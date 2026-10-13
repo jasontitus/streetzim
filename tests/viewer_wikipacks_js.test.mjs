@@ -102,13 +102,26 @@ await ok('wikiPacks are read as documented; anything else is ignored', () => {
     [{ lang: 'de', prefix: '~w/de/' }, { lang: 'th', prefix: '~w/th/' }]);
   assert.deepStrictEqual(W._wikiPacksFromConfig({}), []);
   assert.deepStrictEqual(W._wikiPacksFromConfig({ wikiPacks: 'th' }), []);
-  // A prefix goes into every article URL: only ~w/<lang>/, once each.
-  const bad = ['../', '~w/de', '~w/de/x/', 'w/de/', '~w/DE/', 'https://x/', '~w/../', ''];
+  // A prefix goes into every article URL: only ~w/<lang>/ of the pack's
+  // own language, lower case, once each.
+  const bad = ['../', '~w/de', '~w/de/x/', 'w/de/', '~w/DE/', 'https://x/', '~w/../', '', '~w/th/'];
   assert.deepStrictEqual(W._wikiPacksFromConfig({ wikiPacks: bad.map((p) => ({ lang: 'de', prefix: p })) }), []);
   assert.deepStrictEqual(W._wikiPacksFromConfig({ wikiPacks: [
     { lang: 'de', prefix: '~w/de/' }, { lang: 'de', prefix: '~w/de/' }, { lang: 'x y', prefix: '~w/fr/' },
-    null, { prefix: '~w/es/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }] }),
-    [{ lang: 'de', prefix: '~w/de/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }]);
+    null, { prefix: '~w/es/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }, { lang: 'TH', prefix: '~w/th/' }] }),
+    [{ lang: 'de', prefix: '~w/de/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }, { lang: 'th', prefix: '~w/th/' }]);
+});
+
+await ok('language codes in any case; a map in zh-Hans takes the zh Wikipedia first', () => {
+  let W = merged({ ...MERGED, language: 'TH', baseLanguage: 'EN' });
+  assert.deepStrictEqual(W.langs(), ['th', 'en']);
+  assert.deepStrictEqual(langs(W._wikiArticleLinks('Q1844', null)), ['th', 'en', 'de']);
+  W = merged({ language: 'zh-Hans', baseLanguage: 'en',
+               wikiPacks: [{ lang: 'de', prefix: '~w/de/' }, { lang: 'ZH', prefix: '~w/zh/' }] },
+             { de: DE, zh: { '瓦杜茲': [47.141, 9.521, 'place', '', 'Q1844'] } });
+  assert.deepStrictEqual(langs(W._wikiArticleLinks('Q1844', null)), ['zh', 'en', 'de']);
+  W = merged({ ...MERGED, language: 'EN' });                       // the base's language
+  assert.deepStrictEqual(langs(W._wikiArticleLinks('Q1844', null)), ['en', 'de', 'th']);
 });
 
 await ok('the base language: baseLanguage, else the map language when no pack has it', () => {
@@ -123,14 +136,35 @@ await ok('the base language: baseLanguage, else the map language when no pack ha
   assert.deepStrictEqual(W.packs(), []);
 });
 
-await ok('a pack entry\'s Q-ID and description, in either order', () => {
+await ok('Q-ID and description: each source in its own slots, a pack also the base\'s way round', () => {
   const W = loadWiki();
-  assert.strictEqual(W._wikiEntryQid(DE.Vaduz), 'Q1844');
-  assert.strictEqual(W._wikiEntryDesc(DE.Vaduz), 'Hauptort von Liechtenstein');
-  assert.strictEqual(W._wikiEntryQid(BASE.Vaduz), 'Q1844');
-  assert.strictEqual(W._wikiEntryDesc(BASE.Vaduz), 'capital of Liechtenstein');
-  assert.strictEqual(W._wikiEntryQid(BASE.Old_Bridge), null);
-  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q-ish text', '']), null);
+  assert.strictEqual(W._wikiEntryQid(DE.Vaduz, true), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc(DE.Vaduz, true), 'Hauptort von Liechtenstein');
+  assert.strictEqual(W._wikiEntryQid(BASE.Vaduz, false), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc(BASE.Vaduz, false), 'capital of Liechtenstein');
+  assert.strictEqual(W._wikiEntryQid(BASE.Old_Bridge, false), null);
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q-ish text', ''], false), null);
+  // A description that looks like a Q-ID does not fool either reader.
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q1844', 'Q7'], false), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q1844', 'Q7'], false), 'Q7');
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', null, 'Q7'], false), null);
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q7', 'Q1844'], true), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q7', 'Q1844'], true), 'Q7');
+  // A pack written in the base's order.
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q1844', 'Hauptort'], true), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q1844', 'Hauptort'], true), 'Hauptort');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Hauptort', null], true), 'Hauptort');
+  // The base's Q-ID slot drives the join: a base entry whose description is
+  // a Q-ID string is not joined under it.
+  const W2 = loadWiki();
+  W2.set({ 'Vaduz': [47.141, 9.521, 'place', 'Q1844', 'Q49657'] });
+  W2.wikiPacksInit(MERGED);
+  W2.packs().forEach((pk) => W2.wikiPackSetIndex(pk, { de: DE, th: TH }[pk.lang]));
+  assert.deepStrictEqual(langs(W2._wikiArticleLinks('Q1844', null)), ['th', 'en', 'de']);
+  assert.deepStrictEqual(langs(W2._wikiArticleLinks('Q49657', null)), []);
+  const rows = W2._wikiPanelItems(9.4, 9.7, 47.0, 47.3, () => 1);
+  assert.deepStrictEqual(rows.map((r) => [r.title, r.qid]).sort(),
+    [['Eschen_(Liechtenstein)', 'Q4540'], ['Expo_Park/USC_station', 'Q999'], ['Schloss_Vaduz', 'Q685893'], ['วาดุซ', 'Q1844']]);
   assert.ok(!W.wikiPackSetIndex({}, null) && !W.wikiPackSetIndex({}, [1]) && !W.wikiPackSetIndex({}, 'x'));
 });
 
@@ -157,6 +191,10 @@ await ok('articles are joined by Q-ID, also when the record has a `w` tag', () =
   // English "Eschen" is another place (the tree): its Q-ID differs.
   assert.deepStrictEqual(W._wikiArticleLinks('Q4540', 'en:Eschen'),
     [{ lang: 'de', prefix: '~w/de/', title: 'Eschen_(Liechtenstein)' }]);
+  // A pack's title for the tag is refused when its entry is another place.
+  assert.deepStrictEqual(W._wikiArticleLinks('Q99', 'de:Schloss Vaduz'), []);
+  assert.deepStrictEqual(W._wikiArticleLinks('Q685893', 'de:Schloss Vaduz'),
+    [{ lang: 'de', prefix: '~w/de/', title: 'Schloss_Vaduz' }]);
   // Without a Q-ID the tag is taken in its own language only.
   assert.deepStrictEqual(W._wikiArticleLinks(null, 'de:Schloss Vaduz'),
     [{ lang: 'de', prefix: '~w/de/', title: 'Schloss_Vaduz' }]);
@@ -277,10 +315,55 @@ await ok('the viewer wires the links in everywhere an article opens', () => {
   assert.match(panel, /_wikiPanelItems\(/);
 });
 
+await ok('a Q-ID two titles carry: the later one, in a pack as in the base', () => {
+  const W = loadWiki();
+  W.set({ 'Old': [47.1, 9.5, 'place', 'Q1844', ''], 'New': [47.1, 9.5, 'place', 'Q1844', ''] });
+  W.wikiPacksInit({ language: 'en', wikiPacks: [{ lang: 'de', prefix: '~w/de/' }] });
+  W.wikiPackSetIndex(W.packs()[0], { 'Alt': [47.1, 9.5, 'place', '', 'Q1844'], 'Neu': [47.1, 9.5, 'place', '', 'Q1844'] });
+  assert.deepStrictEqual(W._wikiArticleLinks('Q1844', null).map((l) => l.title), ['New', 'Neu']);
+});
+
+await ok('a detail\'s links: its own entry first when the Q-ID finds another, the rest in order', () => {
+  const W = merged();
+  // The Q-ID finds the row's article: the order stays the preference order.
+  assert.deepStrictEqual(W._wikiDetailLinks('Q1844', 'Vaduz', '~w/de/').map((l) => l.prefix + l.title),
+    ['~w/th/วาดุซ', 'Vaduz', '~w/de/Vaduz']);
+  // It does not (another title in the same pack): the row's first, that
+  // pack's other link dropped, the others in order.
+  assert.deepStrictEqual(W._wikiDetailLinks('Q1844', 'Schloss_Vaduz', '~w/de/').map((l) => [l.lang, l.prefix + l.title]),
+    [['de', '~w/de/Schloss_Vaduz'], ['th', '~w/th/วาดุซ'], ['en', 'Vaduz']]);
+  assert.deepStrictEqual(W._wikiDetailLinks('Q1844', 'Other', '').map((l) => [l.lang, l.prefix + l.title]),
+    [['en', 'Other'], ['th', '~w/th/วาดุซ'], ['de', '~w/de/Vaduz']]);
+  assert.deepStrictEqual(W._wikiDetailLinks('Q1844', null, null).map((l) => l.lang), ['th', 'en', 'de']);
+});
+
+await ok('language names: endonyms, capitalised; an unknown code in capitals', () => {
+  const W = loadWiki();
+  assert.strictEqual(W._wikiLangName('es'), 'Español');
+  assert.strictEqual(W._wikiLangName('de'), 'Deutsch');
+  assert.strictEqual(W._wikiLangName('zh'), '中文');
+  assert.strictEqual(W._wikiLangName('qqx'), 'QQX');
+});
+
+await ok('"Also in" in the UI language: German, Thai, Chinese tables', () => {
+  const W = merged();
+  for (const [lang, want] of [['de', 'Auch auf:'], ['th', 'ภาษาอื่น:'], ['zh', '其他语言：']]) {
+    const table = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/${lang}.json`, 'utf8'));
+    assert.strictEqual(table['wiki.also_in'], want, lang);
+    globalThis.SZ_I18N = table;
+    try {
+      const row = W._wikiAlsoIn(W._wikiArticleLinks('Q1844', null));
+      assert.strictEqual(row.children[0].textContent, want + ' ', lang);
+    } finally { globalThis.SZ_I18N = null; }
+  }
+  assert.strictEqual(W._wikiAlsoIn(W._wikiArticleLinks('Q1844', null)).children[0].textContent, 'Also in: ');
+});
+
 // ---------------------------------------------------------------------
 // Bilingual labels (130-lowzoom-lakes.js).
 const LBL = new Function(slice('var SZ_LANG = ', 'function makeStyle') +
-  '\nreturn { set: (a, b) => { SZ_LANG = a; SZ_LANG2 = b || ""; }, field: szLabelField, langs: szLabelLanguages };')();
+  '\nreturn { set: (a, b) => { SZ_LANG = a; SZ_LANG2 = b || ""; }, field: szLabelField, line: szLineLabelField,' +
+  ' langs: szLabelLanguages, of: szLabelOf, shown: szDisplayLabelOf };')();
 
 // Enough of MapLibre's expression language to evaluate a label: get, has,
 // coalesce, case, all, ==, != and format (a formatted value is returned as
@@ -342,6 +425,29 @@ await ok('labels: local name first, the map language\'s under it, smaller', () =
   LBL.set('en');
 });
 
+await ok('popup and list names: "local · visitor\'s" on a merged map, else the local name', () => {
+  LBL.set('en', 'th');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Vaduz', 'name:th': 'วาดุซ' }), 'Vaduz · วาดุซ');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Vaduz', 'name:th': 'Vaduz' }), 'Vaduz');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Malbun' }), 'Malbun');
+  assert.strictEqual(LBL.shown({ 'name:th': 'วาดุซ' }), 'วาดุซ');
+  assert.strictEqual(LBL.shown({}), '');
+  // Search records are named by the local name: lookups keep it.
+  assert.strictEqual(LBL.of({ 'name:latin': 'Vaduz', 'name:th': 'วาดุซ' }), 'Vaduz');
+  assert.deepStrictEqual(LBL.line(), TODAY_EN);
+  LBL.set('en');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Vaduz', 'name:th': 'วาดุซ' }), 'Vaduz');
+  LBL.set('fr');
+  assert.strictEqual(LBL.shown({ 'name:fr': 'Tour Eiffel', name: 'Tour Eiffel', 'name:th': 'x' }), 'Tour Eiffel');
+  assert.deepStrictEqual(LBL.line(), TODAY_FR);
+  LBL.set('en');
+  // The popups and the tile-scan list show it; the search lookup does not.
+  const popup = fs.readFileSync(`${PARTS_DIR}/400-wikidata-popup.js`, 'utf8');
+  assert.match(popup, /var shown = szDisplayLabelOf\(props\);/);
+  assert.match(popup, /_szPlacePopupDOM\(lat, lon, shown, enrich\)/);
+  assert.match(popup, /__streetzimLookupPlace\(name, lat, lon\)/);
+});
+
 // The whole style, through makeStyle (130-137), as viewer_style_js does.
 const STYLE_SRC = HTML.slice(HTML.indexOf('var _SZ_LAKES'), HTML.indexOf('// END rtl-text'));
 function makeStyleFn() {
@@ -374,7 +480,7 @@ await ok('the style is unchanged unless the map is in another language than its 
   }
 });
 
-await ok('a merged map in another language: every label layer is bilingual', () => {
+await ok('a merged map in another language: point labels bilingual, road labels one line', () => {
   const makeStyle = makeStyleFn();
   const st = makeStyle({ ...BASE_CFG, language: 'th', baseLanguage: 'en' });
   const layers = labelLayers(st);
@@ -384,6 +490,10 @@ await ok('a merged map in another language: every label layer is bilingual', () 
   }
   for (const l of layers) {
     const tf = l.layout['text-field'];
+    if (l.layout['symbol-placement'] === 'line') {
+      assert.deepStrictEqual(tf, TODAY_EN, l.id);
+      continue;
+    }
     assert.strictEqual(tf[0], 'case', l.id);
     assert.deepStrictEqual(tf[2], ['format', TODAY_EN, {}, '\n', {}, ['get', 'name:th'], { 'font-scale': 0.8 }], l.id);
   }

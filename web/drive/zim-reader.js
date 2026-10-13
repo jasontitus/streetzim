@@ -25,11 +25,15 @@
   const MAGIC = 0x44D495A;
   const EXACT = { exact: true };   // HttpRangeSource.slice() option
 
-  // The first read of a compressed cluster: the whole cluster when it is
-  // at most this long (measured: zstd clusters are 280 KB at the median
-  // and at most 2.5 MB on switzerland), else this much and then on to the
-  // end of its frame. It also bounds how far past the frame a read goes
-  // when the next boundary is far away (a merged ZIM's base, above).
+  // How a compressed cluster is read. Its end is known only as an upper
+  // bound: the next cluster or table after it (_clusterEnd). When that is
+  // at most CLUSTER_WHOLE_READ away the whole span is read in ONE request,
+  // as it always was: over HTTP (the online preview) a request costs a
+  // round trip, and Europe has 7,048 clusters of 4-36 MiB. Only a farther
+  // boundary is read in steps, CLUSTER_FIRST_READ first, then x4 up to the
+  // frame's end: a merged ZIM's base (docs/language-matrix.md) keeps its
+  // old tables after its last cluster, hundreds of MB on a continent.
+  const CLUSTER_WHOLE_READ = 64 * 1024 * 1024;
   const CLUSTER_FIRST_READ = 4 * 1024 * 1024;
 
   // Where the zstd frame that starts at buf[pos] ends, from the frame
@@ -64,16 +68,30 @@
   }
 
   // The length a cluster's decoded data says it has: the last word of its
-  // blob offset table. null when `data` is too short to tell.
-  function clusterDataLength(data, extended) {
+  // blob offset table. `parts`: the decoded frames so far, `have` bytes in
+  // all. null while they do not hold the whole table (or hold no table).
+  function clusterDataLength(parts, have, extended) {
     const w = extended ? 8 : 4;
-    if (data.length < w) return null;
-    const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    const word = (o) => (extended ? v.getUint32(o, true) + v.getUint32(o + 4, true) * 0x100000000
-                                  : v.getUint32(o, true));
-    const first = word(0);
-    if (first < w || first % w || first > data.length) return null;
-    return word(first - w);
+    if (!parts.length || have < w) return null;
+    let data = parts[0];
+    const word = (d, o) => {
+      const v = new DataView(d.buffer, d.byteOffset, d.byteLength);
+      return extended ? v.getUint32(o, true) + v.getUint32(o + 4, true) * 0x100000000
+                      : v.getUint32(o, true);
+    };
+    if (data.length < w) data = concatParts(parts, have);
+    const first = word(data, 0);
+    if (first < w || first % w || first > have) return null;
+    if (first > data.length) data = concatParts(parts, have);
+    return word(data, first - w);
+  }
+
+  function concatParts(parts, have) {
+    if (parts.length === 1) return parts[0];
+    const all = new Uint8Array(have);
+    let o = 0;
+    for (const p of parts) { all.set(p, o); o += p.length; }
+    return all;
   }
 
   function u8 (v, o) { return v.getUint8(o); }
@@ -416,22 +434,22 @@
       // cluster's own blob-offset table, never needing an end offset.
       // Take the next-highest offset instead of the next index.
       //
-      // That offset is only an upper bound. A merged ZIM (a base plus
-      // Wikipedia packs, docs/language-matrix.md) keeps the base's bytes
-      // where they were, so the base's last cluster is followed by the
-      // base's old tables and only then by the next cluster. A zstd
-      // cluster is therefore read up to the end of its own frame
-      // (_readZstdCluster), never to the boundary.
+      // That offset is only an upper bound: a merged ZIM keeps the base's
+      // bytes where they were, so the base's last cluster is followed by
+      // the base's old tables and only then by the next cluster. A zstd
+      // cluster is decoded to the end of its frame (_readZstdCluster),
+      // never to the boundary.
       const end = await this._clusterEnd(start);
-      const first = await this._readRange(start, Math.min(end - start, CLUSTER_FIRST_READ));
+      const span = end - start;
+      const first = await this._readRange(start, span <= CLUSTER_WHOLE_READ ? span : CLUSTER_FIRST_READ);
       const info = first[0];
       const compression = info & 0x0F;
       const extended = (info & 0x10) !== 0;
       let payload;
       if (compression === 1 || compression === 2) {
-        const raw = first.length === end - start
-          ? first : await this._readRange(start, end - start);
-        payload = raw.subarray(1);
+        // Raw clusters are never loaded whole: _readBlob reads their blobs
+        // alone (_readRawBlob).
+        throw new Error('raw cluster ' + clusterNum + ' is read blob by blob');
       } else if (compression === 5) {
         if (!global.fzstd || typeof global.fzstd.decompress !== 'function') {
           throw new Error('zstd decoder (fzstd) not loaded');
@@ -447,21 +465,19 @@
       return cluster;
     }
 
-    // The decoded payload of the zstd cluster at `start`: its frame is
-    // found from the frame and block headers (zstdFrameExtent, nothing
-    // decoded) as the bytes come in, and exactly that frame goes to fzstd.
-    // fzstd cannot do this itself: its one-shot decompress() treats every
-    // byte after a frame as the next frame, and so does the push() of its
-    // streaming Decompress, which also never reports where a frame ends;
-    // the old tables after a merged base's last cluster made both throw
-    // "invalid zstd data". `first` holds the bytes read so far from
-    // `start` (CLUSTER_FIRST_READ or the whole cluster, whichever is
-    // less: one read for nearly every cluster, as before); a longer frame
-    // is read on in growing steps, never past `end`. A writer may split a
-    // cluster over several frames (libzim's streaming decoder would read
-    // on), so frames are decoded until the cluster's own blob table is
-    // covered.
+    // The decoded payload of the zstd cluster at `start`. Its frames are
+    // found from their frame and block headers (zstdFrameExtent, nothing
+    // decoded), and exactly those bytes go to fzstd. fzstd cannot stop by
+    // itself: its one-shot decompress() and the push() of its streaming
+    // Decompress both take every byte after a frame as the next frame, so
+    // the old tables after a merged base's last cluster made them throw
+    // "invalid zstd data". `first`: the bytes read from `start` (the whole
+    // span when the boundary is near, see CLUSTER_WHOLE_READ); a frame that
+    // runs past them is read on, x4 at a time, never past `end`. Frames
+    // follow one another, skippable ones included, until the cluster's
+    // own blob table is covered or its bytes end.
     async _readZstdCluster(start, end, first, extended) {
+      const span = end - start;
       let buf = first;
       let pos = 1;                          // after the info byte
       const parts = [];
@@ -469,10 +485,10 @@
       for (;;) {
         let ext = zstdFrameExtent(buf, pos);
         while (ext.end === undefined) {
-          if (buf.length >= end - start) {
+          if (buf.length >= span) {
             throw new Error('zstd frame at ' + (start + pos) + ' runs past the cluster end ' + end);
           }
-          const want = Math.min(end - start, Math.max(ext.need, buf.length * 4));
+          const want = Math.min(span, Math.max(ext.need, buf.length * 4));
           const more = await this._readRange(start + buf.length, want - buf.length);
           const grown = new Uint8Array(want);
           grown.set(buf);
@@ -481,17 +497,13 @@
           ext = zstdFrameExtent(buf, pos);
         }
         const out = global.fzstd.decompress(buf.subarray(pos, ext.end));
-        parts.push(out);
-        have += out.length;
+        if (out.length) { parts.push(out); have += out.length; }
         pos = ext.end;
-        const need = clusterDataLength(parts[0], extended);
-        if (need === null || have >= need || pos >= end - start) break;
+        if (pos >= span) break;
+        const need = clusterDataLength(parts, have, extended);
+        if (need !== null && have >= need) break;
       }
-      if (parts.length === 1) return parts[0];
-      const all = new Uint8Array(have);
-      let o = 0;
-      for (const p of parts) { all.set(p, o); o += p.length; }
-      return all;
+      return concatParts(parts, have);
     }
 
     async _readBlob(clusterNum, blobNum) {

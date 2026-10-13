@@ -307,7 +307,7 @@ function initWikidataPopups(map, config) {
 
   function named(f) {
     var p = f.properties || {};
-    return !!szLabelOf(p);
+    return !!szDisplayLabelOf(p);
   }
   function tappedFeature(pt) {
     var queryOpts = {};
@@ -369,7 +369,7 @@ function initWikidataPopups(map, config) {
   });
 
   function wikiPopup(e, feat, qid, seq) {
-    var name = szLabelOf(feat.properties) || feat.properties.label || qid;
+    var name = szDisplayLabelOf(feat.properties) || feat.properties.label || qid;
     fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
       if (seq !== tapSeq) return;
       var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
@@ -389,7 +389,10 @@ function initWikidataPopups(map, config) {
   // in a ZIM without Overture carry none of those, so the lookup is skipped.
   function placeLabelPopup(e, feat, seq) {
     var props = feat.properties;
+    // Shown bilingual on a merged map; looked up by the local name, which
+    // the search records carry.
     var name = szLabelOf(props);
+    var shown = szDisplayLabelOf(props);
     var g = feat.geometry;
     var lat = e.lngLat.lat, lon = e.lngLat.lng;
     if (g && g.type === 'Point' && g.coordinates) {
@@ -401,7 +404,7 @@ function initWikidataPopups(map, config) {
     var qid = WIKI_PACKS.length && typeof props.wikidata === 'string'
       && /^Q\d+$/.test(props.wikidata) ? props.wikidata : null;
     function placeDOM(enrich) {
-      var box = _szPlacePopupDOM(lat, lon, name, enrich);
+      var box = _szPlacePopupDOM(lat, lon, shown, enrich);
       if (qid) appendArticleLinks(box, _wikiArticleLinks(qid, null), box.querySelector('.pin-directions'));
       return box;
     }

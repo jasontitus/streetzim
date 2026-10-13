@@ -50,6 +50,9 @@ function _szLocalLabelField() {
   }
   return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
 }
+// Point labels (places, POIs, water, peaks, parks, airports). Labels
+// along a line (roads) take szLineLabelField: two lines there would double
+// their height and their collisions.
 function szLabelField() {
   var local = _szLocalLabelField();
   if (!SZ_LANG2) return local;
@@ -59,6 +62,9 @@ function szLabelField() {
     ["all", ["has", key], ["!=", localText, ""], ["!=", ["get", key], localText]],
     ["format", local, {}, "\n", {}, ["get", key], { "font-scale": 0.8 }],
     local.concat([["get", key]])];
+}
+function szLineLabelField() {
+  return _szLocalLabelField();
 }
 // The two label languages a map-config asks for: [local, second or ''].
 function szLabelLanguages(config) {
@@ -72,6 +78,16 @@ function szLabelOf(p) {
     return p['name:' + SZ_LANG] || p.name || p.name_int || p['name:latin'] || '';
   }
   return p['name:latin'] || p.name || '';
+}
+// The same name to show (popups, the Wiki list), bilingual like the labels:
+// "local · visitor's" when the map's language has a name that differs.
+// szLabelOf stays the local name, which search records are named by.
+function szDisplayLabelOf(p) {
+  var local = szLabelOf(p);
+  var other = SZ_LANG2 && p && p['name:' + SZ_LANG2];
+  if (!other || typeof other !== 'string') return local;
+  if (!local) return other;
+  return other === local ? local : local + ' \u00B7 ' + other;
 }
 
 // --clip-poly builds (streetzim/clip.py) carry "clipMask" (the box minus the
@@ -570,7 +586,7 @@ function makeStyle(config) {
         "minzoom": 12,
         "layout": {
           "symbol-placement": "line",
-          "text-field": szLabelField(),
+          "text-field": szLineLabelField(),
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 14, 13, 18, 22],
           "text-max-angle": 30,

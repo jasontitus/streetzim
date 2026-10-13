@@ -54,8 +54,9 @@ The base's own Wikipedia stays implicit (`hasWikiArticles`, `wiki-article/`). `l
 - **Bilingual labels.** When the map language differs from the local language, labels show the local name, then a second, smaller line with `name:<lang>` where it exists and differs (a MapLibre `format` expression). Otherwise the labels are exactly as today.
 - **Popups and place sheet:** they show `wikidata-text.json`'s label and description in the map language when present.
 - **Old base, no packs:** with no `wikiPacks` the viewer behaves exactly as today.
-- **Bilingual labels.** When `language` differs from `baseLanguage`, every label is the local name as the base labels it (what the signs say) and, under it at 0.8 size, `name:<language>` when the tile has one that differs. Otherwise the style is byte for byte today's.
-- **Geo-index order.** The base writes `[lat, lon, type, qid, desc]`; a pack, per this spec, `[lat, lon, type, desc, qid]`. The viewer accepts either in a pack, telling the Q-ID by its `Q<digits>` shape.
+- **Bilingual labels, in detail.** "Local" is the base's own label rule (`baseLanguage`); point labels (places, POIs, water, peaks, parks, airports) get the second line, road labels along lines stay one line. Popup titles and the Wiki list show "local · visitor's name"; searches still look places up by the local name. Otherwise the style is byte for byte today's.
+- **Geo-index order.** The base writes `[lat, lon, type, qid, desc]`; a pack, per this spec, `[lat, lon, type, desc, qid]`. Each is read in its own slots; only a pack whose Q-ID slot holds no Q-ID is read the base's way round. A Q-ID two titles carry maps to the later title, in packs as in the base.
+- **Language codes** in `wikiPacks`, `language` and `baseLanguage` are compared in lower case, and a map in `zh-Hans` takes the `zh` Wikipedia first. A pack's prefix must be `~w/<its lang>/`.
 - **`sw.js`:** `isArticle` also matches `~w/<xx>/wiki-article/`, so the back-to-map bar is injected for older articles too.
 
 ## PWA reader (web/drive/zim-reader.js)

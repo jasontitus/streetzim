@@ -148,8 +148,9 @@ def text_field_keys(src: str) -> set[str]:
     found = 0
     for m in re.finditer(r"""(["']?)text-field\1\s*[:,]""", src):
         found += 1
-        if src[m.end():m.end() + 40].lstrip().startswith("szLabelField()"):
-            # The viewer's label rule (130-lowzoom-lakes.js): the local
+        if src[m.end():m.end() + 40].lstrip().startswith(("szLabelField()", "szLineLabelField()")):
+            # The viewer's label rule (130-lowzoom-lakes.js; road labels:
+            # szLineLabelField, the local label alone): the local
             # label's literal gets (_szLocalLabelField), plus
             # name:<language> ("name:" + SZ_LANG) and, on a merged map shown
             # in another language than its base's, that language's name
@@ -158,6 +159,7 @@ def text_field_keys(src: str) -> set[str]:
                 body = src[src.index(f"function {fn}()"):]
                 return body[:body.index("\n}\n")]
             local, outer = body_of("_szLocalLabelField"), body_of("szLabelField")
+            assert body_of("szLineLabelField").split("{", 1)[1].strip() == "return _szLocalLabelField();"
             assert '["get", "name:" + SZ_LANG]' in local
             assert 'var key = "name:" + SZ_LANG2;' in outer
             body = local.replace('["get", "name:" + SZ_LANG]', "") + outer.replace('["get", key]', "")

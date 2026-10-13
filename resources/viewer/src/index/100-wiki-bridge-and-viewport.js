@@ -134,22 +134,32 @@ var WIKI_MAP_LANG = '';   // map-config "language": the map's (and UI's) languag
 var WIKI_BASE_LANG = '';  // the base Wikipedia's language; '' when not known
 
 // Packs come from map-config.json; a prefix is part of every URL built
-// from it, so only the documented shape is taken.
-var _WIKI_PACK_PREFIX = /^~w\/[a-z]{2,3}(?:-[a-z0-9]{2,8})?\/$/;
+// from it, so only the documented shape is taken: ~w/<lang>/, lower case,
+// the pack's own language (a language code may come in any case).
 var _WIKI_LANG = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/;
+function _wikiLangCode(l) {
+  return typeof l === 'string' ? l.toLowerCase() : '';
+}
 function _wikiPacksFromConfig(config) {
   var out = [], seen = {};
   var list = config && config.wikiPacks;
   if (!Array.isArray(list)) return out;
   for (var i = 0; i < list.length; i++) {
     var p = list[i];
-    if (!p || typeof p.lang !== 'string' || typeof p.prefix !== 'string') continue;
-    if (!_WIKI_LANG.test(p.lang) || !_WIKI_PACK_PREFIX.test(p.prefix)) continue;
+    if (!p || typeof p.prefix !== 'string') continue;
+    var lang = _wikiLangCode(p.lang);
+    if (!_WIKI_LANG.test(lang) || p.prefix !== '~w/' + lang + '/') continue;
     if (seen[p.prefix]) continue;
     seen[p.prefix] = true;
-    out.push({ lang: p.lang, prefix: p.prefix });
+    out.push({ lang: lang, prefix: p.prefix });
   }
   return out;
+}
+
+// Is a Wikipedia in language `wiki` the one of map language `map`? The
+// same code, or the map's primary subtag (map zh-Hans, Wikipedia zh).
+function _wikiLangIs(wiki, map) {
+  return !!map && (wiki === map || wiki === map.split('-')[0]);
 }
 
 // Called once map-config.json has loaded. The base's language is
@@ -162,38 +172,46 @@ function wikiPacksInit(config) {
     return { lang: p.lang, prefix: p.prefix, index: null, qid: null,
              grid: { buckets: null, src: null } };
   });
-  var lang = (config && typeof config.language === 'string') ? config.language : '';
-  var base = (config && typeof config.baseLanguage === 'string') ? config.baseLanguage : '';
-  if (!base && !packs.some(function(p) { return p.lang === lang; })) base = lang;
+  var lang = _wikiLangCode(config && config.language);
+  var base = _wikiLangCode(config && config.baseLanguage);
+  if (!base && !packs.some(function(p) { return _wikiLangIs(p.lang, lang); })) base = lang;
   WIKI_MAP_LANG = lang;
   WIKI_BASE_LANG = base;
   return WIKI_PACKS;
 }
 
-// A geo-index entry's Q-ID and description. Packs put them 4th and 5th
-// the other way round from the base ([.., desc, qid] against
-// [.., qid, desc]), so the Q-ID is told by its shape.
+// A geo-index entry's Q-ID and description. The base writes
+// [lat, lon, type, qid, desc] (zim_writer), a pack [lat, lon, type, desc,
+// qid] (the pack spec). Each is read in its own slots; only a pack whose
+// Q-ID slot holds no Q-ID is read the base's way round (a pack written in
+// the base's order). A description that looks like a Q-ID ("Q7") is never
+// taken for one where the Q-ID slot has one.
 var _WIKI_QID = /^Q\d+$/;
-function _wikiEntryQid(g) {
-  if (!g) return null;
-  if (typeof g[4] === 'string' && _WIKI_QID.test(g[4])) return g[4];
-  if (typeof g[3] === 'string' && _WIKI_QID.test(g[3])) return g[3];
-  return null;
+function _wikiIsQid(v) {
+  return typeof v === 'string' && _WIKI_QID.test(v);
 }
-function _wikiEntryDesc(g) {
+function _wikiEntryQid(g, pack) {
+  if (!g) return null;
+  if (!pack) return _wikiIsQid(g[3]) ? g[3] : null;
+  if (_wikiIsQid(g[4])) return g[4];
+  return _wikiIsQid(g[3]) ? g[3] : null;
+}
+function _wikiEntryDesc(g, pack) {
   if (!g) return '';
-  var d = (typeof g[3] === 'string' && _WIKI_QID.test(g[3])) ? g[4] : g[3];
+  var d = (!pack || (!_wikiIsQid(g[4]) && _wikiIsQid(g[3]))) ? g[4] : g[3];
   return typeof d === 'string' ? d : '';
 }
 
-// Take a pack's loaded wiki-geo-index.json. false when it is not one.
+// Take a pack's loaded wiki-geo-index.json. false when it is not one. A
+// Q-ID that two titles carry maps to the later one, the rule the base's
+// reverse map (WIKI_GEO_QID, 410) has always had.
 function wikiPackSetIndex(pack, m) {
   if (!m || typeof m !== 'object' || Array.isArray(m)) return false;
   var q = {};
   for (var t in m) {
     if (!Object.prototype.hasOwnProperty.call(m, t)) continue;
-    var id = _wikiEntryQid(m[t]);
-    if (id && !Object.prototype.hasOwnProperty.call(q, id)) q[id] = t;
+    var id = _wikiEntryQid(m[t], true);
+    if (id) q[id] = t;
   }
   pack.index = m;
   pack.qid = q;
@@ -208,8 +226,8 @@ function _wikiSources() {
   var base = { lang: WIKI_BASE_LANG, prefix: '', base: true,
                index: WIKI_GEO_INDEX, qid: WIKI_GEO_QID, grid: _WIKI_GEO_BUCKETS };
   var out = [];
-  var mapFirst = WIKI_MAP_LANG && WIKI_BASE_LANG !== WIKI_MAP_LANG;
-  WIKI_PACKS.forEach(function(p) { if (mapFirst && p.lang === WIKI_MAP_LANG) out.push(p); });
+  var mapFirst = WIKI_MAP_LANG && !_wikiLangIs(WIKI_BASE_LANG, WIKI_MAP_LANG);
+  WIKI_PACKS.forEach(function(p) { if (mapFirst && _wikiLangIs(p.lang, WIKI_MAP_LANG)) out.push(p); });
   out.push(base);
   WIKI_PACKS.forEach(function(p) { if (out.indexOf(p) < 0) out.push(p); });
   return out;
@@ -242,10 +260,10 @@ function _wikiArticleLinks(qid, w) {
       t = src.qid[qid];
     } else if (src.base) {
       t = _wikiArticlePath(qid, w);
-      var tq = t && _wikiEntryQid(src.index[t]);
+      var tq = t && _wikiEntryQid(src.index[t], false);
       if (qid && tq && tq !== qid) t = null;
     } else if (wt && wl === src.lang && has.call(src.index, wt)) {
-      var wq = _wikiEntryQid(src.index[wt]);
+      var wq = _wikiEntryQid(src.index[wt], true);
       t = (qid && wq && wq !== qid) ? null : wt;
     }
     if (t && has.call(src.index, t)) out.push({ lang: src.lang, prefix: src.prefix, title: t });
@@ -292,13 +310,13 @@ function _wikiPanelItems(W, E, S, N, priority) {
     if (!src.index) return;
     _wikiTitlesInBounds(src.index, src.grid, W, E, S, N).forEach(function(t) {
       var e = src.index[t];
-      var q = _wikiEntryQid(e);
+      var q = _wikiEntryQid(e, !src.base);
       var key = q ? 'q:' + q : 't:' + src.prefix + t;
       if (Object.prototype.hasOwnProperty.call(byKey, key)) return;
       byKey[key] = true;
       items.push({ title: t, prefix: src.prefix, lang: src.lang, name: t.replace(/_/g, ' '),
                    qid: q, type: e[2] || '', coords: [e[1], e[0]],
-                   desc: _wikiEntryDesc(e), priority: priority(e[2] || '') });
+                   desc: _wikiEntryDesc(e, !src.base), priority: priority(e[2] || '') });
     });
   });
   return items;
