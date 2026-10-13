@@ -88,19 +88,20 @@ class SwDownloadSink {
   async abort(reason) { clearInterval(this.timer); this.port.postMessage({ type: 'error', reason: String(reason) }); }
 }
 
-class OpfsSink {                     // browser-private storage; the page offers the file after
+class OpfsSink {                     // browser-private storage (folder lab-build/); the page offers the file after
   constructor(name) { this.name = name; }
+  async dir() { return (await navigator.storage.getDirectory()).getDirectoryHandle('lab-build', { create: true }); }
   async open() {
-    const root = await navigator.storage.getDirectory();
-    await root.removeEntry(this.name).catch(() => {});
-    this.fh = await root.getFileHandle(this.name, { create: true });
+    const dir = await this.dir();
+    await dir.removeEntry(this.name).catch(() => {});
+    this.fh = await dir.getFileHandle(this.name, { create: true });
     this.h = await this.fh.createSyncAccessHandle(); this.pos = 0;
   }
   async write(u8) { let n = 0; while (n < u8.length) n += this.h.write(u8.subarray(n), { at: this.pos + n }); this.pos += u8.length; }
   async close() { this.h.flush(); this.h.close(); }
   async abort() {
     try { this.h.close(); } catch (e) { /* closed */ }
-    const root = await navigator.storage.getDirectory(); await root.removeEntry(this.name).catch(() => {});
+    await (await this.dir()).removeEntry(this.name).catch(() => {});
   }
 }
 

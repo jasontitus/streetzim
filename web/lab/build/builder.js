@@ -47,6 +47,7 @@
     else if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = null; }
   });
 
+  const announce = (msg) => { $('milestone').textContent = msg; };
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -394,12 +395,18 @@
     }
   }
 
+  // The best place to write to, in the design doc's order: File System
+  // Access (Chrome, Edge on a desktop); a service-worker streamed download
+  // (Firefox, Chrome on Android); browser storage (OPFS) and then a save
+  // step (Safari and every iOS browser, which are WebKit, and wherever the
+  // stream cannot be had).
+  const isWebKit = /Apple/.test(navigator.vendor || '');
   async function prepareSink(fileName, size) {
     if (window.showSaveFilePicker) {
       const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'ZIM file', accept: { 'application/octet-stream': ['.zim'] } }] });
       return { sink: 'fsa', handle, transfer: [] };
     }
-    const ctl = swFailedBefore() ? null : await swController();
+    const ctl = isWebKit || swFailedBefore() ? null : await swController();
     if (ctl) {
       const ch = new MessageChannel();
       const id = Math.random().toString(36).slice(2);
@@ -419,7 +426,69 @@
       }
       ch.port1.close();
     }
+    if (!navigator.storage || !navigator.storage.getDirectory) throw new Error('this browser cannot save a file this large. Chrome or Edge on a desktop works best');
+    let room = null;
+    try { const est = await navigator.storage.estimate(); if (est.quota) room = est.quota - (est.usage || 0); } catch (e) { /* unknown */ }
+    if (room !== null && room < size) throw new Error(`your browser lets this site store ${fmtMB(room)}, and the file needs ${fmtMB(size)}. Free up disk space, or use Chrome or Edge on a desktop`);
     return { sink: 'opfs', transfer: [] };
+  }
+
+  // ------------------------------------------------------------ browser storage (OPFS)
+  // A file built into browser storage (folder lab-build/) is offered with a
+  // Save link; the visitor then deletes the browser's copy, or it is deleted
+  // on the next visit once it has been saved. States per file name, in
+  // localStorage: building | ready | saved.
+  const OPFS_DIR = 'lab-build';
+  const opfsDir = async (create) => (await navigator.storage.getDirectory()).getDirectoryHandle(OPFS_DIR, { create: !!create });
+  const opfsStates = () => { try { return JSON.parse(localStorage.getItem('sz_lab_opfs') || '{}'); } catch (e) { return {}; } };
+  const opfsState = (name, state) => {
+    const st = opfsStates();
+    if (state) st[name] = state; else delete st[name];
+    try { localStorage.setItem('sz_lab_opfs', JSON.stringify(st)); } catch (e) { /* no storage */ }
+  };
+  async function offerSave(name, earlier) {
+    const dir = await opfsDir();
+    const f = await (await dir.getFileHandle(name)).getFile();
+    const box = $('save');
+    box.innerHTML = ''; box.hidden = false;
+    const head = document.createElement('p');
+    head.textContent = earlier ? `A file built earlier is still in this browser's storage: ${name} (${fmtMB(f.size)}).`
+      : 'One more step: save the file to your device.';
+    const a = document.createElement('a');
+    a.id = 'saveLink'; a.className = 'button'; a.href = URL.createObjectURL(f); a.download = name;
+    a.textContent = `Save ${name} (${fmtMB(f.size)})`;
+    const del = document.createElement('button');
+    del.id = 'dropCopy'; del.className = 'secondary'; del.textContent = "Delete the browser's copy";
+    const note = document.createElement('p');
+    note.className = 'dim'; note.hidden = true;
+    note.textContent = `When your browser shows the download as finished, delete the browser's copy to free ${fmtMB(f.size)}.`;
+    a.onclick = () => { opfsState(name, 'saved'); note.hidden = false; $('after').hidden = false; announce('Saving the file. When the download has finished, delete the browser\'s copy.'); };
+    del.onclick = async () => {
+      del.disabled = true;
+      try { await dir.removeEntry(name); } catch (e) { del.disabled = false; note.hidden = false; note.textContent = 'Could not delete it yet (' + (e.message || e) + '). Try again in a moment.'; return; }
+      URL.revokeObjectURL(a.href);
+      opfsState(name, null);
+      box.textContent = "The browser's copy is deleted.";
+    };
+    const row = document.createElement('p');
+    row.append(a, ' ', del);
+    box.append(head, row, note);
+  }
+  // On load: offer files that were built but not saved; delete the rest
+  // (saved ones, and leftovers of builds that did not finish). A file that
+  // another tab is still writing is locked, and stays.
+  async function tidyBrowserStorage() {
+    if (!navigator.storage || !navigator.storage.getDirectory) return;
+    let dir;
+    try { dir = await opfsDir(false); } catch (e) { return; }    // nothing built here yet
+    const st = opfsStates();
+    try {
+      for await (const [name, h] of dir.entries()) {
+        if (h.kind !== 'file') continue;
+        if (st[name] === 'ready') { if (!running) await offerSave(name, true); continue; }
+        try { await dir.removeEntry(name); opfsState(name, null); } catch (e) { /* in use */ }
+      }
+    } catch (e) { /* no directory iteration in this browser */ }
   }
 
   // ------------------------------------------------------------ build
@@ -448,6 +517,7 @@
     const base = { region: region.id, lang: entry.lang, packs, size_mb: Math.round(recipe.size / 1e6),
                    download_mb: Math.round(entry.download_bytes / 1e6), sink: sinkInfo.sink };
     track('build_start', base);
+    if (sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
     const worker = new Worker('assembler-worker.js');
     running = { worker, base, t0, sent: new Set() };
     checkReady();
@@ -484,17 +554,20 @@
       $('status').textContent = (sinkInfo.sink === 'sw' ? 'Done and verified. Your browser has the whole file and is finishing the download; look in your downloads.'
         : 'Done and verified.') + ` ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
-        const root = await navigator.storage.getDirectory();
-        const f = await (await root.getFileHandle(fileName)).getFile();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(f); a.download = fileName; a.textContent = 'Save ' + fileName;
-        $('status').append(' ', a);
-      }
-      $('after').hidden = false;
-    } else if (result.outcome === 'download_stopped') {
-      $('status').textContent = 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).';
+        opfsState(fileName, 'ready');
+        $('status').textContent = `Done and verified; one more step: save it. ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
+        await offerSave(fileName, false);
+      } else $('after').hidden = false;      // saved (or, streamed, being saved by the browser)
     } else {
-      $('status').textContent = 'Stopped: ' + result.error;
+      if (sinkInfo.sink === 'opfs') opfsState(fileName, null);
+      // The worker discarded what it wrote; File System Access leaves the
+      // empty file the save dialog created, which goes too.
+      if (sinkInfo.sink === 'fsa') {
+        try { const f = await sinkInfo.handle.getFile(); if (f.size === 0 && sinkInfo.handle.remove) await sinkInfo.handle.remove(); } catch (e) { /* keep it */ }
+      }
+      $('status').textContent = result.outcome === 'download_stopped'
+        ? 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).'
+        : 'Stopped: ' + result.error;
     }
   };
 
@@ -526,5 +599,6 @@
                            ttfb_ms_2: out[1] && out[1].ttfb, mbps_2: out[1] && out[1].mbps, ok: ok.length });
   };
 
-  load().catch((e) => { $('status').textContent = 'Could not load the list of maps: ' + (e.message || e); });
+  load().catch((e) => { $('notice').textContent = 'Could not load the list of maps (' + (e.message || e) + '). Try again later.'; });
+  tidyBrowserStorage();
 })();
