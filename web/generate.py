@@ -665,6 +665,15 @@ def human_size(bytes_count):
     return f"{int(round(mb))} MB"
 
 
+def _all_listed(data, docs):
+    """archive.org lists at most `rows` items and says how many matched
+    (numFound). A region past the cap would render as not live, with no
+    error (the cap was 100 until 2026-10-13, with 78 items), so stop."""
+    found = (data.get("response") or {}).get("numFound")
+    if isinstance(found, int) and found > len(docs):
+        raise SystemExit(f"archive.org listed {len(docs)} of {found} streetzim-* items: raise rows")
+
+
 def fetch_archive_items():
     """Query Archive.org for all streetzim-* items. Returns {region_id: metadata}."""
     # NOTE: don't include `&fl[]=title` here. archive.org's search index
@@ -682,7 +691,7 @@ def fetch_archive_items():
         "&fl%5B%5D=identifier"
         "&fl%5B%5D=item_size"
         "&fl%5B%5D=publicdate"
-        "&rows=100"
+        "&rows=1000"
         "&output=json"
     )
     print(f"Querying Archive.org: {url}")
@@ -700,6 +709,7 @@ def fetch_archive_items():
             print(f"  search attempt {attempt} failed ({exc}); retrying in {wait}s")
             time.sleep(wait)
     docs = data.get("response", {}).get("docs", [])
+    _all_listed(data, docs)
     by_id = {}
     for doc in docs:
         identifier = doc.get("identifier", "")

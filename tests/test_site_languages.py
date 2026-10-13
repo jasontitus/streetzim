@@ -155,3 +155,27 @@ def test_a_template_change_that_drops_a_translated_string_stops_the_build(tmp_pa
         "</footer>", "<h2>How to Use</h2></footer>"), encoding="utf-8")
     with pytest.raises(ValueError, match="PAGE_TEXT"):
         gen.build_page()
+
+
+@pytest.mark.parametrize("found, listed, ok", [(78, 78, True), (101, 100, False), (None, 3, True)])
+def test_a_listing_cut_short_by_archive_org_stops_the_page(monkeypatch, found, listed, ok):
+    """archive.org lists at most `rows` items; a region past the cap would
+    render as not live, with no error. fetch_archive_items stops instead."""
+    import io
+    import json as _json
+    docs = [{"identifier": f"streetzim-r{i}", "item_size": 1} for i in range(listed)]
+    resp = {"response": {"docs": docs}}
+    if found is not None:
+        resp["response"]["numFound"] = found
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["url"] = req.full_url
+        return io.BytesIO(_json.dumps(resp).encode())
+    monkeypatch.setattr(gen.urllib.request, "urlopen", urlopen)
+    if ok:
+        assert len(gen.fetch_archive_items()) == listed
+    else:
+        with pytest.raises(SystemExit, match=f"listed {listed} of {found}"):
+            gen.fetch_archive_items()
+    assert "rows=1000" in seen["url"]

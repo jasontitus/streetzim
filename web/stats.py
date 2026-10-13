@@ -30,13 +30,17 @@ def fetch_all_items():
         "&fl%5B%5D=item_size"
         "&fl%5B%5D=publicdate"
         "&sort%5B%5D=downloads+desc"
-        "&rows=100"
+        "&rows=1000"
         "&output=json"
     )
     req = urllib.request.Request(url, headers={"User-Agent": "streetzim-stats/1.0"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.load(resp)
-    return data.get("response", {}).get("docs", [])
+    docs = data.get("response", {}).get("docs", [])
+    found = data.get("response", {}).get("numFound")
+    if isinstance(found, int) and found > len(docs):   # at most `rows` are listed
+        raise SystemExit(f"archive.org listed {len(docs)} of {found} items: raise rows")
+    return docs
 
 
 def human_size(bytes_count):
