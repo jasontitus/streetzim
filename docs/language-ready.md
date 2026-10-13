@@ -36,24 +36,30 @@ rebuild driver, which runs it) cuts a region's tiles itself when
 `STREETZIM_ML_TILES=1`:
 
 1. `ops/region-ml-tiles.py --src-id <parent> -- <id> <bbox>` runs tilemaker
-   from the image CI published for the checkout's main commit
-   (`ghcr.io/jasontitus/streetzim:sha-<12 hex>`, with the tile profile
-   inside it) on `world-data/regions/<parent>.osm.pbf` and the registry
-   bbox, and writes `world-data/regions/<parent>.ml.mbtiles` with
-   sidecars `.bbox`, `.langs`, `.image`, `.pbf`. A file whose sidecars
-   all match is reused; any change (bbox, language list, image, a new
-   extract) makes it again. The main commit is HEAD, or, when the host
-   has committed on top of main (torrents, lists), the main commit below
-   it, provided `resources/tilemaker/` and the `Dockerfile` are the same;
-   `STREETZIM_ML_COMMIT` overrides.
-2. The build uses it as `--mbtiles`, with `--tile-languages` from `.langs`
-   and `--region-languages` from the table.
-3. Any failure stops the build: no image for the commit (the commit must be
-   on `main` with its CI finished; `STREETZIM_ML_COMMIT` picks another), no
-   table row, an extract cut for another bbox, a box across the
-   antimeridian (alaska; not supported yet), or tiles that fail the check
-   (an MBTiles file, zooms 0-14, bounds = bbox, `name:xx` for the asked
-   languages only). It never falls back to the world tiles.
+   on `world-data/regions/<parent>.osm.pbf` and the registry bbox, and
+   writes `world-data/regions/<parent>.ml.mbtiles` with sidecars `.bbox`,
+   `.langs`, `.profile` and `.pbf`. `.profile` is what decides the tiles in
+   an image: the `resources/tilemaker` tree, the `Dockerfile` blob and its
+   `TILEMAKER_REF`. A file whose sidecars all match is reused without
+   asking the registry or pulling; any change (bbox, languages, profile, a
+   new extract) makes it again. A new commit that leaves the profile alone
+   does not.
+2. **The image** is one CI published for main
+   (`ghcr.io/jasontitus/streetzim:sha-<12 hex>`), with the tile profile
+   inside it. CI publishes one only for each main tip it tests, so the step
+   walks main's first-parent line from the newest commit that is the
+   checkout's HEAD or below it (the host's own commits, such as torrents,
+   reach main only as a merge's second parent) back to the first one with
+   the checkout's tile inputs and a published image. Tile inputs changed
+   in the checkout but not committed are refused. `STREETZIM_ML_COMMIT`
+   names the commit instead, and must have the same inputs.
+3. The build uses the tiles as `--mbtiles`, with `--tile-languages` from
+   `.langs` and `--region-languages` from the table.
+4. Any failure stops the build: no image with these tile inputs, no table
+   row, an extract cut for another bbox, a box across the antimeridian
+   (alaska; not supported yet), or tiles that fail the check (an MBTiles
+   file, zooms 0-14, bounds = bbox, `name:xx` for the asked languages
+   only). It never falls back to the world tiles.
 
 The driver's marker check then requires `tileLanguages` and
 `regionLanguages` in the ZIM.
@@ -62,8 +68,13 @@ The driver's marker check then requires `tileLanguages` and
 `tmp/.ml-tiles.lock`), `--memory 24g --memory-swap 24g --cpus 6`, our own
 uid, nice 19 (`STREETZIM_ML_IO=idle` adds the idle I/O class, which is
 much slower on a busy disk), the store in `tmp/ml-store-<id>-<pid>`
-(deleted after, and reaped after a crash), and the image tag removed again
-if the run pulled it. `STREETZIM_ML_TIMEOUT` (default 3 h) bounds a run.
+(deleted after), and the image tag removed again if the run pulled it.
+tilemaker runs under `timeout` inside the container: an hour plus half an
+hour per GB of extract (`STREETZIM_ML_TIMEOUT` overrides; measured about 2
+minutes per GB on extracts up to 1.65 GB). A killed run's container, store
+and part folder are removed by the next run, under the lock. A signal to
+`build-region-fast.sh` reaches the step, which removes its container
+before the wrapper ends.
 
 **What differs from the world tiles** (Hispaniola, measured 2026-10-13):
 the world tiles were made by tilemaker 3.2 (master `facdf93`, the same

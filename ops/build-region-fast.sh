@@ -104,13 +104,40 @@ if [ -f "$OUT_FINAL" ]; then
     exit 0
 fi
 
+# Cleanup, installed before the first step that needs it (the multilingual
+# tile step, below; the NVMe copy after it).
+STAGED_MBTILES=""
+ML_PID=""
+cleanup_staged() {
+    if [ -n "$STAGED_MBTILES" ]; then rm -f "$STAGED_MBTILES" 2>/dev/null || true; fi
+    STAGED_MBTILES=""
+}
+# A signal reaches the multilingual tile step too (it runs as a child we
+# wait for, so the trap runs at once): it removes its container and store
+# before we go. A trap's `wait` returns when the child has.
+stop_ml() {
+    if [ -n "$ML_PID" ]; then
+        kill "-$1" "$ML_PID" 2>/dev/null || true
+        wait "$ML_PID" 2>/dev/null || true
+        ML_PID=""
+    fi
+}
+# EXIT does the cleanup. The signal traps must also END the script: a trap that
+# merely returns lets bash resume, so a killed build ran on to validate and
+# "done", and a kill during the copy fell back to a full build from /storage.
+trap cleanup_staged EXIT
+trap 'stop_ml INT;  cleanup_staged; trap - INT;  kill -INT  $$' INT
+trap 'stop_ml TERM; cleanup_staged; trap - TERM; kill -TERM $$' TERM
+trap 'stop_ml HUP;  cleanup_staged; trap - HUP;  kill -HUP  $$' HUP
+
 # Language-ready builds (docs/language-ready.md), opt in with
 # STREETZIM_ML_TILES=1: tiles carrying name:xx for the matrix languages, cut
 # from the region's own extract by ops/region-ml-tiles.py (tilemaker from
-# this commit's CI image; reused while its bbox, languages, image and
-# extract are unchanged) instead of the world tiles, and the region's own
-# languages from cloud/region-languages.tsv. Either failing stops the build:
-# there is no fallback to the world tiles. Unset or 0: nothing changes.
+# main's CI image with this checkout's tile profile; reused while its bbox,
+# languages, profile and extract are unchanged) instead of the world tiles,
+# and the region's own languages from cloud/region-languages.tsv. Either
+# failing stops the build: there is no fallback to the world tiles. Unset
+# or 0: nothing changes.
 ML_ARGS=()
 case "${STREETZIM_ML_TILES:-0}" in
     0) ;;
@@ -118,8 +145,19 @@ case "${STREETZIM_ML_TILES:-0}" in
         REGION_LANGS=$(awk -F'\t' -v id="$ID" '$1==id {print $2; f=1; exit} END {exit !f}' \
                        /storage/streetzim/cloud/region-languages.tsv) \
             || { echo "FATAL: no row for $ID in cloud/region-languages.tsv" >&2; exit 1; }
-        ML_MBTILES=$("$PY" /storage/streetzim/ops/region-ml-tiles.py --src-id "$SRC_ID" -- "$ID" "$BBOX") \
-            || { echo "FATAL: multilingual tiles for $ID failed (STREETZIM_ML_TILES=1); not building from the world tiles" >&2; exit 1; }
+        # In the background and waited for, so a signal's trap runs at once
+        # and passes the signal on (stop_ml).
+        ML_OUT=$(mktemp "$TMPDIR/ml-tiles-$ID.XXXXXX")
+        "$PY" /storage/streetzim/ops/region-ml-tiles.py --src-id "$SRC_ID" -- "$ID" "$BBOX" > "$ML_OUT" &
+        ML_PID=$!
+        ML_RC=0
+        wait "$ML_PID" || ML_RC=$?
+        ML_PID=""
+        ML_MBTILES=$(tail -n 1 "$ML_OUT"); rm -f "$ML_OUT"
+        if [ "$ML_RC" != 0 ]; then
+            echo "FATAL: multilingual tiles for $ID failed (STREETZIM_ML_TILES=1, rc=$ML_RC); not building from the world tiles" >&2
+            exit 1
+        fi
         if [ ! -s "$ML_MBTILES" ] || [ ! -s "$ML_MBTILES.langs" ]; then
             echo "FATAL: ops/region-ml-tiles.py gave '$ML_MBTILES', not tiles with a .langs sidecar" >&2
             exit 1
@@ -149,19 +187,6 @@ esac
 # /mnt/data itself is root-owned (shared host); /mnt/data/tilemaker is ours.
 NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
 NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
-STAGED_MBTILES=""
-cleanup_staged() {
-    if [ -n "$STAGED_MBTILES" ]; then rm -f "$STAGED_MBTILES" 2>/dev/null || true; fi
-    STAGED_MBTILES=""
-}
-# EXIT does the cleanup. The signal traps must also END the script: a trap that
-# merely returns lets bash resume, so a killed build ran on to validate and
-# "done", and a kill during the copy fell back to a full build from /storage.
-trap cleanup_staged EXIT
-trap 'cleanup_staged; trap - INT;  kill -INT  $$' INT
-trap 'cleanup_staged; trap - TERM; kill -TERM $$' TERM
-trap 'cleanup_staged; trap - HUP;  kill -HUP  $$' HUP
-
 if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ] && mkdir -p "$NVME_SCRATCH" 2>/dev/null \
    && exec 9>"$NVME_SCRATCH/.stage.lock" && flock -w 900 9; then
     for _old in "$NVME_SCRATCH"/*.mbtiles; do

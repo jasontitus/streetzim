@@ -7,42 +7,48 @@ name:xx for the matrix languages too (streetzim.languages
 MATRIX_TILE_LANGUAGES, or $STREETZIM_TILE_LANGUAGES), so this cuts them from
 the region's own extract with tilemaker:
 
-- the image CI published for the checkout's commit
-  (ghcr.io/jasontitus/streetzim:sha-<first 12 hex>,
-  .github/workflows/docker-publish.yml), with the tile profile inside it
-  (/app/resources/tilemaker); a commit without an image fails, there is no
-  fallback to the world tiles;
+- from an image CI published for main (ghcr.io/jasontitus/streetzim:sha-<12
+  hex>, .github/workflows/docker-publish.yml; only the main tips CI tested
+  have one), with the tile profile inside it (/app/resources/tilemaker). It
+  is the newest one on main's first-parent line, at or below the checkout,
+  whose resources/tilemaker and Dockerfile (TILEMAKER_REF with it) are the
+  checkout's (image_commit). None: the build fails, there is no fallback to
+  the world tiles;
 - world-data/regions/<src-id>.osm.pbf (a Light variant passes its parent
   as --src-id) and the registry bbox; the coastline and Natural Earth
   shapefiles the world tiles were made with (<root>/coastline,
   <root>/landcover);
 - in docker as a guest of the shared host: one run at a time
   (<store-dir>/.ml-tiles.lock), --memory 24g --memory-swap 24g --cpus 6,
-  our own uid, the tilemaker store in a per-run folder of <store-dir>
-  that is deleted afterwards, and the image tag removed again if this run
-  pulled it.
+  our own uid, nice 19, tilemaker under timeout(1) inside the container, the
+  tilemaker store in a per-run folder of <store-dir> that is deleted
+  afterwards, and the image tag removed again if this run pulled it. Under
+  the lock, containers and folders a killed run left are removed first.
 
 Output: <out-dir>/<src-id>.ml.mbtiles, written as .ml.part.mbtiles and
 renamed once it checks out (an MBTiles file: tilemaker picks its writer by
 the extension, and "x.mbtiles.part" made a directory of loose tiles). Its
 sidecars follow ops/region-bbox.sh's (one line each):
-  .bbox   the registry bbox it was cut for
-  .langs  the languages, sorted, comma-separated
-  .image  the image id it was made with
-  .pbf    the extract's size and mtime (a new extract is a new input)
-A file whose sidecars differ from this run's inputs, or lack one, is stale
-and made again; otherwise it is reused. .run.json records the run (time,
-peak memory, image tag, commit) for planning; it is not compared.
+  .bbox     the registry bbox it was cut for
+  .langs    the languages, sorted, comma-separated
+  .profile  what decides the tiles in the image: the resources/tilemaker
+            tree, the Dockerfile blob and its TILEMAKER_REF (tile_inputs);
+            not the image id, which changes with every commit
+  .pbf      the extract's size and mtime (a new extract is a new input)
+A file whose sidecars all hold this run's inputs is reused without asking
+the registry or pulling anything; any other is made again. .run.json
+records the run (time, peak memory, image, timeout) for planning; it is not
+compared.
 
 Usage: region-ml-tiles.py [--src-id ID] -- <id> <bbox>
 Prints the .ml.mbtiles path on stdout; everything else goes to stderr.
 Env: STREETZIM_ROOT (the data root), STREETZIM_TILE_LANGUAGES,
-STREETZIM_ML_COMMIT (default: the main commit the checkout is on, see
-commit()), STREETZIM_ML_OUT_DIR
-(default <root>/world-data/regions), STREETZIM_ML_STORE_DIR (default
-<root>/tmp), STREETZIM_ML_TIMEOUT (seconds, default 10800),
-STREETZIM_ML_IO (normal or idle, see NICE_SHIM), STREETZIM_ML_IMAGE_REPO
-and DOCKER (tests).
+STREETZIM_ML_COMMIT (a main commit whose image to use; it must have the
+checkout's tile inputs too), STREETZIM_ML_OUT_DIR (default
+<root>/world-data/regions), STREETZIM_ML_STORE_DIR (default <root>/tmp),
+STREETZIM_ML_TIMEOUT (seconds; default from the extract's size, see
+timeout_for), STREETZIM_ML_IO (normal or idle, see NICE_SHIM),
+STREETZIM_ML_IMAGE_REPO, STREETZIM_ML_CHECKOUT and DOCKER (tests).
 """
 import argparse
 import fcntl
@@ -79,13 +85,23 @@ ROOT = _streetzim_root()
 # The code is this file's own checkout (ROOT may point at other data).
 CODE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, CODE)
+# The git checkout whose tile inputs decide the image (tests point it at a
+# scratch repository).
+CHECKOUT = os.environ.get("STREETZIM_ML_CHECKOUT") or CODE
 
 IMAGE_REPO = "ghcr.io/jasontitus/streetzim"
+CONTAINER = "streetzim-mltiles-"
+LOCK_LABEL = "streetzim.mltiles.lock"
 MEMORY = "24g"
 CPUS = 6
-SIDECARS = ("bbox", "langs", "image", "pbf")
+SIDECARS = ("bbox", "langs", "profile", "pbf")
+# What decides the tiles in an image besides the extract and the languages.
+TILE_PATHS = ("resources/tilemaker", "Dockerfile")
+# How far image_commit looks back on main, and how many registry lookups.
+MAIN_DEPTH = 500
+MAX_LOOKUPS = 25
 # The profile inside the image: the tiles are what that commit's builder
-# makes, whatever this checkout's working tree holds.
+# makes, which is the checkout's (image_commit checks the inputs).
 PROFILE = ("/app/resources/tilemaker/config-openmaptiles.json",
            "/app/resources/tilemaker/process-openmaptiles.lua")
 SHAPEFILES = ("coastline/water_polygons.shp",
@@ -103,6 +119,17 @@ NICE_SHIM = ("import ctypes, os, sys\n"
              "    ctypes.CDLL(None, use_errno=True).syscall(251, 1, 0, 3 << 13)\n"
              "os.nice(19)\n"
              "os.execvp(sys.argv[2], sys.argv[2:])\n")
+# The run's time limit when STREETZIM_ML_TIMEOUT is not set: BASE + PER_GB
+# per GB of extract. Measured with the image's tilemaker at 6 threads
+# (2026-10-13, extracts of 0.07-1.65 GB): 1-5 minutes per region, about 2
+# minutes per GB plus a minute's start, slower on a busy disk. An hour plus
+# half an hour per GB leaves a large margin (France, 10.4 GB: 6.2 h); a
+# larger region's first run should be watched (.run.json).
+BASE_SECONDS = 3600
+PER_GB_SECONDS = 1800
+# The client waits this much longer than timeout(1) in the container, then
+# gives up on it (a hung daemon) and removes the container.
+CLIENT_MARGIN = 300
 
 
 def say(msg):
@@ -122,6 +149,15 @@ def io_class():
 
 def docker_bin():
     return os.environ.get("DOCKER", "docker")
+
+
+def docker(*args, timeout=120):
+    """A docker client call; a hung daemon counts as a failure, not a hang."""
+    try:
+        return subprocess.run([docker_bin(), *args], capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 124, "", f"docker {args[0]}: no answer in {timeout} s")
 
 
 def parse_bbox(bbox):
@@ -149,42 +185,118 @@ def languages():
         fail(f"STREETZIM_TILE_LANGUAGES: {e}")
 
 
-# What decides the tiles besides the image: a checkout whose copy of these
-# differs from the main commit the image is for would not get its own tiles.
-TILE_INPUTS = ("resources/tilemaker", "Dockerfile")
+def timeout_for(pbf):
+    env = os.environ.get("STREETZIM_ML_TIMEOUT")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            fail(f"STREETZIM_ML_TIMEOUT {env!r} is not a number of seconds")
+    return int(BASE_SECONDS + PER_GB_SECONDS * os.path.getsize(pbf) / 1e9)
 
+
+# ---- which image ------------------------------------------------------------
 
 def _git(*args):
-    r = subprocess.run(["git", "-C", CODE, *args], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", CHECKOUT, *args], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def commit():
-    """The main commit whose image makes the tiles: $STREETZIM_ML_COMMIT, else
-    the checkout's HEAD where it is on origin/main, else the main commit it
-    is based on (the host commits torrents and lists on top of main), as long
-    as the checkout's tile profile and Dockerfile, committed or not, are
-    that commit's."""
+def tile_inputs(rev):
+    """What decides the tiles an image built from ``rev`` makes: its
+    resources/tilemaker tree, its Dockerfile blob, and the TILEMAKER_REF in
+    it. None when ``rev`` lacks them."""
+    tree = _git("rev-parse", "--verify", "--quiet", f"{rev}:resources/tilemaker")
+    blob = _git("rev-parse", "--verify", "--quiet", f"{rev}:Dockerfile")
+    text = _git("show", f"{rev}:Dockerfile")
+    if not tree or not blob or text is None:
+        return None
+    m = re.search(r"^ARG TILEMAKER_REF=(\S+)", text, re.M)
+    return f"tilemaker={tree} dockerfile={blob} ref={m.group(1) if m else 'none'}"
+
+
+def checkout_inputs():
+    """tile_inputs of the checkout, which must have no change to them that
+    is not committed (no image has those)."""
+    dirty = _git("status", "--porcelain", "--untracked-files=all", "--", *TILE_PATHS)
+    if dirty is None:
+        fail(f"cannot read the git status of {CHECKOUT}")
+    if dirty:
+        fail(f"{CHECKOUT} has changes in {' / '.join(TILE_PATHS)} that are not committed "
+             f"({dirty.replace(chr(10), '; ')}): no published image has them")
+    key = tile_inputs("HEAD")
+    if not key:
+        fail(f"cannot read {' / '.join(TILE_PATHS)} at {CHECKOUT}'s HEAD")
+    return key
+
+
+def image_repo():
+    return os.environ.get("STREETZIM_ML_IMAGE_REPO", IMAGE_REPO)
+
+
+def tag_of(rev):
+    return f"{image_repo()}:sha-{rev[:12]}"
+
+
+def published(tag):
+    """Whether the registry has ``tag`` (a manifest lookup, no pull)."""
+    return docker("manifest", "inspect", tag, timeout=120).returncode == 0
+
+
+def image_commit(want):
+    """The main commit whose image makes the tiles, for a checkout whose
+    tile inputs are ``want``.
+
+    CI publishes an image (sha-<12 hex>) for each main tip it tests, so a
+    commit merged in from elsewhere (the host's torrent commits arrive on
+    main as a merge's second parent) or one pushed together with a later
+    one has none. So: main's first-parent line, from its newest commit that
+    is the checkout's HEAD or an ancestor of it, back to the first commit
+    that has the same tile inputs and a published image.
+    $STREETZIM_ML_COMMIT names the commit instead; it must have the same
+    inputs too."""
     c = os.environ.get("STREETZIM_ML_COMMIT")
     if c:
-        if not re.fullmatch(r"[0-9a-f]{12,40}", c):
-            fail(f"STREETZIM_ML_COMMIT {c!r} is not 12 to 40 lowercase hex digits")
-        return c
-    head = _git("rev-parse", "HEAD")
-    base = _git("merge-base", "HEAD", "origin/main")
-    if not head or not base:
-        fail(f"cannot find the main commit of {CODE} (git merge-base HEAD origin/main); "
-             "set STREETZIM_ML_COMMIT")
-    changed = _git("diff", "--name-only", base, "--", *TILE_INPUTS)
-    if changed is None or changed:
-        fail(f"{CODE}'s {' / '.join(TILE_INPUTS)} differ from main's {base[:12]} "
-             f"({(changed or 'git diff failed').replace(chr(10), ', ')}): its image would "
-             "not make this checkout's tiles. Commit to main first, or set STREETZIM_ML_COMMIT")
-    if base != head:
-        say(f"  checkout {head[:12]} is not on main: using main's {base[:12]} "
-            "(same tile profile and Dockerfile)")
-    return base
+        full = _git("rev-parse", "--verify", "--quiet", f"{c}^{{commit}}")
+        if not full:
+            fail(f"STREETZIM_ML_COMMIT {c!r} is not a commit of {CHECKOUT} (fetch it first)")
+        have = tile_inputs(full)
+        if have != want:
+            fail(f"STREETZIM_ML_COMMIT {full[:12]}'s tile inputs ({have}) are not this "
+                 f"checkout's ({want}): its image would not make this checkout's tiles")
+        if not published(tag_of(full)):
+            fail(f"STREETZIM_ML_COMMIT {full[:12]} has no published image ({tag_of(full)})")
+        return full
+    line = _git("rev-list", "--first-parent", "-n", str(MAIN_DEPTH), "origin/main")
+    after = _git("rev-list", "--first-parent", "-n", str(MAIN_DEPTH), "origin/main", "--not", "HEAD")
+    if not line or after is None:
+        fail(f"cannot read origin/main's history in {CHECKOUT}; set STREETZIM_ML_COMMIT")
+    newer = set(after.split())
+    below = [r for r in line.split() if r not in newer]
+    if not below:
+        fail(f"none of origin/main's last {MAIN_DEPTH} first-parent commits is in "
+             f"{CHECKOUT}'s HEAD; set STREETZIM_ML_COMMIT")
+    head = _git("rev-parse", "HEAD") or "?"
+    tried = []
+    for rev in below:
+        if tile_inputs(rev) != want:
+            continue
+        tried.append(rev[:12])
+        if published(tag_of(rev)):
+            if rev != head:
+                say(f"  image: main's {rev[:12]} (the checkout is at {head[:12]}, on main's "
+                    f"line at {below[0][:12]}; same tile inputs)")
+            return rev
+        if len(tried) >= MAX_LOOKUPS:
+            break
+    fail(f"no published image for this checkout's tile inputs ({want}): main's "
+         f"first-parent commits at or below {below[0][:12]} with these inputs "
+         f"({', '.join(tried) or 'none'}) have no {image_repo()}:sha-<12 hex> image. CI "
+         "publishes one for each main tip it tests: push to main and wait for CI, or "
+         "set STREETZIM_ML_COMMIT")
 
+
+# ---- freshness ----------------------------------------------------------------
 
 def pbf_identity(path):
     st = os.stat(path)
@@ -207,8 +319,8 @@ def write_sidecar(path, value):
 
 
 def is_fresh(out, want):
-    """Whether ``out`` exists as a file and every sidecar holds ``want``'s
-    value (a missing sidecar: stale)."""
+    """Whether ``out`` is a real file (not a symlink) and every sidecar holds
+    ``want``'s value (a missing sidecar: stale)."""
     if not os.path.isfile(out) or os.path.islink(out) or os.path.getsize(out) == 0:
         return False
     for k in SIDECARS:
@@ -220,10 +332,11 @@ def is_fresh(out, want):
     return True
 
 
+# ---- docker -------------------------------------------------------------------
+
 def image_id(tag):
-    r = subprocess.run([docker_bin(), "image", "inspect", tag, "--format",
-                        '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}}'],
-                       capture_output=True, text=True)
+    r = docker("image", "inspect", tag, "--format",
+               '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}}')
     if r.returncode != 0:
         return None, None
     parts = r.stdout.split()
@@ -244,10 +357,7 @@ def pull(tag, rev):
         except subprocess.TimeoutExpired:
             rc = "timeout"
         if rc != 0:
-            fail(f"cannot pull {tag} (rc={rc}). CI publishes an image per main "
-                 "commit (.github/workflows/docker-publish.yml): is this commit on "
-                 "main, and has its CI run finished? STREETZIM_ML_COMMIT picks "
-                 "another commit. Not falling back to the world tiles.")
+            fail(f"cannot pull {tag} (rc={rc}). Not falling back to the world tiles.")
     iid, label = image_id(tag)
     if not iid:
         fail(f"{tag} is not in docker after the pull")
@@ -258,11 +368,12 @@ def pull(tag, rev):
 
 def drop_tag(tag, pulled):
     """Remove the tag this run pulled (never one that was there before);
-    docker refuses while a container uses it, which is fine."""
+    docker refuses while a container uses it, so a just-removed container
+    gets a few seconds."""
     if not pulled:
         return
-    for attempt in range(6):        # a container just removed can still hold it
-        r = subprocess.run([docker_bin(), "rmi", tag], capture_output=True, text=True)
+    for attempt in range(6):
+        r = docker("rmi", tag)
         if r.returncode == 0:
             say(f"  removed image tag {tag}")
             return
@@ -270,6 +381,29 @@ def drop_tag(tag, pulled):
             break
         time.sleep(5)
     say(f"  image tag {tag} kept: {r.stderr.strip()[:200]}")
+
+
+def remove_container(name):
+    r = docker("rm", "-f", name)
+    if r.returncode != 0 and "No such container" not in r.stderr:
+        say(f"  could not remove container {name}: {r.stderr.strip()[:200]}")
+
+
+def reap(out_dir, store_dir, lock_path):
+    """Under the lock, nothing of an earlier run may still be going: remove
+    the containers runs under this lock left (a SIGKILLed client leaves its
+    container running), then the part folders and stores of runs whose
+    process is gone."""
+    r = docker("ps", "-aq", "--filter", f"label={LOCK_LABEL}={lock_path}")
+    for cid in (r.stdout.split() if r.returncode == 0 else []):
+        say(f"  removing container {cid}, left by an earlier run")
+        remove_container(cid)
+    for d, prefix in ((out_dir, ".ml-part-"), (store_dir, "ml-store-")):
+        for n in os.listdir(d):
+            pid = n.rsplit("-", 1)[-1]
+            if n.startswith(prefix) and pid.isdigit() and not os.path.exists(f"/proc/{pid}"):
+                say(f"  removing {os.path.join(d, n)}, left by a dead run")
+                shutil.rmtree(os.path.join(d, n), ignore_errors=True)
 
 
 class MemorySampler(threading.Thread):
@@ -302,25 +436,16 @@ class MemorySampler(threading.Thread):
                 pass
 
 
-def reap(out_dir, store_dir):
-    """Remove the part folders and stores of runs that died without
-    cleaning up (SIGKILL, a reboot): their process is gone."""
-    for d, prefix in ((out_dir, ".ml-part-"), (store_dir, "ml-store-")):
-        for n in os.listdir(d):
-            pid = n.rsplit("-", 1)[-1]
-            if n.startswith(prefix) and pid.isdigit() and not os.path.exists(f"/proc/{pid}"):
-                say(f"  removing {os.path.join(d, n)}, left by a dead run")
-                shutil.rmtree(os.path.join(d, n), ignore_errors=True)
-
-
-def run_tilemaker(*, iid, name, pbf, bbox, langs, part, store, timeout):
-    """tilemaker in the image; True on success. The container is removed
-    however this ends (a timeout kills only the client)."""
+def run_tilemaker(*, iid, name, lock_path, pbf, bbox, langs, part, store, timeout):
+    """tilemaker in the image; True on success. It runs under timeout(1)
+    inside the container, so a container whose client was killed still
+    stops; the client waits a little longer, and the container is removed
+    however this ends."""
     cidfile = os.path.join(store, "cid")
     store_in = os.path.join(store, "tm")
     os.makedirs(store_in)
     cmd = [docker_bin(), "run", "--rm", "--init", "--name", name,
-           "--cidfile", cidfile,
+           "--label", f"{LOCK_LABEL}={lock_path}", "--cidfile", cidfile,
            "--user", f"{os.getuid()}:{os.getgid()}",
            "--memory", MEMORY, "--memory-swap", MEMORY, "--cpus", str(CPUS),
            "-v", f"{os.path.realpath(pbf)}:/in/region.osm.pbf:ro",
@@ -329,6 +454,7 @@ def run_tilemaker(*, iid, name, pbf, bbox, langs, part, store, timeout):
            "-v", f"{os.path.dirname(part)}:/out", "-v", f"{store_in}:/store", "-w", "/w",
            "-e", f"STREETZIM_TILE_LANGUAGES={','.join(langs)}",
            "--entrypoint", "python3", iid, "-c", NICE_SHIM, io_class(),
+           "timeout", "--kill-after=60", str(timeout),
            "tilemaker", "--input", "/in/region.osm.pbf",
            "--output", f"/out/{os.path.basename(part)}",
            "--config", PROFILE[0], "--process", PROFILE[1],
@@ -339,21 +465,25 @@ def run_tilemaker(*, iid, name, pbf, bbox, langs, part, store, timeout):
     sampler.start()
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, stdout=sys.stderr, stderr=sys.stderr, timeout=timeout)
+        r = subprocess.run(cmd, stdout=sys.stderr, stderr=sys.stderr, timeout=timeout + CLIENT_MARGIN)
         rc = r.returncode
+        if rc == 124:
+            say(f"  tilemaker passed {timeout} s: stopped in the container")
     except subprocess.TimeoutExpired:
         say(f"  tilemaker passed {timeout} s: stopping it")
         rc = None
     finally:
         sampler.stop.set()
-        subprocess.run([docker_bin(), "rm", "-f", name], capture_output=True)
+        remove_container(name)
     secs = time.time() - t0
     gib = 1 << 30
     say(f"  tilemaker rc={rc} in {secs:.0f} s; peak memory {sampler.peak / gib:.1f} GiB "
         f"(anon {sampler.anon / gib:.1f} GiB)")
-    return rc == 0, {"seconds": round(secs), "peak_bytes": sampler.peak,
+    return rc == 0, {"seconds": round(secs), "timeout": timeout, "peak_bytes": sampler.peak,
                      "peak_anon_bytes": sampler.anon}
 
+
+# ---- the check ----------------------------------------------------------------
 
 def _tile_keys(blob):
     pb2 = importlib.import_module("mapbox_vector_tile.Mapbox.vector_tile_pb2")
@@ -367,7 +497,7 @@ def _tile_keys(blob):
 def check_tiles(path, langs, bbox):
     """Refuse output that is not a usable MBTiles of these languages: a
     sqlite file with tiles at zoom 0, 6, 10 and 14, pbf format, bounds that
-    are the bbox (tilemaker took --bbox), and among the low-zoom tiles
+    are the bbox (tilemaker took --bbox), and among the zoom 0-8 tiles
     name:xx keys for some of the languages and for no other (the profile
     writes only those it was asked for)."""
     if not os.path.isfile(path):
@@ -406,18 +536,17 @@ def check_tiles(path, langs, bbox):
         f"{len(langs)} languages ({','.join(found)})")
 
 
-def make(rid, src_id, bbox, *, out_dir=None, store_dir=None, timeout=None):
+# ---- the step -----------------------------------------------------------------
+
+def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
     parse_bbox(bbox)
     io_class()
     langs = languages()
-    rev = commit()
-    repo = os.environ.get("STREETZIM_ML_IMAGE_REPO", IMAGE_REPO)
-    tag = f"{repo}:sha-{rev[:12]}"
+    profile = checkout_inputs()
     out_dir = os.path.abspath(out_dir or os.environ.get("STREETZIM_ML_OUT_DIR")
                               or os.path.join(ROOT, "world-data", "regions"))
     store_dir = os.path.abspath(store_dir or os.environ.get("STREETZIM_ML_STORE_DIR")
                                 or os.path.join(ROOT, "tmp"))
-    timeout = timeout or int(os.environ.get("STREETZIM_ML_TIMEOUT") or 10800)
     pbf = os.path.join(ROOT, "world-data", "regions", f"{src_id}.osm.pbf")
     if not os.path.isfile(pbf) or os.path.getsize(pbf) == 0:
         fail(f"no extract {pbf}")
@@ -431,16 +560,18 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None, timeout=None):
         if not os.path.isfile(os.path.join(ROOT, shp)):
             fail(f"{os.path.join(ROOT, shp)} is missing (the tiles would have no "
                  "ocean or landcover)")
+    timeout = timeout_for(pbf)
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(store_dir, exist_ok=True)
     out = os.path.join(out_dir, f"{src_id}.ml.mbtiles")
     say(f"=== multilingual tiles for {rid}"
         + (f" (from {src_id})" if src_id != rid else "")
-        + f": {len(langs)} languages, bbox {bbox}, image {tag}")
+        + f": {len(langs)} languages, bbox {bbox}")
 
     # One run at a time on the host; the freshness check is under the lock
     # too, so a run that waited reuses what the one before it made.
-    lock = open(os.path.join(store_dir, ".ml-tiles.lock"), "w")
+    lock_path = os.path.join(store_dir, ".ml-tiles.lock")
+    lock = open(lock_path, "w")
     t_wait = time.time()
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -448,23 +579,24 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None, timeout=None):
         say("  waiting for another multilingual tile run (one at a time)")
         fcntl.flock(lock, fcntl.LOCK_EX)
         say(f"  waited {time.time() - t_wait:.0f} s")
-    reap(out_dir, store_dir)
-    # The tag is removed afterwards only when this run is what pulled it.
-    pulled = image_id(tag)[0] is None
-    # tilemaker writes into a folder of its own beside the output (so the
-    # rename is atomic and the container sees nothing else of out_dir).
     partdir = os.path.join(out_dir, f".ml-part-{src_id}-{os.getpid()}")
     part = os.path.join(partdir, f"{src_id}.ml.part.mbtiles")
     store = os.path.join(store_dir, f"ml-store-{src_id}-{os.getpid()}")
-    name = f"streetzim-mltiles-{src_id}"
+    name = f"{CONTAINER}{src_id}"
+    tag, pulled = None, False
     try:
-        iid = pull(tag, rev)
-        want = {"bbox": bbox, "langs": ",".join(langs), "image": iid,
+        reap(out_dir, store_dir, lock_path)
+        want = {"bbox": bbox, "langs": ",".join(langs), "profile": profile,
                 "pbf": pbf_identity(pbf)}
         if is_fresh(out, want):
-            say(f"  {out}: fresh (same bbox, languages, image and extract), reused")
+            say(f"  {out}: fresh (same bbox, languages, tile profile and extract), reused")
             return out
-        for k in SIDECARS + ("run.json",):    # they describe the old file
+        rev = image_commit(profile)
+        tag = tag_of(rev)
+        # The tag is removed afterwards only when this run is what pulled it.
+        pulled = image_id(tag)[0] is None
+        iid = pull(tag, rev)
+        for k in SIDECARS + ("image", "run.json"):    # they describe the old file
             try:
                 os.unlink(f"{out}.{k}")
             except FileNotFoundError:
@@ -472,9 +604,9 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None, timeout=None):
         for d in (partdir, store):
             shutil.rmtree(d, ignore_errors=True)
             os.makedirs(d)
-        subprocess.run([docker_bin(), "rm", "-f", name], capture_output=True)
-        ok, stats = run_tilemaker(iid=iid, name=name, pbf=pbf, bbox=bbox, langs=langs,
-                                  part=part, store=store, timeout=timeout)
+        remove_container(name)
+        ok, stats = run_tilemaker(iid=iid, name=name, lock_path=lock_path, pbf=pbf, bbox=bbox,
+                                  langs=langs, part=part, store=store, timeout=timeout)
         if not ok:
             fail(f"tilemaker failed for {rid}; see above")
         check_tiles(part, langs, bbox)
@@ -482,14 +614,16 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None, timeout=None):
         for k in SIDECARS:
             write_sidecar(f"{out}.{k}", want[k])
         stats.update(image=tag, image_id=iid, commit=rev, bbox=bbox, langs=langs,
-                     pbf_bytes=os.path.getsize(pbf), mbtiles_bytes=os.path.getsize(out))
+                     profile=profile, pbf_bytes=os.path.getsize(pbf),
+                     mbtiles_bytes=os.path.getsize(out))
         write_sidecar(f"{out}.run.json", json.dumps(stats))
         say(f"  wrote {out} ({os.path.getsize(out) / 1e6:.0f} MB)")
         return out
     finally:
         for d in (partdir, store):
             shutil.rmtree(d, ignore_errors=True)
-        drop_tag(tag, pulled)
+        if tag:
+            drop_tag(tag, pulled)
         lock.close()
 
 
