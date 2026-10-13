@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""streetzim-recipe/2: build, materialize and check recipes.
+
+    recipe2.py build BASE.zim PACK... --lang L -o RECIPE.json [--region R] [--title T]
+                     [--check MERGED.zim]
+    recipe2.py menu BASE.zim --packs-dir DIR --langs de,en,fr,th --region-langs de
+                     --out-dir DIR [--region R]
+    recipe2.py materialize RECIPE.json BASE.zim PACK... -o OUT.zim
+
+Recipe (docs/language-matrix-prototype.md, "Recipes"):
+  {"format": "streetzim-recipe/2", "uuid", "name", "size", "md5",
+   "base": {"file", "size", "range": [cluster_start, dirents_end], "chunk", "sha256": [...]},
+   "packs": {"<lang>": {"file", "url", "size", "chunk", "sha256": [...]}},
+   "segments": [{"src": "inline", "len", "data": b64, "sha256"},
+                {"src": "base", "off", "len"}, {"src": "pack", "pack", "off", "len"},
+                {"src": "md5"}]}
+
+Chunk hashes cover each WHOLE input file from offset 0 in 16 MiB chunks, so
+the browser can check any range it reads. materialize() checks every chunk a
+segment touches and every inline segment before writing it, recomputes the
+MD5 and requires it to equal the recipe's; nothing is trusted.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import sys
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from tools.langpack.gatelib import pack_gate_ok, work_dir  # noqa: E402
+from tools.langpack.merge_zim import (  # noqa: E402
+    MERGER_VERSION, MergeError, Plan, Ref, build_plan, peak_rss_mb, pieces)
+
+FORMAT = "streetzim-recipe/2"
+CHUNK = 16 << 20
+INLINE_MAX_REF = 256         # verbatim runs shorter than this are inlined (bounds the segment count)
+PROXY = "{proxy}"            # the builder page substitutes its range proxy
+_LAST_FILE_MD5: list[str | None] = [None]
+
+
+def chunk_hashes(path: str, chunk: int = CHUNK) -> list[str]:
+    """SHA-256 per chunk of the whole file, cached under $LANGPACK_WORK/sha-cache."""
+    st = os.stat(path)
+    cdir = os.path.join(work_dir(), "sha-cache")
+    os.makedirs(cdir, exist_ok=True)
+    key = os.path.join(cdir, f"{os.path.basename(path)}.{st.st_size}.{st.st_mtime_ns}.{chunk}.json")
+    if os.path.exists(key):
+        return json.load(open(key))
+    out = []
+    with open(path, "rb", buffering=0) as fh:
+        while True:
+            b = fh.read(chunk)
+            if not b:
+                break
+            out.append(hashlib.sha256(b).hexdigest())
+    with open(key, "w") as fh:
+        json.dump(out, fh)
+    return out
+
+
+def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template: str = PROXY + "/{file}",
+                 url_overrides: dict | None = None, **kw) -> tuple[dict, Plan, dict]:
+    """url_template: each pack's absolute Range URL, {file} = the pack's file
+    name (the builder page uses it as is; "{proxy}" is left for a page that
+    substitutes its own proxy)."""
+    t0 = time.perf_counter()
+    plan = build_plan(base_path, pack_paths, lang, **kw)
+    t_plan = time.perf_counter() - t0
+    segs: list[dict] = []
+    pend = bytearray()
+    fds = {}
+
+    def flush():
+        if pend:
+            segs.append({"src": "inline", "len": len(pend), "data": bytes(pend)})
+            pend.clear()
+
+    def read(r: Ref) -> bytes:
+        path = plan.base.path if isinstance(r.src, str) else plan.packs[r.src[1]].path
+        if path not in fds:
+            fds[path] = os.open(path, os.O_RDONLY)
+        return os.pread(fds[path], r.n, r.off)
+
+    for pc in pieces(plan):
+        if isinstance(pc, Ref):
+            if pc.n == 0:
+                continue
+            if pc.n < INLINE_MAX_REF:
+                pend += read(pc)
+                continue
+            flush()
+            if isinstance(pc.src, str):
+                segs.append({"src": "base", "off": pc.off, "len": pc.n})
+            else:
+                segs.append({"src": "pack", "pack": plan.packs[pc.src[1]].lang, "off": pc.off, "len": pc.n})
+        else:
+            pend += pc
+    flush()
+    segs.append({"src": "md5"})
+    for fd in fds.values():
+        os.close(fd)
+    for s in segs:
+        if s["src"] == "inline":
+            s["sha256"] = hashlib.sha256(s["data"]).hexdigest()
+            s["data"] = base64.b64encode(s["data"]).decode()
+    L = plan.layout
+    recipe = {
+        "format": FORMAT, "merger": MERGER_VERSION,
+        "uuid": str(__import__("uuid").UUID(bytes=plan.header.uuid)),
+        "name": plan.meta["Name"],
+        # the download's file name: Name + the base's date (builder.js: recipe.file_name || recipe.name)
+        "file_name": plan.meta["Name"] + (("_" + _date.group(1)) if (_date := __import__("re").search(
+            r"(\d{4}-\d{2}-\d{2})", os.path.basename(os.path.realpath(base_path)))) else ""),
+        "title": plan.meta["Title"], "language": plan.meta["Language"],
+        "flavour": plan.meta["Flavour"], "map_language": lang,
+        "size": L["total"], "md5": None, "file_md5": None,
+        "base": {"file": os.path.basename(os.path.realpath(base_path)), "size": os.path.getsize(base_path),
+                 "uuid": plan.base.header.uuid.hex(),
+                 "range": [L["cluster_start"], L["base_dirents_end"]], "chunk": CHUNK,
+                 "sha256": chunk_hashes(base_path)},
+        "packs": {p.lang: {"file": os.path.basename(p.path), "uuid": p.uuid.hex(),
+                           "url": ((url_overrides or {}).get(p.lang) or url_template).format(
+                               file=os.path.basename(p.path), proxy=PROXY),
+                           "size": os.path.getsize(p.path), "chunk": CHUNK, "articles": p.articles,
+                           "sha256": chunk_hashes(p.path)} for p in plan.packs},
+        "segments": segs,
+    }
+    # exact MD5: stream the recipe once (the same code path the browser follows)
+    t1 = time.perf_counter()
+    recipe["md5"] = materialize(recipe, base_path, {p.lang: p.path for p in plan.packs}, out=None,
+                                trust_md5=False)
+    # md5 of the whole file as `md5sum` prints it (the ZIM checksum appended)
+    recipe["file_md5"] = _LAST_FILE_MD5[0]
+    stats = {"plan_s": round(t_plan, 4), "md5_pass_s": round(time.perf_counter() - t1, 2),
+             "segments": len(segs),
+             "inline_segments": sum(1 for s in segs if s["src"] == "inline"),
+             "inline_bytes": sum(s["len"] for s in segs if s["src"] == "inline"),
+             "base_bytes": sum(s["len"] for s in segs if s["src"] == "base"),
+             "pack_bytes": sum(s["len"] for s in segs if s["src"] == "pack"),
+             "generated_tail": L["generated_tail"], "size": L["total"]}
+    return recipe, plan, stats
+
+
+class ChunkReader:
+    """Reads ranges of one input, checking each 16 MiB chunk against its hash once."""
+
+    def __init__(self, path: str, size: int, chunk: int, hashes: list[str], label: str):
+        self.fd = os.open(path, os.O_RDONLY)
+        if os.fstat(self.fd).st_size != size:
+            raise MergeError(f"{label}: size {os.fstat(self.fd).st_size} != recipe {size}")
+        self.chunk, self.hashes, self.label = chunk, hashes, label
+        self.verified: set[int] = set()
+        self.cache: tuple[int, bytes] | None = None
+
+    def _chunk(self, k: int) -> bytes:
+        if self.cache and self.cache[0] == k:
+            return self.cache[1]
+        b = os.pread(self.fd, self.chunk, k * self.chunk)
+        if k not in self.verified:
+            if hashlib.sha256(b).hexdigest() != self.hashes[k]:
+                raise MergeError(f"{self.label}: chunk {k} fails its SHA-256")
+            self.verified.add(k)
+        self.cache = (k, b)
+        return b
+
+    def read(self, off: int, n: int):
+        end = off + n
+        while off < end:
+            k = off // self.chunk
+            b = self._chunk(k)
+            lo = off - k * self.chunk
+            hi = min(len(b), end - k * self.chunk)
+            if hi <= lo:
+                raise MergeError(f"{self.label}: read past end")
+            yield b[lo:hi]
+            off += hi - lo
+
+
+def materialize(recipe: dict, base_path: str, pack_paths: dict[str, str], out: str | None,
+                trust_md5: bool = True) -> str:
+    """Write (or, with out=None, only hash) the merged file; returns the MD5 hex.
+    Every input chunk and inline segment is checked; the MD5 must match the
+    recipe's unless trust_md5 is False (used while computing it)."""
+    if recipe.get("format") != FORMAT:
+        raise MergeError("not a streetzim-recipe/2")
+    b = recipe["base"]
+    readers = {"base": ChunkReader(base_path, b["size"], b["chunk"], b["sha256"], "base")}
+    for lang, p in recipe["packs"].items():
+        readers[lang] = ChunkReader(pack_paths[lang], p["size"], p["chunk"], p["sha256"], f"pack {lang}")
+    md5 = hashlib.md5(usedforsecurity=False)
+    part = out + ".part" if out else None
+    fh = open(part, "wb", buffering=0) if part else None
+    n = 0
+    try:
+        for s in recipe["segments"]:
+            if s["src"] == "inline":
+                data = base64.b64decode(s["data"])
+                if len(data) != s["len"] or hashlib.sha256(data).hexdigest() != s["sha256"]:
+                    raise MergeError(f"inline segment at {n} fails its SHA-256")
+                parts = (data,)
+            elif s["src"] == "base":
+                parts = readers["base"].read(s["off"], s["len"])
+            elif s["src"] == "pack":
+                parts = readers[s["pack"]].read(s["off"], s["len"])
+            elif s["src"] == "md5":
+                digest = md5.hexdigest()
+                if trust_md5 and digest != recipe["md5"]:
+                    raise MergeError(f"MD5 {digest} != recipe {recipe['md5']}")
+                fmd5 = md5.copy()
+                fmd5.update(bytes.fromhex(digest))
+                _LAST_FILE_MD5[0] = fmd5.hexdigest()
+                if trust_md5 and recipe.get("file_md5") and _LAST_FILE_MD5[0] != recipe["file_md5"]:
+                    raise MergeError("file MD5 mismatch")
+                if fh:
+                    fh.write(bytes.fromhex(digest))
+                n += 16
+                continue
+            else:
+                raise MergeError(f"unknown segment {s['src']}")
+            for p in parts:
+                md5.update(p)
+                if fh:
+                    fh.write(p)
+                n += len(p)
+        if n != recipe["size"]:
+            raise MergeError(f"materialized {n} != recipe size {recipe['size']}")
+    except BaseException:
+        if fh and part:
+            fh.close()
+            os.remove(part)
+        raise
+    if fh and part and out:
+        fh.close()
+        os.replace(part, out)
+    return digest
+
+
+def blob_of_mapcfg(plan) -> bytes:
+    return plan.layout["mapcfg"]
+
+
+def menu_packs(region_langs: list[str], base_wiki: str | None, L: str, available: dict[str, str]) -> list[str]:
+    want = (set(region_langs) | {L, "en"}) - ({base_wiki} if base_wiki else set())
+    return sorted(x for x in want if x in available)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("build")
+    b.add_argument("base")
+    b.add_argument("packs", nargs="*")
+    b.add_argument("--lang", required=True)
+    b.add_argument("-o", "--out", required=True)
+    b.add_argument("--region")
+    b.add_argument("--title")
+    b.add_argument("--region-langs", default="")
+    b.add_argument("--check", help="compare the materialized recipe with this merge_zim.py output")
+    mn = sub.add_parser("menu")
+    mn.add_argument("base")
+    mn.add_argument("--packs-dir", required=True)
+    mn.add_argument("--langs", required=True)
+    mn.add_argument("--region-langs", required=True)
+    mn.add_argument("--out-dir", required=True)
+    mn.add_argument("--region")
+    mn.add_argument("--titles", default="{}", help='JSON {"th": "..."}')
+    mn.add_argument("--language-meta", choices=("list", "map"), default="list")
+    m = sub.add_parser("materialize")
+    m.add_argument("recipe")
+    m.add_argument("base")
+    m.add_argument("packs", nargs="*")
+    m.add_argument("-o", "--out", required=True)
+    a = ap.parse_args(argv)
+
+    if a.cmd == "build":
+        recipe, plan, st = build_recipe(a.base, a.packs, a.lang, region=a.region, title=a.title,
+                                        region_langs=[x for x in a.region_langs.split(",") if x])
+        with open(a.out, "w") as fh:
+            json.dump(recipe, fh, ensure_ascii=False)
+        st["recipe_json_bytes"] = os.path.getsize(a.out)
+        st["md5"] = recipe["md5"]
+        if a.check:
+            t = time.perf_counter()
+            tmp = a.out + ".materialized.zim"
+            materialize(recipe, a.base, {p.lang: p.path for p in plan.packs}, tmp)
+            same = open(tmp, "rb").read() == open(a.check, "rb").read() if os.path.getsize(tmp) < (2 << 30) \
+                else os.system(f"cmp -s '{tmp}' '{a.check}'") == 0
+            os.remove(tmp)
+            st["materialized_equals_merge"] = same
+            st["materialize_s"] = round(time.perf_counter() - t, 2)
+        st["peak_rss_MB"] = round(peak_rss_mb(), 1)
+        print(json.dumps(st, indent=1))
+    elif a.cmd == "menu":
+        from merge_zim import open_pack
+        from merge_zim import ZimReader, blob_of, KEY_MAPCFG
+        region = a.region
+        if region is None:
+            import re as _re
+            nm = blob_of(ZimReader(a.base), (77, b"Name")) or b""
+            m_ = _re.match(rb"^osm_[a-z]{2,3}_(.+)$", nm)
+            region = m_.group(1).decode() if m_ else None
+        base_uuid = ZimReader(a.base).header.uuid.hex()
+        cands: dict[str, list] = {}
+        for f in sorted(os.listdir(a.packs_dir)):
+            fp = os.path.join(a.packs_dir, f)
+            if not f.endswith(".zim") or not os.path.isfile(fp):
+                continue
+            try:
+                p = open_pack(fp)
+            except Exception as e:  # noqa: BLE001  (partial / foreign files)
+                print(f"skip {f}: {e}", file=sys.stderr)
+                continue
+            pj = json.loads(blob_of(p.z, (67, p.prefix + b"pack.json")) or b"{}")
+            same_base = pj.get("base_uuid", "").replace("-", "") == base_uuid
+            if not same_base and region and pj.get("region") != region and f"_{region}_" not in f:
+                continue
+            ok, why = pack_gate_ok(fp)            # review S1: a pack must pass its own gate
+            if not ok:
+                print(f"skip {f}: {why}", file=sys.stderr)
+                continue
+            # prefer the published naming osm_<region>_wiki-<xx>, then the newest file
+            cands.setdefault(p.lang, []).append((f.startswith(f"osm_{region}_wiki-"), os.path.getmtime(fp), fp))
+        avail = {lang: max(c)[2] for lang, c in cands.items()}
+        print(f"packs: {json.dumps(avail)}", file=sys.stderr)
+        titles = json.loads(a.titles)
+        os.makedirs(a.out_dir, exist_ok=True)
+        cfg = json.loads(blob_of(ZimReader(a.base), KEY_MAPCFG) or b"{}")
+        base_wiki = (cfg.get("language") or "en") if cfg.get("hasWikiArticles") else None
+        rows = []
+        for L in a.langs.split(","):
+            packs = menu_packs(a.region_langs.split(","), base_wiki, L, avail)
+            recipe, plan, st = build_recipe(a.base, [avail[x] for x in packs], L, region=region,
+                                            title=titles.get(L), region_langs=a.region_langs.split(","),
+                                            language_meta=a.language_meta)
+            path = os.path.join(a.out_dir, f"{L}.json")
+            with open(path, "w") as fh:
+                json.dump(recipe, fh, ensure_ascii=False)
+            with open(os.path.join(a.out_dir, f"{L}.map-config.json"), "wb") as fh:
+                fh.write(plan.layout["mapcfg"])
+            want = (set(a.region_langs.split(",")) | {L, "en"}) - ({base_wiki} if base_wiki else set())
+            st.update(L=L, packs=packs, pack_files=[avail[x] for x in packs], missing_packs=sorted(want - set(packs)), recipe=path,
+                      recipe_json_bytes=os.path.getsize(path),
+                      wikiPacks=[w["lang"] for w in json.loads(blob_of_mapcfg(plan))["wikiPacks"]],
+                      name=recipe["name"], md5=recipe["md5"])
+            rows.append(st)
+            print(json.dumps(st), flush=True)
+    else:
+        recipe = json.load(open(a.recipe))
+        packs = {}
+        from merge_zim import open_pack
+        for p in a.packs:
+            packs[open_pack(p).lang] = p
+        t = time.perf_counter()
+        d = materialize(recipe, a.base, packs, a.out)
+        print(json.dumps({"out": a.out, "md5": d, "s": round(time.perf_counter() - t, 2)}))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

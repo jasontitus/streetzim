@@ -86,3 +86,6 @@ coverage.xml
 htmlcov/
 !tests/fixtures/monaco-full/monaco.osm.pbf
 !tests/fixtures/monaco-full/dl/cache/wikidata_cache/
+
+# Language-pack pipeline working directory (tools/langpack/, $LANGPACK_WORK's default)
+/langpack-work/
