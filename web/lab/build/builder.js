@@ -14,7 +14,18 @@
   'use strict';
   const q = new URLSearchParams(location.search);
   const $ = (id) => document.getElementById(id);
-  const PROBE_BYTES = 8 * 1048576;
+  // Never inside another page (firebase.json also sends frame-ancestors
+  // 'self' and X-Frame-Options): a framed copy could start downloads the
+  // visitor cannot see. Nothing below runs.
+  let framed = true;
+  try { framed = window.top !== window.self; } catch (e) { /* cross-origin parent */ }
+  if (framed) {
+    const p = document.createElement('p'), a = document.createElement('a');
+    a.href = location.href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Open it on its own';
+    p.append('This page does not run inside another page. ', a, '.');
+    document.body.replaceChildren(p);
+    return;
+  }
 
   // ------------------------------------------------------------ analytics
   const devSession = (() => {
@@ -104,13 +115,23 @@
     } else if (want) sel.value = want;
     sel.onchange = () => { $('notice').textContent = ''; pickRegion(); };
     pickRegion();
-    // ?go=1 (a download link): start at once. The parameter is dropped from
-    // the address, so reloading the page later does not download again.
+    // ?go=1 (a download link): the language is chosen and the Download
+    // button focused; one click starts it. Nothing starts without a click,
+    // so another site cannot start a download by linking or redirecting here.
     if (q.get('go') === '1' && region && entry && region.menu.some((m) => m.lang === q.get('lang'))) {
       const u = new URL(location.href); u.searchParams.delete('go');
       history.replaceState(null, '', u);
-      build('net');
+      $('goHint').hidden = false;
+      $('oneclick').focus();
+      $('oneclick').scrollIntoView({ block: 'center' });
     }
+    // The connection check waits for a sign of a person on the page (a
+    // pointer, a key, a touch, a wheel; not 'scroll', which the page's own
+    // scrollIntoView fires): a page opened by a redirect from another site
+    // fetches nothing by itself.
+    const human = ['pointermove', 'pointerdown', 'keydown', 'touchstart', 'wheel'];
+    const onHuman = () => { human.forEach((t) => removeEventListener(t, onHuman, true)); measureSpeed(false); };
+    human.forEach((t) => addEventListener(t, onHuman, { capture: true, passive: true }));
   }
 
   function pickRegion() {
