@@ -67,4 +67,6 @@ def test_the_pruner_lists_every_page(monkeypatch):
         stderr = ""
     monkeypatch.setattr(mod, "ia", lambda args: calls.append(args) or Done())
     assert mod.list_all_streetzim_items() == ["streetzim-a", "streetzim-b"]
-    assert not any("rows" in a for a in calls[0]), calls[0]
+    # Any --parameters/-p (rows, page) makes internetarchive send one request.
+    assert not any(a == "-p" or a.startswith(("--parameters", "-p=")) or "rows" in a
+                   for a in calls[0]), calls[0]
