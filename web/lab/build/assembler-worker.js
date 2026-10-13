@@ -40,7 +40,9 @@ class WritableSink {                 // File System Access: the visitor picked a
 // - 'cancelled' from the service worker ends it at once.
 // close() returns only when the browser has read the whole stream.
 const PING_MS = 5000, DEAD_MS = 20000, STALL_MS = 60000;
-class SinkStopped extends Error {}
+class SinkStopped extends Error {
+  constructor(msg, watchdog) { super(msg); this.watchdog = !!watchdog; }
+}
 class SwDownloadSink {
   constructor(port) {
     this.port = port; this.waiters = []; this.credit = 0; this.failed = null;
@@ -55,14 +57,14 @@ class SwDownloadSink {
     };
   }
   wake() { this.waiters.splice(0).forEach((w) => w()); }
-  fail(why) { if (!this.failed) { this.failed = new SinkStopped(why); this.wake(); } }
+  fail(why, watchdog) { if (!this.failed) { this.failed = new SinkStopped(why, watchdog); this.wake(); } }
   async open() {
     this.credit = 1;
     this.timer = setInterval(() => {
       const now = Date.now();
       this.port.postMessage({ type: 'ping' });
-      if (now - this.lastPong > DEAD_MS) this.fail('the service worker stopped');
-      else if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > STALL_MS) this.fail('the browser stopped reading the download');
+      if (now - this.lastPong > DEAD_MS) this.fail('the service worker stopped', true);
+      else if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > STALL_MS) this.fail('the browser stopped reading the download', true);
     }, PING_MS);
   }
   async until(ready) {               // wait for ready(), or a failure
@@ -187,7 +189,7 @@ async function run(o) {
   // that needs step i's chunk (Infinity after its last use); MAX_LIVE caps
   // memory if a plan ever spreads a chunk's uses far apart (the chunk with
   // the furthest next use goes first).
-  const MAX_LIVE = 6;
+  const MAX_LIVE = 3;
   const keyOf = (s) => s.src + '#' + s.k;
   const nextUse = new Array(steps.length).fill(Infinity);
   const lastSeen = new Map();
@@ -275,7 +277,7 @@ async function run(o) {
   } catch (e) {
     await sink.abort(e);
     const outcome = e instanceof SinkStopped ? 'download_stopped' : /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error';
-    return { ok: false, outcome, error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
+    return { ok: false, outcome, watchdog: !!(e instanceof SinkStopped && e.watchdog), error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
   }
   const ms = performance.now() - t0;
   return { ok: true, outcome: 'ok', md5: digest, file_md5: fileMd5, size: recipe.size, written, ms: Math.round(ms),
@@ -287,9 +289,16 @@ function summary(net) {
            local_mbps: net.local_ms ? +(net.local_bytes / 1e6 / (net.local_ms / 1000)).toFixed(1) : null };
 }
 
+// PROTO: what builder.js sends. A tab opened before an update loads its old
+// builder.js with this worker; it gets a plain "reload" instead of a failure.
+const PROTO = 2;
 onmessage = async (e) => {
   if (e.data.cmd !== 'run') return;
   let result;
+  if (e.data.proto !== PROTO) {
+    postMessage({ type: 'done', result: { ok: false, outcome: 'stale_page', error: 'This page was updated while it was open. Reload it and try again.' } });
+    return;
+  }
   try { result = await run(e.data); } catch (err) { result = { ok: false, outcome: 'error', error: String(err && err.message || err) }; }
   postMessage({ type: 'done', result });
 };

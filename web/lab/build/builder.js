@@ -44,7 +44,7 @@
     if (!analytics) analytics = loadAnalytics();
     analytics.then((log) => { if (log && !optedOut()) log(name, params); });
   };
-  $('trackNote').textContent = 'Speed reports: when you build or test your speed, this page sends Google Analytics the region, the language, file sizes, download speeds and timings, never file names or anything from your files. Google Analytics also records the page address and your browser type, and sets a cookie with a random ID.';
+  $('trackNote').textContent = 'Speed reports: when you choose a map file, build, or test your speed, this page sends Google Analytics the region, the language, file sizes, download speeds and timings, never file names or anything from your files. Google Analytics also records the page address and your browser type, and sets a cookie with a random ID.';
   $('noReports').checked = devSession || optedOut();
   $('noReports').disabled = devSession;
   if (devSession) $('noReportsLabel').append(' (off for this session)');
@@ -375,6 +375,7 @@
           shown = now;
           out.textContent = `Downloading ${name}: ${(got / 1e6).toFixed(0)} of ${fmtMB(p.size)}` + (note ? ` — ${note}` : '');
         }).catch((e) => { e.pack = name; throw e; });
+        if (seq !== packSeq) return;           // the language changed meanwhile
         packBytes.set(packKey(p), bytes);
       }
     } catch (e) {
@@ -542,9 +543,10 @@
     row.append(a, ' ', del);
     box.append(head, row, note);
   }
-  // On load: offer files that were built but not saved; delete the rest
-  // (saved ones, and leftovers of builds that did not finish). A file that
-  // another tab is still writing is locked, and stays.
+  // On load: offer finished files again (Save / Delete), whether or not Save
+  // was clicked — a cancelled download looks the same as a finished one, so
+  // only the Delete button removes a finished file. Leftovers of builds that
+  // did not finish are deleted. A file another tab is writing is locked.
   async function tidyBrowserStorage() {
     if (!navigator.storage || !navigator.storage.getDirectory) return;
     let dir;
@@ -553,7 +555,7 @@
     try {
       for await (const [name, h] of dir.entries()) {
         if (h.kind !== 'file') continue;
-        if (st[name] === 'ready') { if (!running) await offerSave(name, true); continue; }
+        if (st[name] === 'ready' || st[name] === 'saved') { if (!running) await offerSave(name, true); continue; }
         try { await dir.removeEntry(name); opfsState(name, null); } catch (e) { /* in use */ }
       }
     } catch (e) { /* no directory iteration in this browser */ }
@@ -565,7 +567,7 @@
     // click cannot start a second worker or a second save dialog.
     if (running || $('go').disabled) return;
     running = { starting: true };
-    $('go').disabled = true;
+    checkReady();                    // locks region, language and file too
     let recipe, fileName, sinkInfo;
     try {
       recipe = await recipeFor(entry);
@@ -612,12 +614,13 @@
         } else if (e.data.type === 'done') resolve(e.data.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      worker.postMessage({ cmd: 'run', recipe, baseFile, packs: bytes, sink: sinkInfo.sink, handle: sinkInfo.handle,
+      worker.postMessage({ cmd: 'run', proto: 2, recipe, baseFile, packs: bytes, sink: sinkInfo.sink, handle: sinkInfo.handle,
                            port: sinkInfo.port, fileName }, sinkInfo.transfer);
     });
     worker.terminate();
     if (sinkInfo.cleanup) sinkInfo.cleanup(result.ok);
-    if (result.outcome === 'download_stopped') swFailed();
+    // Only a watchdog (not the visitor cancelling) moves this tab to OPFS.
+    if (result.outcome === 'download_stopped' && result.watchdog) swFailed();
     if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = performance.now(); }
     track('build_end', Object.assign({}, base, netParams(), {
       outcome: result.outcome, secs: Math.round((performance.now() - t0) / 1000), mbps_total: result.mbps_total,
