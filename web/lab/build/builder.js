@@ -498,11 +498,18 @@
     return { sink: 'sw', port: ch.port1, transfer: [ch.port1],
              cleanup: (ok) => { clearInterval(keepalive); setTimeout(() => ifr.remove(), ok ? 5000 : 0); } };
   }
-  async function opfsSink(size) {
-    if (!navigator.storage || !navigator.storage.getDirectory) throw new Error('this browser cannot save a file this large. Chrome or Edge on a desktop works best');
+  // Why browser storage cannot take `size` bytes, or null if it can.
+  async function opfsRoomError(size) {
+    if (!navigator.storage || !navigator.storage.getDirectory) return 'this browser cannot save a file this large. Chrome or Edge on a desktop works best';
     let room = null;
     try { const est = await navigator.storage.estimate(); if (est.quota) room = est.quota - (est.usage || 0); } catch (e) { /* unknown */ }
-    if (room !== null && room < size) throw new Error(`your browser lets this site store ${fmtMB(room)}, and the file needs ${fmtMB(size)}. Free up disk space, or use Chrome or Edge on a desktop`);
+    if (room !== null && room < size) return `your browser lets this site store ${fmtMB(room)}, and the file needs ${fmtMB(size)}. Free up disk space, or use Chrome or Edge on a desktop`;
+    return null;
+  }
+  const willUseOpfs = () => isWebKit || swFailedBefore() || !('serviceWorker' in navigator);
+  async function opfsSink(size) {
+    const err = await opfsRoomError(size);
+    if (err) throw new Error(err);
     return { sink: 'opfs', transfer: [] };
   }
   // Where to write. picker: File System Access when the browser has it (the
@@ -635,6 +642,9 @@
       baseUrl = baseUrlFor(region, recipe);
       if (!baseUrl) { notStarted(`the ${region.title} map cannot be downloaded from here yet. Download the map file, then use "Already have the map?".`); return; }
       setStatus('Starting…', true);
+      // Browser storage must have room before anything is downloaded.
+      const room = willUseOpfs() ? await opfsRoomError(recipe.size) : null;
+      if (room) { notStarted(room + '.'); return; }
       if (!await ensurePacks(true)) {  // #packStatus says why
         running = null; releaseScreen(); checkReady();
         setStatus('Not started: Wikipedia could not be downloaded (see above). Nothing was saved.', true);
