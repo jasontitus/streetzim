@@ -49,9 +49,13 @@ NODE=/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node
 KS=$(readlink -f /storage/streetzim/tools/kiwix-tools_*/kiwix-serve)
 PLANET=/storage/streetzim/world-data/planet-2026-08-31.osm.pbf
 WORLD_MB=/storage/streetzim/world-data/world-tiles-v3.mbtiles
-WORLD_SEARCH=/storage/streetzim/search_cache/world-2026-08-31.jsonl
+# Schema 2 (name_native: places found by their own script's name). The
+# schema-1 world-2026-08-31.jsonl it replaced lacks it, and a build only
+# warns about that.
+WORLD_SEARCH=/storage/streetzim/search_cache/world-2026-08-31.s2.jsonl
 REL=2026-08-19.0
 REGISTRY=/storage/streetzim/cloud/regions.tsv
+VARIANTS=/storage/streetzim/cloud/region-variants.tsv
 LOG=/storage/streetzim/rebuild-old.log
 TSV=/storage/streetzim/rebuild-old.tsv
 LOCK=/storage/streetzim/.retrofit-upload.lock
@@ -155,10 +159,25 @@ for ID in $ORDER; do
   R=$(awk -F'\t' -v id="$ID" '$1==id' "$REGISTRY" | head -1)
   BBOX=$(echo "$R" | cut -f3); NAME=$(echo "$R" | cut -f2); TERM=$(echo "$R" | cut -f7)
   [ -n "$BBOX" ] || { log "skip $ID: no registry row"; row "$ID" no-registry "-"; continue; }
+  # A Light variant (cloud/region-variants.tsv) is built by build-region-fast.sh
+  # from its parent's extracts and Overture parquets, so the data steps below
+  # check the parent's files (DATA_ID). Without this, africa-light would get an
+  # extract of all Africa and an Overture download of its own that the build
+  # never reads. Only under the parent's box: under another box those steps
+  # would re-cut the parent's own files.
+  DATA_ID=$(awk -F'\t' -v id="$ID" '$1==id {print $2; exit}' "$VARIANTS" 2>/dev/null)
+  if [ -n "$DATA_ID" ]; then
+    PBOX=$(awk -F'\t' -v id="$DATA_ID" '$1==id' "$REGISTRY" | head -1 | cut -f3)
+    if [ "$PBOX" != "$BBOX" ]; then
+      log "skip $ID: a variant of $DATA_ID under another box ($BBOX, not ${PBOX:-none})"
+      row "$ID" variant-box "-"; continue
+    fi
+  else DATA_ID=$ID; fi
   T0=$(date +%s)
   log "=== $ID ($NAME) bbox=$BBOX"
+  [ "$DATA_ID" = "$ID" ] || log "  variant of $DATA_ID: checks and uses its extracts and Overture parquets"
 
-  PBF=world-data/regions/${ID}.osm.pbf
+  PBF=world-data/regions/${DATA_ID}.osm.pbf
   if [ ! -s "$PBF" ] || bbox_stale "$PBF" "$BBOX"; then
     log "  osmium extract -> $PBF"
     # -b "$BBOX"; across the antimeridian a two-ring .poly, never -b.
@@ -177,7 +196,7 @@ for ID in $ORDER; do
   # europe.mbtiles 31.1 GB, canada 15.2 GB, russia 13.3 GB. There is no
   # tilemaker on this host, so they could only be re-derived from the 114 GB
   # world file. Symlink ONLY when nothing is there.
-  for _pair in "${ID}.mbtiles:$WORLD_MB" "${ID}.search.jsonl:$WORLD_SEARCH"; do
+  for _pair in "${DATA_ID}.mbtiles:$WORLD_MB" "${DATA_ID}.search.jsonl:$WORLD_SEARCH"; do
     _dst="world-data/regions/${_pair%%:*}"; _src="${_pair#*:}"
     if [ -e "$_dst" ] && [ ! -L "$_dst" ] && bbox_stale "$_dst" "$BBOX"; then
       # Cut for another bbox: park it (never delete; see above), use the world file.
@@ -191,7 +210,7 @@ for ID in $ORDER; do
   done
 
   for THEME in addresses places; do
-    OUT=overture_cache/${THEME}-${ID}-${REL}.parquet
+    OUT=overture_cache/${THEME}-${DATA_ID}-${REL}.parquet
     [ -s "$OUT" ] && ! bbox_stale "$OUT" "$BBOX" && continue
     rm -f "$OUT" "$OUT.bbox"               # cut for another bbox (or absent)
     log "  overture $THEME"
@@ -201,7 +220,7 @@ for ID in $ORDER; do
       log "  overture $THEME failed (continuing; build guards on file presence)"
     fi
   done
-  PLACES=overture_cache/places-${ID}-${REL}.parquet
+  PLACES=overture_cache/places-${DATA_ID}-${REL}.parquet
   if [ ! -s "$PLACES" ]; then
     log "  NO PLACES PARQUET — refusing to build (would silently drop --overture-places)"
     row "$ID" no-places "-"; continue

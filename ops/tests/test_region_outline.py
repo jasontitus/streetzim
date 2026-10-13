@@ -160,6 +160,82 @@ def test_a_cut_off_outline_is_never_used(ro, host):
     assert raw.read_text() == SPLIT
 
 
+def _index(host, path, geometry):
+    """A Geofabrik index-v1.json in the local 'Geofabrik' with one region."""
+    import json
+    feat = {"type": "Feature", "geometry": geometry,
+            "properties": {"id": path.rsplit("/", 1)[-1],
+                           "urls": {"pbf": f"{_base(host)}/{path}-latest.osm.pbf"}}}
+    (host / "geofabrik" / "index-v1.json").write_text(json.dumps({"features": [feat]}))
+
+
+SQ_A_GEOM = {"type": "MultiPolygon", "coordinates": [[[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]]]}
+
+
+@pytest.mark.parametrize("served", ["", "none\nEND\n"])
+def test_an_outline_geofabrik_serves_empty_comes_from_its_index(ro, host, served):
+    """asia/japan.poly is served empty (asia/japan/chubu.poly as "none"):
+    the same region's polygon comes from index-v1.json, is cached, says so
+    on its first line and in .source, and the next build reads the cache."""
+    (host / "geofabrik" / "part" / "a.poly").write_text(served)
+    _index(host, "part/a", SQ_A_GEOM)
+    calls = []
+    out = ro.make("both", BOTH_BOX, root=str(host), base=_base(host), fetcher=_counting(ro, calls))
+    from streetzim import clip
+    assert clip.parse_poly(Path(out).read_text()).bounds == (0.0, 0.0, 8.0, 4.0)
+    raw = host / "world-data" / "outlines" / "part__a.poly"
+    assert raw.read_text().splitlines()[0] == f"part/a (from {_base(host)}/index-v1.json)"
+    assert clip.parse_poly(raw.read_text()).equals(clip.parse_poly(SQ_A))
+    src = Path(out + ".source").read_text().splitlines()
+    assert src[0].startswith(f"{_base(host)}/index-v1.json#part/a\tsha256=")
+    assert src[1].startswith(f"{_base(host)}/part/b.poly\t")
+    calls.clear()
+    ro.make("both", BOTH_BOX, root=str(host), base=_base(host), fetcher=_counting(ro, calls))
+    assert calls == []
+    assert Path(out + ".source").read_text().splitlines() == src
+
+
+def test_an_index_outline_keeps_its_holes_and_takes_a_plain_polygon(ro, host):
+    ring = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]
+    hole = [[1, 1], [2, 1], [2, 2], [1, 2], [1, 1]]
+    data = ro.poly_from_index({"features": [{"geometry": {"type": "Polygon", "coordinates": [ring, hole]},
+                                             "properties": {"urls": {"pbf": "B/p-latest.osm.pbf"}}}]},
+                              "B", "p")
+    text = data.decode()
+    assert text.splitlines()[1:3] == ["1", "   0.0   0.0"] and "\n!2\n" in text
+    from streetzim import clip
+    assert clip.parse_poly(text).area == 15.0
+    # Another region's entry, or a geometry that is not a polygon, gives none.
+    assert ro.poly_from_index({"features": [{"geometry": {"type": "Polygon", "coordinates": [ring]},
+                                             "properties": {"urls": {"pbf": "B/q-latest.osm.pbf"}}}]},
+                              "B", "p") is None
+    for bad in ({"type": "Point", "coordinates": [0, 0]}, {"type": "Polygon", "coordinates": [[["x"]]]},
+                {"type": "MultiPolygon", "coordinates": []}):
+        assert ro.poly_from_index({"features": [{"geometry": bad,
+                                                 "properties": {"urls": {"pbf": "B/p-latest.osm.pbf"}}}]},
+                                  "B", "p") is None
+
+
+def test_an_empty_outline_with_no_index_entry_stops_the_build(ro, host):
+    (host / "geofabrik" / "part" / "a.poly").write_text("")
+    with pytest.raises(SystemExit, match="not a whole.*no index-v1.json"):
+        ro.make("both", BOTH_BOX, root=str(host), base=_base(host))
+    _index(host, "part/other", SQ_A_GEOM)
+    with pytest.raises(SystemExit, match="index-v1.json has no outline for part/a"):
+        ro.make("both", BOTH_BOX, root=str(host), base=_base(host))
+    assert not (host / "world-data" / "outlines" / "part__a.poly").exists()
+
+
+def test_a_cut_off_outline_is_not_replaced_by_the_index(ro, host):
+    """Only an outline Geofabrik does not serve comes from the index; a
+    download cut off midway stops the build, as before."""
+    (host / "geofabrik" / "part" / "a.poly").write_text(SQ_A[:SQ_A.index("END")])
+    _index(host, "part/a", SQ_A_GEOM)
+    with pytest.raises(SystemExit, match="not a whole"):
+        ro.make("both", BOTH_BOX, root=str(host), base=_base(host))
+    assert not (host / "world-data" / "outlines" / "part__a.poly").exists()
+
+
 def test_a_variant_uses_its_parents_row(ro, host):
     out = ro.make("russia-light", RUSSIA_BOX, outline_id="russia", root=str(host), base=_base(host))
     assert out.endswith("russia-light.clip.poly")

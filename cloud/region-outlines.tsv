@@ -16,7 +16,8 @@ egypt	africa/egypt
 # description (web/generate.py); the box cuts them, so a big neighbour that
 # the description includes in part (Ukraine's "western Russian frontier")
 # is listed whole. Unlisted on purpose: switzerland ("and the surrounding
-# Alps"), caucasus ("with the southern Russian Caucasus and eastern Turkey").
+# Alps", and its Light variant): its box is all land in the countries it
+# would list, so a cut would change nothing.
 iceland	europe/iceland
 baltics	europe/estonia+europe/latvia+europe/lithuania
 greece	europe/greece
@@ -32,3 +33,28 @@ italy	europe/italy
 nordics	europe/norway+europe/sweden+europe/finland+europe/denmark
 germany	europe/germany
 france	europe/france
+# The September regions outside Europe and the US (2026-10-13: "Redo them
+# with all the new fixes - boundary based"), by the same rule. Additions
+# beyond the description's list: caucasus lists Russia and Turkey whole
+# (its description includes parts of both), west-africa adds Guinea-Bissau
+# (it would be a hole between Senegal and Guinea), west-asia adds Cyprus
+# (an island inside the box, on the September map). Japan's outline comes
+# from Geofabrik's index (asia/japan.poly is served empty).
+argentina	south-america/argentina
+australia-nz	australia-oceania/australia+australia-oceania/new-zealand
+caucasus	asia/armenia+asia/azerbaijan+europe/georgia+russia+europe/turkey
+central-africa	africa/congo-democratic-republic+africa/cameroon+africa/chad+africa/central-african-republic+africa/gabon+africa/congo-brazzaville+africa/equatorial-guinea+africa/angola+africa/zambia
+central-america-caribbean	central-america+north-america/mexico+north-america/us/puerto-rico+north-america/us/us-virgin-islands
+east-africa	africa/kenya+africa/tanzania+africa/uganda+africa/ethiopia+africa/rwanda+africa/burundi+africa/somalia+africa/south-sudan
+hispaniola	central-america/haiti-and-domrep
+horn-of-africa	africa/ethiopia+africa/somalia+africa/eritrea+africa/djibouti+africa/south-sudan+africa/kenya
+iran	asia/iran
+japan	asia/japan
+korea-mongolia	asia/south-korea+asia/north-korea+asia/mongolia
+mexico	north-america/mexico
+pacific-islands	australia-oceania/papua-new-guinea+australia-oceania/fiji+australia-oceania/solomon-islands+australia-oceania/vanuatu+australia-oceania/new-caledonia+australia-oceania/samoa+australia-oceania/tonga+australia-oceania/palau+australia-oceania/micronesia+australia-oceania/marshall-islands
+southern-africa	africa/south-africa+africa/namibia+africa/botswana+africa/zimbabwe+africa/mozambique+africa/zambia+africa/malawi+africa/lesotho+africa/swaziland
+south-korea	asia/south-korea
+turkey	europe/turkey
+west-africa	africa/nigeria+africa/ghana+africa/ivory-coast+africa/senegal-and-gambia+africa/mali+africa/burkina-faso+africa/guinea+africa/benin+africa/togo+africa/sierra-leone+africa/liberia+africa/niger+africa/guinea-bissau
+west-asia	europe/turkey+asia/syria+asia/lebanon+asia/israel-and-palestine+asia/jordan+asia/iraq+asia/iran+asia/gcc-states+asia/yemen+africa/egypt+asia/afghanistan+asia/pakistan+europe/cyprus

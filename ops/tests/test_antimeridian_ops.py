@@ -127,14 +127,14 @@ def _run(tmp_path, script_block, bbox, env, pre=""):
     calls log (osmium argv lines, python calls, log/row lines)."""
     log = Path(env["STUB_LOG"])
     log.unlink(missing_ok=True)
-    body = f'{HARNESS}\nID=r; BBOX="$1"\n{pre}\nfor _once in 1; do\n{script_block}\ndone\n'
+    body = f'{HARNESS}\nID=r; DATA_ID=r; BBOX="$1"\n{pre}\nfor _once in 1; do\n{script_block}\ndone\n'
     subprocess.run(["bash", "-c", body, "-", bbox], env={**os.environ, **env},
                    cwd=tmp_path, check=True, capture_output=True, text=True)
     return log.read_text() if log.exists() else ""
 
 
 QUEUE = ("ops/build-refresh-queue.sh", '  PBF="$REGDIR/$ID.osm.pbf"', '  log "  PBF:')
-REBUILD = ("ops/cloud/rebuild_old_regions.sh", "  PBF=world-data/regions/${ID}.osm.pbf",
+REBUILD = ("ops/cloud/rebuild_old_regions.sh", "  PBF=world-data/regions/${DATA_ID}.osm.pbf",
            "  # NEVER")
 
 
