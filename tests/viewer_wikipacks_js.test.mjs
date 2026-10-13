@@ -973,6 +973,7 @@ await ok('labels: a name with several values (";") shows the first; the rest is 
   assert.strictEqual(evalExpr(f, { 'name:latin': 'Biel;Bienne', 'name:zh': 'Biel' }), 'Biel');   // equal once cut
   assert.strictEqual(evalExpr(f, { 'name:zh': '洛杉矶;洛杉磯' }), '洛杉矶');
   assert.strictEqual(evalExpr(f, { 'name:latin': ';x', 'name:zh': ';x' }), ';x');               // a leading ";": whole
+  assert.strictEqual(evalExpr(f, { 'name:latin': 'Zug', 'name:zh': 'Zug;楚格' }), 'Zug');          // equal once cut
   LBL.set('en');
   assert.strictEqual(evalExpr(LBL.field(), { 'name:latin': 'Biel;Bienne' }), 'Biel');
   assert.strictEqual(evalExpr(LBL.field(), { name_int: 'A;B;C' }), 'A');
@@ -983,6 +984,7 @@ await ok('labels: a name with several values (";") shows the first; the rest is 
   assert.strictEqual(LBL.shown({ 'name:latin': 'Los Angeles', 'name:th': 'ลอสแอนเจลิส;แอลเอ' }), 'Los Angeles · ลอสแอนเจลิส');
   LBL.set('en');
   assert.strictEqual(LBL.shown({ 'name:latin': 'Biel;Bienne' }), 'Biel');
+  assert.strictEqual(LBL.shown({ 'name:latin': ';x' }), ';x');
   assert.strictEqual(LBL.of({ 'name:latin': 'Biel;Bienne' }), 'Biel;Bienne');       // search records: as named
   // Names without ";": exactly what the labels gave before, for every
   // combination of present, missing, equal and differing names.
