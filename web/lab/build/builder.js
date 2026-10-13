@@ -532,7 +532,7 @@
         } else if (e.data.type === 'done') resolve(e.data.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      worker.postMessage({ cmd: 'run', proto: 2, recipe, baseFile, packs: bytes, sink: sinkInfo.sink, handle: sinkInfo.handle,
+      worker.postMessage({ cmd: 'run', proto: 3, recipe, baseFile, packs: bytes, sink: sinkInfo.sink, handle: sinkInfo.handle,
                            port: sinkInfo.port, fileName }, sinkInfo.transfer);
     });
     worker.terminate();
