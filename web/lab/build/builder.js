@@ -157,6 +157,11 @@
 
   function pickLang() {
     entry = region.menu.find((m) => m.lang === $('lang').value);
+    try {                            // the address names what is shown (a reload or a shared link shows it again)
+      const u = new URL(location.href);
+      u.searchParams.set('region', region.id); u.searchParams.set('lang', entry.lang);
+      if (u.href !== location.href) history.replaceState(null, '', u);
+    } catch (e) { /* history unavailable */ }
     if (/^Could not load the recipe/.test($('notice').textContent)) $('notice').textContent = '';
     const ul = $('packs');
     ul.innerHTML = '';
@@ -300,6 +305,7 @@
   // could not be had, or a newer call took over). Without force it waits
   // for a right base file (the "build from my copy" path).
   async function ensurePacks(force) {
+    if (!force && running) return false;   // a build's own download is running; leave it
     const seq = ++packSeq;
     if (packAbort) packAbort.abort();
     packAbort = null; packsOk = false;
@@ -638,9 +644,11 @@
           let text;
           if (closing && sinkInfo && sinkInfo.sink === 'sw') text = `All ${fmtMB(size)} built and checked; your browser is saving the rest`;
           else if (d.base && d.base.got < d.base.size) {
-            const left = d.base.size - d.base.got, bps = d.base.bps;
+            // Speed over the last 30 s; time left from the average since the
+            // first byte (the proxy's speed swings too much for the former).
+            const left = d.base.size - d.base.got, bps = d.base.bps, avg = d.base.avg || bps;
             text = `Downloading the ${region.title} map: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)}` +
-              (bps > 0 ? `, ${(bps / 1e6).toFixed(1)} MB/s, about ${fmtDur(left / bps)} left` : '');
+              (bps > 0 ? `, ${(bps / 1e6).toFixed(1)} MB/s` : '') + (avg > 0 && ms > 20000 ? `, about ${fmtDur(left / avg)} left` : '');
           } else text = `${fmtMB(written)} of ${fmtMB(size)}`;
           if (note && performance.now() - note.at < 15000) text += ` (${note.text})`;
           if (!sinkInfo && written === 0 && mode === 'net' && !(d.base && d.base.got)) text = `Connecting to the ${region.title} map…`;
