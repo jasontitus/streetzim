@@ -136,7 +136,7 @@ await ok('the base language: baseLanguage, else the map language when no pack ha
   assert.deepStrictEqual(W.packs(), []);
 });
 
-await ok('Q-ID and description: each source in its own slots, a pack also the base\'s way round', () => {
+await ok('Q-ID and description: [lat, lon, type, qid, desc] everywhere, an old-order pack read its way', () => {
   const W = loadWiki();
   assert.strictEqual(W._wikiEntryQid(DE.Vaduz, true), 'Q1844');
   assert.strictEqual(W._wikiEntryDesc(DE.Vaduz, true), 'Hauptort von Liechtenstein');
@@ -148,12 +148,17 @@ await ok('Q-ID and description: each source in its own slots, a pack also the ba
   assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q1844', 'Q7'], false), 'Q1844');
   assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q1844', 'Q7'], false), 'Q7');
   assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', null, 'Q7'], false), null);
-  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q7', 'Q1844'], true), 'Q1844');
-  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q7', 'Q1844'], true), 'Q7');
-  // A pack written in the base's order.
+  // A pack in the base's order (what wiki_pack writes), even when its
+  // description looks like a Q-ID.
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q1844', 'Q7'], true), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q1844', 'Q7'], true), 'Q7');
   assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Q1844', 'Hauptort'], true), 'Q1844');
   assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Q1844', 'Hauptort'], true), 'Hauptort');
-  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Hauptort', null], true), 'Hauptort');
+  // An old-order pack ([.., desc, qid]) only when its Q-ID slot has none.
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Hauptort', 'Q1844'], true), 'Q1844');
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Hauptort', 'Q1844'], true), 'Hauptort');
+  assert.strictEqual(W._wikiEntryQid([1, 2, 'poi', 'Hauptort', 'Q1844'], false), null);
+  assert.strictEqual(W._wikiEntryDesc([1, 2, 'poi', 'Hauptort', null], true), '');
   // The base's Q-ID slot drives the join: a base entry whose description is
   // a Q-ID string is not joined under it.
   const W2 = loadWiki();

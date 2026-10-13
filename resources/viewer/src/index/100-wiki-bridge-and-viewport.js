@@ -180,25 +180,24 @@ function wikiPacksInit(config) {
   return WIKI_PACKS;
 }
 
-// A geo-index entry's Q-ID and description. The base writes
-// [lat, lon, type, qid, desc] (zim_writer), a pack [lat, lon, type, desc,
-// qid] (the pack spec). Each is read in its own slots; only a pack whose
-// Q-ID slot holds no Q-ID is read the base's way round (a pack written in
-// the base's order). A description that looks like a Q-ID ("Q7") is never
-// taken for one where the Q-ID slot has one.
+// A geo-index entry's Q-ID and description. The base and the packs write
+// [lat, lon, type, qid, desc] (zim_writer, streetzim/wiki_pack.py). A pack
+// written in the first spec's order, [lat, lon, type, desc, qid], is read
+// that way only when its Q-ID slot (g[3]) holds no Q-ID. A description
+// that looks like a Q-ID ("Q7") is never taken for one where the Q-ID
+// slot has one.
 var _WIKI_QID = /^Q\d+$/;
 function _wikiIsQid(v) {
   return typeof v === 'string' && _WIKI_QID.test(v);
 }
 function _wikiEntryQid(g, pack) {
   if (!g) return null;
-  if (!pack) return _wikiIsQid(g[3]) ? g[3] : null;
-  if (_wikiIsQid(g[4])) return g[4];
-  return _wikiIsQid(g[3]) ? g[3] : null;
+  if (_wikiIsQid(g[3])) return g[3];
+  return pack && _wikiIsQid(g[4]) ? g[4] : null;
 }
 function _wikiEntryDesc(g, pack) {
   if (!g) return '';
-  var d = (!pack || (!_wikiIsQid(g[4]) && _wikiIsQid(g[3]))) ? g[4] : g[3];
+  var d = (pack && !_wikiIsQid(g[3]) && _wikiIsQid(g[4])) ? g[3] : g[4];
   return typeof d === 'string' ? d : '';
 }
 
