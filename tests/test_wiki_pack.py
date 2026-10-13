@@ -148,6 +148,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         {"n": "Bad", "t": "poi", "s": "", "a": 10.6, "o": 20.6, "l": "", "q": "Q01"},
         {"n": "No q", "t": "poi", "s": "", "a": 10.6, "o": 20.6, "l": ""},
         {"n": "Search Only", "t": "poi", "s": "", "a": 10.8, "o": 20.8, "l": "", "q": "Q78"},
+        {"n": "Testland County", "t": "admin", "s": "county", "a": 10.9, "o": 20.9, "l": "",
+         "q": "Q20", "al": 6},
     ]
     # The base's own geo-index ([lat, lon, type, qid, desc]; an older row
     # has no Q-ID): it places the POIs the category files do not hold.
@@ -177,6 +179,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
                          json.dumps([records[0]])))
         c.add_item(_Item("category-index/water-g000.json", "", "application/json",
                          json.dumps([records[2]])))
+        c.add_item(_Item("category-index/admin.json", "", "application/json",
+                         json.dumps([records[-1]])))
         c.add_item(_Item("category-index/chip-food-g000.json", "", "application/json",
                          json.dumps([{**records[4], "q": "Q77"}])))   # a chip: not read
         c.add_item(_Item("wikidata/manifest.json", "", "application/json", json.dumps({"total": 6})))
@@ -299,7 +303,7 @@ def test_pack_json_and_counts(world: dict[str, Any]) -> None:
                     "articles": 6, "images": 3, "source": world["src"].name, "built": "2026-10-13"}
     s = world["stats"]
     assert (s["base_qids"], s["sitelinks"], s["not_in_zim"], s["found_under_old_title"]) == \
-        (12, 11, 1, 1)
+        (13, 11, 1, 1)
     assert (s["through_redirect"], s["redirect_to_other_article"]) == (1, 1)
     assert s["redirect_to_other_article_list"] == [["Q30", "Gamma_(lac)", "Gamma_Lake"]]
     assert s["not_in_zim_list"] == [["Q10", "Missing_Article"]]
@@ -368,12 +372,13 @@ def test_title_fits_in_utf16_units() -> None:
 def test_wikidata_text(world: dict[str, Any]) -> None:
     text = json.loads(_read(world, PRE + "wikidata-text.json"))
     # Every Q-ID of the base with fr text, article or not (Q11: Wikidata has none).
-    assert set(text) == {"Q1", "Q2", "Q3", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10", "Q15", "Q30"}
+    assert set(text) == {"Q1", "Q2", "Q3", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10", "Q15", "Q20",
+                         "Q30"}
     assert text["Q1"] == ["Lieu Q1", "lieu numéro 1"]
     assert text["Q2"] == ["Lieu Q2", ""]
     assert text["Q30"] == ["Lac Gamma", ""]            # answered under the item it was merged into
     s = world["stats"]["wikidata_text"]
-    assert (s["labels"], s["descriptions"], s["requests"], s["complete"]) == (11, 9, 1, True)
+    assert (s["labels"], s["descriptions"], s["requests"], s["complete"]) == (12, 10, 1, True)
     # Every language was cached at once: zh needs no request.
     n = len(world["asked"])
     got, st = wiki_pack.wikidata_text(["Q1", "Q2", "Q11"], "zh", world["cache"],
@@ -393,7 +398,30 @@ def test_wikidata_text_halves_a_refused_batch(tmp_path: Path) -> None:
     got, st = wiki_pack.wikidata_text([f"Q{i}" for i in range(1, 21)], "de", tmp_path,
                                       fetch=fetch, langs=("de",))
     assert set(got) == {f"Q{i}" for i in range(1, 21)} - {"Q13"}
-    assert st["complete"] and len(calls) > 1
+    assert st["complete"] and len(calls) > 1 and st["refused"] == ["Q13"]
+    # A refused id is not cached as "no text": the next run asks again.
+    calls.clear()
+    wiki_pack.wikidata_text([f"Q{i}" for i in range(1, 21)], "de", tmp_path,
+                            fetch=fetch, langs=("de",))
+    assert calls == [["Q13"]]
+
+
+def test_wikidata_text_stops_when_refused(tmp_path: Path) -> None:
+    import urllib.error
+    calls: list[list[str]] = []
+
+    def refuse(ids: list[str], codes: list[str]) -> dict[str, Any]:
+        calls.append(ids)
+        raise urllib.error.HTTPError("https://www.wikidata.org/w/api.php", 403, "Forbidden",
+                                     None, None)  # type: ignore[arg-type]
+    got, st = wiki_pack.wikidata_text([f"Q{i}" for i in range(1, 101)], "de", tmp_path,
+                                      fetch=refuse, langs=("de",))
+    assert got == {} and st["complete"] is False and len(calls) == 1
+    # Nothing was cached as "no text": a working API is asked for all of them.
+    got, st = wiki_pack.wikidata_text(
+        [f"Q{i}" for i in range(1, 101)], "de", tmp_path, langs=("de",),
+        fetch=lambda ids, codes: {q: {"labels": {"de": {"value": q}}} for q in ids})
+    assert len(got) == 100 and st["requests"] == 2
 
 
 def test_wikidata_text_follows_an_item_merged_away(tmp_path: Path) -> None:
@@ -450,6 +478,24 @@ def test_the_gate_catches_a_stray_path(tmp_path: Path, world: dict[str, Any]) ->
         assert want in text, (want, text)
 
 
+@pytest.mark.skipif(not wiki_pack.find_zimcheck(), reason="no zimcheck here")
+@pytest.mark.parametrize("link", ["./Nowhere", "../../index.html"])
+def test_the_gate_fails_a_dangling_link(tmp_path: Path, link: str) -> None:
+    """Only the back-to-map links at the right depth may dangle: a link to a
+    missing article, or a bar link one level short (~w/index.html), fails."""
+    bad = tmp_path / "dangling.zim"
+    page = ('<html><head><title>A</title></head><body><nav class="sz-back">'
+            '<a href="../../../index.html">map</a></nav><p>x <a href="' + link + '">y</a></p>'
+            "</body></html>")
+    with Creator(str(bad)).config_indexing(False, "fra") as c:
+        c.set_mainpath(PRE + "wiki-article/A")
+        c.add_metadata("Title", "x")
+        c.add_item(_Item(PRE + "wiki-article/A", "A", "text/html", page, front=True))
+    res = wiki_pack.check_pack(bad, LANG, wiki_pack.find_zimcheck())
+    assert res["zimcheck"].startswith("FAIL"), res
+    assert res["zimcheck_findings"].get("url_internal") == 1, res
+
+
 def test_cli_rejects_an_unknown_language(capsys: pytest.CaptureFixture[str]) -> None:
     assert wiki_pack.main(["b.zim", "--lang", "xx", "--source", "s.zim", "--region", "r"]) == 2
     assert "unsupported language" in capsys.readouterr().err
@@ -496,6 +542,10 @@ def test_relative_links_and_excerpts() -> None:
     assert wiki_pack.relative_link("A", "B") == "./B"
     assert wiki_pack.relative_link("A/B", "C") == "../C"
     assert wiki_pack.relative_link("A", "X/Y") == "./X/Y"
+    # To an ancestor title: up to wiki-article/ and down, never "./." (a folder).
+    assert wiki_pack.relative_link("Foo/Bar", "Foo") == "../Foo"
+    assert wiki_pack.relative_link("Foo/Bar/Baz", "Foo") == "../../Foo"
+    assert wiki_pack.relative_link("A/B", "A/C") == "../A/C"
     assert wiki_pack.relative_link("A", "Gr%C3%A8ce?") == "./Gr%25C3%25A8ce%3F"
     assert wiki_pack.relative_link("A", "Grèce_(pays)") == "./Gr%C3%A8ce_(pays)"
     assert wiki_pack.excerpt("<h1>x</h1><p>Die Moschee bzw. Kirche ist alt. Sie steht in "
@@ -519,6 +569,7 @@ def test_read_base_light_and_full(world: dict[str, Any], tmp_path: Path) -> None
     assert light.places["Q1"] == (10.0, 20.0, "place")       # place.json
     assert light.places["Q3"] == (10.2, 20.2, "water")       # a water shard
     assert light.places["Q9"] == (10.1, 20.1, "poi")         # the base's geo-index
+    assert light.places["Q20"] == (10.9, 20.9, "admin")      # admin.json
     assert "Q77" not in light.qids and "Q78" not in light.qids
     full = wiki_pack.read_base(world["base"], tmp_path, log=lambda m: None, full_scan=True)
     assert full.placed_from == "search records" and full.places["Q78"] == (10.8, 20.8, "poi")

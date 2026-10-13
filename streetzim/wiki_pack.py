@@ -186,7 +186,8 @@ def path_range(archive: Any, prefix: str) -> range:
 
 # The base's category files that hold records of these types (water-g000.json
 # when the base cut a big one into geographic shards); not the POI chips.
-_CATEGORY_RE = re.compile(r"category-index/(place|peak|water|park|airport)(?:-g[0-9a-f]+)?\.json")
+_CATEGORY_RE = re.compile(
+    r"category-index/(place|admin|peak|water|park|airport)(?:-g[0-9a-f]+)?\.json")
 
 
 def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
@@ -194,8 +195,8 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
     """The base's identity, bounds, illustration and Q-IDs, with the place
     of every Q-ID a record of the base has.
 
-    Places come from the base's category files (places, peaks, water,
-    parks, airports: tens of MB) and its own wiki-geo-index (every Q-ID
+    Places come from the base's category files (places, admin areas,
+    peaks, water, parks, airports: tens of MB) and its own wiki-geo-index (every Q-ID
     with an article in the base's language, POIs and streets included).
     `full_scan` reads every search record instead: all of them, at the
     cost of the whole search index (California: 7.8 GB, read at idle I/O
@@ -213,7 +214,7 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
         illustration = None
     base = Base(str(path), uuid, str(cfg.get("name") or Path(path).stem), bounds, illustration)
     full = cache_dir / "bases" / f"{uuid}.json.gz" if cache_dir else None
-    light = cache_dir / "bases" / f"{uuid}.light.json.gz" if cache_dir else None
+    light = cache_dir / "bases" / f"{uuid}.light2.json.gz" if cache_dir else None
     for cached, how in ((full, "search records"), (None if full_scan else light,
                                                     "category files + geo-index")):
         if cached is not None and cached.exists():
@@ -280,48 +281,6 @@ def read_base(path: str | os.PathLike[str], cache_dir: Path | None = None,
     if cached is not None:
         cached.parent.mkdir(parents=True, exist_ok=True)
         tmp = cached.with_name(cached.name + ".tmp")
-        with gzip.open(tmp, "wt", encoding="utf-8") as f:
-            json.dump({"base": os.path.basename(str(path)), "places": base.places,
-                       "kinds": base.kinds}, f)
-        os.replace(tmp, cached)
-    return base
-    t0 = time.time()
-    rank: dict[str, int] = {}
-    chunks = records = 0
-    ids = [*path_range(a, "search-data/"), *path_range(a, "wikidata/")]
-    for i in ids:
-        e = a._get_entry_by_id(i)
-        p = e.path
-        if p.startswith("wikidata/") and p != "wikidata/manifest.json":
-            data = json.loads(bytes(e.get_item().content))
-            for q, wd in data.items():
-                if _QID_RE.fullmatch(q) and isinstance(wd, dict):
-                    base.kinds.setdefault(q, guess_type(wd))
-        elif p.startswith("search-data/") and p.endswith(".json"):
-            data = json.loads(bytes(e.get_item().content))
-            if not isinstance(data, list):      # search-data/manifest.json
-                continue
-            chunks += 1
-            for r in data:
-                records += 1
-                q = r.get("q") if isinstance(r, dict) else None
-                if not q or not _QID_RE.fullmatch(q):
-                    continue
-                t = str(r.get("t") or "")
-                rk = TYPE_RANK.get(t, len(TYPE_RANK))
-                if q not in rank or rk < rank[q]:
-                    try:
-                        base.places[q] = (round(float(r["a"]), 5), round(float(r["o"]), 5), t)
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    rank[q] = rk
-    for q in base.places:
-        base.kinds.pop(q, None)
-    log(f"  base: {chunks} search chunks, {records:,} records: {len(base.places)} placed "
-        f"Q-IDs + {len(base.kinds)} more in wikidata/ ({time.time() - t0:.0f}s)")
-    if cached is not None:
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cached.with_suffix(".tmp")
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
             json.dump({"base": os.path.basename(str(path)), "places": base.places,
                        "kinds": base.kinds}, f)
@@ -586,8 +545,10 @@ Fetcher = Callable[[list[str], list[str]], dict[str, Any]]
 def api_fetcher(log: Callable[[str], None] = log_stderr) -> Fetcher:
     """wbgetentities for <=50 ids and the given label languages, at most a
     request a second, maxlag=5, Retry-After honoured (cloud/wikimedia_http).
-    Returns the ``entities`` object."""
-    from cloud.wikimedia_http import get_json, polite_pacer, user_agent
+    Returns the ``entities`` object. Raises TransientError when the API
+    did not answer about the ids (throttled, failing, refusing the client)
+    and ValueError for an error about them."""
+    from cloud.wikimedia_http import TransientError, get_json, polite_pacer, stop_error, user_agent
     pacer = polite_pacer(gap=0.2, max_per_min=60)
     ua = user_agent("wiki-pack")
 
@@ -596,15 +557,22 @@ def api_fetcher(log: Callable[[str], None] = log_stderr) -> Fetcher:
             "action": "wbgetentities", "ids": "|".join(ids),
             "props": "labels|descriptions", "languages": "|".join(codes),
             "format": "json", "maxlag": "5"})
-        data = get_json(f"{WIKIDATA_API}?{params}", user_agent=ua, pacer=pacer,
-                        timeout=60, throttle_retries=1000, log=log)
+        try:
+            data = get_json(f"{WIKIDATA_API}?{params}", user_agent=ua, pacer=pacer,
+                            timeout=60, throttle_retries=1000, log=log)
+        except urllib.error.HTTPError as e:
+            raise stop_error(e) from e      # refused (403, 404, ...): stop asking
         if not isinstance(data, dict):
-            raise ValueError("wbgetentities: not a JSON object")
-        if "error" in data:
-            raise ValueError(f"wbgetentities: {data['error'].get('code', '?')}")
+            raise TransientError("wbgetentities: not a JSON object")
+        err = data.get("error")
+        if err is not None:
+            code = str(err.get("code", "")) if isinstance(err, dict) else ""
+            if code in ("maxlag", "ratelimited", "readonly") or code.startswith("internal_api_error"):
+                raise TransientError(f"wbgetentities: {code}")
+            raise ValueError(f"wbgetentities: {code or '?'}")   # about the ids
         ents = data.get("entities")
         if not isinstance(ents, dict):
-            raise ValueError("wbgetentities: no entities")
+            raise TransientError("wbgetentities: no entities")
         return ents
     return fetch
 
@@ -623,7 +591,7 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
     caches = {lg: _load_text_cache(_text_cache(cache_dir, lg)) for lg in langs}
     missing = [q for q in qids if q not in caches[lang]]
     stats: dict[str, Any] = {"qids": len(qids), "asked": len(missing), "requests": 0,
-                             "complete": True, "seconds": 0.0}
+                             "complete": True, "seconds": 0.0, "refused": []}
     codes = sorted({c for lg in langs for c in TEXT_VARIANTS.get(lg, (lg,))})
     t0 = time.time()
     if missing and fetch is None:
@@ -646,13 +614,19 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
                         "not fetched")
                     stats["complete"] = False
                     break
-                except (ValueError, urllib.error.HTTPError) as e:
+                except urllib.error.HTTPError as e:
+                    log(f"  wikidata-text: stopped: HTTP {e.code}")
+                    stats["complete"] = False
+                    break
+                except ValueError as e:
                     stats["requests"] += 1
                     if len(batch) > 1:      # a refused batch: halve to find the bad id
                         todo[:0] = [batch[:len(batch) // 2], batch[len(batch) // 2:]]
                         continue
+                    # Not cached: the refusal may have had nothing to do with it.
                     log(f"  wikidata-text: {batch[0]} refused ({e})")
-                    ents = {}
+                    stats["refused"].append(batch[0])
+                    continue
                 got: dict[str, dict[str, Any]] = {}
                 for key, ent in ents.items():
                     if not isinstance(ent, dict):
@@ -711,7 +685,7 @@ def geo_position(raw: str) -> tuple[float, float] | None:
 # (not "bzw.", "St.", "v. Chr."), before a space and a capital, or at a CJK
 # full stop.
 _SENTENCE_END_RE = re.compile(r"(?:(?<=[^\W\d_]{4})\.|[!?])(?=\s+[\"'«„“(]?[^\W\d_](?<![a-z]))"
-                              r"|[。！？]")
+                              r"|[。！？।]")
 
 
 def excerpt(page_html: str, limit: int = DESC_MAX) -> str:
@@ -723,7 +697,7 @@ def excerpt(page_html: str, limit: int = DESC_MAX) -> str:
         return ""
     text = " ".join(_html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).split())
     for s in _SENTENCE_END_RE.finditer(text):
-        if s.end() >= (10 if s.group() in "。！？" else 40):
+        if s.end() >= (10 if s.group() in "。！？।" else 40):
             if s.end() <= limit:
                 return text[:s.end()]
             break
@@ -850,9 +824,9 @@ def stored_title(source_path: str, prefix: str) -> str:
 def relative_link(from_title: str, to_title: str) -> str:
     """The href from wiki-article/<from_title> to wiki-article/<to_title>:
     "./To" (or "../To" from a title with a slash), percent-encoded."""
-    rel = posixpath.relpath(to_title, posixpath.dirname(from_title) or ".")
-    if not rel.startswith("../"):
-        rel = "./" + rel
+    # Up to wiki-article/ and down again: posixpath.relpath would make a
+    # link to an ancestor title ("Foo/Bar" -> "Foo") "./.", a folder.
+    rel = ("../" * from_title.count("/") or "./") + to_title
     return urllib.parse.quote(rel, safe=_URL_SAFE)
 
 
@@ -1190,6 +1164,10 @@ def build_pack(base_path: str | os.PathLike[str], *, lang: str, source: str | os
                 if k % 500 == 0:
                     log(f"    ... {k}/{len(cands)} read, {len(pages)} pages, {len(spooled)} "
                         f"images ({image_bytes / 1e6:.0f} MB), {time.time() - t_pages:.0f}s")
+    except BaseException:
+        if pool is not None:
+            pool.terminate()        # not the queued candidates first
+        raise
     finally:
         if pool is not None:
             pool.close()
@@ -1360,15 +1338,19 @@ def check_pack(path: str | os.PathLike[str], lang: str,
             out["zimcheck"] = "error"
         else:
             bar = other = 0
+            findings: dict[str, int] = {}     # check -> findings not excused
             for row in report.get("logs") or []:
                 if (row.get("check") == "url_internal" and row.get("links")
+                        and row.get("normalized_link") == "index.html"
                         and all(_BAR_LINK_RE.match(x) for x in row["links"])):
                     bar += 1
                 elif row.get("level") in ("ERROR", "WARNING"):
                     other += 1
+                    findings[str(row.get("check"))] = findings.get(str(row.get("check")), 0) + 1
                     if other <= 3:
                         problems.append(f"zimcheck: {row.get('check')}: "
                                         f"{str(row.get('message', ''))[:200]}")
+            out["zimcheck_findings"] = findings
             out["zimcheck"] = ("pass" if report.get("status") else
                                f"pass but {bar} back-to-map links to the base's index.html"
                                if not other else f"FAIL ({other} findings)")
@@ -1380,9 +1362,11 @@ def check_pack(path: str | os.PathLike[str], lang: str,
 # ---- command line -----------------------------------------------------------
 
 def pick_source(source: str, lang: str) -> str:
-    """A Wikipedia ZIM, or the newest complete wikipedia_<xx>_*.zim in a folder."""
+    """A Wikipedia ZIM, or the newest wikipedia_<xx>_all_maxi_*.zim in a folder
+    (else the newest wikipedia_<xx>_*.zim; files still downloading end .part)."""
     if os.path.isdir(source):
-        found = sorted(Path(source).glob(f"wikipedia_{wiki_code(lang)}_*.zim"))
+        found = (sorted(Path(source).glob(f"wikipedia_{wiki_code(lang)}_all_maxi_*.zim"))
+                 or sorted(Path(source).glob(f"wikipedia_{wiki_code(lang)}_*.zim")))
         if not found:
             raise FileNotFoundError(f"no wikipedia_{wiki_code(lang)}_*.zim in {source}")
         return str(max(found, key=lambda p: (p.name.rsplit("_", 1)[-1], p.name)))
