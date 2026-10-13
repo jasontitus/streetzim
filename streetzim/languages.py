@@ -11,6 +11,8 @@ use) -> ISO 639-3 (the ZIM ``Language`` metadata, openZIM's rule).
 """
 from __future__ import annotations
 
+import re
+
 ISO639_3 = {
     "en": "eng", "fr": "fra", "de": "deu", "es": "spa", "it": "ita",
     "pt": "por", "nl": "nld", "ru": "rus", "uk": "ukr", "pl": "pol",
@@ -64,3 +66,51 @@ def check(lang: str | None) -> str:
     lang = (lang or "en").strip().lower()
     iso639_3(lang)
     return lang
+
+
+# The name:xx languages a multilingual ("language-ready") map carries in its
+# tiles besides English, which the tiles always carry as name:latin
+# (docs/language-ready.md; chosen in docs/language-packs.md: no dialects,
+# transliterations or mass-tagged imports).
+MATRIX_TILE_LANGUAGES = ("ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "it", "ja",
+                         "ko", "nl", "pl", "pt", "ru", "th", "tr", "uk", "vi", "zh")
+
+
+def _codes(text: str) -> list[str]:
+    return [c for c in re.split(r"[\s,]+", text.strip().lower()) if c]
+
+
+def tile_languages(text: str) -> list[str]:
+    """The name:xx languages ``text`` ("de,fr", "fr de") asks tiles to carry,
+    as STREETZIM_TILE_LANGUAGES and map-config ``tileLanguages`` hold them:
+    codes a build can be made in, sorted, once each. English is refused (the
+    tiles always carry it as name:latin), and so is an empty list."""
+    langs = sorted(set(_codes(text)))
+    if not langs:
+        raise ValueError("no tile languages given")
+    if "en" in langs:
+        raise ValueError("en is not a tile language: the tiles always carry English "
+                         "(name:latin)")
+    for lang in langs:
+        iso639_3(lang)
+    return langs
+
+
+_REGION_CODE = re.compile(r"[a-z]{2,3}")
+
+
+def region_languages(text: str) -> list[str]:
+    """A region's own languages (cloud/region-languages.tsv; map-config
+    ``regionLanguages``): ISO 639 codes, most used first, once each. Any
+    two- or three-letter code: a region's language need not be one a build
+    can be made in (ht, ka)."""
+    langs: list[str] = []
+    for code in _codes(text):
+        if not _REGION_CODE.fullmatch(code):
+            raise ValueError(f"region language {code!r} is not an ISO 639 code "
+                             "(two or three letters)")
+        if code not in langs:
+            langs.append(code)
+    if not langs:
+        raise ValueError("no region languages given")
+    return langs

@@ -460,6 +460,19 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "place's own name otherwise; the ZIM's Language "
                              "metadata. Tiles must carry name:XX: tilemaker builds "
                              "add it (streetzim/languages.py).")
+    parser.add_argument("--tile-languages", metavar="XX,YY",
+                        help="The name:XX languages the tiles carry besides English "
+                             "(comma-separated ISO 639-1): with --mbtiles, tiles a "
+                             "tilemaker run made with STREETZIM_TILE_LANGUAGES set to "
+                             "them; without, this build's tilemaker run writes them. "
+                             "Recorded in map-config.json (tileLanguages); the fallback "
+                             "glyphs cover their scripts. Labels stay in --language "
+                             "(docs/language-ready.md)")
+    parser.add_argument("--region-languages", metavar="XX,YY",
+                        help="The region's own languages, most used first (ISO 639 "
+                             "codes), recorded in map-config.json (regionLanguages) "
+                             "for the viewer; nothing else changes "
+                             "(docs/language-ready.md)")
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
@@ -1769,6 +1782,12 @@ def _build_map_config(
         # The viewer labels the map in it (name:<language>, else the
         # place's own name).
         map_config["language"] = lang
+    # Language-ready builds (docs/language-ready.md): the name:xx the tiles
+    # carry, and the region's own languages. Absent from other builds.
+    if getattr(args, "tile_languages", None):
+        map_config["tileLanguages"] = list(args.tile_languages)
+    if getattr(args, "region_languages", None):
+        map_config["regionLanguages"] = list(args.region_languages)
     if bbox:
         map_config["bounds"] = bbox
         active_clip = _clip.active()
@@ -1972,6 +1991,28 @@ def _activate_clip(args, bbox_str, parser):
         parser.error(f"--clip-poly: {e}")
 
 
+def _apply_languages(args):
+    """Check --language, --tile-languages and --region-languages (ValueError)
+    and normalise them in ``args``; then set STREETZIM_TILE_LANGUAGES, which
+    makes the tile profile write name:<lang> (search extraction keeps them,
+    the fallback glyphs cover them): the tile languages and the build's own
+    language. Unset for an English build without --tile-languages, also when
+    a shell or an earlier build in this process set it."""
+    from streetzim import languages as _languages
+    args.language = _languages.check(args.language)
+    if getattr(args, "tile_languages", None) is not None:
+        args.tile_languages = _languages.tile_languages(args.tile_languages)
+    if getattr(args, "region_languages", None) is not None:
+        args.region_languages = _languages.region_languages(args.region_languages)
+    tile_env = list(getattr(args, "tile_languages", None) or [])
+    if args.language != "en" and args.language not in tile_env:
+        tile_env.append(args.language)
+    if tile_env:
+        os.environ["STREETZIM_TILE_LANGUAGES"] = ",".join(tile_env)
+    else:
+        os.environ.pop("STREETZIM_TILE_LANGUAGES", None)
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1980,16 +2021,9 @@ def main(argv=None):
     check_viewer_fits(VIEWER_DIR)
     from streetzim import languages as _languages
     try:
-        args.language = _languages.check(args.language)
+        _apply_languages(args)
     except ValueError as e:
         parser.error(str(e))
-    if args.language != "en":
-        # The tile profile writes name:<language> (and search extraction
-        # keeps it) when asked through this variable.
-        os.environ["STREETZIM_TILE_LANGUAGES"] = args.language
-    else:
-        # Not inherited from a shell or an earlier build in this process.
-        os.environ.pop("STREETZIM_TILE_LANGUAGES", None)
     _src = getattr(args, "wiki_articles_source", None)
     if _src and os.path.isfile(_src) and _src.endswith(".zim"):
         try:

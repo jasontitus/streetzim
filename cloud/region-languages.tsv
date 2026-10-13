@@ -1,0 +1,80 @@
+# The languages of each region in cloud/regions.tsv (one row per registry id;
+# tests/test_region_languages.py checks that every registry row has one).
+# Columns (tab-separated):
+#   id	languages
+# languages = the region's own languages, most used first, comma-separated
+# ISO 639 codes (ISO 639-1 where there is one): what its signs and OSM's
+# `name` tags are written in. A multi-country region lists its countries'
+# official languages, largest first. A language-ready build
+# (STREETZIM_ML_TILES=1, docs/language-ready.md) records the row in
+# map-config.json as regionLanguages; nothing else reads it yet.
+silicon-valley	en
+washington-dc	en
+hawaii	en,haw
+chicago-metro	en
+nyc-metro	en
+greater-la	en
+hispaniola	es,fr,ht
+colorado	en
+florida	en
+carolinas	en
+new-york-state	en
+alaska	en
+california	en
+texas	en
+iceland	is
+south-korea	ko
+egypt	ar
+turkey	tr
+japan	ja
+iran	fa
+ukraine	uk,ru,ro
+argentina	es
+mexico	es
+brazil	pt
+baltics	lt,lv,et
+caucasus	ka,hy,az,ru,tr
+himalayas	ne,hi,zh,bo,dz,ur
+central-america-caribbean	es,en,fr,ht
+pacific-islands	en,tpi,fr,fj,bi,ho
+west-africa	en,fr,pt
+southern-africa	en,pt,af,zu
+east-africa	sw,en,am,so,rw,rn,fr
+korea-mongolia	ko,mn
+west-asia	ar,fa,tr,he,ps,ur,el
+central-asia	kk,uz,ru,ky,tg,tk,fa,ps
+central-us	en
+west-coast-us	en
+midwest-us	en
+east-coast-us	en
+southeast-asia	id,vi,th,tl,my,ms,km,lo
+australia-nz	en,mi
+canada	en,fr
+indian-subcontinent	hi,en,bn,ur,ta,te,mr,ne,si
+china	zh
+africa	ar,fr,en,pt,sw,am
+south-america	es,pt,en,nl,fr
+russia	ru
+united-states	en
+europe	ru,de,tr,fr,en,it,es,pl,uk,ro,nl,el,cs,hu,sv,pt,be,bg,sr,az,da,fi,sk,no,hr,ka,hy,sq,lt,sl,mk,bs,lv,et,ga,is,lb,mt
+france	fr
+germany	de
+britain-ireland	en,cy,ga,gd,gv
+italy	it
+iberia	es,pt,ca,gl,eu
+poland	pl
+benelux	nl,fr,de,lb
+nordics	sv,da,fi,no
+austria-czech	de,cs,sk
+balkans	sr,hr,bs,sl,sq,mk
+greece	el
+carpathians	ro,hu,bg
+switzerland	de,fr,it,rm
+switzerland-nosat	de,fr,it,rm
+switzerland-nosat-z13	de,fr,it,rm
+switzerland-light	de,fr,it,rm
+north-africa	ar,fr
+central-africa	fr,pt,en,sw,ln,ar,es
+horn-of-africa	am,so,sw,en,ti,ar,fr
+east-polynesia	fr,ty,en
+africa-light	ar,fr,en,pt,sw,am
