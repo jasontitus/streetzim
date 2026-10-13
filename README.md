@@ -18,6 +18,9 @@ Published ZIMs are listed at <https://streetzim.web.app>. That site also has a
 PWA at `/drive/` that opens a local ZIM, or streams one from archive.org, in
 the browser.
 
+[CHANGELOG.md](CHANGELOG.md) lists what StreetZim can do and when each feature
+arrived.
+
 ## Quick start (build Monaco in about a minute)
 
 CI runs these steps on every push (`.github/workflows/ci.yml`, job
