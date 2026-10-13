@@ -196,16 +196,34 @@ for ID in $ORDER; do
   # europe.mbtiles 31.1 GB, canada 15.2 GB, russia 13.3 GB. There is no
   # tilemaker on this host, so they could only be re-derived from the 114 GB
   # world file. Symlink ONLY when nothing is there.
+  # A search cut without native-script names (no schema-2 .schema sidecar;
+  # the cuts of 2026-09-06 have none) is as stale as one cut for another
+  # box: a build from it only warns. Its sidecars are parked with it, and a
+  # symlink to the world file gets the world file's .schema beside it.
   for _pair in "${DATA_ID}.mbtiles:$WORLD_MB" "${DATA_ID}.search.jsonl:$WORLD_SEARCH"; do
     _dst="world-data/regions/${_pair%%:*}"; _src="${_pair#*:}"
-    if [ -e "$_dst" ] && [ ! -L "$_dst" ] && bbox_stale "$_dst" "$BBOX"; then
-      # Cut for another bbox: park it (never delete; see above), use the world file.
-      mv -f "$_dst" "$_dst.stale-$(date +%F)"; ln -sfn "$_src" "$_dst"
-      log "  $(basename "$_dst"): cut for another bbox, parked; now -> world file"
+    _why=""
+    if [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
+      if bbox_stale "$_dst" "$BBOX"; then _why="cut for another bbox"
+      elif [ "${_dst%.search.jsonl}" != "$_dst" ] && ! grep -q '"search_schema": *2[,}]' "$_dst.schema" 2>/dev/null; then
+        _why="no native-script names (search schema < 2)"; fi
+    fi
+    if [ -n "$_why" ]; then
+      # Park it (never delete; see above), use the world file.
+      _park="$_dst.stale-$(date +%F-%H%M%S)"
+      mv -n "$_dst" "$_park"
+      if [ -e "$_dst" ] && [ ! -L "$_dst" ]; then    # never ln -sfn over it
+        log "  could not park $(basename "$_dst") — not building"; row "$ID" park-failed "-"; continue 2
+      fi
+      for _side in bbox schema; do [ ! -e "$_dst.$_side" ] || mv -n "$_dst.$_side" "$_park.$_side"; done
+      ln -sfn "$_src" "$_dst"
+      [ ! -e "$_src.schema" ] || ln -sfn "$_src.schema" "$_dst.schema"
+      log "  $(basename "$_dst"): $_why, parked as $(basename "$_park"); now -> world file"
     elif [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
       log "  keeping existing extract $(basename "$_dst") ($(du -h "$_dst" | cut -f1))"
     else
       ln -sfn "$_src" "$_dst"
+      [ ! -e "$_src.schema" ] || ln -sfn "$_src.schema" "$_dst.schema"
     fi
   done
 

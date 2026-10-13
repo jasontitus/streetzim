@@ -161,12 +161,17 @@ def test_a_cut_off_outline_is_never_used(ro, host):
 
 
 def _index(host, path, geometry):
-    """A Geofabrik index-v1.json in the local 'Geofabrik' with one region."""
+    """A Geofabrik index-v1.json in the local 'Geofabrik': another region
+    first (with the same id), then `path`'s."""
     import json
-    feat = {"type": "Feature", "geometry": geometry,
-            "properties": {"id": path.rsplit("/", 1)[-1],
-                           "urls": {"pbf": f"{_base(host)}/{path}-latest.osm.pbf"}}}
-    (host / "geofabrik" / "index-v1.json").write_text(json.dumps({"features": [feat]}))
+
+    def feat(p, geom):
+        return {"type": "Feature", "geometry": geom,
+                "properties": {"id": path.rsplit("/", 1)[-1],
+                               "urls": {"pbf": f"{_base(host)}/{p}-latest.osm.pbf"}}}
+    other = {"type": "MultiPolygon", "coordinates": [[[[50, 50], [51, 50], [51, 51], [50, 50]]]]}
+    (host / "geofabrik" / "index-v1.json").write_text(
+        json.dumps({"features": [feat("elsewhere/" + path, other), feat(path, geometry)]}))
 
 
 SQ_A_GEOM = {"type": "MultiPolygon", "coordinates": [[[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]]]}
@@ -226,13 +231,21 @@ def test_an_empty_outline_with_no_index_entry_stops_the_build(ro, host):
     assert not (host / "world-data" / "outlines" / "part__a.poly").exists()
 
 
-def test_a_cut_off_outline_is_not_replaced_by_the_index(ro, host):
+@pytest.mark.parametrize("cut", ["after ring 1", "after 1", "mid-ring"])
+def test_a_cut_off_outline_is_not_replaced_by_the_index(ro, host, cut):
     """Only an outline Geofabrik does not serve comes from the index; a
-    download cut off midway stops the build, as before."""
-    (host / "geofabrik" / "part" / "a.poly").write_text(SQ_A[:SQ_A.index("END")])
+    download cut off midway stops the build, as before. Geofabrik's own
+    files are named "none" on their first line, like its empty answer
+    (a file cut to exactly "none" is that answer, and gets the same polygon
+    from the index)."""
+    real = SQ_A.replace("a\n", "none\n", 1)
+    end = {"after ring 1": real.index("END") + 4, "after 1": real.index("1\n") + 2,
+           "mid-ring": real.index("4 0") + 3}[cut]
+    (host / "geofabrik" / "part" / "a.poly").write_text(real[:end])
     _index(host, "part/a", SQ_A_GEOM)
-    with pytest.raises(SystemExit, match="not a whole"):
+    with pytest.raises(SystemExit, match="not a whole") as e:
         ro.make("both", BOTH_BOX, root=str(host), base=_base(host))
+    assert "index-v1.json" not in str(e.value)
     assert not (host / "world-data" / "outlines" / "part__a.poly").exists()
 
 

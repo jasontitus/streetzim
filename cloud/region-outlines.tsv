@@ -38,8 +38,10 @@ france	europe/france
 # beyond the description's list: caucasus lists Russia and Turkey whole
 # (its description includes parts of both), west-africa adds Guinea-Bissau
 # (it would be a hole between Senegal and Guinea), west-asia adds Cyprus
-# (an island inside the box, on the September map). Japan's outline comes
-# from Geofabrik's index (asia/japan.poly is served empty).
+# (an island inside the box, on the September map), pacific-islands adds
+# Nauru, Tuvalu and Kiribati (inside the box and on the September map; the
+# box cuts Kiribati at 180). Japan's outline comes from Geofabrik's index
+# (asia/japan.poly is served empty).
 argentina	south-america/argentina
 australia-nz	australia-oceania/australia+australia-oceania/new-zealand
 caucasus	asia/armenia+asia/azerbaijan+europe/georgia+russia+europe/turkey
@@ -52,7 +54,7 @@ iran	asia/iran
 japan	asia/japan
 korea-mongolia	asia/south-korea+asia/north-korea+asia/mongolia
 mexico	north-america/mexico
-pacific-islands	australia-oceania/papua-new-guinea+australia-oceania/fiji+australia-oceania/solomon-islands+australia-oceania/vanuatu+australia-oceania/new-caledonia+australia-oceania/samoa+australia-oceania/tonga+australia-oceania/palau+australia-oceania/micronesia+australia-oceania/marshall-islands
+pacific-islands	australia-oceania/papua-new-guinea+australia-oceania/fiji+australia-oceania/solomon-islands+australia-oceania/vanuatu+australia-oceania/new-caledonia+australia-oceania/palau+australia-oceania/micronesia+australia-oceania/marshall-islands+australia-oceania/nauru+australia-oceania/tuvalu+australia-oceania/kiribati
 southern-africa	africa/south-africa+africa/namibia+africa/botswana+africa/zimbabwe+africa/mozambique+africa/zambia+africa/malawi+africa/lesotho+africa/swaziland
 south-korea	asia/south-korea
 turkey	europe/turkey

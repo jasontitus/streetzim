@@ -272,7 +272,7 @@ REGIONS = [
         "tier": "multi-country",
         "title": "Pacific Islands",
         "zim_file": "osm-pacific-islands.zim",
-        "description": "Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Samoa, Tonga, Palau, Micronesia, and the Marshall Islands &mdash; Port Moresby, Suva, Nadi, Nouméa, Apia, and Nuku'alofa.",
+        "description": "Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Palau, Micronesia, the Marshall Islands, Nauru, Tuvalu, and Kiribati&rsquo;s Gilbert Islands &mdash; Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa, and Majuro.",
     },
     {
         "id": "west-africa",

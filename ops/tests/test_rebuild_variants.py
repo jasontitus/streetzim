@@ -38,6 +38,8 @@ def _setup(tmp: Path, *, variant_box: str = BOX, parent_places: bool = True) -> 
     for f in ("p.osm.pbf", "p.mbtiles", "p.search.jsonl"):
         (tmp / "world-data" / "regions" / f).write_text("x")
         (tmp / "world-data" / "regions" / f"{f}.bbox").write_text(BOX + "\n")
+    (tmp / "world-data" / "regions" / "p.search.jsonl.schema").write_text(
+        '{"search_schema": 2, "languages": []}')
     for theme in ("addresses", "places"):
         if theme == "places" and not parent_places:
             continue
@@ -56,7 +58,7 @@ def _setup(tmp: Path, *, variant_box: str = BOX, parent_places: bool = True) -> 
     return {"PATH": f"{bin_}:{os.environ['PATH']}", "PY": str(py), "STUB_LOG": str(tmp / "calls.log")}
 
 
-def _run(tmp: Path, env: dict[str, str], rid: str) -> list[str]:
+def _run(tmp: Path, env: dict[str, str], rid: str, pre: str = "") -> list[str]:
     body = f"""
 . {ROOT}/ops/region-bbox.sh
 log() {{ echo "LOG $*" >> "$STUB_LOG"; }}
@@ -66,6 +68,7 @@ REGISTRY={tmp}/regions.tsv; VARIANTS={tmp}/variants.tsv
 PLANET={tmp}/planet.osm.pbf; PBFLOCK={tmp}/lock; LOG=/dev/null; REL=rel
 WORLD_MB={tmp}/world.mbtiles; WORLD_SEARCH={tmp}/world.s2.jsonl
 ID={rid}
+{pre}
 R=$(awk -F'\\t' -v id="$ID" '$1==id' "$REGISTRY" | head -1)
 BBOX=$(echo "$R" | cut -f3); NAME=$(echo "$R" | cut -f2)
 for _once in 1; do
@@ -142,3 +145,75 @@ def test_the_driver_falls_back_to_the_schema_2_world_search_file():
     text = SCRIPT.read_text()
     line = next(ln for ln in text.splitlines() if ln.startswith("WORLD_SEARCH="))
     assert line.endswith(".s2.jsonl"), line
+
+
+# --- search cuts without native-script names --------------------------------
+
+def _own_files(tmp: Path, rid: str, *, search_schema: int | None) -> Path:
+    """A full, fresh set of rid's own inputs; its search cut has a .schema
+    sidecar of the given schema (None: no sidecar, as the 09-06 cuts)."""
+    regions = tmp / "world-data" / "regions"
+    for f in (f"{rid}.osm.pbf", f"{rid}.mbtiles", f"{rid}.search.jsonl"):
+        (regions / f).write_text("x")
+        (regions / f"{f}.bbox").write_text(BOX + "\n")
+    if search_schema is not None:
+        (regions / f"{rid}.search.jsonl.schema").write_text(
+            '{"search_schema": %d, "languages": []}' % search_schema)
+    for theme in ("addresses", "places"):
+        pq = tmp / "overture_cache" / f"{theme}-{rid}-rel.parquet"
+        pq.write_text("x")
+        pq.with_name(pq.name + ".bbox").write_text(BOX + "\n")
+    (tmp / "world.s2.jsonl").write_text("w")
+    (tmp / "world.s2.jsonl.schema").write_text('{"search_schema": 2, "languages": []}')
+    return regions
+
+
+@pytest.mark.parametrize("schema", [None, 1])
+def test_a_search_cut_without_native_names_is_parked_for_the_world_file(tmp_path, schema):
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=schema)
+    calls = _run(tmp_path, env, "r")
+    assert "BUILD r" in calls, calls
+    assert not [c for c in calls if c.startswith(("osmium", "python", "ROW"))], calls
+    dst = regions / "r.search.jsonl"
+    assert dst.is_symlink() and os.readlink(dst) == str(tmp_path / "world.s2.jsonl")
+    assert os.readlink(regions / "r.search.jsonl.schema") == str(tmp_path / "world.s2.jsonl.schema")
+    parked = sorted(regions.glob("r.search.jsonl.stale-*"))
+    main = [p for p in parked if not p.name.endswith((".bbox", ".schema"))]
+    assert len(main) == 1 and main[0].read_text() == "x"
+    want = {main[0].name, main[0].name + ".bbox"} | ({main[0].name + ".schema"} if schema else set())
+    assert {p.name for p in parked} == want
+    assert any("no native-script names" in c for c in calls), calls
+    # The tiles have no schema: kept as they are.
+    assert not (regions / "r.mbtiles").is_symlink() and (regions / "r.mbtiles").read_text() == "x"
+
+
+def test_a_schema_2_search_cut_for_the_box_is_kept(tmp_path):
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=2)
+    calls = _run(tmp_path, env, "r")
+    assert "BUILD r" in calls, calls
+    assert not (regions / "r.search.jsonl").is_symlink()
+    assert not list(regions.glob("*.stale-*"))
+
+
+def test_a_cut_that_cannot_be_parked_is_never_replaced(tmp_path):
+    """ln -sfn over a regular file deletes it: if the park fails, the region
+    is not built and the file stays."""
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=None)
+    calls = _run(tmp_path, env, "r", pre="mv() { return 1; }")
+    assert "ROW r park-failed -" in calls and "BUILD r" not in calls, calls
+    dst = regions / "r.search.jsonl"
+    assert not dst.is_symlink() and dst.read_text() == "x"
+
+
+def test_a_symlinked_cut_gets_the_world_files_schema(tmp_path):
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=2)
+    (regions / "r.search.jsonl").unlink()
+    (regions / "r.search.jsonl.schema").unlink()
+    calls = _run(tmp_path, env, "r")
+    assert "BUILD r" in calls, calls
+    assert os.readlink(regions / "r.search.jsonl") == str(tmp_path / "world.s2.jsonl")
+    assert os.readlink(regions / "r.search.jsonl.schema") == str(tmp_path / "world.s2.jsonl.schema")

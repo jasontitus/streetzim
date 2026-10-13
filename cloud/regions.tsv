@@ -39,7 +39,7 @@ baltics	Baltics	20.9,53.9,28.3,59.7	multi-country	56.9496,24.1052	56.9680,23.770
 caucasus	Caucasus	39.0,38.0,52.0,44.0	multi-country	41.7151,44.8271	40.1792,44.4991	Tbilisi	
 himalayas	Himalayas	72.0,26.0,98.0,37.5	multi-country	27.7172,85.3240	28.2096,83.9856	Kathmandu	bbox reconstructed 2026-09-04 (no local record of the April cloud-VM build); confirmed by user 2026-09-05
 central-america-caribbean	Central America & Caribbean	-93.0,7.0,-59.0,27.5	multi-country	14.6349,-90.5069	13.6929,-89.2182	Panama	bbox reconstructed 2026-09-04 (no local record of the April cloud-VM build); confirmed by user 2026-09-05
-pacific-islands	Pacific Islands	130.0,-25.0,180.0,5.0	multi-country	-18.1416,178.4419	-17.7765,177.4356	Suva	smoke pair on Viti Levu; old queue pair spanned the ocean and forced a manual upload; not in generate.py REGIONS
+pacific-islands	Pacific Islands	130.0,-25.0,180.0,15.0	multi-country	-18.1416,178.4419	-17.7765,177.4356	Suva	smoke pair on Viti Levu; old queue pair spanned the ocean and forced a manual upload; 2026-10-13: north edge 5.0 -> 15.0 (Palau, Micronesia and the Marshall Islands, all in the description, lay north of it); Samoa and Tonga are past 180, outside any box
 west-africa	West Africa	-18.0,3.0,15.0,17.0	multi-country	6.5244,3.3792	7.3775,3.9470	Lagos	not in generate.py REGIONS
 southern-africa	Southern Africa	11.0,-35.0,42.0,-15.0	multi-country	-26.2041,28.0473	-25.7479,28.2293	Johannesburg	not in generate.py REGIONS
 east-africa	East Africa	28.0,-12.0,52.0,18.0	multi-country	-1.2921,36.8219	-0.3031,36.0800	Nairobi	built 2026-05-12 (4.6 GB) but NEVER uploaded to archive.org
