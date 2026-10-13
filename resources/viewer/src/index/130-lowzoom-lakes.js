@@ -48,6 +48,8 @@ function _szLowzoomLakes() {
 // (_szNativeLabelField), what the signs say, not the base's label (an
 // English base's name:latin, "Athina"). A German map shows "Athen" over
 // "Αθήνα"; a Greek map, whose name:el is the native name, just "Αθήνα".
+// The order is intended: a visitor reads their own language first, and
+// the smaller native line is what they match against the signs.
 // Without regionLanguages, or on a map in its base's language, labels are
 // as above.
 var SZ_LANG = 'en';
