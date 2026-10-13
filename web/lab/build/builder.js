@@ -228,9 +228,11 @@
   }
   // One range request, its bytes handed to onChunk as they arrive. Aborted
   // when no byte has arrived for STALL_MS (while waiting for the answer,
-  // too); with crawlCheck, also when it has run SLOW_AFTER_MS at under
-  // SLOW_BPS (the proxy's upstream sometimes trickles one request while the
-  // next one is fast).
+  // too); with crawlCheck, also when it is a laggard: after SLOW_AFTER_MS
+  // at under SLOW_BPS, and under a quarter of the median speed of the
+  // requests that have finished (the proxy's upstream sometimes trickles one
+  // request while the next is fast; when every request is slow, asking
+  // again only costs another wait for the first byte).
   async function fetchRange(url, a, b, size, signal, onChunk, crawlCheck) {
     const ac = new AbortController();
     const outer = () => ac.abort();
@@ -258,9 +260,10 @@
         if (n + value.length > b - a) throw new FetchError('the server sent too many bytes');
         onChunk(value); n += value.length;
         const ms = performance.now() - t0;
-        if (crawlCheck && n < b - a && ms > SLOW_AFTER_MS && n / (ms / 1000) < SLOW_BPS) {
+        const bps = n / (ms / 1000);
+        if (crawlCheck && n < b - a && ms > SLOW_AFTER_MS && bps < SLOW_BPS && net.mbps.length && bps * 4 < pct(net.mbps, 0.5) * 1e6) {
           reader.cancel().catch(() => {});
-          const e = new FetchError(`only ${Math.round(n / (ms / 1000) / 1e3)} KB/s`); e.slow = true; throw e;
+          const e = new FetchError(`only ${Math.round(bps / 1e3)} KB/s`); e.slow = true; throw e;
         }
       }
       if (n !== b - a) throw new FetchError(`the server sent ${n} of ${b - a} bytes`);
