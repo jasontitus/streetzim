@@ -193,7 +193,10 @@ function initWikidataPopups(map, config) {
   // event-bound Directions button. The text content is the same as
   // buildPopupHTML — wrapping HTML in a fresh div keeps that helper
   // useful for the wiki sidebar (which still uses setHTML).
-  function buildWikiPopupDOM(name, wd, lngLat, articlePath) {
+  // `links`: the place's bundled articles, preferred first
+  // (_wikiArticleLinks); the first gets the button, any others a line of
+  // language links under it.
+  function buildWikiPopupDOM(name, wd, lngLat, links) {
     var box = document.createElement('div');
     box.className = 'pin-popup wiki-popup';
     if (wd) {
@@ -206,17 +209,7 @@ function initWikidataPopups(map, config) {
     }
     // Full bundled-article link — opens the in-ZIM wiki-article/<Title> page
     // (served by the drive SW) when this place has one.
-    if (articlePath) {
-      var ab = document.createElement('button');
-      ab.className = 'wiki-article-btn';
-      ab.textContent = szT('popup.read_article', '📖 Read full article');
-      ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
-      ab.addEventListener('click', function(e) {
-        e.stopPropagation();
-        openWikiArticle(articlePath);
-      });
-      box.appendChild(ab);
-    }
+    appendArticleLinks(box, links, null);
     if (window.streetzimRouting
         && typeof window.streetzimRouting.open === 'function') {
       box.appendChild(buildDirectionsButton(lngLat.lat, lngLat.lng, name));
@@ -229,6 +222,25 @@ function initWikidataPopups(map, config) {
   // glue).
   map._buildDirectionsButton = buildDirectionsButton;
   map._buildWikiPopupDOM = buildWikiPopupDOM;
+
+  // The article button (and, with Wikipedia packs, the "Also in" line) for
+  // `links`, appended to `box`, or put before `before` when given.
+  function appendArticleLinks(box, links, before) {
+    var link = links && links[0];
+    if (!link) return;
+    var ab = document.createElement('button');
+    ab.className = 'wiki-article-btn';
+    ab.textContent = szT('popup.read_article', '📖 Read full article');
+    ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
+    if (WIKI_PACKS.length) ab.setAttribute('data-wiki-lang', link.lang);
+    ab.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openWikiArticle(link.title, link.prefix);
+    });
+    box.insertBefore(ab, before || null);
+    var also = _wikiAlsoIn(links);
+    if (also) box.insertBefore(also, before || null);
+  }
 
   // Expose a closer so the find-result marker click handler can
   // dismiss the Wikidata feature popup (otherwise the two popup
@@ -365,7 +377,7 @@ function initWikidataPopups(map, config) {
       currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
         .setLngLat(e.lngLat)
         .setDOMContent(buildWikiPopupDOM(name, wd, e.lngLat,
-                                         _wikiArticlePath(qid, null)));
+                                         _wikiArticleLinks(qid, null)));
       _szPopupGap(map, currentPopup);
       currentPopup.addTo(map);
     });
@@ -384,9 +396,18 @@ function initWikidataPopups(map, config) {
       lon = g.coordinates[0]; lat = g.coordinates[1];
     }
     var kind = props.subclass || props.class || '';
+    // A base without Wikidata of its own can still have Wikipedia packs:
+    // their articles for the label's Q-ID go above "Directions to here".
+    var qid = WIKI_PACKS.length && typeof props.wikidata === 'string'
+      && /^Q\d+$/.test(props.wikidata) ? props.wikidata : null;
+    function placeDOM(enrich) {
+      var box = _szPlacePopupDOM(lat, lon, name, enrich);
+      if (qid) appendArticleLinks(box, _wikiArticleLinks(qid, null), box.querySelector('.pin-directions'));
+      return box;
+    }
     var popup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
       .setLngLat(e.lngLat)
-      .setDOMContent(_szPlacePopupDOM(lat, lon, name, { cat: kind }));
+      .setDOMContent(placeDOM({ cat: kind }));
     currentPopup = popup;
     popupSeq = seq;
     _szPopupGap(map, popup);
@@ -395,7 +416,7 @@ function initWikidataPopups(map, config) {
         || typeof window.__streetzimLookupPlace !== 'function') return;
     window.__streetzimLookupPlace(name, lat, lon).then(function(r) {
       if (!r || seq !== tapSeq || currentPopup !== popup || !popup.isOpen()) return;
-      popup.setDOMContent(_szPlacePopupDOM(lat, lon, name, {
+      popup.setDOMContent(placeDOM({
         // Overture's category, else the tile's ("copyshop"), which is
         // finer than the record's type ("shop").
         cat: r.cat || kind || r.s, subtype: r.s, ws: r.ws, p: r.p,
