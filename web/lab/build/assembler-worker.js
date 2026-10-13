@@ -7,7 +7,8 @@
 // base64). Every byte is checked before it is written: base and pack bytes
 // against the recipe's SHA-256 of each 16 MiB chunk of their file, inline
 // pieces against their own SHA-256. The ZIM's MD5 is computed as the bytes
-// go out, appended as its last 16 bytes, and compared with the recipe's.
+// go out, appended as its last 16 bytes, and compared with the recipe's; so
+// is the MD5 of the whole file (recipe file_md5, what md5sum prints).
 //
 // In:  {cmd:'run', recipe, recipeUrl, baseFile, sink, handle?, port?,
 //       inflight?, maxRetries?}
@@ -144,6 +145,8 @@ async function run(o) {
   const sources = { base: new Source('base file', recipe.base, fileReader(o.baseFile, net), net) };
   for (const [id, p] of Object.entries(recipe.packs)) sources['pack:' + id] = new Source(`${id} pack`, p, httpReader(p.url, p.size, net, maxRetries), net);
 
+  const last = recipe.segments[recipe.segments.length - 1];
+  if (!last || last.src !== 'md5' || recipe.segments.filter((x) => x.src === 'md5').length !== 1) throw new Error('the recipe must end with the checksum');
   // The reads, in order: [sourceKey, chunk index, take from, take to] per piece.
   const steps = [];
   for (const s of recipe.segments) {
@@ -218,7 +221,7 @@ async function run(o) {
   if (!sink) throw new Error('unknown sink ' + o.sink);
   const md5 = await hashwasm.createMD5(); md5.init();
   await sink.open(recipe.size);
-  let written = 0, lastProg = 0, digest = null;
+  let written = 0, lastProg = 0, digest = null, fileMd5 = null;
   try {
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
@@ -227,9 +230,16 @@ async function run(o) {
         data = b64dec(s.data);
         if (data.length !== s.len || await sha256(data) !== s.sha256) throw new Error(`generated piece at ${written} does not match the recipe`);
       } else if (s.src === 'md5') {
+        // The ZIM's own checksum covers every byte before it. The MD5 of the
+        // whole file (what md5sum prints) also covers these 16 bytes: resume
+        // the hash from its state before the digest and add them.
+        const state = md5.save();
         data = md5.digest('binary');
         digest = hex(data);
         if (digest !== recipe.md5) throw new Error(`checksum mismatch: got ${digest}, want ${recipe.md5}`);
+        md5.load(state); md5.update(data);
+        fileMd5 = md5.digest('hex');
+        if (recipe.file_md5 && fileMd5 !== recipe.file_md5) throw new Error(`checksum mismatch: whole file ${fileMd5}, want ${recipe.file_md5}`);
       } else {
         prefetch(i);
         const buf = await sources[s.src].get(s.k);
@@ -249,7 +259,7 @@ async function run(o) {
     return { ok: false, outcome: /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error', error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
   }
   const ms = performance.now() - t0;
-  return { ok: true, outcome: 'ok', md5: digest, size: recipe.size, written, ms: Math.round(ms),
+  return { ok: true, outcome: 'ok', md5: digest, file_md5: fileMd5, size: recipe.size, written, ms: Math.round(ms),
            mbps_total: +(written / 1e6 / (ms / 1000)).toFixed(1), net: summary(net) };
 }
 

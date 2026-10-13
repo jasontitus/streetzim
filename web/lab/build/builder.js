@@ -186,7 +186,7 @@
     running = null;
     checkReady();
     if (result.ok) {
-      $('status').textContent = `Done and verified (MD5 ${result.md5}). ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s.`;
+      $('status').textContent = `Done and verified. ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
         const root = await navigator.storage.getDirectory();
         const f = await (await root.getFileHandle(fileName)).getFile();
