@@ -575,7 +575,7 @@
                    download_mb: Math.round(entry.download_bytes / 1e6), sink: sinkInfo.sink };
     track('build_start', base);
     if (sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
-    const worker = new Worker('assembler-worker.js');
+    const worker = new Worker('assembler-worker.js?v=2');
     running = { worker, base, t0, sent: new Set() };
     checkReady();
     holdScreen();

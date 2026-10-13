@@ -54,6 +54,12 @@
         ]
       },
       {
+        "source": "lab/build/@(builder|assembler-worker).js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
         "source": "drive/build-info.js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
