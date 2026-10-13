@@ -41,7 +41,8 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
-  TILEMAKER_REF: v3.0.0
+  # The image's (Dockerfile) and the world tiles' version.
+  TILEMAKER_REF: v3.2.0
   ZIM_TOOLS_VERSION: 3.8.0
   KIWIX_TOOLS_VERSION: 3.8.2
 

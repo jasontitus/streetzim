@@ -10,6 +10,8 @@ memory"): Luxembourg (48 MB extract) 1.48 GB in memory, 0.46 GB on disk,
 size, so what keeps memory as the choice for small regions is the disk the
 store takes: 2.5 GB for the Netherlands (1.8 times what tilemaker read),
 at least 14 GB for China's 6.5 GB cut (2.2 times; sampled once, mid-run).
+The image builds tilemaker v3.2.0 since 2026-10-14; these were not
+re-measured with it.
 
 The decision is made on the file tilemaker reads (the extract cut to the
 area, when the builder cut it), just before tilemaker runs. Stdlib only.

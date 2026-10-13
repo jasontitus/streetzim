@@ -35,14 +35,16 @@ they are known to work on Ubuntu 24.04.
 sudo apt install osmium-tool unzip build-essential cmake libboost-dev \
   libboost-filesystem-dev libboost-iostreams-dev libboost-program-options-dev \
   libboost-system-dev liblua5.1-0-dev libshp-dev libsqlite3-dev rapidjson-dev zlib1g-dev
-git clone --depth 1 --branch v3.0.0 https://github.com/systemed/tilemaker.git /tmp/tilemaker
+git clone --depth 1 --branch v3.2.0 https://github.com/systemed/tilemaker.git /tmp/tilemaker
 cmake -S /tmp/tilemaker -B /tmp/tilemaker/build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/tilemaker/build -j"$(nproc)" && sudo cp /tmp/tilemaker/build/tilemaker /usr/local/bin/
 ```
 
 On macOS: `brew install osmium-tool`, then build tilemaker the same way
 (`brew install boost lua rapidjson shapelib sqlite cmake` for its
-dependencies) or use Homebrew's `tilemaker` if it is 3.0 or newer.
+dependencies) or use Homebrew's `tilemaker` if it is 3.2 or newer (3.0 runs
+the profile too, but writes some labels into many tiles; see
+[docs/language-ready.md](docs/language-ready.md)).
 
 **2. Python environment.**
 

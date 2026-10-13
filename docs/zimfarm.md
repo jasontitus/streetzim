@@ -909,7 +909,8 @@ is given a store folder, where it maps them to files instead (and deletes
 them when it exits). In memory, that is most of what grows with the region:
 the Netherlands' tiles took 4.0 GB, and China's 6.5 GB extract would take
 about 15 GB, too close to a 16 GiB task's limit with the rest of the build
-alongside. tilemaker alone (v3.0.0, 4 threads, a `--memory 16g` container on
+alongside. (Measured with tilemaker v3.0.0; the image builds v3.2.0 since
+2026-10-14, not re-measured.) tilemaker alone (v3.0.0, 4 threads, a `--memory 16g` container on
 the 36-core machine; anonymous memory at its peak, sampled every second from
 the container's cgroup, and wall time; 2026-10-02). The extracts are
 Geofabrik's of 2026-09-30, smaller than the openstreetmap.fr ones in the

@@ -16,7 +16,11 @@
 # Builds from OpenFreeMap tiles (--mbtiles) need neither tilemaker nor shapefiles.
 
 FROM debian:trixie-slim AS tilemaker
-ARG TILEMAKER_REF=v3.0.0
+# 3.2.0: the tilemaker the world tiles were made with (master facdf93 = v3.2.0
+# plus a version bump), so a region cut here (ops: the multilingual tile
+# step) matches them. 3.0.0 copied a polygon's label into every tile under
+# it, and did not merge or declutter points (docs/language-ready.md).
+ARG TILEMAKER_REF=v3.2.0
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
         libboost-dev libboost-filesystem-dev libboost-iostreams-dev \
