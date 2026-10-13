@@ -166,6 +166,7 @@
  "place.social": "Soziale Medien",
  "place.website": "Website",
  "place.wikipedia": "Wikipedia",
+ "place.wikipedia_in": "Wikipedia ({language})",
  "places.back_to_map": "← Zurück",
  "places.category_filter": "Kategoriefilter",
  "places.chip_failed": "„{chip}“ konnte nicht geladen werden.",
@@ -222,6 +223,7 @@
  "places.type_two": "Mindestens 2 Zeichen eingeben.",
  "popup.directions_to_here": "Route hierher",
  "popup.read_article": "📖 Ganzen Artikel lesen",
+ "popup.read_article_in": "📖 Ganzen Artikel auf {language} lesen",
  "preview.download": "Herunterladen",
  "preview.download_better": "— die heruntergeladene Datei ist schneller und funktioniert offline",
  "preview.hide": "Ausblenden",
@@ -589,6 +591,11 @@
  "wiki.no_data": "Objekte gefunden, aber keine Wikipedia-Daten für diesen Bereich.",
  "wiki.none_at_zoom": "Bei dieser Zoomstufe sind keine Wikipedia-Einträge sichtbar. Zoomen Sie hinein, um Orte zu entdecken.",
  "wiki.none_in_view": "Keine Wikipedia-Orte im Ausschnitt — Karte verschieben oder zoomen.",
+ "wiki.none_yours_in_view": {
+  "one": "Keine Artikel auf {language} im Ausschnitt; {n} in einer anderen Sprache.",
+  "other": "Keine Artikel auf {language} im Ausschnitt; {n} in anderen Sprachen."
+ },
+ "wiki.only_lang": "Nur Artikel auf {language}",
  "wiki.pop": "{n} Einw.",
  "wiki.show_in_area": "In diesem Bereich anzeigen"
 }

@@ -411,6 +411,42 @@ await ok('theme: dark chrome text keeps >= 4.5:1 (WCAG AA) on every dark panel c
   for (const bg of ['#1a73e8', '#2563eb', '#2a4a7a']) assert.ok(contrast('#ffffff', bg) >= 4.5, bg);
 });
 
+await ok('the Wiki list\'s language tag keeps >= 4.5:1 (WCAG AA), light and dark', () => {
+  // Light: its colour on its own tint over the panel, over the darkest
+  // map behind the panel (the worst case for dark text).
+  const rule = (sel) => {
+    const i = HTML.indexOf(sel + ' {');
+    assert.ok(i >= 0, sel);
+    return HTML.slice(i, HTML.indexOf('}', i));
+  };
+  const prop = (body, k) => new RegExp('(?:[{;\\s])' + k + ':\\s*([^;]+);').exec(body)[1].trim();
+  const light = rule('  .wiki-item-lang');
+  const over = (top, under) => {           // rgba `top` over the solid colour `under`
+    const m = /^rgba\(([^)]+)\)$/.exec(top);
+    if (!m) return top;
+    const [r, g, b, a] = m[1].split(',').map(Number);
+    const u = rgb(under);
+    return '#' + [r, g, b].map((v, i) => Math.round(v * a + u[i] * (1 - a)).toString(16).padStart(2, '0')).join('');
+  };
+  const root = HTML.slice(HTML.indexOf(':root {'), HTML.indexOf('}', HTML.indexOf(':root {')));
+  const panelBg = /--panel-bg:\s*([^;]+);/.exec(root)[1];
+  const bgLight = over(prop(light, 'background'), over(panelBg, '#000000'));
+  const cLight = contrast(prop(light, 'color'), bgLight);
+  assert.ok(cLight >= 4.5, `${prop(light, 'color')} on ${bgLight}: ${cLight.toFixed(2)}`);
+  // Dark: --text-secondary on its tint over the dark panel over white.
+  const dark = darkRule('html.sz-dark .wiki-item-lang', 'color');
+  assert.strictEqual(dark, 'var(--text-secondary)');
+  const bgDark = over(darkRule('html.sz-dark .wiki-item-lang', 'background'), overWhite(DARK_VARS['--panel-bg']));
+  const cDark = contrast(DARK_VARS['--text-secondary'], bgDark);
+  assert.ok(cDark >= 4.5, `${DARK_VARS['--text-secondary']} on ${bgDark}: ${cDark.toFixed(2)}`);
+});
+
+await ok('the Wiki panel\'s "Only <language>" row is a 44 px target on a phone', () => {
+  const css = HTML.slice(HTML.indexOf('.wiki-only-yours input {'));
+  const media = css.slice(css.indexOf('@media (max-width: 600px)'), css.indexOf('}\n  }'));
+  assert.match(media, /\.wiki-only-yours \{[^}]*min-height: (4[4-9]|[5-9]\d)px;/);
+});
+
 await ok('theme: light mode is untouched -- --szd-* exist only under html.sz-dark', () => {
   const used = new Set([...HTML.matchAll(/var\((--szd-[\w-]+),\s*([^)]+\)?)\)/g)].map(m => m[1]));
   assert.ok(used.size >= 8, 'the JS-built sheets should use the --szd-* tokens');

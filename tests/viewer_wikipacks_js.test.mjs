@@ -61,7 +61,10 @@ function loadWiki() {
     ' packs: function() { return WIKI_PACKS; }, langs: function() { return [WIKI_MAP_LANG, WIKI_BASE_LANG]; },' +
     ' _wikiArticlePath, _wikiPacksFromConfig, wikiPacksInit, wikiPackSetIndex, _wikiEntryQid, _wikiEntryDesc,' +
     ' _wikiSources, _wikiArticleLinks, _wikiDetailLinks, _wikiPanelItems, _wikiArticleHref, _wikiLangName,' +
-    ' _wikiAlsoIn, openWikiArticle, wikiGeoTitlesInBounds };');
+    ' _wikiAlsoIn, openWikiArticle, wikiGeoTitlesInBounds,' +
+    ' _wikiYourLang, _wikiIsOther, _wikiLangLabel, _wikiLangTag, _wikiPanelPick, _wikiPanelFilter, _wikiYoursFirst,' +
+    ' _wikiPanelRowEl, _wikiMarkerEl, _wikiMarkerOptions, _wikiMarkerOrder, _wikiReadLabel, _wikiSheetLabel,' +
+    ' _wikiOnlyYoursSaved, _wikiOnlyYoursRow };');
   const api = fn(window, fakeDocument(), history, { pathname: '/C/index.html', search: '' },
                  'http://kiwix/content/osm_th_liechtenstein/');
   return { ...api, nav };
@@ -362,6 +365,514 @@ await ok('"Also in" in the UI language: German, Thai, Chinese tables', () => {
     } finally { globalThis.SZ_I18N = null; }
   }
   assert.strictEqual(W._wikiAlsoIn(W._wikiArticleLinks('Q1844', null)).children[0].textContent, 'Also in: ');
+});
+
+// ---------------------------------------------------------------------
+// Your language first (100, wiki-yours; 410): on a map with packs the
+// map language's articles lead the Wiki panel, the others name their
+// language and get a lighter marker. Without packs: exactly as before.
+const DE_MAP = { language: 'de', baseLanguage: 'en', hasWikidata: true, hasWikiArticles: true,
+  wikiPacks: [{ lang: 'de', prefix: '~w/de/', articles: 3 }] };
+
+await ok('your language: the map\'s, when this file has its Wikipedia', () => {
+  const cases = [
+    [{ language: 'en' }, ''],                                                       // no packs
+    [DE_MAP, 'de'],
+    [{ ...DE_MAP, language: 'en' }, 'en'],                                          // the base's language
+    [{ ...DE_MAP, language: 'fr' }, ''],                                            // no Wikipedia in it
+    [{ ...DE_MAP, language: 'fr', baseLanguage: undefined }, 'fr'],                 // taken for the base's
+    [{ ...DE_MAP, language: 'DE', baseLanguage: undefined }, 'de'],
+    [{ language: 'zh-Hans', baseLanguage: 'en', wikiPacks: [{ lang: 'zh', prefix: '~w/zh/' }] }, 'zh-hans'],
+    [{ ...DE_MAP, language: '' }, ''],
+  ];
+  for (const [cfg, want] of cases) {
+    const W = loadWiki();
+    W.wikiPacksInit(cfg);
+    assert.strictEqual(W._wikiYourLang(), want, JSON.stringify(cfg));
+  }
+  const W = loadWiki();
+  W.wikiPacksInit({ language: 'zh-Hans', baseLanguage: 'en', wikiPacks: [{ lang: 'zh', prefix: '~w/zh/' }] });
+  assert.deepStrictEqual(['zh', 'en', ''].map(W._wikiIsOther), [false, true, true]);
+  assert.deepStrictEqual(['zh', 'en', ''].map(W._wikiLangTag), ['', 'English', '']);
+});
+
+await ok('which articles are other, and the tag they carry', () => {
+  const W = loadWiki();
+  W.wikiPacksInit(DE_MAP);
+  assert.deepStrictEqual(['de', 'en', 'th', '', undefined].map(W._wikiIsOther), [false, true, true, true, true]);
+  assert.deepStrictEqual(['de', 'en', 'th', ''].map(W._wikiLangTag), ['', 'English', 'Thai', '']);
+  // A map with no Wikipedia in its language: nothing is put behind, but an
+  // article still says which language it is in.
+  W.wikiPacksInit({ ...DE_MAP, language: 'fr' });
+  assert.deepStrictEqual(['de', 'en'].map(W._wikiIsOther), [false, false]);
+  assert.deepStrictEqual(['de', 'en'].map(W._wikiLangTag), ['German', 'English']);
+  // No packs: never other, never a tag, whatever the language.
+  W.wikiPacksInit({ language: 'de', hasWikiArticles: true });
+  assert.deepStrictEqual(['de', 'en', 'th', ''].map(W._wikiIsOther), [false, false, false, false]);
+  assert.deepStrictEqual(['de', 'en', 'th', ''].map(W._wikiLangTag), ['', '', '', '']);
+});
+
+await ok('language names in the UI language; the code without Intl.DisplayNames', () => {
+  const W = loadWiki();
+  W.wikiPacksInit(DE_MAP);
+  const want = { en: 'English', de: 'Englisch', th: 'อังกฤษ', zh: '英语' };
+  for (const [ui, name] of Object.entries(want)) {
+    globalThis.SZ_UI_LANG = ui;
+    try { assert.strictEqual(W._wikiLangTag('en'), name, ui); } finally { globalThis.SZ_UI_LANG = 'en'; }
+  }
+  const DN = Intl.DisplayNames;
+  try {
+    Intl.DisplayNames = undefined;
+    assert.strictEqual(W._wikiLangTag('en'), 'EN');
+    assert.strictEqual(W._wikiLangLabel('zh-hans'), 'ZH-HANS');
+  } finally { Intl.DisplayNames = DN; }
+  assert.strictEqual(W._wikiLangLabel('qqx'), 'QQX');
+});
+
+// The order the panel always had (410 before packs).
+const OLD_ORDER = (a, b) => b.priority - a.priority || a.name.localeCompare(b.name);
+function rowsFixture() {
+  const r = (name, priority, lang) => ({ name, priority, lang, title: name });
+  return [r('Zug', 40, 'en'), r('Aarau', 80, 'de'), r('Bern', 80, 'en'), r('Chur', 40, 'de'),
+          r('Aarau', 80, 'en'), r('Thun', 55, undefined), r('Baden', 55, 'de'), r('Ilanz', 35, 'th')];
+}
+
+// What 410 did before packs: sort, count, keep the first `cap`.
+function oldPick(rows, cap) {
+  const items = rows.sort(OLD_ORDER);
+  return { total: items.length, items: items.length > cap ? items.slice(0, cap) : items };
+}
+
+await ok('panel order: without packs exactly the old sort, count and cap', () => {
+  for (const cfg of [{ language: 'de' }, { language: 'en', hasWikiArticles: true }, {}]) {
+    const W = loadWiki();
+    W.wikiPacksInit(cfg);
+    for (const cap of [150, 5, 3]) {
+      for (const only of [false, true]) {          // the switch, even saved on, changes nothing
+        assert.deepStrictEqual(W._wikiPanelPick(rowsFixture(), only, cap), oldPick(rowsFixture(), cap),
+                               JSON.stringify([cfg, cap, only]));
+      }
+    }
+    const rows = rowsFixture();
+    assert.strictEqual(W._wikiPanelPick(rows, false, 150).items, rows);   // in place, as before
+    assert.strictEqual(W._wikiPanelFilter(rows, true), rows);
+    assert.strictEqual(W._wikiYoursFirst(rows), rows);
+    assert.strictEqual(W._wikiMarkerOrder(rows), rows);
+  }
+});
+
+await ok('panel order: your language first, each group in the old order', () => {
+  const W = loadWiki();
+  W.wikiPacksInit(DE_MAP);
+  const { total, items: rows } = W._wikiPanelPick(rowsFixture(), false, 150);
+  assert.strictEqual(total, 8);
+  assert.deepStrictEqual(rows.map((r) => r.name + ':' + r.lang),
+    ['Aarau:de', 'Baden:de', 'Chur:de', 'Aarau:en', 'Bern:en', 'Thun:undefined', 'Zug:en', 'Ilanz:th']);
+  const only = W._wikiPanelPick(rowsFixture(), true, 150);
+  assert.deepStrictEqual([only.total, only.items.map((r) => r.name)], [3, ['Aarau', 'Baden', 'Chur']]);
+  // Markers: the others added first, so yours are drawn on top.
+  assert.deepStrictEqual(W._wikiMarkerOrder(rows).map((r) => r.lang),
+    ['en', 'en', undefined, 'en', 'th', 'de', 'de', 'de']);
+  // No Wikipedia in the map language: the old order, no filter.
+  W.wikiPacksInit({ ...DE_MAP, language: 'fr' });
+  assert.deepStrictEqual(W._wikiPanelPick(rowsFixture(), true, 150), oldPick(rowsFixture(), 150));
+});
+
+await ok('the cap is taken in the old order, then your language goes first within it', () => {
+  // A dense, zoomed-out view: 40 English cities (80) and 160 German POIs
+  // (40). The old top 150 are the 40 cities and 110 POIs; all of them stay,
+  // the German ones listed (and drawn) first.
+  const rows = () => {
+    const out = [];
+    for (let i = 0; i < 160; i++) out.push({ name: 'Poi ' + String(i).padStart(3, '0'), priority: 40, lang: 'de' });
+    for (let i = 0; i < 40; i++) out.push({ name: 'City ' + String(i).padStart(2, '0'), priority: 80, lang: 'en' });
+    return out;
+  };
+  const W = loadWiki();
+  W.wikiPacksInit(DE_MAP);
+  const { total, items } = W._wikiPanelPick(rows(), false, 150);
+  const old = oldPick(rows(), 150).items;
+  assert.strictEqual(total, 200);
+  assert.strictEqual(items.length, 150);
+  assert.deepStrictEqual(items.map((r) => r.name).sort(), old.map((r) => r.name).sort());
+  assert.strictEqual(items.filter((r) => r.lang === 'en').length, 40);
+  assert.deepStrictEqual(items.slice(0, 110).map((r) => r.name), old.filter((r) => r.lang === 'de').map((r) => r.name));
+  assert.deepStrictEqual(items.slice(110).map((r) => r.name), old.filter((r) => r.lang === 'en').map((r) => r.name));
+  // Only German: the cap counts German places only.
+  const only = W._wikiPanelPick(rows(), true, 150);
+  assert.deepStrictEqual([only.total, only.items.length, only.items[149].name], [160, 150, 'Poi 149']);
+});
+
+// A fake element plain enough to compare: its tag, class, own text,
+// attributes, style, a few properties and its children.
+function ser(e) {
+  if (!e.tag) return { text: e.textContent };
+  const o = { tag: e.tag, className: e.className, text: e.textContent, title: e.title, attrs: e.attrs,
+              style: { ...e.style }, on: Object.keys(e.on || {}).sort() };
+  for (const k of ['type', 'checked']) if (e[k] !== undefined) o[k] = e[k];
+  o.children = e.children.map(ser);
+  return o;
+}
+
+// The elements the panel built before packs (410 at 80f701d), for the same
+// rows: what a map without packs must still show.
+function oldRow(document, it) {
+  const createEl = (tag, className, text) => {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text) el.appendChild(document.createTextNode(text));
+    return el;
+  };
+  const desc = it.desc || '';
+  const div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
+  div.appendChild(createEl('div', 'wiki-item-name', it.name));
+  const meta = createEl('div', 'wiki-item-meta');
+  meta.appendChild(createEl('span', 'wiki-item-type', szPlaceType(it.type || 'place')));
+  div.appendChild(meta);
+  if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
+  return div;
+}
+function oldMarker(document, it) {
+  const el = document.createElement('div');
+  el.className = 'wiki-map-marker';
+  el.textContent = '📖';
+  el.title = it.name;
+  el.style.cssText = 'font-size:18px;line-height:1;cursor:pointer;'
+    + 'text-shadow:0 0 3px #fff,0 1px 2px rgba(255,255,255,0.95);';
+  return el;
+}
+
+await ok('rows, markers and the article label without packs: the old elements', () => {
+  const W = loadWiki();
+  W.set(BASE);
+  W.wikiPacksInit({ language: 'de', hasWikiArticles: true });
+  const doc = fakeDocument();
+  const items = W._wikiPanelItems(9.4, 9.7, 47.0, 47.3, (t) => (t === 'place' ? 80 : 40));
+  // Rows that name another language's Wikipedia still look as before.
+  items.push({ title: 'X', name: 'X', type: 'poi', desc: 'd', lang: 'en', priority: 1 });
+  for (const it of items) {
+    assert.deepStrictEqual(ser(W._wikiPanelRowEl(it)), ser(oldRow(doc, it)), it.name);
+    const m = W._wikiMarkerEl(it);
+    assert.deepStrictEqual(ser(m), ser(oldMarker(doc, it)), it.name);
+    // The options 410 gave every Marker.
+    assert.deepStrictEqual(W._wikiMarkerOptions(m, it), { element: m, anchor: 'center' }, it.name);
+  }
+  for (const l of [null, { lang: '', prefix: '', title: 'Vaduz' }, { lang: 'en', prefix: '', title: 'Vaduz' },
+                   { lang: 'de', prefix: '~w/de/', title: 'Vaduz' }]) {
+    assert.strictEqual(W._wikiSheetLabel(l), 'Wikipedia');
+  }
+  for (const l of [null, { lang: '', prefix: '', title: 'Vaduz' }, { lang: 'en', prefix: '', title: 'Vaduz' },
+                   { lang: 'de', prefix: '~w/de/', title: 'Vaduz' }]) {
+    assert.strictEqual(W._wikiReadLabel(l), '📖 Read full article');
+  }
+});
+
+await ok('rows and markers with packs: a tag and a lighter marker for another language', () => {
+  const W = merged(DE_MAP, { de: DE });
+  const rows = W._wikiPanelPick(W._wikiPanelItems(9.4, 9.7, 47.0, 47.3, (t) => (t === 'place' ? 80 : 40)), false, 150).items;
+  assert.deepStrictEqual(rows.map((r) => [r.name, r.lang]), [
+    ['Eschen (Liechtenstein)', 'de'], ['Vaduz', 'de'], ['Schloss Vaduz', 'de'],
+    ['Malbun', 'en'], ['Eschen', 'en'], ['Old Bridge', 'en']]);
+  const de = W._wikiPanelRowEl(rows[1]);
+  assert.strictEqual(de.attrs['data-wiki-lang'], 'de');
+  assert.ok(!JSON.stringify(ser(de)).includes('wiki-item-lang'));
+  const en = W._wikiPanelRowEl(rows[3]);
+  assert.strictEqual(en.attrs['data-wiki-lang'], 'en');
+  const tag = en.children[1].children[1];
+  assert.deepStrictEqual([tag.className, tag.text(), tag.attrs['data-wiki-lang']], ['wiki-item-lang', 'English', 'en']);
+  // The row is otherwise the old one: name, type, description.
+  assert.deepStrictEqual(en.children.map((c) => c.className), ['wiki-item-name', 'wiki-item-meta']);
+  const mDe = W._wikiMarkerEl(rows[1]), mEn = W._wikiMarkerEl(rows[3]);
+  assert.strictEqual(mDe.className, 'wiki-map-marker');
+  assert.match(mDe.style.cssText, /^font-size:18px;line-height:1;/);
+  assert.strictEqual(mDe.title, 'Vaduz');
+  assert.strictEqual(mEn.className, 'wiki-map-marker wiki-map-marker-other');
+  assert.match(mEn.style.cssText, /^font-size:14px;filter:grayscale\(1\);line-height:1;/);
+  // The fading is the Marker's own opacity: MapLibre overwrites an inline one.
+  assert.doesNotMatch(mEn.style.cssText, /opacity/);
+  assert.deepStrictEqual(W._wikiMarkerOptions(mEn, rows[3]), { element: mEn, anchor: 'center', opacity: '0.6' });
+  assert.deepStrictEqual(W._wikiMarkerOptions(mDe, rows[1]), { element: mDe, anchor: 'center' });
+  assert.strictEqual(mEn.title, 'Malbun · English');
+  assert.deepStrictEqual([mDe.attrs['data-wiki-lang'], mEn.attrs['data-wiki-lang']], ['de', 'en']);
+  assert.deepStrictEqual([mDe.attrs['aria-label'], mEn.attrs['aria-label']], ['Vaduz', 'Malbun · English']);
+  // Without Intl.DisplayNames the title names the code.
+  const DN = Intl.DisplayNames;
+  try {
+    Intl.DisplayNames = undefined;
+    const m = W._wikiMarkerEl(rows[3]);
+    assert.deepStrictEqual([m.title, m.attrs['aria-label']], ['Malbun · EN', 'Malbun · EN']);
+  } finally { Intl.DisplayNames = DN; }
+});
+
+await ok('the article button names another language, in the UI language', () => {
+  const W = merged(DE_MAP, { de: DE });
+  const en = W._wikiArticleLinks('Q675040', null)[0];               // Malbun: English only
+  assert.strictEqual(en.lang, 'en');
+  assert.strictEqual(W._wikiReadLabel(en), '📖 Read full article in English');
+  assert.strictEqual(W._wikiReadLabel(W._wikiArticleLinks('Q1844', null)[0]), '📖 Read full article');
+  assert.strictEqual(W._wikiReadLabel(null), '📖 Read full article');
+  const want = { de: '📖 Ganzen Artikel auf Englisch lesen', th: '📖 อ่านบทความฉบับเต็มภาษาอังกฤษ', zh: '📖 阅读英语全文' };
+  for (const [lang, label] of Object.entries(want)) {
+    globalThis.SZ_I18N = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/${lang}.json`, 'utf8'));
+    globalThis.SZ_UI_LANG = lang;
+    try { assert.strictEqual(W._wikiReadLabel(en), label, lang); }
+    finally { globalThis.SZ_I18N = null; globalThis.SZ_UI_LANG = 'en'; }
+  }
+  // Popups, the panel's detail and the place sheet use it.
+  const popup = fs.readFileSync(`${PARTS_DIR}/400-wikidata-popup.js`, 'utf8');
+  assert.match(popup, /ab\.textContent = _wikiReadLabel\(link\);/);
+  const panel = fs.readFileSync(`${PARTS_DIR}/410-wiki-sidebar.js`, 'utf8');
+  assert.match(panel, /createEl\('button', 'wiki-article-btn', _wikiReadLabel\(links \? ap : null\)\)/);
+});
+
+await ok('"Only <language> articles": the saved choice, the label, the change', () => {
+  const W = merged(DE_MAP, { de: DE });
+  const store = { m: {}, getItem(k) { return k in this.m ? this.m[k] : null; }, setItem(k, v) { this.m[k] = v; } };
+  assert.strictEqual(W._wikiOnlyYoursSaved(store), false);
+  assert.strictEqual(W._wikiOnlyYoursSaved(null), false);
+  assert.strictEqual(W._wikiOnlyYoursSaved({ getItem() { throw new Error('SecurityError'); } }), false);
+  const seen = [];
+  const row = W._wikiOnlyYoursRow(false, store, (on) => seen.push(on));
+  assert.strictEqual(row.attrs['data-wiki-only'], 'de');
+  assert.strictEqual(row.text(), 'Only German articles');
+  const box = row.children[0];
+  assert.deepStrictEqual([box.tag, box.type, box.checked], ['input', 'checkbox', false]);
+  box.checked = true; box.on.change();
+  assert.deepStrictEqual([seen, store.m['streetzim.wikiOnlyYours']], [[true], '1']);
+  assert.strictEqual(W._wikiOnlyYoursSaved(store), true);
+  box.checked = false; box.on.change();
+  assert.deepStrictEqual([seen, store.m['streetzim.wikiOnlyYours']], [[true, false], '0']);
+  assert.strictEqual(W._wikiOnlyYoursSaved(store), false);
+  // A storage that throws on write still changes the list.
+  const bad = { getItem: () => null, setItem() { throw new Error('QuotaExceededError'); } };
+  const r2 = W._wikiOnlyYoursRow(true, bad, (on) => seen.push(on));
+  assert.strictEqual(r2.children[0].checked, true);
+  r2.children[0].checked = false; r2.children[0].on.change();
+  assert.deepStrictEqual(seen, [true, false, false]);
+  globalThis.SZ_I18N = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/de.json`, 'utf8'));
+  globalThis.SZ_UI_LANG = 'de';
+  try { assert.strictEqual(W._wikiOnlyYoursRow(false, null, () => {}).text(), 'Nur Artikel auf Deutsch'); }
+  finally { globalThis.SZ_I18N = null; globalThis.SZ_UI_LANG = 'en'; }
+});
+
+// The Wiki panel itself (410, initWikiSidebar) on stubbed browser globals:
+// a map, MapLibre markers, the panel's markup, fetch of the geo-indexes.
+const SIDEBAR_SRC = slice('// --- Wiki sidebar: show Wikipedia entries', '// BEGIN sz-here');
+function panelDocument() {
+  function el(tag) {
+    const e = {
+      tag, children: [], style: {}, attrs: {}, className: '', title: '', on: {}, _text: '',
+      classList: { set: new Set(), add(c) { this.set.add(c); }, remove(c) { this.set.delete(c); } },
+      get textContent() { return e._text; },
+      set textContent(v) { e._text = v; e.children = []; },
+      appendChild(c) { e.children.push(c); return c; },
+      insertBefore(c, ref) { const i = e.children.indexOf(ref); e.children.splice(i < 0 ? e.children.length : i, 0, c); return c; },
+      setAttribute(k, v) { e.attrs[k] = String(v); },
+      getAttribute(k) { return k in e.attrs ? e.attrs[k] : null; },
+      addEventListener(t, f) { e.on[t] = f; },
+      querySelector(t) { return e.children.find((c) => c.tag === t) || null; },
+      text() { return [e._text].concat(e.children.map((c) => (c.text ? c.text() : c.textContent))).join(''); },
+    };
+    return e;
+  }
+  const byId = {};
+  const mk = (id, tag = 'div') => (byId[id] = el(tag));
+  const panel = mk('wiki-panel');
+  const refresh = mk('wiki-refresh');
+  refresh.appendChild(el('button'));
+  for (const c of [mk('wiki-panel-header'), refresh, mk('wiki-panel-loading'), mk('wiki-panel-list')]) panel.appendChild(c);
+  mk('wiki-toggle', 'button'); mk('wiki-panel-count', 'span'); mk('wiki-panel-close', 'button');
+  return { createElement: el, createTextNode: (t) => ({ textContent: t }), getElementById: (id) => byId[id] || null, byId };
+}
+async function openPanel(config, files, { storage = null, bounds = [9.4, 9.7, 47.0, 47.3] } = {}) {
+  const document = panelDocument();
+  const map = {
+    markers: [], handlers: {}, bounds,
+    on(t, f) { this.handlers[t] = f; },
+    getBounds() { const [w, e, s, n] = this.bounds; return { getWest: () => w, getEast: () => e, getSouth: () => s, getNorth: () => n }; },
+    getZoom: () => 12, flyTo() {}, getCanvas: () => ({ clientHeight: 600 }),
+  };
+  class Marker {
+    constructor(o) { this.el = o.element; this.options = o; }
+    setLngLat(c) { this.lngLat = c; return this; }
+    addTo(m) { m.markers.push(this); return this; }
+    remove() { map.markers = map.markers.filter((x) => x !== this); }
+  }
+  const base = 'http://kiwix/content/osm_de_california/';
+  const fetch = (url) => Promise.resolve(Object.prototype.hasOwnProperty.call(files, url.slice(base.length))
+    ? { ok: true, json: () => Promise.resolve(files[url.slice(base.length)]) } : { ok: false });
+  const init = new Function('window', 'document', 'fetch', 'maplibregl', 'setTimeout', 'clearTimeout', '_szStorage',
+    '_szFlyToClear', 'history', 'location', 'baseUrl',
+    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC + SIDEBAR_SRC +
+    '\nreturn initWikiSidebar;')({ innerWidth: 1000 }, document, fetch, { Marker }, () => 0, () => {},
+    () => storage, () => {}, {}, { pathname: '/', search: '' }, base);
+  const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r)); };
+  init(map, config);
+  await flush();
+  document.byId['wiki-toggle'].on.click();
+  await flush();
+  const $ = document.byId;
+  return { document, map, $, flush, list: $['wiki-panel-list'], count: $['wiki-panel-count'], panel: $['wiki-panel'],
+           refresh: async () => { $['wiki-refresh'].children[0].on.click(); await flush(); } };
+}
+
+await ok('the Wiki panel without wikiPacks: the old rows, markers and count, element for element', async () => {
+  const pri = (t) => (t === 'place' ? 80 : t === 'water' || t === 'peak' ? 55 : t === 'park' ? 50 : t === 'poi' ? 40 : 35);
+  for (const cfg of [{ hasWikidata: true, language: 'de' }, { hasWikidata: true, hasWikiArticles: true }]) {
+    for (const saved of [null, '1']) {
+      const storage = { getItem: () => saved, setItem() {}, removeItem() {} };
+      const P = await openPanel(cfg, { 'wiki-geo-index.json': BASE }, { storage });
+      // What 410 showed before, from the base's index alone.
+      const doc = panelDocument();
+      const items = Object.entries(BASE).map(([title, g]) => ({ title, name: title.replace(/_/g, ' '),
+        qid: g[3] || null, type: g[2] || '', coords: [g[1], g[0]], desc: g[4] || '', priority: pri(g[2] || '') }))
+        .sort(OLD_ORDER);
+      assert.deepStrictEqual(P.list.children.map(ser),
+        items.map((it) => { const r = ser(oldRow(doc, it)); r.on = ['click']; return r; }), JSON.stringify(cfg));
+      assert.deepStrictEqual(P.map.markers.map((m) => ser(m.el)),
+        items.map((it) => { const r = ser(oldMarker(doc, it)); r.on = ['click']; return r; }));
+      assert.deepStrictEqual(P.map.markers.map((m) => m.lngLat), items.map((it) => it.coords));
+      // Each Marker made with the options it always had.
+      assert.deepStrictEqual(P.map.markers.map((m) => Object.keys(m.options).sort().join()), items.map(() => 'anchor,element'));
+      assert.ok(P.map.markers.every((m) => m.options.element === m.el && m.options.anchor === 'center'));
+      assert.strictEqual(P.count.textContent, 4);
+      // No switch: the panel is header, refresh bar, loading, list.
+      assert.deepStrictEqual(P.panel.children.map((c) => c.className || c.tag), ['div', 'div', 'div', 'div']);
+      assert.strictEqual(P.panel.children.length, 4);
+    }
+  }
+});
+
+await ok('the Wiki panel with packs: German first, English tagged, the switch filters', async () => {
+  const store = { m: {}, getItem(k) { return k in this.m ? this.m[k] : null; }, setItem(k, v) { this.m[k] = v; }, removeItem() {} };
+  const P = await openPanel(DE_MAP, { 'wiki-geo-index.json': BASE, '~w/de/wiki-geo-index.json': DE }, { storage: store });
+  const rows = () => P.list.children.map((r) => [r.children[0].text(), r.attrs['data-wiki-lang'],
+    r.children[1].children[1] ? r.children[1].children[1].text() : '']);
+  assert.deepStrictEqual(rows(), [
+    ['Eschen (Liechtenstein)', 'de', ''], ['Vaduz', 'de', ''], ['Schloss Vaduz', 'de', ''],
+    ['Malbun', 'en', 'English'], ['Eschen', 'en', 'English'], ['Old Bridge', 'en', 'English']]);
+  assert.strictEqual(P.count.textContent, 6);
+  // Markers: the English ones first (under) and greyed.
+  assert.deepStrictEqual(P.map.markers.map((m) => [m.el.title, m.el.className]), [
+    ['Malbun · English', 'wiki-map-marker wiki-map-marker-other'],
+    ['Eschen · English', 'wiki-map-marker wiki-map-marker-other'],
+    ['Old Bridge · English', 'wiki-map-marker wiki-map-marker-other'],
+    ['Eschen (Liechtenstein)', 'wiki-map-marker'], ['Vaduz', 'wiki-map-marker'], ['Schloss Vaduz', 'wiki-map-marker']]);
+  assert.ok(P.map.markers.every((m) => m.el.on.click));
+  // Faded by the Marker (MapLibre overwrites an inline opacity).
+  assert.deepStrictEqual(P.map.markers.map((m) => m.options.opacity), ['0.6', '0.6', '0.6', undefined, undefined, undefined]);
+  // The switch sits under the header; on, only the German rows and markers.
+  const sw = P.panel.children[1];
+  assert.deepStrictEqual([sw.tag, sw.className, sw.attrs['data-wiki-only']], ['label', 'wiki-only-yours', 'de']);
+  assert.strictEqual(P.panel.children[2], P.$['wiki-refresh']);
+  sw.children[0].checked = true; sw.children[0].on.change();
+  await P.flush();
+  assert.deepStrictEqual(rows().map((r) => r[1]), ['de', 'de', 'de']);
+  assert.deepStrictEqual(P.map.markers.map((m) => m.el.title), ['Eschen (Liechtenstein)', 'Vaduz', 'Schloss Vaduz']);
+  assert.strictEqual(P.count.textContent, 3);
+  assert.strictEqual(store.m['streetzim.wikiOnlyYours'], '1');
+  // Only English in view: say so rather than "nothing here".
+  P.map.bounds = [9.60, 9.62, 47.09, 47.11];
+  await P.refresh();
+  const empty = P.list.children[0];
+  assert.strictEqual(empty.attrs['data-wiki-empty'], 'none-yours');
+  assert.strictEqual(empty.text(), '🌍No German articles in view; 1 in another language.');
+  assert.deepStrictEqual(P.map.markers, []);
+  // A new panel starts with the saved choice.
+  const Q = await openPanel(DE_MAP, { 'wiki-geo-index.json': BASE, '~w/de/wiki-geo-index.json': DE }, { storage: store });
+  assert.strictEqual(Q.panel.children[1].children[0].checked, true);
+  assert.strictEqual(Q.list.children.length, 3);
+  // Off again: all six.
+  Q.panel.children[1].children[0].checked = false; Q.panel.children[1].children[0].on.change();
+  await Q.flush();
+  assert.strictEqual(Q.list.children.length, 6);
+  // ... and the next panel starts with all of them.
+  const R = await openPanel(DE_MAP, { 'wiki-geo-index.json': BASE, '~w/de/wiki-geo-index.json': DE }, { storage: store });
+  assert.strictEqual(R.panel.children[1].children[0].checked, false);
+  assert.strictEqual(R.list.children.length, 6);
+});
+
+await ok('the switch while an entry\'s detail is open: the detail stays, the list follows on Back', async () => {
+  const P = await openPanel(DE_MAP, { 'wiki-geo-index.json': BASE, '~w/de/wiki-geo-index.json': DE });
+  const malbun = P.list.children.find((r) => r.children[0].text() === 'Malbun');
+  malbun.on.click();
+  await P.flush();
+  const detailName = () => {
+    const wrap = P.list.children[0];
+    const nm = wrap && wrap.children && wrap.children.find((c) => c.className === 'wiki-detail-name');
+    return nm ? nm.text() : null;
+  };
+  assert.strictEqual(detailName(), 'Malbun');
+  const btn = P.list.children[0].children.find((c) => c.className === 'wiki-article-btn');
+  assert.strictEqual(btn.text(), '📖 Read full article in English');
+  const sw = P.panel.children[1].children[0];
+  sw.checked = true; sw.on.change();
+  await P.flush();
+  assert.strictEqual(detailName(), 'Malbun');            // not wiped by the switch
+  // Back: the list, German only.
+  P.list.children[0].children[0].on.click();
+  await P.flush();
+  assert.deepStrictEqual(P.list.children.map((r) => r.attrs['data-wiki-lang']), ['de', 'de', 'de']);
+});
+
+// The place sheet (210, _showPlaceDetail) on stubbed globals.
+const SHEET_SRC = fs.readFileSync(`${PARTS_DIR}/210-place-detail-sheet.js`, 'utf8');
+function sheetFor(config, idx, record) {
+  const document = panelDocument();
+  const body = document.createElement('body');
+  document.body = body;
+  const fn = new Function('window', 'document', 'history', 'location', 'baseUrl', '_findResultsState',
+    '_populateNearby', 'requestAnimationFrame', 'setTimeout',
+    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC + SHEET_SRC +
+    '\nreturn { show: _showPlaceDetail, set: function(i) { WIKI_GEO_INDEX = i; WIKI_GEO_QID = {};' +
+    ' for (var t in i) { var q = i[t] && i[t][3]; if (q) WIKI_GEO_QID[q] = t; } },' +
+    ' packs: function() { return WIKI_PACKS; }, wikiPacksInit: wikiPacksInit, wikiPackSetIndex: wikiPackSetIndex };');
+  const api = fn({}, document, {}, { pathname: '/', search: '' }, 'http://kiwix/c/', { origin: null },
+    () => {}, () => {}, () => 0);
+  api.set(BASE);
+  api.wikiPacksInit(config);
+  for (const pk of api.packs()) if (idx[pk.lang]) api.wikiPackSetIndex(pk, idx[pk.lang]);
+  api.show({}, record, 0);
+  const panel = body.children.find((c) => c.attrs.role === 'dialog');
+  const all = (e) => [e].concat((e.children || []).flatMap(all));
+  return {
+    buttons: all(panel).filter((e) => e.tag === 'button').map((b) => b.text()).filter((t) => t !== '×'),
+    also: (all(panel).find((e) => e.className === 'wiki-also') || null),
+  };
+}
+
+await ok('the place sheet: "Wikipedia (English)" for another language\'s article, "Also in" for the rest', () => {
+  const malbun = { n: 'Malbun', a: 47.10, o: 9.61, q: 'Q675040', t: 'place' };
+  const vaduz = { n: 'Vaduz', a: 47.141, o: 9.521, q: 'Q1844', t: 'place' };
+  let S = sheetFor(DE_MAP, { de: DE }, malbun);
+  assert.deepStrictEqual(S.buttons, ['🧭Directions', '📖Wikipedia (English)']);
+  assert.strictEqual(S.also, null);
+  S = sheetFor(DE_MAP, { de: DE }, vaduz);
+  assert.deepStrictEqual(S.buttons, ['🧭Directions', '📖Wikipedia']);
+  assert.strictEqual(S.also.attrs['data-wiki-also'], 'en');
+  // Two packs: the same.
+  const TWO = { ...DE_MAP, wikiPacks: [...DE_MAP.wikiPacks, { lang: 'th', prefix: '~w/th/' }] };
+  assert.deepStrictEqual(sheetFor(TWO, { de: DE, th: TH }, malbun).buttons, ['🧭Directions', '📖Wikipedia (English)']);
+  // German UI.
+  globalThis.SZ_I18N = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/de.json`, 'utf8'));
+  globalThis.SZ_UI_LANG = 'de';
+  try { assert.deepStrictEqual(sheetFor(DE_MAP, { de: DE }, malbun).buttons, ['🧭Route', '📖Wikipedia (Englisch)']); }
+  finally { globalThis.SZ_I18N = null; globalThis.SZ_UI_LANG = 'en'; }
+  // No packs, whatever the map language: "Wikipedia", as before.
+  for (const cfg of [{ language: 'de', hasWikiArticles: true }, { hasWikiArticles: true }]) {
+    for (const r of [malbun, vaduz]) {
+      assert.deepStrictEqual(sheetFor(cfg, {}, r).buttons, ['🧭Directions', '📖Wikipedia'], JSON.stringify(cfg));
+      assert.strictEqual(sheetFor(cfg, {}, r).also, null);
+    }
+  }
+});
+
+await ok('the Wiki panel wires in the order, rows and markers', () => {
+  const panel = fs.readFileSync(`${PARTS_DIR}/410-wiki-sidebar.js`, 'utf8');
+  assert.match(panel, /var pick = _wikiPanelPick\(all, onlyYours, 150\);\s*var items = pick\.items;\s*countEl\.textContent = pick\.total;/);
+  assert.match(panel, /_wikiMarkerOrder\(items\)\.forEach\(function\(it\) \{\s*var el = _wikiMarkerEl\(it\);/);
+  assert.match(panel, /new maplibregl\.Marker\(_wikiMarkerOptions\(el, it\)\)/);
+  assert.match(panel, /var div = _wikiPanelRowEl\(it\);/);
 });
 
 // ---------------------------------------------------------------------

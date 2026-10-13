@@ -230,7 +230,8 @@ function initWikidataPopups(map, config) {
     if (!link) return;
     var ab = document.createElement('button');
     ab.className = 'wiki-article-btn';
-    ab.textContent = szT('popup.read_article', '📖 Read full article');
+    // With packs, an article in another language than the map's names it.
+    ab.textContent = _wikiReadLabel(link);
     ab.style.cssText = 'display:block;width:100%;margin-top:8px;padding:7px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
     if (WIKI_PACKS.length) ab.setAttribute('data-wiki-lang', link.lang);
     ab.addEventListener('click', function(e) {

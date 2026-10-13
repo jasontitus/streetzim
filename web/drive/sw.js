@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-0aa932fa7d';
+const SHELL_CACHE = 'streetzim-drive-shell-3632d56326';
 
 const SHELL_URLS = [
   './',
@@ -434,10 +434,26 @@ const OPTIONAL_PROBE_PATHS = new Set([
 // here, and in both cases the link becomes the absolute viewer URL —
 // `../index.html` would be answered by Firebase with a redirect, which
 // iOS refuses for a navigation served through a service worker.
-const BACK_BAR_HTML =
-  '<nav class="sz-back"><a href="/drive/viewer/" ' +
-  'onclick="if(history.length>1){history.back();return false}">' +
-  '&#8592; Back to map</a></nav>';
+// The bar's words in the map's language (map-config "language"), one
+// entry per viewer UI table (resources/viewer/i18n/<lang>.json;
+// tests/sw_back_bar_js.test.mjs keeps them in step). English, and a
+// language without an entry, keep the words the build writes.
+const BACK_TO_MAP = {
+  de: 'Zurück zur Karte',
+  th: 'กลับไปที่แผนที่',
+  zh: '返回地图',
+};
+const BACK_TO_MAP_EN = '&#8592; Back to map';
+function backToMapText(lang) {
+  const l = typeof lang === 'string' ? lang.toLowerCase() : '';
+  const t = BACK_TO_MAP[l] || BACK_TO_MAP[l.split('-')[0]];
+  return t ? '&#8592; ' + t : BACK_TO_MAP_EN;
+}
+function backBarHtml(lang) {
+  return '<nav class="sz-back"><a href="/drive/viewer/" ' +
+    'onclick="if(history.length>1){history.back();return false}">' +
+    backToMapText(lang) + '</a></nav>';
+}
 const BACK_BAR_CSS =
   '<link rel="icon" href="data:,">' +   // no /favicon.ico probe (404 noise)
   '<style>.sz-back{position:sticky;top:0;z-index:1;background:#fff;' +
@@ -446,7 +462,8 @@ const BACK_BAR_CSS =
   'min-height:44px;color:#2563eb;font-weight:600;text-decoration:none}</style>';
 
 const WIKI_ARTICLE_PATH = /^(?:~w\/[^/]+\/)?wiki-article\//;
-function withBackToMap(data) {
+// `lang`: the map's language (mapLanguage), for the bar's words.
+function withBackToMap(data, lang) {
   let html;
   try { html = new TextDecoder('utf-8').decode(data); } catch (e) { return data; }
   if (html.indexOf('class="sz-back"') >= 0) {
@@ -455,11 +472,36 @@ function withBackToMap(data) {
     // view stamped after the file name (#map=…) is kept.
     html = html.replace(/(<nav class="sz-back"><a href=")(?:\.\.\/)+index\.html(#[^"]*)?"/,
                         (m, open, frag) => open + '/drive/viewer/' + (frag || '') + '"');
+    // The build writes the words in English.
+    const words = backToMapText(lang);
+    if (words !== BACK_TO_MAP_EN) {
+      html = html.replace(/(<nav class="sz-back"><a [^>]*>)&#8592; Back to map(<\/a>)/,
+                          (m, open, close) => open + words + close);
+    }
   } else {
     html = html.replace(/<\/head>/i, BACK_BAR_CSS + '</head>')
-               .replace(/<body\b[^>]*>/i, (m) => m + BACK_BAR_HTML);
+               .replace(/<body\b[^>]*>/i, (m) => m + backBarHtml(lang));
   }
   return new TextEncoder().encode(html);
+}
+
+// The map's language, read once per opened ZIM from its map-config.json;
+// '' when it has none or it cannot be read.
+const mapLanguages = new WeakMap();
+function mapLanguage(reader) {
+  let p = mapLanguages.get(reader);
+  if (!p) {
+    p = reader.findEntry('map-config.json')
+      .then((e) => (e ? reader.readEntry(e) : null))
+      .then((got) => {
+        if (!got) return '';
+        const cfg = JSON.parse(new TextDecoder('utf-8').decode(got.data));
+        return cfg && typeof cfg.language === 'string' ? cfg.language : '';
+      })
+      .catch(() => '');
+    mapLanguages.set(reader, p);
+  }
+  return p;
 }
 
 // Entries at least this big that sit in a raw (uncompressed) cluster are
@@ -599,7 +641,7 @@ async function serveFromZim(viewerPath, request, event) {
       });
     }
     const got = await read;
-    if (isArticle) return okResponse(withBackToMap(got.data), got.mime);
+    if (isArticle) return okResponse(withBackToMap(got.data, await mapLanguage(reader)), got.mime);
     const range = request.headers.get('range');
     if (range) {
       const rr = rangeResponse(got.data, range, got.mime);

@@ -106,8 +106,9 @@ function _showPlaceDetail(map, r, idx) {
   var _detailLinks = _wikiArticleLinks(r.q, r.w);
   var _detailArt = _detailLinks[0];
   if (_detailArt) {
+    // An article in another language than the map's says which (100).
     actions.appendChild(_detailActionBtn(
-      szT('place.wikipedia', 'Wikipedia'), '📖', false,
+      _wikiSheetLabel(_detailArt), '📖', false,
       function() { openWikiArticle(_detailArt.title, _detailArt.prefix); }));
   }
   panel.appendChild(actions);

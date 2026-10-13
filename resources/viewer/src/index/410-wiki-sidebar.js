@@ -22,6 +22,19 @@ function initWikiSidebar(map, config) {
   var pulseTimeout = null;
   var staleView = false; // true after flying to an item (list is stale)
 
+  // With packs and a Wikipedia in the map language: "Only <language>
+  // articles" under the header (100, wiki-yours). A map without packs has
+  // no such row.
+  var onlyYours = false;
+  if (_wikiYourLang()) {
+    var store = _szStorage();
+    onlyYours = _wikiOnlyYoursSaved(store);
+    panel.insertBefore(_wikiOnlyYoursRow(onlyYours, store, function(on) {
+      onlyYours = on;
+      if (active && !staleView) updateSidebarFromGeo();
+    }), refreshBar);
+  }
+
   // Baked geo-index: { title_underscored: [lat, lon, type, qid] } for every
   // placed Wikipedia article. When present (ZIMs built 2026-05-30+) it drives
   // the nearby list + map markers at ANY zoom, replacing the tile-scan path
@@ -91,20 +104,17 @@ function initWikiSidebar(map, config) {
   // ZIM's bundled glyph font has no emoji range, so a symbol text-field of
   // '📖' renders nothing (and 404s the 128000-128255 glyph range). DOM
   // elements use the browser font, so the 📖 shows — same as the UI buttons.
+  // With packs, the places in your language are added last: on top (100,
+  // wiki-yours).
   var _wikiMarkers = [];
   function setWikiMarkers(items) {
     clearWikiMarkers();
-    items.forEach(function(it) {
-      var el = document.createElement('div');
-      el.className = 'wiki-map-marker';
-      el.textContent = '📖';
-      el.title = it.name;
-      el.style.cssText = 'font-size:18px;line-height:1;cursor:pointer;'
-        + 'text-shadow:0 0 3px #fff,0 1px 2px rgba(255,255,255,0.95);';
+    _wikiMarkerOrder(items).forEach(function(it) {
+      var el = _wikiMarkerEl(it);
       el.addEventListener('click', function(e) {
         e.stopPropagation(); flyAndDetail(it);
       });
-      _wikiMarkers.push(new maplibregl.Marker({ element: el, anchor: 'center' })
+      _wikiMarkers.push(new maplibregl.Marker(_wikiMarkerOptions(el, it))
         .setLngLat(it.coords).addTo(map));
     });
   }
@@ -157,11 +167,13 @@ function initWikiSidebar(map, config) {
     loadingEl.style.display = 'none';
     listEl.textContent = '';
     var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
-    var items = _wikiPanelItems(W, E, S, N, geoPriority);
+    var all = _wikiPanelItems(W, E, S, N, geoPriority);
     var loaded = !!WIKI_GEO_INDEX || WIKI_PACKS.some(function(p) { return !!p.index; });
-    items.sort(function(a, b2) { return b2.priority - a.priority || a.name.localeCompare(b2.name); });
-    countEl.textContent = items.length;
-    if (items.length > 150) items = items.slice(0, 150);
+    // Priority, then name, the first 150; with packs, your language's
+    // places first among them (100, wiki-yours).
+    var pick = _wikiPanelPick(all, onlyYours, 150);
+    var items = pick.items;
+    countEl.textContent = pick.total;
     setWikiMarkers(items);
     if (!items.length) {
       var empty = createEl('div', 'wiki-empty-state');
@@ -174,6 +186,14 @@ function initWikiSidebar(map, config) {
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '⏳'));
         empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.loading_index', 'Loading Wikipedia index…')));
         countEl.textContent = '';
+      } else if (all.length) {
+        // "Only <language> articles" hides every row in view.
+        empty.setAttribute('data-wiki-empty', 'none-yours');
+        empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
+        empty.appendChild(createEl('div', 'wiki-empty-state-text', szTn('wiki.none_yours_in_view', all.length, {
+          one: 'No {language} articles in view; {n} in another language.',
+          other: 'No {language} articles in view; {n} in other languages.' },
+          { language: _wikiLangLabel(_wikiYourLang()) })));
       } else {
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '🌍'));
         empty.appendChild(createEl('div', 'wiki-empty-state-text', szT('wiki.none_in_view', 'No Wikipedia places in view — pan or zoom to explore.')));
@@ -186,14 +206,9 @@ function initWikiSidebar(map, config) {
     // the whole list: those chunks are region-global 20-45 MB files and a wide
     // "explore" used to Promise.all several at once and OOM mobile WebViews.
     // (Older ZIMs without a baked desc simply show name + type — no fetch.)
+    // With packs, a row in another language than yours names it (100).
     items.forEach(function(it) {
-      var desc = it.desc || '';
-      var div = createEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
-      div.appendChild(createEl('div', 'wiki-item-name', it.name));
-      var meta = createEl('div', 'wiki-item-meta');
-      meta.appendChild(createEl('span', 'wiki-item-type', szPlaceType(it.type || 'place')));
-      div.appendChild(meta);
-      if (desc) div.appendChild(createEl('div', 'wiki-item-desc', desc));
+      var div = _wikiPanelRowEl(it);
       div.addEventListener('click', function() {
         staleView = true; refreshBar.style.display = 'block'; flyAndDetail(it);
       });
@@ -282,7 +297,7 @@ function initWikiSidebar(map, config) {
     var links = WIKI_PACKS.length ? _wikiDetailLinks(qid, explicitTitle, explicitPrefix) : null;
     var ap = links ? links[0] : (explicitTitle || _wikiArticlePath(qid, null));
     if (ap) {
-      var ab = createEl('button', 'wiki-article-btn', szT('popup.read_article', '📖 Read full article'));
+      var ab = createEl('button', 'wiki-article-btn', _wikiReadLabel(links ? ap : null));
       ab.style.cssText = 'display:block;width:100%;margin-bottom:8px;padding:9px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-sizing:border-box;';
       if (links) ab.setAttribute('data-wiki-lang', ap.lang);
       ab.addEventListener('click', function() {

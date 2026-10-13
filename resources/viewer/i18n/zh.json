@@ -167,6 +167,7 @@
  "place.social": "社交媒体",
  "place.website": "网站",
  "place.wikipedia": "Wikipedia",
+ "place.wikipedia_in": "Wikipedia（{language}）",
  "places.back_to_map": "← 地图",
  "places.category_filter": "类别筛选",
  "places.chip_failed": "无法加载“{chip}”。",
@@ -221,6 +222,7 @@
  "places.type_two": "请至少输入 2 个字符。",
  "popup.directions_to_here": "到这里去",
  "popup.read_article": "📖 阅读全文",
+ "popup.read_article_in": "📖 阅读{language}全文",
  "preview.download": "下载",
  "preview.download_better": "——下载后的文件更快，且可离线使用",
  "preview.hide": "隐藏",
@@ -587,6 +589,10 @@
  "wiki.no_data": "找到了地物，但此区域没有 Wikipedia 数据。",
  "wiki.none_at_zoom": "在此缩放级别下看不到 Wikipedia 条目。请放大以发现更多地点。",
  "wiki.none_in_view": "视图中没有 Wikipedia 地点——平移或缩放以探索。",
+ "wiki.none_yours_in_view": {
+  "other": "视图中没有{language}条目；另有 {n} 个其他语言条目。"
+ },
+ "wiki.only_lang": "仅显示{language}条目",
  "wiki.pop": "人口 {n}",
  "wiki.show_in_area": "在此区域显示"
 }

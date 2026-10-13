@@ -374,6 +374,191 @@ function _wikiAlsoIn(links) {
 }
 // END wiki-packs
 
+// BEGIN wiki-yours
+// Your language first. On a map with Wikipedia packs the articles in the
+// map's language (which is also the UI's) are "yours"; the others, usually
+// the base's English, come after them in the Wiki panel, name their
+// language there and on the article buttons, and get a lighter map marker.
+// Without packs there are no others: every function here then gives
+// exactly what the viewer showed before.
+
+// The map language when this file has a Wikipedia in it, else '' (no
+// packs; or, say, a French map of an English base with a German pack,
+// where no article is yours and none is put behind).
+function _wikiYourLang() {
+  if (!WIKI_PACKS.length || !WIKI_MAP_LANG) return '';
+  var has = _wikiLangIs(WIKI_BASE_LANG, WIKI_MAP_LANG)
+    || WIKI_PACKS.some(function(p) { return _wikiLangIs(p.lang, WIKI_MAP_LANG); });
+  return has ? WIKI_MAP_LANG : '';
+}
+
+// Is an article in `lang` put behind yours? '' (the base's, language not
+// known) is: it is not the map language's, or _wikiYourLang would say so.
+function _wikiIsOther(lang) {
+  var y = _wikiYourLang();
+  return !!y && !_wikiLangIs(lang || '', y);
+}
+
+// A language's name in the UI language ("Englisch" in a German UI); its
+// code in capitals where Intl.DisplayNames is missing.
+function _wikiLangLabel(lang) {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+      var n = new Intl.DisplayNames([SZ_UI_LANG], { type: 'language' }).of(lang);
+      if (n && n !== lang) return n;
+    }
+  } catch (e) {}
+  return String(lang).toUpperCase();
+}
+
+// The language an article names: '' for one in the map language, of a
+// language not known, or on a map without packs.
+function _wikiLangTag(lang) {
+  if (!WIKI_PACKS.length || !lang || _wikiLangIs(lang, WIKI_MAP_LANG)) return '';
+  return _wikiLangLabel(lang);
+}
+
+// The Wiki panel's rows: { total, items }. As always, the places in view
+// by priority, then name, and the first `cap` of them; on a map with
+// packs, your language's places first within those. The cap is taken
+// before your language is put first, so a dense, zoomed-out view keeps its
+// most important places in every language (the cities an English article
+// has stay; a German view of Los Angeles at zoom 10 kept none of them).
+function _wikiPanelCompare(a, b) {
+  return b.priority - a.priority || a.name.localeCompare(b.name);
+}
+function _wikiPanelPick(all, onlyYours, cap) {
+  var items = _wikiPanelFilter(all, onlyYours).sort(_wikiPanelCompare);
+  var total = items.length;
+  if (items.length > cap) items = items.slice(0, cap);
+  return { total: total, items: _wikiYoursFirst(items) };
+}
+// Your language's first, each part in its order; the same array without
+// packs or without a Wikipedia in the map language.
+function _wikiYoursFirst(items) {
+  if (!_wikiYourLang()) return items;
+  return items.filter(function(it) { return !_wikiIsOther(it.lang); })
+    .concat(items.filter(function(it) { return _wikiIsOther(it.lang); }));
+}
+
+// "Only <language> articles": the rows in your language when the reader
+// asked for that and the map has a Wikipedia in it; otherwise all of them.
+function _wikiPanelFilter(items, onlyYours) {
+  if (!onlyYours || !_wikiYourLang()) return items;
+  return items.filter(function(it) { return !_wikiIsOther(it.lang); });
+}
+
+function _wikiEl(tag, className, text) {
+  var el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text) el.appendChild(document.createTextNode(text));
+  return el;
+}
+
+// One row of the Wiki panel (410 adds its click): name; type and, for an
+// article in another language, that language; the description.
+function _wikiPanelRowEl(it) {
+  var desc = it.desc || '';
+  var div = _wikiEl('div', 'wiki-item' + (desc ? '' : ' wiki-item-nodesc'));
+  div.appendChild(_wikiEl('div', 'wiki-item-name', it.name));
+  var meta = _wikiEl('div', 'wiki-item-meta');
+  meta.appendChild(_wikiEl('span', 'wiki-item-type', szPlaceType(it.type || 'place')));
+  var tag = _wikiLangTag(it.lang);
+  if (tag) {
+    var lt = _wikiEl('span', 'wiki-item-lang', tag);
+    lt.setAttribute('data-wiki-lang', it.lang);
+    meta.appendChild(lt);
+  }
+  div.appendChild(meta);
+  if (desc) div.appendChild(_wikiEl('div', 'wiki-item-desc', desc));
+  // data-wiki-lang: which Wikipedia the row opens, for the gates.
+  if (WIKI_PACKS.length) div.setAttribute('data-wiki-lang', it.lang || '');
+  return div;
+}
+
+// A Wiki panel place's map marker (410 adds its click): a 📖 (DOM, not a
+// symbol layer: the bundled glyphs have no emoji). A place whose article is
+// in another language than yours gets a smaller, greyed-out one, faded by
+// its Marker (_wikiMarkerOptions). With packs, a screen reader reads the
+// title, not MapLibre's "Map marker".
+function _wikiMarkerEl(it) {
+  var el = document.createElement('div');
+  el.className = 'wiki-map-marker';
+  el.textContent = '📖';
+  el.title = it.name;
+  var other = _wikiIsOther(it.lang);
+  el.style.cssText = (other ? 'font-size:14px;filter:grayscale(1);' : 'font-size:18px;')
+    + 'line-height:1;cursor:pointer;'
+    + 'text-shadow:0 0 3px #fff,0 1px 2px rgba(255,255,255,0.95);';
+  if (other) {
+    el.className += ' wiki-map-marker-other';
+    var tag = _wikiLangTag(it.lang);
+    if (tag) el.title = it.name + ' · ' + tag;
+  }
+  if (WIKI_PACKS.length) {
+    el.setAttribute('data-wiki-lang', it.lang || '');
+    el.setAttribute('aria-label', el.title);
+  }
+  return el;
+}
+
+// Its maplibregl.Marker options. The fading is the Marker's `opacity`: a
+// Marker sets its element's style.opacity on every move (MapLibre 5,
+// _updateOpacity), which overwrote an inline one.
+var WIKI_OTHER_OPACITY = '0.6';
+function _wikiMarkerOptions(el, it) {
+  var o = { element: el, anchor: 'center' };
+  if (_wikiIsOther(it.lang)) o.opacity = WIKI_OTHER_OPACITY;
+  return o;
+}
+
+// The order the markers are added in: the others first, so the ones in
+// your language are drawn over them where they overlap.
+function _wikiMarkerOrder(items) {
+  if (!_wikiYourLang()) return items;
+  return items.filter(function(it) { return _wikiIsOther(it.lang); })
+    .concat(items.filter(function(it) { return !_wikiIsOther(it.lang); }));
+}
+
+// The article button's label; for an article in another language than the
+// map's, one that names it ("Read full article in English").
+function _wikiReadLabel(link) {
+  var tag = link ? _wikiLangTag(link.lang) : '';
+  return tag ? szT('popup.read_article_in', '📖 Read full article in {language}', { language: tag })
+    : szT('popup.read_article', '📖 Read full article');
+}
+// The place sheet's Wikipedia button (210): "Wikipedia", or
+// "Wikipedia (English)" for an article in another language.
+function _wikiSheetLabel(link) {
+  var tag = link ? _wikiLangTag(link.lang) : '';
+  return tag ? szT('place.wikipedia_in', 'Wikipedia ({language})', { language: tag })
+    : szT('place.wikipedia', 'Wikipedia');
+}
+
+// The panel's "Only <language> articles" switch (410), shown when the map
+// has packs and a Wikipedia in its language. The choice is kept on this
+// device (`storage`: _szStorage()'s, or null).
+var WIKI_ONLY_YOURS_KEY = 'streetzim.wikiOnlyYours';
+function _wikiOnlyYoursSaved(storage) {
+  try { return !!storage && storage.getItem(WIKI_ONLY_YOURS_KEY) === '1'; } catch (e) { return false; }
+}
+function _wikiOnlyYoursRow(checked, storage, onChange) {
+  var row = _wikiEl('label', 'wiki-only-yours');
+  row.setAttribute('data-wiki-only', _wikiYourLang());
+  var box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = !!checked;
+  row.appendChild(box);
+  row.appendChild(_wikiEl('span', '', szT('wiki.only_lang', 'Only {language} articles',
+                                          { language: _wikiLangLabel(_wikiYourLang()) })));
+  box.addEventListener('change', function() {
+    try { if (storage) storage.setItem(WIKI_ONLY_YOURS_KEY, box.checked ? '1' : '0'); } catch (e) {}
+    onChange(!!box.checked);
+  });
+  return row;
+}
+// END wiki-yours
+
 // Open a bundled Wikipedia article in a full-screen in-app overlay with a
 // "← Back to map" bar, instead of window.open('_blank'). In the Kiwix WebView
 // '_blank' replaces the view with the chrome-less article and leaves no way

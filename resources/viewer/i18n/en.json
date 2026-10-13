@@ -166,6 +166,7 @@
  "place.social": "Social",
  "place.website": "Website",
  "place.wikipedia": "Wikipedia",
+ "place.wikipedia_in": "Wikipedia ({language})",
  "places.back_to_map": "← Map",
  "places.category_filter": "Category filter",
  "places.chip_failed": "Couldn't load ‘{chip}’.",
@@ -222,6 +223,7 @@
  "places.type_two": "Type at least 2 characters.",
  "popup.directions_to_here": "Directions to here",
  "popup.read_article": "📖 Read full article",
+ "popup.read_article_in": "📖 Read full article in {language}",
  "preview.download": "Download",
  "preview.download_better": "— the downloaded file is faster and works offline",
  "preview.hide": "Hide",
@@ -316,6 +318,11 @@
  "wiki.no_data": "Features found but no Wikipedia data available for this area.",
  "wiki.none_at_zoom": "No Wikipedia entries visible at this zoom level. Try zooming in to discover places.",
  "wiki.none_in_view": "No Wikipedia places in view — pan or zoom to explore.",
+ "wiki.none_yours_in_view": {
+  "one": "No {language} articles in view; {n} in another language.",
+  "other": "No {language} articles in view; {n} in other languages."
+ },
+ "wiki.only_lang": "Only {language} articles",
  "wiki.pop": "pop. {n}",
  "wiki.show_in_area": "Show in this area"
 }

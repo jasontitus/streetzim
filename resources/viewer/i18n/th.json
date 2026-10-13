@@ -166,6 +166,7 @@
  "place.social": "โซเชียลมีเดีย",
  "place.website": "เว็บไซต์",
  "place.wikipedia": "Wikipedia",
+ "place.wikipedia_in": "Wikipedia (ภาษา{language})",
  "places.back_to_map": "← แผนที่",
  "places.category_filter": "ตัวกรองหมวดหมู่",
  "places.chip_failed": "โหลด “{chip}” ไม่ได้",
@@ -220,6 +221,7 @@
  "places.type_two": "พิมพ์อย่างน้อย 2 ตัวอักษร",
  "popup.directions_to_here": "เส้นทางมาที่นี่",
  "popup.read_article": "📖 อ่านบทความฉบับเต็ม",
+ "popup.read_article_in": "📖 อ่านบทความฉบับเต็มภาษา{language}",
  "preview.download": "ดาวน์โหลด",
  "preview.download_better": "— ไฟล์ที่ดาวน์โหลดจะเร็วกว่าและใช้งานออฟไลน์ได้",
  "preview.hide": "ซ่อน",
@@ -586,6 +588,10 @@
  "wiki.no_data": "พบสถานที่ แต่ไม่มีข้อมูล Wikipedia สำหรับบริเวณนี้",
  "wiki.none_at_zoom": "ไม่มีรายการ Wikipedia ที่มองเห็นได้ในระดับซูมนี้ ลองซูมเข้าเพื่อค้นพบสถานที่",
  "wiki.none_in_view": "ไม่มีสถานที่จาก Wikipedia ในมุมมองนี้ — เลื่อนหรือซูมเพื่อสำรวจ",
+ "wiki.none_yours_in_view": {
+  "other": "ไม่มีบทความภาษา{language}ในมุมมองนี้ มี {n} บทความในภาษาอื่น"
+ },
+ "wiki.only_lang": "เฉพาะบทความภาษา{language}",
  "wiki.pop": "ประชากร {n}",
  "wiki.show_in_area": "แสดงในบริเวณนี้"
 }
