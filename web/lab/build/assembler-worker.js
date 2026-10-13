@@ -343,6 +343,7 @@ async function run(o) {
       rate.push([now, net.base_bytes]);
       while (rate.length > 2 && now - rate[0][0] > 30000) rate.shift();
       const [t1, b1] = rate[0];
+      if (net.waitingAt && now - net.waitingAt < 2500) msg.waiting = net.waiting;
       msg.base = { got: net.base_bytes, size: recipe.base.size, bps: now > t1 ? (net.base_bytes - b1) / ((now - t1) / 1000) : 0, k: http.win.k,
                    avg: net.base_t0 && now > net.base_t0 ? net.base_bytes / ((now - net.base_t0) / 1000) : 0 };
     }

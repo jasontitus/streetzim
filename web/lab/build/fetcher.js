@@ -13,17 +13,37 @@
 //   asking again only costs another wait for the first byte);
 // - any other failure is retried after a backoff of 1, 2, 4, ... s (capped at
 //   maxBackoffMs), `tries` requests in all; a 4xx other than 408/429 is not;
-// - every retry resumes from the first missing byte.
+// - every retry resumes from the first missing byte;
+// - with patienceMs, `tries` failures do not end it: it then waits for the
+//   connection (the 'online' event, or 20-60 s) and tries again, until no
+//   byte has arrived from any request sharing `net` for patienceMs. Each
+//   second of that wait calls onWait(ms without a byte).
 // net collects the speeds (see newNet); onBytes(n) reports progress and
 // onRetry(note) explains each retry.
 (function (g) {
   'use strict';
-  const DEFAULTS = { stallMs: 30000, tries: 5, maxBackoffMs: 8000, slowAfterMs: 20000, slowBps: 50e3, slowTries: 3 };
+  const DEFAULTS = { stallMs: 30000, tries: 5, maxBackoffMs: 8000, slowAfterMs: 20000, slowBps: 50e3, slowTries: 3, patienceMs: 0, onWait: null };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   class FetchError extends Error {
     constructor(msg, permanent) { super(msg); this.permanent = !!permanent; }
   }
-  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, slow_retries: 0, errors: 0, resets: 0, hash_retries: 0 });
+  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, slow_retries: 0, errors: 0, resets: 0, hash_retries: 0,
+    waits: 0, wait_ms: 0, lastByteAt: performance.now() });
+  const online = () => !(self.navigator && self.navigator.onLine === false);
+  // Until the 'online' event (when the browser says it is offline: up to
+  // 60 s), or 20 s; aborted with the signal.
+  function waitForConnection(signal, tick) {
+    return new Promise((resolve, reject) => {
+      const t0 = performance.now();
+      const on = typeof self.addEventListener === 'function';
+      const done = () => { clearTimeout(timer); clearInterval(every); if (on) self.removeEventListener('online', done); signal.removeEventListener('abort', stop); resolve(); };
+      const stop = () => { done(); reject(aborted()); };
+      const timer = setTimeout(done, online() ? 20000 : 60000);
+      const every = setInterval(() => tick(performance.now() - t0), 1000);
+      if (on) self.addEventListener('online', done);
+      signal.addEventListener('abort', stop, { once: true });
+    });
+  }
   function pct(a, p) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
   const aborted = () => new DOMException('aborted', 'AbortError');
 
@@ -53,6 +73,7 @@
         if (done) break;
         if (n + value.length > b - a) throw new FetchError('the server sent too many bytes');
         onChunk(value); n += value.length;
+        net.lastByteAt = performance.now();
         const ms = performance.now() - t0;
         const bps = n / (ms / 1000);
         if (crawlCheck && n < b - a && ms > opt.slowAfterMs && bps < opt.slowBps && net.mbps.length && bps * 4 < pct(net.mbps, 0.5) * 1e6) {
@@ -90,7 +111,16 @@
         if (e.name === 'AbortError' || e.permanent) throw e;
         net.errors++;
         if (e.slow) { slow++; net.slow_retries++; onRetry(`${e.message}; asking again`); continue; }
-        if (++failures >= opt.tries) throw new FetchError(`${e.message}, ${opt.tries} tries`);
+        if (++failures >= opt.tries) {
+          const idle = performance.now() - net.lastByteAt;
+          if (!opt.patienceMs) throw new FetchError(`${e.message}, ${opt.tries} tries`);
+          if (idle >= opt.patienceMs) throw new FetchError(`${e.message}; nothing arrived for ${Math.round(idle / 60000)} min`);
+          net.waits++;
+          const w0 = performance.now();
+          await waitForConnection(signal, () => { if (opt.onWait) opt.onWait(performance.now() - net.lastByteAt); });
+          net.wait_ms += performance.now() - w0;
+          continue;                    // stays past `tries`: the next failure waits again
+        }
         net.retries++;
         onRetry(`${e.message}; trying again (${failures + 1} of ${opt.tries})`);
         await sleep(Math.min(opt.maxBackoffMs, 1000 * 2 ** (failures - 1)));

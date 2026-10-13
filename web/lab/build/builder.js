@@ -681,7 +681,11 @@
             text = `Downloading the ${region.title} map: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)}` +
               (bps > 0 ? `, ${(bps / 1e6).toFixed(1)} MB/s` : '') + (avg > 0 && ms > 20000 ? `, about ${fmtDur(left / avg)} left` : '');
           } else text = `${fmtMB(written)} of ${fmtMB(size)}`;
-          if (note && performance.now() - note.at < 15000) text += ` (${note.text})`;
+          if (d.waiting) {
+            const w = d.waiting / 1000;
+            text = `Waiting for the connection… (${w < 120 ? Math.round(w) + ' s' : Math.round(w / 60) + ' min'} without data; ` +
+              `it keeps trying for 30 min). ${fmtMB(d.base ? d.base.got : written)} of ${fmtMB(d.base ? d.base.size : size)} so far`;
+          } else if (note && performance.now() - note.at < 15000) text += ` (${note.text})`;
           if (!sinkInfo && written === 0 && mode === 'net' && !(d.base && d.base.got)) text = `Connecting to the ${region.title} map…`;
           setStatus(text + ' — keep this tab open', closing);
           for (const p of [25, 50, 75]) {
@@ -746,7 +750,7 @@
         try { const f = await sinkInfo.handle.getFile(); if (f.size === 0 && sinkInfo.handle.remove) await sinkInfo.handle.remove(); } catch (e) { /* keep it */ }
       }
       setStatus(result.outcome === 'download_stopped' ? 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).'
-        : result.outcome === 'base_download' ? `Stopped: could not download the ${region.title} map (${result.error}). Nothing was saved. Try again.`
+        : result.outcome === 'base_download' ? `Stopped: could not download the ${region.title} map (${result.error}). The download was cancelled; try again when the connection is back.`
         : result.outcome === 'wrong_base' && mode === 'net' ? `Stopped: the ${region.title} map on the server is not the one this language was made for (${result.error}). Nothing was saved. Try again later.`
         : result.outcome === 'no_sink' ? 'Not started: ' + result.error
         : 'Stopped: ' + result.error, true);
