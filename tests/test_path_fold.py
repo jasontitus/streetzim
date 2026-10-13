@@ -519,3 +519,55 @@ def test_the_streetzim_command_forwards_no_fold_paths(tmp_path):
         argv = cli._builder_argv(p.parse_args(common + extra), "1,1,2,2", None, tmp_path, None)  # pyright: ignore[reportPrivateUsage]
         assert ("--no-fold-paths" in argv) is want
 
+
+
+# ---- round-3 review: broken parents, arithmetic escapes, Folder wiring ------
+
+def _broken_transportation_parent() -> bytes:
+    # top level parses; the transportation layer ends in an unterminated varint
+    layer = pf._enc_varint(15 << 3) + pf._enc_varint(2) + pf._enc_len(1, b"transportation") + b"\x28\x80"
+    return pf._enc_len(3, layer)
+
+
+def test_a_parent_broken_inside_a_path_layer_is_stored_as_it_came(mb):
+    folder = pf.Folder(mb)
+    bad = _broken_transportation_parent()
+    assert folder(13, X13, Y13, bad) is bad and folder.stats["bad_parents"] == 1
+    top = b"\x1a\xff\xff"                                   # top level broken
+    assert folder(13, X13, Y13, top) is top and folder.stats["bad_parents"] == 2
+    folder.close()
+
+
+def test_bad_parents_are_counted_across_processes_and_warned_about(mb, capsys):
+    from streetzim import tiles as T
+    for workers in (1, 2):
+        stats: dict = {}
+        list(pf.fold_tiles(mb, [(13, X13, Y13, _broken_transportation_parent())], workers=workers, stats=stats))
+        assert stats["bad_parents"] == 1
+    T._print_fold({"tiles": 0, "features": 0, "bad_parents": 1})
+    assert "1 z13 tiles would not decode" in capsys.readouterr().out
+
+
+def test_a_fold_bug_is_not_swallowed_by_the_folder(mb, monkeypatch):
+    def boom(*_a, **_k):
+        raise IndexError("a bug")
+    monkeypatch.setattr(pf, "_encode_geometry", boom)
+    folder = pf.Folder(mb)
+    with pytest.raises(IndexError):
+        folder(13, X13, Y13, gzip.compress(PARENT))
+    folder.close()
+
+
+def test_children_with_extent_0_or_an_endless_varint_are_skipped():
+    zero = raw_tile("transportation", [(2, [("class", "path")], line((1, 1), (300, 1)))], extent=0)
+    endless = raw_tile("transportation", [(2, [("class", "path")], [pf._MOVE_TO | 1 << 3] + [1 << 70, 0])])
+    good = tile({"transportation": [FOOTWAY]})
+    stats: dict = {}
+    got = added_features(pf.fold(PARENT, [(0, 0, zero), (1, 1, endless), (1, 0, good)], stats))
+    assert len(got) == 1 and stats["bad_children"] == 2
+
+
+@pytest.mark.parametrize("keep", [True, False])
+def test_the_pool_honours_keep_gzip(mb, keep):
+    out = list(pf.fold_tiles(mb, [(13, X13, Y13, gzip.compress(PARENT))], workers=2, keep_gzip=keep))
+    assert (out[0][3][:2] == b"\x1f\x8b") is keep and _paths_in(out[0][3]) == 1

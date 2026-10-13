@@ -48,6 +48,8 @@ def _varint(buf, i: int) -> tuple[int, int]:
         if b < 0x80:
             return result, i
         shift += 7
+        if shift > 63:                 # protobuf varints are at most 10 bytes
+            raise ValueError("varint longer than 10 bytes")
 
 
 def _fields(buf) -> Iterator[tuple[int, int, Any, int, int]]:
@@ -157,6 +159,8 @@ def _path_features(tile, name: bytes, dx: int, dy: int, out: list) -> None:
         layer = _Layer(v)
         if CLASS_KEY not in layer.keys or PATH_VALUE not in layer.values:
             return
+        if layer.extent <= 0:
+            raise ValueError(f"layer extent {layer.extent}")
         ck = layer.keys.index(CLASS_KEY)
         pv = {i for i, raw in enumerate(layer.values) if raw == PATH_VALUE}
         for feat in layer.features:
@@ -429,10 +433,16 @@ class Folder:
         if not children:
             return data
         try:
+            # Parse what fold() will: every layer's name, and the path
+            # layers' fields. A parent broken there is stored as it came
+            # (the writer checks only its gzip), not folded, never fatal.
             tile = _decoded(data)
-            for _f in _fields(tile):           # a parent the writer will reject
-                pass
+            for fno, wt, v, _s, _e in _fields(tile):
+                if fno == 3 and wt == 2 and _layer_name(v).decode("utf-8", "replace") in LAYERS:
+                    if _Layer(v).extent <= 0:
+                        raise ValueError("parent layer extent")
         except _BAD_TILE:
+            self.stats["bad_parents"] = self.stats.get("bad_parents", 0) + 1
             return data
         folded = fold(tile, children, self.stats)
         if folded is tile:
@@ -465,16 +475,18 @@ def _init_worker(mbtiles_path, keep_gzip: bool = True) -> None:
     _WORKER = Folder(mbtiles_path, keep_gzip)
 
 
-def _fold_with(folder: Folder, x: int, y: int, data: bytes) -> tuple[bytes | None, int, int]:
-    """(the folded tile or None when unchanged, paths added, bad children)."""
-    f0 = folder.stats.get("features", 0)
-    b0 = folder.stats.get("bad_children", 0)
+def _fold_with(folder: Folder, x: int, y: int,
+               data: bytes) -> tuple[bytes | None, int, int, int]:
+    """(the folded tile or None when unchanged, paths added, bad children,
+    bad parents)."""
+    st = folder.stats
+    f0, b0, p0 = st.get("features", 0), st.get("bad_children", 0), st.get("bad_parents", 0)
     out = folder(FOLD_ZOOM, x, y, data)
-    return ((None if out is data else out), folder.stats.get("features", 0) - f0,
-            folder.stats.get("bad_children", 0) - b0)
+    return ((None if out is data else out), st.get("features", 0) - f0,
+            st.get("bad_children", 0) - b0, st.get("bad_parents", 0) - p0)
 
 
-def _fold_one(item: tuple[int, int, bytes]) -> tuple[bytes | None, int, int]:
+def _fold_one(item: tuple[int, int, bytes]) -> tuple[bytes | None, int, int, int]:
     assert _WORKER is not None
     return _fold_with(_WORKER, *item)
 
@@ -485,9 +497,10 @@ def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
     """`items` ((z, x, y, data), XYZ rows) with every z13 tile folded
     (see `fold`), in the same order. `workers` > 1 folds in that many
     processes; `stats` gets "tiles" (tiles that gained paths), "features"
-    (paths added) and "bad_children" (z14 tiles that would not decode)."""
+    (paths added), "bad_children" (z14 tiles whose paths could not be
+    read) and "bad_parents" (z13 tiles stored as they came)."""
     stats = stats if stats is not None else {}
-    for k in ("tiles", "features", "bad_children"):
+    for k in ("tiles", "features", "bad_children", "bad_parents"):
         stats.setdefault(k, 0)
     pool = None
     folder = None
@@ -514,8 +527,9 @@ def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
             else:
                 assert folder is not None
                 results = [_fold_with(folder, *chunk[i][1:]) for i in todo]
-            for i, (out, added, bad) in zip(todo, results):
+            for i, (out, added, bad, bad_parent) in zip(todo, results):
                 stats["bad_children"] += bad
+                stats["bad_parents"] += bad_parent
                 if out is not None:
                     z, x, y, _data = chunk[i]
                     chunk[i] = (z, x, y, out)

@@ -394,6 +394,9 @@ def _print_fold(stats):
     if stats.get("bad_children"):
         print(f"    WARNING: {stats['bad_children']:,} z14 tiles would not decode; "
               "their paths are missing at z13", flush=True)
+    if stats.get("bad_parents"):
+        print(f"    WARNING: {stats['bad_parents']:,} z13 tiles would not decode; "
+              "stored as they were, without paths", flush=True)
 
 
 FALLBACK_SCAN_MAX_BYTES = 200_000_000

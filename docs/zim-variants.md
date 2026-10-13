@@ -86,7 +86,7 @@ folding takes 2 minutes on one core. The densest city tiles grow most
 every path of the overzoomed tile, so phones do more work there. A build
 without a search cache also takes trail names into search. A z14 tile that
 will not decode, or whose paths cannot be read, is skipped with a warning
-(its siblings still fold). Folded paths carry no feature id, so two
+(its siblings still fold); a z13 tile that will not decode is stored as it came, also with a warning. Folded paths carry no feature id, so two
 identical features (same tags and geometry) in one tile are added once. `derive_zim.py --light` copies
 blobs and does not fold: its ZIMs still draw no paths.
 
