@@ -158,10 +158,48 @@ async function run(o) {
       off = end;
     }
   }
+  // A chunk stays cached from its first read until its last use. The tail of
+  // a merged ZIM interleaves hundreds of small base ranges (from one or two
+  // chunks) with generated pieces, so dropping a chunk whenever the next
+  // step differs re-read it hundreds of times. lastUse[i] says step i is the
+  // last to need its chunk; MAX_LIVE caps memory if a plan ever spreads a
+  // chunk's uses far apart (the chunk with the furthest next use goes first).
+  const MAX_LIVE = 6;
+  const keyOf = (s) => s.src + '#' + s.k;
+  const nextUse = new Array(steps.length).fill(Infinity);
+  const lastSeen = new Map();
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].k === undefined) continue;
+    const key = keyOf(steps[i]);
+    if (lastSeen.has(key)) nextUse[i] = lastSeen.get(key);
+    lastSeen.set(key, i);
+  }
+  const pendingUse = new Map();        // key -> index of its next use, for cached chunks
+  const release = (i) => {
+    const s = steps[i], key = keyOf(s);
+    if (nextUse[i] === Infinity) { sources[s.src].drop(s.k); pendingUse.delete(key); return; }
+    pendingUse.set(key, nextUse[i]);
+    let live = 0;
+    for (const src of Object.values(sources)) live += src.cache.size;
+    while (live > MAX_LIVE) {
+      let worst = null;
+      for (const [k2, at] of pendingUse) if (!worst || at > worst[1]) worst = [k2, at];
+      if (!worst) break;
+      const [srcKey, k] = worst[0].split('#');
+      sources[srcKey].drop(+k); pendingUse.delete(worst[0]); live--;
+    }
+  };
+
   // Prefetch: keep up to `inflight` network chunks (and 2 local) ahead.
   const inflight = o.inflight || 4;
   const ahead = [];
-  for (let i = 0; i < steps.length; i++) if (steps[i].k !== undefined && (i === 0 || steps[i - 1].src !== steps[i].src || steps[i - 1].k !== steps[i].k)) ahead.push(i);
+  let prevKey = null;
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].k === undefined) continue;
+    const key = keyOf(steps[i]);
+    if (key !== prevKey) ahead.push(i);
+    prevKey = key;
+  }
   let nextAhead = 0;
   const prefetch = (i) => {
     while (nextAhead < ahead.length && ahead[nextAhead] < i) nextAhead++;
@@ -196,8 +234,7 @@ async function run(o) {
         prefetch(i);
         const buf = await sources[s.src].get(s.k);
         data = buf.subarray(s.from, s.to);
-        const nxt = steps[i + 1];
-        if (!nxt || nxt.src !== s.src || nxt.k !== s.k) sources[s.src].drop(s.k);
+        release(i);
       }
       if (s.src !== 'md5') md5.update(data);
       const n = data.length;
