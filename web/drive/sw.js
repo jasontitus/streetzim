@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-605560d718';
+const SHELL_CACHE = 'streetzim-drive-shell-7b7efe8d81';
 
 const SHELL_URLS = [
   './',
@@ -440,6 +440,11 @@ const OPTIONAL_PROBE_PATHS = new Set([
 // language without an entry, keep the words the build writes.
 const BACK_TO_MAP = {
   de: 'Zurück zur Karte',
+  el: 'Επιστροφή στον χάρτη',
+  es: 'Volver al mapa',
+  fr: 'Retour à la carte',
+  ja: '地図に戻る',
+  ko: '지도로 돌아가기',
   th: 'กลับไปที่แผนที่',
   zh: '返回地图',
 };

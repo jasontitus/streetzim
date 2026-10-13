@@ -30,10 +30,12 @@ PARTS = ROOT / "resources" / "viewer" / "src" / "index"
 PLACES = ROOT / "resources" / "viewer" / "places.html"
 
 # Plural categories each language's table must give (Intl.PluralRules).
-PLURAL_FORMS = {"de": {"one", "other"}, "th": {"other"}, "zh": {"other"}}
+PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "other"},
+                "fr": {"one", "other"}, "ja": {"other"}, "ko": {"other"},
+                "th": {"other"}, "zh": {"other"}}
 # Tables made by machine translation (their "_machine": true shows the note);
 # German is reviewed by a person.
-MACHINE = {"th", "zh"}
+MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh"}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -52,6 +54,14 @@ def test_generated_files_are_current() -> None:
 
 def test_there_is_a_german_table() -> None:
     assert "de" in lang_tables()
+
+
+def test_the_language_matrix_menu_has_its_ui_tables() -> None:
+    # California's menu entries (es, fr, ja, ko, el) got an English UI and
+    # no <html lang> without a table; every plural rule is listed above.
+    tables = lang_tables()
+    assert {"el", "es", "fr", "ja", "ko"} <= set(tables)
+    assert set(tables) <= set(PLURAL_FORMS), sorted(set(tables) - set(PLURAL_FORMS))
 
 
 def test_there_are_thai_and_chinese_tables() -> None:

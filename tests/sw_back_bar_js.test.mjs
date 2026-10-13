@@ -33,7 +33,7 @@ const BUILT = '<html><head></head><body><nav class="sz-back"><a href="../../../i
   'onclick="x">&#8592; Back to map</a></nav><p>Pack body.</p></body></html>';
 
 await ok('English, no language, or one without a table: the old bar, byte for byte', () => {
-  for (const lang of [undefined, '', 'en', 'EN', 'fr', 'qqx', 42]) {
+  for (const lang of [undefined, '', 'en', 'EN', 'it', 'qqx', 42]) {
     assert.strictEqual(api.backBarHtml(lang), OLD_BAR, String(lang));
     const out = run(BARE, lang);
     assert.ok(out.includes('<body>' + OLD_BAR + '<p>x</p>'), String(lang));
@@ -41,8 +41,10 @@ await ok('English, no language, or one without a table: the old bar, byte for by
   }
 });
 
-await ok('a map in German, Thai or Chinese: the bar in that language, added or rewritten', () => {
-  const want = { de: '&#8592; Zurück zur Karte', th: '&#8592; กลับไปที่แผนที่', zh: '&#8592; 返回地图' };
+await ok('a map in a language with a UI table: the bar in that language, added or rewritten', () => {
+  const want = { de: '&#8592; Zurück zur Karte', th: '&#8592; กลับไปที่แผนที่', zh: '&#8592; 返回地图',
+                 es: '&#8592; Volver al mapa', fr: '&#8592; Retour à la carte', ja: '&#8592; 地図に戻る',
+                 ko: '&#8592; 지도로 돌아가기', el: '&#8592; Επιστροφή στον χάρτη' };
   for (const [lang, words] of Object.entries(want)) {
     for (const l of [lang, lang.toUpperCase(), lang + '-x']) {
       assert.strictEqual(api.backToMapText(l), words, l);

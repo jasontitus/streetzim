@@ -15,7 +15,8 @@ const DE = table('de');
 const EN = table('en');
 const TH = table('th');
 const ZH = table('zh');
-const TABLES = { de: DE, th: TH, zh: ZH };
+const NEW_MACHINE = ['el', 'es', 'fr', 'ja', 'ko'];
+const TABLES = { de: DE, th: TH, zh: ZH, ...Object.fromEntries(NEW_MACHINE.map((l) => [l, table(l)])) };
 
 let pass = 0;
 async function ok(name, fn) {
@@ -78,9 +79,9 @@ await ok('English: no table, the call site text, exactly as before', () => {
   assert.strictEqual(docEl.lang, '');   // an English page is left as it was
 });
 
-await ok('a language without a table (fr) falls back to English, string by string', () => {
+await ok('a language without a table (it) falls back to English, string by string', () => {
   const { api } = load(INDEX_TABLES);
-  assert.strictEqual(api.szSetUiLanguage('fr', ''), 'en');
+  assert.strictEqual(api.szSetUiLanguage('it', ''), 'en');
   assert.strictEqual(api.szT('routing.clear', 'Clear route'), 'Clear route');
 });
 
@@ -132,12 +133,34 @@ await ok('Thai and Chinese: picked by the map language and by ?uilang=', () => {
   }
 });
 
-await ok('the machine-translation note shows for th and zh only', () => {
+await ok('Spanish, French, Japanese, Korean, Greek: a table, <html lang> = the map language', () => {
+  for (const lang of NEW_MACHINE) {
+    const r = load(INDEX_TABLES);
+    assert.strictEqual(r.api.szSetUiLanguage(lang, ''), lang);
+    assert.strictEqual(r.docEl.lang, lang);
+    assert.strictEqual(r.api.szT('routing.clear', 'Clear route'), TABLES[lang]['routing.clear']);
+    assert.notStrictEqual(TABLES[lang]['routing.clear'], 'Clear route', lang);
+    assert.strictEqual(r.api.szMachineTranslated(), true, lang);
+    // A region subtag or upper case: the same table.
+    const r2 = load(INDEX_TABLES);
+    assert.strictEqual(r2.api.szSetUiLanguage(lang.toUpperCase() + '-XX', ''), lang);
+    assert.strictEqual(r2.docEl.lang, lang);
+  }
+  // A language without a table: English, <html lang> untouched.
+  const r = load(INDEX_TABLES);
+  assert.strictEqual(r.api.szSetUiLanguage('it', ''), 'en');
+  assert.strictEqual(r.docEl.lang, '');
+  // Places.html carries them too.
+  const places = JSON.parse(pageTables('places.html').json);
+  for (const lang of NEW_MACHINE) assert.ok(places[lang] && places[lang]._machine === true, lang);
+});
+
+await ok('the machine-translation note shows for machine tables only', () => {
   const note = () => el({ 'data-i18n': 'common.machine_translated', 'data-i18n-machine': '' },
                         'Interface translated by machine — corrections welcome');
   const plain = () => el({ 'data-i18n': 'routing.clear' }, 'Clear route');
   for (const [lang, shown] of [['th', true], ['zh', true], ['de', false], ['en', false],
-                               ['fr', false], ['qps', false]]) {
+                               ['it', false], ['qps', false], ...NEW_MACHINE.map((l) => [l, true])]) {
     const els = [note(), plain()];
     const r = load(INDEX_TABLES, els);
     r.api.szUseLanguage(lang, '');
