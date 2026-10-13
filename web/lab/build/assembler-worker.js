@@ -83,11 +83,14 @@ class SwDownloadSink {
       if (this.failed) throw this.failed;
     } finally { this.waitingSince = null; }
   }
-  async write(u8) {
+  // own: the caller is done with u8's whole buffer, so it moves to the
+  // service worker as it is; otherwise a private copy is transferred.
+  async write(u8, own) {
     await this.until(() => this.credit > 0);
     this.credit--;
-    const c = u8.slice();            // a private copy to transfer
+    const c = own && u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength ? u8 : u8.slice();
     this.port.postMessage({ type: 'chunk', chunk: c }, [c.buffer]);
+    return c === u8;                 // true: u8 is gone (transferred)
   }
   async close() {
     this.port.postMessage({ type: 'end' });
@@ -165,26 +168,35 @@ function memoryReader(u8) {          // a pack the page has downloaded and check
 // flight ahead of the assembly: 4 at first, one more (up to 6) each time the
 // throughput of the last 4 chunks rose by 10 %, one fewer (down to 4) when it
 // fell by 20 %.
-function httpReader(url, size, net, signal, onRetry) {
-  const win = { k: 4, done: 0, t: performance.now(), bytes: 0, rate: 0 };
+// mem.window [min, max] chunks in flight ([4, 6], or [2, 2] on a device with
+// little memory). After 8 failed tries a chunk waits for the connection and
+// tries again (fetcher.js patienceMs) until nothing has arrived for 30 min;
+// net.waiting then says how long it has been. Chunk buffers come from a pool
+// that release() refills, so a long download does not churn 16 MiB buffers.
+const PATIENCE_MS = 30 * 60000;
+function httpReader(url, size, chunk, net, signal, onRetry, mem) {
+  const [kMin, kMax] = mem.window;
+  const win = { k: kMin, done: 0, t: performance.now(), bytes: 0, rate: 0 };
+  const pool = [];
   const read = async (a, b) => {
-    const out = new Uint8Array(b - a);
+    const out = b - a === chunk && pool.length ? pool.pop() : new Uint8Array(b - a);
     if (!net.base_t0) net.base_t0 = performance.now();
     try {
       await SZFetch.fetchRetrying(url, out, a, a, b, size, signal, net.http, (n) => { net.base_bytes += n; }, onRetry,
-        { tries: 8, maxBackoffMs: 30000 });
+        { tries: 8, maxBackoffMs: 30000, patienceMs: mem.patienceMs || PATIENCE_MS, onWait: (ms) => { net.waiting = ms; net.waitingAt = performance.now(); } });
     } catch (e) { e.baseDownload = true; throw e; }
     net.base_t1 = performance.now();
     if (++win.done % 4 === 0) {
       const now = performance.now();
       const rate = (net.base_bytes - win.bytes) / ((now - win.t) / 1000);
-      if (win.rate && rate > win.rate * 1.1 && win.k < 6) win.k++;
-      else if (win.rate && rate < win.rate * 0.8 && win.k > 4) win.k--;
+      if (win.rate && rate > win.rate * 1.1 && win.k < kMax) win.k++;
+      else if (win.rate && rate < win.rate * 0.8 && win.k > kMin) win.k--;
       win.rate = rate; win.t = now; win.bytes = net.base_bytes;
     }
     return out;
   };
-  return { read, win };
+  const free = (u8) => { if (u8.byteLength === chunk && pool.length < kMax + 1) pool.push(u8); };
+  return { read, win, free };
 }
 
 // ---------------------------------------------------------------- run
@@ -195,8 +207,9 @@ async function run(o) {
   const net = { local_bytes: 0, local_ms: 0, base_bytes: 0, http: SZFetch.newNet(), hash_retries: 0 };
   const abort = new AbortController();
   let http = null;
+  const mem = o.mem || { window: [4, 6] };
   if (o.baseUrl) {
-    http = httpReader(o.baseUrl, recipe.base.size, net, abort.signal, (text) => postMessage({ type: 'note', text }));
+    http = httpReader(o.baseUrl, recipe.base.size, recipe.base.chunk, net, abort.signal, (text) => postMessage({ type: 'note', text }), mem);
   } else if (!o.baseFile || o.baseFile.size !== recipe.base.size) {
     return { ok: false, outcome: 'wrong_base', error: `This is not the expected base file (${recipe.base.file}, ${recipe.base.size} bytes).` };
   }
@@ -231,7 +244,6 @@ async function run(o) {
   // that needs step i's chunk (Infinity after its last use); MAX_LIVE caps
   // memory if a plan ever spreads a chunk's uses far apart (the chunk with
   // the furthest next use goes first).
-  const MAX_LIVE = 3;
   const keyOf = (s) => s.src + '#' + s.k;
   const nextUse = new Array(steps.length).fill(Infinity);
   const lastSeen = new Map();
@@ -241,6 +253,26 @@ async function run(o) {
     if (lastSeen.has(key)) nextUse[i] = lastSeen.get(key);
     lastSeen.set(key, i);
   }
+  // How many chunks the plan needs to keep at once for a later use (1 for
+  // California): from the network all of them are kept, so nothing is
+  // downloaded twice; a plan needing more than KEEP_CAP stops here, before
+  // anything is downloaded. From a local file at most 3 (reading again is
+  // cheap).
+  const KEEP_CAP = 8;
+  let keepNeeded = 0;
+  {
+    const held = new Set();
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i].k === undefined) continue;
+      const key = keyOf(steps[i]);
+      if (nextUse[i] === Infinity) held.delete(key); else held.add(key);
+      keepNeeded = Math.max(keepNeeded, held.size);
+    }
+  }
+  if (http && keepNeeded > KEEP_CAP) {
+    return { ok: false, outcome: 'error', error: `this language's recipe would keep ${keepNeeded} pieces of the map in memory at once (at most ${KEEP_CAP}); use "Already have the map?" with a downloaded map file` };
+  }
+  const MAX_LIVE = http ? keepNeeded : Math.min(keepNeeded, 3);
   const pendingUse = new Map();        // key -> index of its next use, for cached chunks
   const release = (i) => {
     const s = steps[i], key = keyOf(s);
@@ -301,7 +333,7 @@ async function run(o) {
     : null;
   if (!sink) throw new Error('unknown sink ' + o.sink);
   const md5 = await hashwasm.createMD5(); md5.init();
-  let written = 0, digest = null, fileMd5 = null;
+  let written = 0, digest = null, fileMd5 = null, lastUse = null;
   // Progress every 500 ms, also while the assembly waits for the network.
   const rate = [];                    // [ms, base bytes] over the last 30 s
   const progress = (extra) => {
@@ -341,10 +373,15 @@ async function run(o) {
         const buf = await sources[s.src].get(s.k);
         data = buf.subarray(s.from, s.to);
         release(i);
+        // The chunk's last use: its buffer can move to the service worker
+        // (no copy) or, after the write, go back to the download pool.
+        if (s.src === 'base' && nextUse[i] === Infinity) lastUse = buf;
       }
       if (s.src !== 'md5') md5.update(data);
       const n = data.length;
-      await sink.write(data);
+      const moved = await sink.write(data, !!lastUse && data.buffer === lastUse.buffer);
+      if (lastUse && !moved && http) http.free(lastUse);
+      lastUse = null;
       written += n;
     }
     clearInterval(ticker);
@@ -372,12 +409,13 @@ function summary(net) {
            base_stream_mbps_avg: h.ms ? +(h.bytes / 1e6 / (h.ms / 1000)).toFixed(2) : null,
            base_stream_mbps_p10: SZFetch.pct(h.mbps, 0.1), base_ttfb_p50: SZFetch.pct(h.ttfb, 0.5),
            base_requests: h.requests, base_retries: h.retries, base_slow_retries: h.slow_retries,
-           base_resets: h.resets, base_hash_retries: net.hash_retries || 0 };
+           base_resets: h.resets, base_hash_retries: net.hash_retries || 0, base_waits: h.waits || 0,
+           base_wait_s: Math.round((h.wait_ms || 0) / 1000) };
 }
 
 // PROTO: what builder.js sends. A tab opened before an update loads its old
 // builder.js with this worker; it gets a plain "reload" instead of a failure.
-const PROTO = 3;
+const PROTO = 4;
 let sinkReply = null;                // set while run() waits for {cmd:'sink'}
 onmessage = async (e) => {
   if (e.data.cmd === 'sink') { if (sinkReply) { const r = sinkReply; sinkReply = null; r(e.data); } return; }

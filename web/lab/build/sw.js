@@ -16,9 +16,10 @@
 // START_TIMEOUT_MS (the iframe was blocked or never loaded) is cancelled; one
 // whose writer goes silent for SILENT_MS (it pings every 5 s) is failed, so
 // the browser does not keep a half-finished download open forever.
-const VERSION = 3;
+const VERSION = 4;
 const streams = new Map();            // id -> {stream, filename, size, started}
-const HWM = 64 * 1048576;             // bytes held here before it stops acking
+const HWM = 64 * 1048576;             // bytes held here before it stops acking (the page may ask
+                                      // for less: {hwm} at registration, 16 MiB on a small device)
 const START_TIMEOUT_MS = 20000;
 const SILENT_MS = 30000;
 
@@ -34,8 +35,9 @@ self.addEventListener('message', (e) => {
   if (d.type === 'skipWaiting') { self.skipWaiting(); return; }
   if (d.type !== 'register' || !e.ports[0]) return;
   const port = e.ports[0];
+  const hwm = Math.min(HWM, Math.max(1048576, +d.hwm || HWM));
   let ctrl, waiting = 0, enqueued = 0, ended = false, lastPulled = -1, startTimer = null, heard = Date.now();
-  const queued = () => HWM - ctrl.desiredSize;
+  const queued = () => hwm - ctrl.desiredSize;
   const forget = () => { streams.delete(d.id); clearTimeout(startTimer); clearInterval(silence); };
   const silence = setInterval(() => {
     if (ended || Date.now() - heard < SILENT_MS) return;
@@ -54,7 +56,7 @@ self.addEventListener('message', (e) => {
       report();
     },
     cancel(reason) { forget(); port.postMessage({ type: 'cancelled', reason: String(reason || 'cancelled') }); },
-  }, new ByteLengthQueuingStrategy({ highWaterMark: HWM }));
+  }, new ByteLengthQueuingStrategy({ highWaterMark: hwm }));
   port.onmessage = (m) => {
     const x = m.data || {};
     heard = Date.now();

@@ -420,7 +420,7 @@
   const swFailed = () => { try { sessionStorage.setItem('sz_sw_failed', '1'); } catch (e) { /* no storage */ } };
   const within = (p, ms) => Promise.race([p, new Promise((r, j) => setTimeout(() => j(new Error('timed out')), ms))]);
 
-  const SW_VERSION = 3;                // the sw.js protocol this page speaks
+  const SW_VERSION = 4;                // the sw.js protocol this page speaks
   const controllerChange = (ms) => new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, ms); });
   // {v, busy} from a service worker; null if it does not answer (an old one).
   function swStatus(w) {
@@ -460,6 +460,13 @@
   // step (Safari and every iOS browser, which are WebKit, and wherever the
   // stream cannot be had).
   const isWebKit = /Apple/.test(navigator.vendor || '');
+  // A device with little memory (navigator.deviceMemory <= 4 GB; phones and
+  // tablets when the browser does not say; ?lowmem) downloads 2 chunks of
+  // the map at a time instead of 4-6, and the service worker holds 16 MiB
+  // of the download instead of 64 MiB.
+  const lowMem = q.has('lowmem') || (navigator.deviceMemory ? navigator.deviceMemory <= 4
+    : /iPhone|iPad|iPod|Android|Mobile/.test(navigator.userAgent) || (isWebKit && navigator.maxTouchPoints > 1));
+  const MEM = lowMem ? { window: [2, 2], hwm: 16 * 1048576 } : { window: [4, 6], hwm: 64 * 1048576 };
   // A streamed download through the service worker. Resolves with the sink
   // once the browser has asked for the download ('started'), or null if it
   // did not within 10 s (a browser that blocks a download the visitor did
@@ -473,7 +480,7 @@
     const ok = new Promise((r) => {
       ch.port1.onmessage = (e) => { if (e.data.type === 'registered') r(e.data.v); else if (e.data.type === 'started') started(true); };
     });
-    ctl.postMessage({ type: 'register', id, filename: fileName, size }, [ch.port2]);
+    ctl.postMessage({ type: 'register', id, filename: fileName, size, hwm: MEM.hwm }, [ch.port2]);
     const v = await within(ok, 5000).catch(() => null);
     if (v !== SW_VERSION) { ch.port1.onmessage = null; ch.port1.close(); return null; }
     const ifr = document.createElement('iframe');
@@ -687,12 +694,21 @@
         } else if (d.type === 'done') resolve(d.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      worker.postMessage({ cmd: 'run', proto: 3, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, packs: bytes,
+      // One click: the pack bytes move to the worker (no copy) and are
+      // downloaded again for another build. From a copy they are copied, so
+      // the Build button stays ready (its save dialog needs the click).
+      const packBufs = mode === 'net' ? Object.values(bytes).map((u8) => u8.buffer) : [];
+      worker.postMessage({ cmd: 'run', proto: 4, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, packs: bytes, mem: MEM,
                            sink: sinkInfo ? sinkInfo.sink : 'later', handle: sinkInfo && sinkInfo.handle,
-                           port: sinkInfo && sinkInfo.port, fileName }, sinkInfo ? sinkInfo.transfer : []);
+                           port: sinkInfo && sinkInfo.port, fileName }, (sinkInfo ? sinkInfo.transfer : []).concat(packBufs));
+      if (mode === 'net') {
+        for (const id of Object.keys(recipe.packs)) packBytes.delete(packKey(recipe.packs[id]));
+        packsOk = false;
+      }
     });
     worker.terminate();
     $('startDl').hidden = true;
+    if (mode === 'net') { $('packStatus').textContent = ''; $('packStatus').className = ''; }
     if (sinkInfo && sinkInfo.cleanup) sinkInfo.cleanup(result.ok);
     // Only a watchdog (not the visitor cancelling) moves this tab to OPFS.
     if (result.outcome === 'download_stopped' && result.watchdog) swFailed();
