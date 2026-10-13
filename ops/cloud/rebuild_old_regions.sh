@@ -21,6 +21,9 @@ unset _ops_real _ops_old
 #
 # Per region: osmium extract -> symlink world tiles/search -> Overture
 # download -> build-region-fast.sh -> validate -> markers -> gates -> upload.
+# With STREETZIM_ML_TILES=1 in the environment, build-region-fast.sh cuts
+# multilingual tiles from the extract instead of using the world tiles
+# (ops/region-ml-tiles.py), and markers() checks they reached the ZIM.
 #
 # Notes earned elsewhere in this project:
 #  * The PBF must be a REAL extract, never a planet symlink: wikidata_cache's
@@ -94,6 +97,12 @@ checks = {
         a.get_entry_by_path("places.html").get_item().content),
     "archive check":   a.check(),
 }
+# A language-ready round (STREETZIM_ML_TILES=1, docs/language-ready.md): the
+# ZIM carries what the multilingual tiles and cloud/region-languages.tsv gave
+# build-region-fast.sh; a build from the world tiles would not.
+if __import__("os").environ.get("STREETZIM_ML_TILES") == "1":
+    mc = __import__("json").loads(bytes(a.get_entry_by_path("map-config.json").get_item().content))
+    checks["ml languages"] = bool(mc.get("tileLanguages")) and bool(mc.get("regionLanguages"))
 for k, v in checks.items(): print(f"    {k:18s} {v}")
 sys.exit(0 if all(checks.values()) else 1)
 PYEOF
@@ -153,6 +162,9 @@ while :; do
   sleep 300
 done
 log "=== all prior jobs done; starting ${ORDER}"
+# Inherited by build-region-fast.sh and markers(): STREETZIM_ML_TILES=1 builds
+# language-ready ZIMs (multilingual tiles; docs/language-ready.md).
+log "=== multilingual tiles (STREETZIM_ML_TILES): ${STREETZIM_ML_TILES:-0}"
 
 for ID in $ORDER; do
   grep -qP "^$ID\t(uploaded|upload-pending)" "$TSV" 2>/dev/null && { log "skip $ID: done"; continue; }

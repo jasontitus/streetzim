@@ -104,6 +104,33 @@ if [ -f "$OUT_FINAL" ]; then
     exit 0
 fi
 
+# Language-ready builds (docs/language-ready.md), opt in with
+# STREETZIM_ML_TILES=1: tiles carrying name:xx for the matrix languages, cut
+# from the region's own extract by ops/region-ml-tiles.py (tilemaker from
+# this commit's CI image; reused while its bbox, languages, image and
+# extract are unchanged) instead of the world tiles, and the region's own
+# languages from cloud/region-languages.tsv. Either failing stops the build:
+# there is no fallback to the world tiles. Unset or 0: nothing changes.
+ML_ARGS=()
+case "${STREETZIM_ML_TILES:-0}" in
+    0) ;;
+    1)
+        REGION_LANGS=$(awk -F'\t' -v id="$ID" '$1==id {print $2; f=1; exit} END {exit !f}' \
+                       /storage/streetzim/cloud/region-languages.tsv) \
+            || { echo "FATAL: no row for $ID in cloud/region-languages.tsv" >&2; exit 1; }
+        ML_MBTILES=$("$PY" /storage/streetzim/ops/region-ml-tiles.py --src-id "$SRC_ID" -- "$ID" "$BBOX") \
+            || { echo "FATAL: multilingual tiles for $ID failed (STREETZIM_ML_TILES=1); not building from the world tiles" >&2; exit 1; }
+        if [ ! -s "$ML_MBTILES" ] || [ ! -s "$ML_MBTILES.langs" ]; then
+            echo "FATAL: ops/region-ml-tiles.py gave '$ML_MBTILES', not tiles with a .langs sidecar" >&2
+            exit 1
+        fi
+        MBTILES="$ML_MBTILES"
+        ML_ARGS=( --tile-languages "$(cat "$ML_MBTILES.langs")" --region-languages "$REGION_LANGS" )
+        echo "  multilingual tiles: $MBTILES ($(cat "$MBTILES.langs")); region languages: $REGION_LANGS"
+        ;;
+    *) echo "FATAL: STREETZIM_ML_TILES must be 0 or 1, not '$STREETZIM_ML_TILES'" >&2; exit 1 ;;
+esac
+
 # Stage the MBTiles on NVMe for the tile phase.
 #
 # Tile reading is random small-record access into a multi-GB SQLite file. On
@@ -222,6 +249,7 @@ ARGS=(
 )
 # shellcheck disable=SC2206
 ARGS+=( $WRITER_FLAGS )
+ARGS+=( "${ML_ARGS[@]}" )
 # Terrain is always on here: without the world DEM the builder would
 # switch to its fresh-machine layout (streetzim/terrain.py). Refuse instead.
 if [ -f "$LOWZ" ]; then
