@@ -809,17 +809,39 @@ function HasNames()
 	-- then set any additional languages
 	for i,lang in ipairs(additional_languages) do
 		if Holds("name:"..lang) then return true end
+		if lang == "zh" and Holds("name:zh-Hans") then return true end
 	end
 	return false
 end
 
+-- StreetZim: an OSM name tag can hold several names separated by ";"
+-- ("洛杉矶;洛杉磯": Simplified;Traditional), and a label would show them
+-- all. Every name written keeps the first non-empty one, trimmed.
+function FirstName(v)
+	for part in string.gmatch(v or "", "[^;]+") do
+		local s = string.match(part, "^%s*(.-)%s*$")
+		if s ~= "" then return s end
+	end
+	return ""
+end
+
+-- The name:<lang> to write (first value, see FirstName); for zh, OSM's
+-- name:zh-Hans (Simplified) when it has one, else name:zh.
+function LangName(lang)
+	if lang == "zh" then
+		local hans = FirstName(Find("name:zh-Hans"))
+		if hans ~= "" then return hans end
+	end
+	return FirstName(Find("name:"..lang))
+end
+
 -- Set name attributes on any object
 function SetNameAttributes()
-	local name = Find("name"), iname
+	local name = FirstName(Find("name")), iname
 	local main_written = name
 	-- if we have a preferred language, then write that (if available), and additionally write the base name tag
-	if preferred_language and Holds("name:"..preferred_language) then
-		iname = Find("name:"..preferred_language)
+	iname = preferred_language and LangName(preferred_language) or ""
+	if iname ~= "" then
 		Attribute(preferred_language_attribute, iname)
 		if iname~=name and default_language_attribute then
 			Attribute(default_language_attribute, name)
@@ -829,7 +851,7 @@ function SetNameAttributes()
 	end
 	-- then set any additional languages
 	for i,lang in ipairs(additional_languages) do
-		iname = Find("name:"..lang)
+		iname = LangName(lang)
 		if iname=="" then iname=name end
 		if iname~=main_written then Attribute("name:"..lang, iname) end
 	end

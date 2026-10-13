@@ -14,6 +14,16 @@ region's own languages. Labels, search and the viewer do not change.
 | `--region-languages el` | The region's own languages, most used first. Recorded as `regionLanguages` in `map-config.json`; nothing else reads it yet. |
 
 A build that passes neither is byte for byte what it was.
+
+**Names in the tiles** (`resources/tilemaker/process-openmaptiles.lua`,
+`SetNameAttributes`): an OSM name tag can list several names separated by
+`;` (`name:zh=洛杉矶;洛杉磯`, Simplified;Traditional), and the label drew
+them all. Every name the profile writes (`name:latin`, `name_int`,
+`name:xx`) keeps the first non-empty one, trimmed, and `name:zh` comes
+from `name:zh-Hans` when OSM has it. This applies to every tilemaker run
+with this profile; the world tiles change only when they are rebuilt.
+`tests/test_tile_profile_names.py` runs the profile's Lua (5.1, through
+`lupa`).
 `streetzim.languages.MATRIX_TILE_LANGUAGES` is the list (21: ar de el es fa
 fr he hi id it ja ko nl pl pt ru th tr uk vi zh).
 `cloud/region-languages.tsv` holds every registry region's own languages;

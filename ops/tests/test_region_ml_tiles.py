@@ -64,6 +64,8 @@ if argv[0] == "rmi":
     os.unlink(present)
     sys.exit(0)
 if argv[0] == "rm":
+    time.sleep(float(os.environ.get("FAKE_RM_SECS", "0")))
+    open(os.path.join(st, "rm-done"), "a").write("x")
     sys.exit(0)
 assert argv[0] == "run", argv
 mounts, env = {}, {}
@@ -367,16 +369,22 @@ def test_a_timeout_or_a_signal_removes_the_container_and_the_store(host):
     assert p.returncode != 0 and "passed 2 s" in err and "tilemaker failed" in err
     assert ["rm", "-f", "streetzim-mltiles-hispaniola"] == _calls(host)[-2]
     assert _leftovers(host) == [] and not _out(host).exists()
-    p = _cli(host, ("FAKE_TM", "sleep"))
+    done = host / "docker" / "rm-done"
+    done.unlink()
+    p = _cli(host, ("FAKE_TM", "sleep"), ("FAKE_RM_SECS", "1"))
     for _ in range(100):
         if _runs(host)[1:]:
             break
         time.sleep(0.1)
     time.sleep(0.5)
+    assert done.read_text() == "x"      # the rm -f before the run
     p.send_signal(signal.SIGTERM)
-    time.sleep(0.05)
-    p.send_signal(signal.SIGTERM)       # timeout(1) forwards one too: cleanup still runs
+    time.sleep(0.5)
+    # timeout(1) forwards one too; it lands while the container is being
+    # removed, and must not cut that short.
+    p.send_signal(signal.SIGTERM)
     p.communicate(timeout=60)
+    assert done.read_text() == "xx"
     assert p.returncode == 128 + signal.SIGTERM
     assert ["rm", "-f", "streetzim-mltiles-hispaniola"] in _calls(host)[-3:]
     assert _calls(host)[-1] == ["rmi", TAG]
