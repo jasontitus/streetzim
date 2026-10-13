@@ -15,7 +15,9 @@ unset _ops_real _ops_old
 # Inputs:
 #   world-data/world-tiles-v2.mbtiles    — full vector tiles MBTiles (z0-14);
 #                                          create_osm_zim.py filters at read-time via
-#                                          --max-zoom 13 so z14 is skipped.
+#                                          --max-zoom 13 so z14 is skipped;
+#                                          --no-fold-paths: no z14 paths copied
+#                                          into z13 for the whole world.
 #   world-data/planet-2026-03-10.osm.pbf — planet PBF (Q-ID cache already exists)
 #   search_cache/world.jsonl             — full search index incl. streets (~17.5 GB / 121M features)
 #   wikidata_cache/                       — 90-bucket Wikidata cache
@@ -71,7 +73,7 @@ echo
     --pbf "$PBF" \
     --bbox="-180,-85,180,85" \
     --name "World" \
-    --max-zoom 13 \
+    --max-zoom 13 --no-fold-paths \
     --terrain \
     --terrain-zoom 12 \
     --terrain-dir "$TERRAIN_DIR" \

@@ -79,6 +79,9 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "illustration_url": {"title": "Illustration URL", "type": "url"},
     "area": {"title": "Preset area", "type": "string-enum", "choices": "KNOWN_AREAS"},
     "include_poly": {"title": "Include poly"},
+    "no_fold_paths": {"title": "No paths at zoom 13",
+                      "description": "With Max zoom 13, leave out the footways, cycleways and "
+                                     "other paths the map otherwise copies down from zoom 14"},
     "no_clip": {"title": "No border clip",
                 "description": "With Include poly, keep everything in the polygon's "
                                "box instead of cutting the map, search and routing "
@@ -289,7 +292,12 @@ def build_parser() -> argparse.ArgumentParser:
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. At 13, footways, cycleways "
                            "and other paths, which the tiles carry only from 14, are copied "
-                           "into the zoom-13 tiles. Default: 14")
+                           "into the zoom-13 tiles (--no-fold-paths leaves them out). "
+                           "Default: 14")
+    feat.add_argument("--fold-paths", action=argparse.BooleanOptionalAction, default=True,
+                      help="With --max-zoom 13, copy the zoom-14 footways, cycleways and "
+                           "other paths into the zoom-13 tiles, so a map capped at 13 still "
+                           "draws them. --no-fold-paths leaves them out. Default: on")
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
     feat.add_argument("--zim-workers", type=positive_int,
@@ -1070,6 +1078,8 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--kiwix-poi-pages"]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
+    if not args.fold_paths:
+        argv += ["--no-fold-paths"]
     if args.zim_workers is not None:
         argv += ["--workers", str(args.zim_workers)]
     if args.cpus is not None:

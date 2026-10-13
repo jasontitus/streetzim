@@ -210,9 +210,15 @@
       "type": "integer",
       "required": false,
       "title": "Max zoom",
-      "description": "Maximum zoom of the vector tiles. At 13, footways, cycleways and other paths, which the tiles carry only from 14, are copied into the zoom-13 tiles. Default: 14",
+      "description": "Maximum zoom of the vector tiles. At 13, footways, cycleways and other paths, which the tiles carry only from 14, are copied into the zoom-13 tiles (--no-fold-paths leaves them out). Default: 14",
       "min": 0,
       "max": 14
+    },
+    "no_fold_paths": {
+      "type": "boolean",
+      "required": false,
+      "title": "No paths at zoom 13",
+      "description": "With Max zoom 13, leave out the footways, cycleways and other paths the map otherwise copies down from zoom 14"
     },
     "default_view": {
       "type": "string",

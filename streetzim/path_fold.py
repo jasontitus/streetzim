@@ -21,7 +21,9 @@ from __future__ import annotations
 import gzip
 import math
 import sqlite3
+import zlib
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 from typing import Any
 
 # Where the profile puts "path" features and their names.
@@ -162,12 +164,14 @@ def _path_features(tile, name: bytes, dx: int, dy: int, out: list) -> None:
             gtype = 0
             geom: list[int] = []
             for ffno, fwt, fv, _fs, _fe in _fields(feat):
+                # Repeated fields may come packed, unpacked or split
+                # over several fields; each occurrence adds to the list.
                 if ffno == 2:
-                    tags = _packed(fwt, fv)
+                    tags += _packed(fwt, fv)
                 elif ffno == 3 and fwt == 0:
                     gtype = fv
                 elif ffno == 4:
-                    geom = _packed(fwt, fv)
+                    geom += _packed(fwt, fv)
             pairs = list(zip(tags[0::2], tags[1::2]))
             if not any(k == ck and val in pv for k, val in pairs):
                 continue
@@ -217,10 +221,13 @@ def _ring_area2(ring: list[tuple[int, int]]) -> int:
 def _encode_geometry(gtype: int, parts, closed, src_extent: int, dst_extent: int,
                      dx: int, dy: int) -> list[int] | None:
     """The geometry in the parent's grid, or None when the halving leaves
-    nothing drawable (a polygon losing any ring is dropped whole)."""
+    nothing drawable. A polygon keeps the rings that survive: an outer ring
+    that collapses takes its holes with it, a hole that collapses goes on
+    its own."""
     scale = dst_extent / (2 * src_extent)
     ox, oy = dx * src_extent, dy * src_extent
     out_parts = []
+    outer_kept = False
     for pts, is_closed in zip(parts, closed):
         moved = []
         for x, y in pts:
@@ -230,11 +237,17 @@ def _encode_geometry(gtype: int, parts, closed, src_extent: int, dst_extent: int
         if gtype == _POLYGON:
             if len(moved) > 1 and moved[0] == moved[-1]:
                 moved.pop()
-            # Rounding onto the coarser grid can collapse a small ring or
-            # turn it inside out (an outer ring read as a hole).
-            area = _ring_area2(moved) if len(moved) >= 3 else 0
-            if area == 0 or (area > 0) != (_ring_area2(pts) > 0):
-                return None
+            # MVT: an outer ring has a positive area (surveyor's formula,
+            # y down), a hole a negative one. Rounding onto the coarser grid
+            # can collapse a small ring or turn it inside out.
+            was = _ring_area2(pts)
+            now = _ring_area2(moved) if len(moved) >= 3 else 0
+            if was > 0:
+                outer_kept = now > 0
+                if not outer_kept:
+                    continue
+            elif not (outer_kept and was < 0 and now < 0):
+                continue
         elif gtype == _LINESTRING:
             if len(moved) < 2:
                 continue
@@ -265,8 +278,10 @@ def _encode_geometry(gtype: int, parts, closed, src_extent: int, dst_extent: int
 
 # ---------- folding ----------
 
-def _append(layer_buf, layer: _Layer | None, name: bytes, feats: list) -> bytes:
-    """`layer_buf` (empty for a new layer) with `feats` appended."""
+def _append(layer_buf, layer: _Layer | None, name: bytes, feats: list) -> tuple[bytes, int]:
+    """`layer_buf` (empty for a new layer) with `feats` appended, and how
+    many were. A feature that two children both carry in their buffer
+    zones is added once."""
     keys = list(layer.keys) if layer else []
     values = list(layer.values) if layer else []
     extent = layer.extent if layer else 4096
@@ -275,10 +290,16 @@ def _append(layer_buf, layer: _Layer | None, name: bytes, feats: list) -> bytes:
     new_keys: list[bytes] = []
     new_values: list[bytes] = []
     out = bytearray()
+    seen: set[tuple] = set()
+    added = 0
     for gtype, tags, parts, closed, src_extent, dx, dy in feats:
         geom = _encode_geometry(gtype, parts, closed, src_extent, extent, dx, dy)
         if geom is None:
             continue
+        key = (gtype, tuple(tags), tuple(geom))
+        if key in seen:
+            continue
+        seen.add(key)
         idx: list[int] = []
         for k, val in tags:
             if k not in key_ix:
@@ -290,14 +311,15 @@ def _append(layer_buf, layer: _Layer | None, name: bytes, feats: list) -> bytes:
             idx += [key_ix[k], val_ix[val]]
         feature = _enc_packed(2, idx) + _enc_varint(3 << 3) + _enc_varint(gtype) + _enc_packed(4, geom)
         out += _enc_len(2, feature)
+        added += 1
     if not out:
-        return bytes(layer_buf)
+        return bytes(layer_buf), 0
     out += b"".join(_enc_len(3, k) for k in new_keys)
     out += b"".join(_enc_len(4, v) for v in new_values)
     if layer is None:
         head = _enc_varint(15 << 3) + _enc_varint(2) + _enc_len(1, name)
-        return head + bytes(out) + _enc_varint(5 << 3) + _enc_varint(extent)
-    return bytes(layer_buf) + bytes(out)
+        return head + bytes(out) + _enc_varint(5 << 3) + _enc_varint(extent), added
+    return bytes(layer_buf) + bytes(out), added
 
 
 def fold(tile: bytes, children: Iterable[tuple[int, int, bytes]],
@@ -315,7 +337,7 @@ def fold(tile: bytes, children: Iterable[tuple[int, int, bytes]],
         return tile
     out = bytearray()
     seen: set[bytes] = set()
-    changed = False
+    added = 0
     for fno, wt, v, s, e in _fields(tile):
         if fno == 3 and wt == 2:
             name = _layer_name(v)
@@ -323,23 +345,23 @@ def fold(tile: bytes, children: Iterable[tuple[int, int, bytes]],
                 seen.add(name)
                 layer = _Layer(v)
                 if adds[name] and not layer.has_paths():
-                    new = _append(v, layer, name, adds[name])
-                    if len(new) != len(v):
+                    new, n = _append(v, layer, name, adds[name])
+                    if n:
                         out += _enc_len(3, new)
-                        changed = True
+                        added += n
                         continue
         out += tile[s:e]
     for name, feats in adds.items():
         if feats and name not in seen:
-            new = _append(b"", None, name, feats)
-            if new:
+            new, n = _append(b"", None, name, feats)
+            if n:
                 out += _enc_len(3, new)
-                changed = True
-    if not changed:
+                added += n
+    if not added:
         return tile
     if stats is not None:
         stats["tiles"] = stats.get("tiles", 0) + 1
-        stats["features"] = stats.get("features", 0) + sum(len(f) for f in adds.values())
+        stats["features"] = stats.get("features", 0) + added
     return bytes(out)
 
 
@@ -349,17 +371,29 @@ def _decoded(data: bytes | None) -> bytes:
     return data or b""
 
 
+def _ro_uri(path) -> str:
+    """A read-only SQLite URI; `as_uri` escapes '#', '?' and '%' (an
+    f-string URI cut the path at '#' and created the truncated file)."""
+    return f"{Path(path).resolve().as_uri()}?mode=ro"
+
+
+_BAD_TILE = (OSError, EOFError, zlib.error, ValueError, IndexError)
+
+
 class Folder:
     """Folds z14 paths into the z13 tiles of an MBTiles file (see `fold`).
     One per thread or process: it holds a SQLite connection."""
 
     def __init__(self, mbtiles_path):
-        self.conn = sqlite3.connect(f"file:{mbtiles_path}?mode=ro", uri=True)
+        self.conn = sqlite3.connect(_ro_uri(mbtiles_path), uri=True)
         self.stats: dict[str, int] = {}
 
     def __call__(self, z: int, x: int, y: int, data: bytes) -> bytes:
-        """The tile at XYZ (z, x, y) with its children's paths, decoded
-        when anything was added, else `data` unchanged."""
+        """The tile at XYZ (z, x, y) with its children's paths, in the same
+        encoding (gzip or not) when anything was added, else `data`
+        itself. A child that will not decode is skipped and counted
+        ("bad_children"); a parent that will not decode is returned as
+        it came, for the writer's own check to report."""
         if z != FOLD_ZOOM or not data:
             return data
         n = 1 << SOURCE_ZOOM
@@ -367,14 +401,30 @@ class Folder:
         rows = {n - 1 - 2 * y: 0, n - 1 - (2 * y + 1): 1}       # TMS row -> dy
         cur = self.conn.execute(
             "SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = ? "
-            "AND tile_column IN (?, ?) AND tile_row IN (?, ?)",
+            "AND tile_column IN (?, ?) AND tile_row IN (?, ?) "
+            "ORDER BY tile_column, tile_row DESC",
             (SOURCE_ZOOM, cols[0], cols[1], *rows))
-        children = [(col - 2 * x, rows[row], _decoded(blob)) for col, row, blob in cur]
+        children = []
+        for col, row, blob in cur:
+            try:
+                child = _decoded(blob)
+                # Parse it here, so a malformed child is caught alone.
+                for _f in _fields(child):
+                    pass
+            except _BAD_TILE:
+                self.stats["bad_children"] = self.stats.get("bad_children", 0) + 1
+                continue
+            children.append((col - 2 * x, rows[row], child))
         if not children:
             return data
-        tile = _decoded(data)
-        folded = fold(tile, children, self.stats)
-        return data if folded is tile else folded
+        try:
+            tile = _decoded(data)
+            folded = fold(tile, children, self.stats)
+        except _BAD_TILE:
+            return data
+        if folded is tile:
+            return data
+        return gzip.compress(folded, compresslevel=6, mtime=0) if data[:2] == b"\x1f\x8b" else folded
 
     def close(self) -> None:
         self.conn.close()
@@ -382,7 +432,7 @@ class Folder:
 
 def has_source_zoom(mbtiles_path) -> bool:
     """Whether the MBTiles has z14 tiles to fold from."""
-    conn = sqlite3.connect(f"file:{mbtiles_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(mbtiles_path), uri=True)
     try:
         return conn.execute("SELECT 1 FROM tiles WHERE zoom_level = ? LIMIT 1",
                             (SOURCE_ZOOM,)).fetchone() is not None
@@ -400,12 +450,18 @@ def _init_worker(mbtiles_path) -> None:
     _WORKER = Folder(mbtiles_path)
 
 
-def _fold_one(item: tuple[int, int, bytes]) -> tuple[bytes | None, int]:
-    x, y, data = item
+def _fold_with(folder: Folder, x: int, y: int, data: bytes) -> tuple[bytes | None, int, int]:
+    """(the folded tile or None when unchanged, paths added, bad children)."""
+    f0 = folder.stats.get("features", 0)
+    b0 = folder.stats.get("bad_children", 0)
+    out = folder(FOLD_ZOOM, x, y, data)
+    return ((None if out is data else out), folder.stats.get("features", 0) - f0,
+            folder.stats.get("bad_children", 0) - b0)
+
+
+def _fold_one(item: tuple[int, int, bytes]) -> tuple[bytes | None, int, int]:
     assert _WORKER is not None
-    before = _WORKER.stats.get("features", 0)
-    out = _WORKER(FOLD_ZOOM, x, y, data)
-    return (None if out is data else out), _WORKER.stats.get("features", 0) - before
+    return _fold_with(_WORKER, *item)
 
 
 def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
@@ -413,11 +469,11 @@ def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
                batch: int = 4096) -> Iterator[tuple[int, int, int, bytes]]:
     """`items` ((z, x, y, data), XYZ rows) with every z13 tile folded
     (see `fold`), in the same order. `workers` > 1 folds in that many
-    processes; `stats` gets "tiles" (tiles that gained paths) and
-    "features" (paths added)."""
+    processes; `stats` gets "tiles" (tiles that gained paths), "features"
+    (paths added) and "bad_children" (z14 tiles that would not decode)."""
     stats = stats if stats is not None else {}
-    stats.setdefault("tiles", 0)
-    stats.setdefault("features", 0)
+    for k in ("tiles", "features", "bad_children"):
+        stats.setdefault(k, 0)
     pool = None
     folder = None
     try:
@@ -442,14 +498,9 @@ def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
                                    chunksize=max(1, len(todo) // (workers * 4) or 1))
             else:
                 assert folder is not None
-                results = []
-                for i in todo:
-                    _z, x, y, data = chunk[i]
-                    before = folder.stats.get("features", 0)
-                    out = folder(FOLD_ZOOM, x, y, data)
-                    results.append((None if out is data else out,
-                                    folder.stats.get("features", 0) - before))
-            for i, (out, added) in zip(todo, results):
+                results = [_fold_with(folder, *chunk[i][1:]) for i in todo]
+            for i, (out, added, bad) in zip(todo, results):
+                stats["bad_children"] += bad
                 if out is not None:
                     z, x, y, _data = chunk[i]
                     chunk[i] = (z, x, y, out)

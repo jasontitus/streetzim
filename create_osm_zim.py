@@ -974,6 +974,9 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
     print()
     print(f"[3/{total_steps}] Processing tiles...")
 
+    if getattr(args, "fold_paths", None) and args.max_zoom != 13:
+        print(f"  Note: --fold-paths applies to --max-zoom 13 only (this build: "
+              f"--max-zoom {args.max_zoom}); nothing is folded.")
     # For large mbtiles (>5 GB), use streaming to avoid OOM
     mbtiles_size_gb = os.path.getsize(mbtiles_path) / (1024**3)
     use_streaming = mbtiles_size_gb > 5.0

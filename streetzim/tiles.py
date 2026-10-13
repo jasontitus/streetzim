@@ -391,6 +391,9 @@ def _print_fold(stats):
     print(f"    Paths at z13: folded {stats.get('features', 0):,} footways, cycleways and "
           f"other paths from z14 into {stats.get('tiles', 0):,} tiles "
           "(--max-zoom 13; --no-fold-paths leaves them out)", flush=True)
+    if stats.get("bad_children"):
+        print(f"    WARNING: {stats['bad_children']:,} z14 tiles would not decode; "
+              "their paths are missing at z13", flush=True)
 
 
 FALLBACK_SCAN_MAX_BYTES = 200_000_000
