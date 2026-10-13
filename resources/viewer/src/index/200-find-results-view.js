@@ -300,7 +300,7 @@ function _findResultPopup(map, r) {
     if (r.l) wd = { c: r.l };
     var lng = { lat: r.a, lng: r.o };
     var dom = map._buildWikiPopupDOM(r.n || szT('common.unnamed', '(unnamed)'), wd, lng,
-                                     _wikiArticlePath(r.q, r.w));
+                                     _wikiArticleLinks(r.q, r.w));
     return new maplibregl.Popup({ offset: 28, closeButton: true,
                                   closeOnClick: false, maxWidth: '320px' })
       .setDOMContent(dom);

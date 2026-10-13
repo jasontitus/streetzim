@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-a963580255';
+const SHELL_CACHE = 'streetzim-drive-shell-0aa932fa7d';
 
 const SHELL_URLS = [
   './',
@@ -445,12 +445,16 @@ const BACK_BAR_CSS =
   'border-bottom:1px solid #eee}.sz-back a{display:inline-flex;align-items:center;' +
   'min-height:44px;color:#2563eb;font-weight:600;text-decoration:none}</style>';
 
+const WIKI_ARTICLE_PATH = /^(?:~w\/[^/]+\/)?wiki-article\//;
 function withBackToMap(data) {
   let html;
   try { html = new TextDecoder('utf-8').decode(data); } catch (e) { return data; }
   if (html.indexOf('class="sz-back"') >= 0) {
-    html = html.replace(/(<nav class="sz-back"><a href=")(?:\.\.\/)+index\.html"/,
-                        '$1/drive/viewer/"');
+    // Any depth: a pack's article sits three levels below index.html
+    // (~w/<xx>/wiki-article/), and a title with slashes deeper still. A
+    // view stamped after the file name (#map=…) is kept.
+    html = html.replace(/(<nav class="sz-back"><a href=")(?:\.\.\/)+index\.html(#[^"]*)?"/,
+                        (m, open, frag) => open + '/drive/viewer/' + (frag || '') + '"');
   } else {
     html = html.replace(/<\/head>/i, BACK_BAR_CSS + '</head>')
                .replace(/<body\b[^>]*>/i, (m) => m + BACK_BAR_HTML);
@@ -571,7 +575,9 @@ async function serveFromZim(viewerPath, request, event) {
       }
       return notFound(viewerPath);
     }
-    const isArticle = viewerPath.startsWith('wiki-article/') && /^text\/html/i.test(entry.mime);
+    // The base's articles (wiki-article/<Title>) and a Wikipedia pack's
+    // (~w/<xx>/wiki-article/<Title>, docs/language-matrix-prototype.md).
+    const isArticle = WIKI_ARTICLE_PATH.test(lookupPath) && /^text\/html/i.test(entry.mime);
     if (!isArticle) {
       const span = await reader.rawBlobSpan(entry.cluster, entry.blob);
       if (span && span.length >= STREAM_MIN_BYTES) {

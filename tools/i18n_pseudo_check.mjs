@@ -12,7 +12,10 @@
 //    licences) is skipped by selector; in rows that mix a translated type
 //    with data ("[restaurant] · Ville Haute") each "·" part must be
 //    bracketed or carry no letters, unless the row is listed in MIXED.
-// 2. German (?uilang=de): <html lang>, and fixed elements read de.json.
+// 2. German (?uilang=de): <html lang>, and fixed elements read de.json;
+//    no "translated by machine" note (German is reviewed).
+// 3. Thai and Chinese (?uilang=th, ?uilang=zh): the same, and the
+//    machine-translation note shows in About and on the Find page.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/i18n_pseudo_check.mjs
@@ -27,7 +30,8 @@ import fs from 'node:fs';
 const origin = process.env.ZIM_ORIGIN;
 if (!origin) { console.error('ZIM_ORIGIN is required'); process.exit(2); }
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-const DE = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/de.json`, 'utf8'));
+const table = (lang) => JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/${lang}.json`, 'utf8'));
+const DE = table('de');
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
 const ORIGIN = pt(process.env.ORIGIN, '43.7396,7.4246');
@@ -291,18 +295,49 @@ try {
   // ---- 2. German
   await page.goto(origin + '/index.html?uilang=de', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
-  const de = await page.evaluate(() => ({
+  // The "translated by machine" note: About's #about-mt, the Find page's
+  // #mt-note (both data-i18n-machine).
+  const viewerState = () => page.evaluate(() => ({
     lang: document.documentElement.lang,
     clear: document.getElementById('routing-clear').textContent,
     about: document.getElementById('attr-btn').textContent,
+    note: (() => { const n = document.getElementById('about-mt');
+      return n ? [getComputedStyle(n).display !== 'none', n.textContent] : null; })(),
   }));
+  const findState = () => page.evaluate(() => ({
+    title: document.querySelector('header h1').textContent,
+    note: (() => { const n = document.getElementById('mt-note');
+      return n ? [getComputedStyle(n).display !== 'none', n.textContent] : null; })(),
+  }));
+  const de = await viewerState();
   check(de.lang === 'de', 'German: <html lang="de">', de.lang);
   check(de.clear === DE['routing.clear'] && de.about === DE['about.button'], 'German: static markup',
         JSON.stringify(de));
+  check(de.note && de.note[0] === false, 'German: no machine-translation note', JSON.stringify(de.note));
   await page.goto(origin + '/places.html?uilang=de', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => document.documentElement.lang === 'de', { timeout: 30000 }).catch(() => {});
-  const dp = await page.evaluate(() => document.querySelector('header h1').textContent);
-  check(dp === DE['places.title'], 'German: Find page', dp);
+  const dp = await findState();
+  check(dp.title === DE['places.title'], 'German: Find page', dp.title);
+  check(dp.note && dp.note[0] === false, 'German: no note on the Find page', JSON.stringify(dp.note));
+
+  // ---- 3. Thai and Chinese (machine-translated tables)
+  for (const [lang, tag] of [['th', 'th'], ['zh', 'zh-Hans']]) {
+    const T = table(lang);
+    await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
+    const v = await viewerState();
+    check(v.lang === tag, `${lang}: <html lang="${tag}">`, v.lang);
+    check(v.clear === T['routing.clear'] && v.about === T['about.button'], `${lang}: static markup`,
+          JSON.stringify([v.clear, v.about]));
+    check(v.note && v.note[0] === true && v.note[1] === T['common.machine_translated'],
+          `${lang}: machine-translation note in About`, JSON.stringify(v.note));
+    await page.goto(origin + '/places.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction((t) => document.documentElement.lang === t, { timeout: 30000 }, tag).catch(() => {});
+    const f = await findState();
+    check(f.title === T['places.title'], `${lang}: Find page`, f.title);
+    check(f.note && f.note[0] === true && f.note[1] === T['common.machine_translated'],
+          `${lang}: machine-translation note on the Find page`, JSON.stringify(f.note));
+  }
   check(!errors.length, 'no page errors', errors.join(' | '));
 } finally {
   await browser.close();

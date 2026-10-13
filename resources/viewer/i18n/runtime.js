@@ -30,8 +30,18 @@ function szSetUiLanguage(lang, search) {
   SZ_I18N = (base !== 'en' && !SZ_I18N_PSEUDO &&
              Object.prototype.hasOwnProperty.call(tables, base) && tables[base]) || null;
   SZ_UI_LANG = SZ_I18N ? base : 'en';
-  try { if (SZ_I18N || SZ_I18N_PSEUDO) document.documentElement.lang = SZ_UI_LANG; } catch (e) {}
+  // <html lang> is the table's _lang when it gives one (zh-Hans: the
+  // device then draws Han characters with its Simplified Chinese font).
+  var tag = SZ_I18N && typeof SZ_I18N._lang === 'string' ? SZ_I18N._lang : SZ_UI_LANG;
+  try { if (SZ_I18N || SZ_I18N_PSEUDO) document.documentElement.lang = tag; } catch (e) {}
   return SZ_UI_LANG;
+}
+
+// Is the UI in a machine-translated table (its "_machine": true)? Then
+// elements marked data-i18n-machine (the "translated by machine" note in
+// About and on the Find page) are shown; otherwise they stay hidden.
+function szMachineTranslated() {
+  return !!(SZ_I18N && SZ_I18N._machine === true);
 }
 
 // '{name} is closed' + { name: 'Zoo' }. An unknown {x} is left as is.
@@ -106,7 +116,9 @@ function szMonthYear(year, month0) {
 // szSetUiLanguage; English leaves the page untouched. (Text that code
 // fills in with szT is marked data-i18n-code; text that stays as written,
 // such as a licence, translate="no". tests/test_viewer_i18n.py checks that
-// all visible markup text is one of the three.)
+// all visible markup text is one of the three.) An element that also has
+// data-i18n-machine starts hidden (style="display:none") and is shown only
+// in a machine-translated table (szMachineTranslated).
 var SZ_I18N_ATTRS = ['title', 'placeholder', 'aria-label'];
 function szApplyI18n(root) {
   if (!SZ_I18N && !SZ_I18N_PSEUDO) return;
@@ -118,6 +130,9 @@ function szApplyI18n(root) {
     var key = el.getAttribute('data-i18n');
     var text = String(el.textContent).replace(/\s+/g, ' ').replace(/^ | $/g, '');
     if (key) el.textContent = szT(key, text);  // i18n-dynamic
+    if (el.getAttribute('data-i18n-machine') != null && el.style) {
+      el.style.display = szMachineTranslated() ? '' : 'none';
+    }
     for (var j = 0; j < SZ_I18N_ATTRS.length; j++) {
       var a = SZ_I18N_ATTRS[j];
       var ak = el.getAttribute('data-i18n-' + a);

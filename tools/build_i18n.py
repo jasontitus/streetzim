@@ -51,6 +51,13 @@ KEY = r"[a-z0-9_]+(?:\.[a-z0-9_]+)+"
 # key itself; a table may hold any of them, and both pages get them all.
 DYNAMIC_FAMILIES = ("type.",)
 PLURAL_CATEGORIES = ("zero", "one", "two", "few", "many", "other")
+# Table-level settings, not UI text: they start with "_" (a key never does)
+# and go into every page's copy of the table (runtime.js reads them).
+#   _machine: true    machine-translated; the viewer shows the
+#                     common.machine_translated note (data-i18n-machine)
+#   _lang: "zh-Hans"  the BCP 47 tag for <html lang>, when the code alone
+#                     does not say which script or glyphs to use
+META_KEYS: dict[str, type] = {"_machine": bool, "_lang": str}
 
 class I18nError(Exception):
     pass
@@ -295,6 +302,24 @@ def is_dynamic(key: str) -> bool:
     return key.startswith(DYNAMIC_FAMILIES)
 
 
+def is_meta(key: str) -> bool:
+    """A table-level setting (META_KEYS), not a UI string."""
+    return key.startswith("_")
+
+
+def _check_meta(lang: str, table: dict[str, Any], origin: Path) -> None:
+    for k, v in table.items():
+        if not is_meta(k):
+            continue
+        want = META_KEYS.get(k)
+        if want is None:
+            raise I18nError(f"{origin}: unknown table setting {k!r} (known: {sorted(META_KEYS)})")
+        if type(v) is not want:
+            raise I18nError(f"{origin}: {k} must be a {want.__name__}, not {v!r}")
+        if k == "_lang" and not re.fullmatch(re.escape(lang) + r"(-[A-Za-z0-9]{2,8})+", v):
+            raise I18nError(f"{origin}: _lang {v!r} must be {lang}-<subtag> (zh-Hans)")
+
+
 def languages() -> dict[str, dict[str, Any]]:
     """Every translation table but English, by language code."""
     out = {}
@@ -303,7 +328,9 @@ def languages() -> dict[str, dict[str, Any]]:
             continue
         if not re.fullmatch(r"[a-z]{2,3}", p.stem):
             raise I18nError(f"{p}: name a table by its language code (de.json)")
-        out[p.stem] = json.loads(p.read_text(encoding="utf-8"))
+        table = json.loads(p.read_text(encoding="utf-8"))
+        _check_meta(p.stem, table, p)
+        out[p.stem] = table
     return out
 
 
@@ -315,10 +342,11 @@ def _json(obj: Any) -> str:
 def tables_for(keys: set[str], langs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Each language's entries for `keys`, as inlined: the place types
     ("type.<key>") nested under one "type" object, which saves repeating
-    the prefix ~260 times in a slot that is short of room."""
+    the prefix ~260 times in a slot that is short of room. Table settings
+    (_machine, _lang) go to every page."""
     out: dict[str, dict[str, Any]] = {}
     for lang, table in langs.items():
-        t: dict[str, Any] = {k: v for k, v in table.items() if k in keys}
+        t: dict[str, Any] = {k: v for k, v in table.items() if k in keys or is_meta(k)}
         types = {k[len("type."):]: v for k, v in table.items() if k.startswith("type.")}
         if types:
             t["type"] = types

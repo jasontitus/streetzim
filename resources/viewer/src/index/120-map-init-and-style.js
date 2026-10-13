@@ -645,7 +645,8 @@ if (!window.__szUnsupported) fetchConfig(1)
     // must not show the imagery's non-commercial licence as if it applied.
     [['attr-satellite-section', config.hasSatellite],
      ['attr-terrain-section', config.hasTerrain],
-     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles],
+     ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles
+                           || _wikiPacksFromConfig(config).length],
      ['attr-rtl-section', config.rtlTextPlugin]
     ].forEach(function (s) {
       var el = document.getElementById(s[0]);

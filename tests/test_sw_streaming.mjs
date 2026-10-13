@@ -90,6 +90,13 @@ async function main() {
       data: Buffer.from('{"name":"synthetic","center":[-77.03,38.9],"zoom":10,"minZoom":8,"maxZoom":14,' +
                         '"bounds":[-77.2,38.8,-76.9,39.0],"buildDate":"2026-09-18"}') },
     { path: 'wiki-article/Foo_Bar.html', mime: 'text/html', data: ARTICLE, cluster: zstdCluster },
+    // A Wikipedia pack's articles (docs/language-matrix-prototype.md): one
+    // without a bar, one with its own bar three levels up and a view.
+    { path: '~w/de/wiki-article/Foo_Bar', mime: 'text/html', data: ARTICLE, cluster: zstdCluster },
+    { path: '~w/de/wiki-article/Baz', mime: 'text/html', cluster: zstdCluster,
+      data: Buffer.from('<html><head></head><body><nav class="sz-back"><a href="../../../index.html#map=12/47.1/9.5" ' +
+                        'onclick="x">&#8592; Back to map</a></nav><p>Pack body.</p></body></html>') },
+    { path: '~w/de/wiki-geo-index.json', mime: 'application/json', data: Buffer.from('{}'), cluster: zstdCluster },
   ];
   const specs = [{ extended: false }, { extended: true }];
   if (haveZstd) specs.push({ zstd: true });
@@ -345,6 +352,16 @@ async function main() {
         assert.ok(r.text.includes('class="sz-back"'), r.text);
         assert.ok(r.text.includes('href="/drive/viewer/"'), r.text);
         assert.ok(r.text.includes('<p>Article body.</p>'));
+      });
+      await check(label + ': a Wikipedia pack\'s article gets it too, at its depth', async () => {
+        const r = await get('~w/de/wiki-article/Foo_Bar');
+        assert.equal(r.status, 200);
+        assert.ok(r.text.includes('class="sz-back"') && r.text.includes('href="/drive/viewer/"'), r.text);
+        const own = await get('~w/de/wiki-article/Baz');
+        assert.ok(own.text.includes('<a href="/drive/viewer/#map=12/47.1/9.5" onclick="x">'), own.text);
+        assert.equal((own.text.match(/class="sz-back"/g) || []).length, 1);
+        const idx = await get('~w/de/wiki-geo-index.json');      // not an article: as stored
+        assert.equal(idx.text, '{}');
       });
       await check(label + ': HEAD answers like GET without a body', async () => {
         const h = await page.evaluate(async () => {

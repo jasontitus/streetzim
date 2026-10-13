@@ -10,8 +10,12 @@ import fs from 'node:fs';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const RUNTIME = fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8');
-const DE = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/de.json`, 'utf8'));
-const EN = JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/en.json`, 'utf8'));
+const table = (lang) => JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/${lang}.json`, 'utf8'));
+const DE = table('de');
+const EN = table('en');
+const TH = table('th');
+const ZH = table('zh');
+const TABLES = { de: DE, th: TH, zh: ZH };
 
 let pass = 0;
 async function ok(name, fn) {
@@ -41,12 +45,12 @@ function load(tables, els = []) {
   const window = { dispatchEvent: (e) => events.push(e.type) };
   const api = new Function('document', 'window', RUNTIME + `
     return { szSetUiLanguage, szUseLanguage, szT, szTn, szFixed, szLocaleNum, szMonthYear,
-             szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum,
+             szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szMachineTranslated,
              get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; } };`)(document, window);
   return { api, docEl, events };
 }
 function el(attrs, text) {
-  return { textContent: text, attrs: Object.assign({}, attrs),
+  return { textContent: text, attrs: Object.assign({}, attrs), style: { display: 'none' },
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
     setAttribute(k, v) { this.attrs[k] = v; } };
 }
@@ -101,6 +105,52 @@ await ok('German: the table, its plurals and number/date formats', () => {
   assert.strictEqual(api.szPlaceType('kebab_shop_xyz'), 'kebab shop xyz');   // not in the table
   // A key the table lacks shows the call site's English, never the key.
   assert.strictEqual(api.szT('no.such_key', 'English text'), 'English text');
+});
+
+await ok('Thai and Chinese: picked by the map language and by ?uilang=', () => {
+  let r = load(INDEX_TABLES);
+  assert.strictEqual(r.api.szSetUiLanguage('th', ''), 'th');
+  assert.strictEqual(r.docEl.lang, 'th');
+  assert.strictEqual(r.api.szT('routing.clear', 'Clear route'), TH['routing.clear']);
+  assert.strictEqual(r.api.szChipLabel('food', 'Food & Drink'), TH['chip.food']);
+  assert.strictEqual(r.api.szPlaceType('restaurant'), TH['type.restaurant']);
+  // One plural category ("other") for every count, the number in {n}.
+  assert.strictEqual(r.api.szTn('place.links', 1, { one: '{n} link', other: '{n} links' }),
+                     TH['place.links'].other.replace('{n}', '1'));
+  assert.strictEqual(r.api.szCompactNum(5600000), TH['num.millions'].replace('{n}', '5.6'));
+  r = load(INDEX_TABLES);
+  assert.strictEqual(r.api.szSetUiLanguage('zh', ''), 'zh');
+  assert.strictEqual(r.docEl.lang, 'zh-Hans');   // the table's _lang: Simplified glyphs
+  assert.strictEqual(r.api.szT('routing.clear', 'Clear route'), ZH['routing.clear']);
+  assert.strictEqual(r.api.szTn('search.placeholder_count', 1234, { one: 'Search {n} places...', other: 'Search {n} places...' }),
+                     ZH['search.placeholder_count'].other.replace('{n}', '1,234'));
+  assert.strictEqual(r.api.szMonthYear(2026, 6), '2026年7月');
+  for (const [map, q, want] of [['en', '?uilang=th', 'th'], ['de', '?x=1&uilang=zh', 'zh'],
+                                ['en', '?uilang=zh-CN', 'zh'], ['th', '', 'th'], ['zh', '?uilang=en', 'en']]) {
+    r = load(INDEX_TABLES);
+    assert.strictEqual(r.api.szSetUiLanguage(map, q), want, map + ' ' + q);
+  }
+});
+
+await ok('the machine-translation note shows for th and zh only', () => {
+  const note = () => el({ 'data-i18n': 'common.machine_translated', 'data-i18n-machine': '' },
+                        'Interface translated by machine — corrections welcome');
+  const plain = () => el({ 'data-i18n': 'routing.clear' }, 'Clear route');
+  for (const [lang, shown] of [['th', true], ['zh', true], ['de', false], ['en', false],
+                               ['fr', false], ['qps', false]]) {
+    const els = [note(), plain()];
+    const r = load(INDEX_TABLES, els);
+    r.api.szUseLanguage(lang, '');
+    assert.strictEqual(r.api.szMachineTranslated(), shown, lang);
+    assert.strictEqual(els[0].style.display, shown ? '' : 'none', lang);
+    assert.strictEqual(els[1].style.display, 'none', lang + ': only data-i18n-machine is touched');
+    if (shown) assert.strictEqual(els[0].textContent, TABLES[lang]['common.machine_translated'], lang);
+  }
+  // ?uilang=de on a Thai map: German, no note.
+  const els = [note()];
+  const r = load(INDEX_TABLES, els);
+  r.api.szUseLanguage('th', '?uilang=de');
+  assert.strictEqual(els[0].style.display, 'none');
 });
 
 await ok('?uilang= overrides the map language; qps is the pseudo-locale', () => {
@@ -162,16 +212,20 @@ await ok('static markup: one pass in German, untouched in English', () => {
   assert.strictEqual(els[1].attrs.placeholder, '[Search places, streets, POIs...]');
 });
 
-await ok('each page carries the German for exactly its own keys', () => {
+await ok('each page carries every table, with exactly its own keys', () => {
   for (const file of ['index.html', 'places.html']) {
     const t = JSON.parse(pageTables(file).json);
-    assert.deepStrictEqual(Object.keys(t), ['de'], file);
-    for (const [k, v] of Object.entries(t.de)) {
-      if (k === 'type') {   // place types, nested (tools/build_i18n.py tables_for)
-        for (const [tk, tv] of Object.entries(v)) assert.strictEqual(tv, DE['type.' + tk], file + ' type.' + tk);
-        continue;
+    assert.deepStrictEqual(Object.keys(t).sort(), Object.keys(TABLES).sort(), file);
+    for (const [lang, src] of Object.entries(TABLES)) {
+      for (const [k, v] of Object.entries(t[lang])) {
+        if (k === 'type') {   // place types, nested (tools/build_i18n.py tables_for)
+          for (const [tk, tv] of Object.entries(v)) assert.strictEqual(tv, src['type.' + tk], `${file} ${lang} type.${tk}`);
+          continue;
+        }
+        assert.deepStrictEqual(v, src[k], `${file} ${lang} ${k}`);
       }
-      assert.deepStrictEqual(v, DE[k], file + ' ' + k);
+      // Table settings go to both pages.
+      for (const k of ['_machine', '_lang']) assert.strictEqual(t[lang][k], src[k], `${file} ${lang} ${k}`);
     }
   }
   const idx = JSON.parse(INDEX_TABLES).de, plc = JSON.parse(pageTables('places.html').json).de;

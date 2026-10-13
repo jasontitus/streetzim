@@ -3,6 +3,8 @@
 - the generated files (en.json, part 005, places.html's block) are current;
 - every translation table has exactly the keys the code uses, with the same
   {placeholders} and the plural forms its language needs;
+- a machine-translated table ("_machine": true) says so on screen, and only
+  such a table does;
 - user-visible text in the viewer is translatable: static markup carries
   data-i18n* (or data-i18n-code / translate="no"), and no English literal
   goes straight into a text sink in the JavaScript (best effort: the sinks
@@ -28,7 +30,10 @@ PARTS = ROOT / "resources" / "viewer" / "src" / "index"
 PLACES = ROOT / "resources" / "viewer" / "places.html"
 
 # Plural categories each language's table must give (Intl.PluralRules).
-PLURAL_FORMS = {"de": {"one", "other"}}
+PLURAL_FORMS = {"de": {"one", "other"}, "th": {"other"}, "zh": {"other"}}
+# Tables made by machine translation (their "_machine": true shows the note);
+# German is reviewed by a person.
+MACHINE = {"th", "zh"}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -49,10 +54,17 @@ def test_there_is_a_german_table() -> None:
     assert "de" in lang_tables()
 
 
+def test_there_are_thai_and_chinese_tables() -> None:
+    # The language-matrix prototype's travellers (docs/language-matrix.md).
+    tables = lang_tables()
+    assert {"th", "zh"} <= set(tables)
+    assert tables["zh"].get("_lang") == "zh-Hans"   # Simplified Chinese
+
+
 @pytest.mark.parametrize("lang", sorted(build_i18n.languages()))
 def test_table_has_every_key_and_no_stale_one(lang: str) -> None:
     en, table = en_table(), lang_tables()[lang]
-    keys = {k for k in table if not build_i18n.is_dynamic(k)}
+    keys = {k for k in table if not build_i18n.is_dynamic(k) and not build_i18n.is_meta(k)}
     missing = sorted(set(en) - keys)
     stale = sorted(keys - set(en))
     assert not missing, f"{lang}.json lacks {missing}"
@@ -64,6 +76,8 @@ def test_placeholders_and_plural_forms_match(lang: str) -> None:
     en, table = en_table(), lang_tables()[lang]
     bad = []
     for key, text in table.items():
+        if build_i18n.is_meta(key):
+            continue   # table settings: build_i18n.languages() checks them
         if build_i18n.is_dynamic(key):
             if not re.fullmatch(r"type\.[a-z0-9_]+", key) or not isinstance(text, str) or not text.strip():
                 bad.append(f"{key}: a place type needs an OSM-style key and a text")
@@ -105,6 +119,73 @@ def test_inlined_tables_hold_the_page_keys() -> None:
     m = re.search(r'id="sz-i18n">(.*?)</script>', plc, re.S)
     assert m
     assert "drive.roundabout" not in json.loads(m.group(1))["de"]
+
+
+def _page_tables(page: str) -> dict[str, dict[str, Any]]:
+    src = (ROOT / "resources" / "viewer" / page).read_text(encoding="utf-8")
+    m = re.search(r'<script type="application/json" id="sz-i18n">(.*?)</script>', src, re.S)
+    assert m, page
+    return json.loads(m.group(1))
+
+
+def test_type_keys_cover_the_same_types_in_every_table() -> None:
+    # Place types are the one family the key test cannot pin to en.json;
+    # a new table covers the German one's.
+    tables = lang_tables()
+    want = {k for k in tables["de"] if build_i18n.is_dynamic(k)}
+    for lang, table in tables.items():
+        got = {k for k in table if build_i18n.is_dynamic(k)}
+        assert got >= want, f"{lang}.json lacks {sorted(want - got)}"
+
+
+# ------------------------------------------------- machine-translation note
+
+def test_machine_tables_are_marked_and_reviewed_ones_are_not() -> None:
+    tables = lang_tables()
+    marked = {lang for lang, t in tables.items() if t.get("_machine") is True}
+    assert marked == MACHINE
+    # Both pages carry the flag (and _lang) in exactly those tables.
+    for page in ("index.html", "places.html"):
+        inlined = _page_tables(page)
+        assert {lang for lang, t in inlined.items() if t.get("_machine") is True} == MACHINE, page
+        for lang, t in tables.items():
+            assert inlined[lang].get("_lang") == t.get("_lang"), (page, lang)
+
+
+def test_machine_note_is_in_both_pages_hidden_until_the_runtime_shows_it() -> None:
+    # About in the map viewer, the footer of the Find page: data-i18n-machine
+    # (runtime.js szApplyI18n shows it only for a "_machine" table) and
+    # display:none in the markup, so English and German never show it.
+    idx = "".join(p.read_text(encoding="utf-8") for p in sorted(PARTS.glob("*.html"))
+                  if p.name != build_i18n.PART_OUT.name)
+    plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
+    for page, src in (("index", idx), ("places", plc)):
+        notes = re.findall(r"<[a-z]+\b[^>]*\bdata-i18n-machine\b[^>]*>", src)
+        assert len(notes) == 1, (page, notes)
+        assert 'data-i18n="common.machine_translated"' in notes[0], page
+        assert re.search(r'style="display:\s*none;?"', notes[0]), page
+    assert 'id="about-mt"' in idx
+    en = en_table()["common.machine_translated"]
+    assert "machine" in en
+    for lang, table in lang_tables().items():
+        assert table["common.machine_translated"].strip(), lang
+
+
+@pytest.mark.parametrize("bad, why", [
+    ({"_machine": "yes"}, "must be a bool"),
+    ({"_machine": 1}, "must be a bool"),
+    ({"_lang": "de-Hans"}, "must be zh-<subtag>"),
+    ({"_lang": "zh"}, "must be zh-<subtag>"),
+    ({"_reviewed": True}, "unknown table setting"),
+])
+def test_table_settings_are_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                    bad: dict[str, Any], why: str) -> None:
+    (tmp_path / "zh.json").write_text(json.dumps({"common.close": "关闭", **bad}), encoding="utf-8")
+    monkeypatch.setattr(build_i18n, "I18N", tmp_path)
+    with pytest.raises(build_i18n.I18nError, match=re.escape(why)):
+        build_i18n.languages()
+    (tmp_path / "zh.json").write_text(json.dumps({"_machine": True, "_lang": "zh-Hans"}), encoding="utf-8")
+    assert build_i18n.languages() == {"zh": {"_machine": True, "_lang": "zh-Hans"}}
 
 
 # --------------------------------------------------------------- markup lint

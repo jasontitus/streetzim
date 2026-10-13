@@ -1,6 +1,9 @@
 // --- Wiki sidebar: show Wikipedia entries in current viewport ---
 function initWikiSidebar(map, config) {
-  if (!config.hasWikidata) return;
+  // Wikipedia packs (100, wiki-packs) bring the panel to a base without
+  // Wikidata of its own.
+  wikiPacksInit(config);
+  if (!config.hasWikidata && !WIKI_PACKS.length) return;
 
   var toggle = document.getElementById('wiki-toggle');
   var panel = document.getElementById('wiki-panel');
@@ -58,6 +61,23 @@ function initWikiSidebar(map, config) {
   // A ZIM built without Wikipedia articles says so (hasWikiArticles false)
   // and has no geo-index to ask for; one from before the flag is asked.
   if (config.hasWikiArticles !== false) loadWikiGeoIndex();
+
+  // Each Wikipedia pack's geo-index, retried the same way. A list the user
+  // opened refills as each arrives, unless an entry's detail is showing.
+  function loadPackGeoIndex(pack, tries) {
+    function retry() {
+      if (pack.index || tries >= 12) return;
+      setTimeout(function() { loadPackGeoIndex(pack, tries + 1); }, Math.min(15000, 1000 * tries));
+    }
+    fetch(baseUrl + pack.prefix + 'wiki-geo-index.json')
+      .then(function(r) { return r && r.ok ? r.json() : null; })
+      .then(function(m) {
+        if (!wikiPackSetIndex(pack, m)) { retry(); return; }
+        if (active && !staleView) updateSidebarFromGeo();
+      })
+      .catch(retry);
+  }
+  WIKI_PACKS.forEach(function(p) { loadPackGeoIndex(p, 1); });
 
   function geoPriority(type) {
     if (type === 'place') return 80;             // settlements (cities/towns)
@@ -129,7 +149,7 @@ function initWikiSidebar(map, config) {
     // No wikidata chunk fetch — those are 20-45 MB and made the detail slow to
     // appear (and empty/short until they finished, so the panel never filled
     // out). The "Read full article" button covers the full content.
-    renderWikiDetail(it.qid, it.name, [lon, lat], it.title, it.desc);
+    renderWikiDetail(it.qid, it.name, [lon, lat], it.title, it.desc, it.prefix);
   }
 
   // Build the nearby list + markers from the baked geo-index (any zoom).
@@ -137,16 +157,8 @@ function initWikiSidebar(map, config) {
     loadingEl.style.display = 'none';
     listEl.textContent = '';
     var b = map.getBounds(), W = b.getWest(), E = b.getEast(), S = b.getSouth(), N = b.getNorth();
-    var items = [];
-    var titles = wikiGeoTitlesInBounds(W, E, S, N);
-    for (var ti = 0; ti < titles.length; ti++) {
-      var title = titles[ti];
-      var g = WIKI_GEO_INDEX[title];
-      var lat = g[0], lon = g[1];
-      items.push({ title: title, name: title.replace(/_/g, ' '),
-                   qid: g[3] || null, type: g[2] || '', coords: [lon, lat],
-                   desc: g[4] || '', priority: geoPriority(g[2] || '') });
-    }
+    var items = _wikiPanelItems(W, E, S, N, geoPriority);
+    var loaded = !!WIKI_GEO_INDEX || WIKI_PACKS.some(function(p) { return !!p.index; });
     items.sort(function(a, b2) { return b2.priority - a.priority || a.name.localeCompare(b2.name); });
     countEl.textContent = items.length;
     if (items.length > 150) items = items.slice(0, 150);
@@ -155,8 +167,8 @@ function initWikiSidebar(map, config) {
       var empty = createEl('div', 'wiki-empty-state');
       // data-wiki-empty: which empty state, for the smoke gates (the text
       // is translatable): loading / none.
-      empty.setAttribute('data-wiki-empty', WIKI_GEO_INDEX ? 'none' : 'loading');
-      if (!WIKI_GEO_INDEX) {
+      empty.setAttribute('data-wiki-empty', loaded ? 'none' : 'loading');
+      if (!loaded) {
         // Don't claim the area is empty when we simply have not loaded the
         // index yet — that misreading is what made california look broken.
         empty.appendChild(createEl('div', 'wiki-empty-state-icon', '⏳'));
@@ -226,7 +238,7 @@ function initWikiSidebar(map, config) {
   // Show one entry's detail INSIDE the panel (replacing the list) so the
   // description + "Read full article" button are readable — a map popup
   // here would sit behind the list. A Back link restores the list.
-  function renderWikiDetail(qid, name, coords, explicitTitle, bakedDesc) {
+  function renderWikiDetail(qid, name, coords, explicitTitle, bakedDesc, explicitPrefix) {
     loadingEl.style.display = 'none';
     refreshBar.style.display = 'none';
     countEl.textContent = '';
@@ -265,14 +277,21 @@ function initWikiSidebar(map, config) {
       wrap.appendChild(dd);
     }
 
-    var ap = explicitTitle || _wikiArticlePath(qid, null);
+    // With Wikipedia packs: the place's articles in every bundled language,
+    // the preferred one on the button and the others under it (100).
+    var links = WIKI_PACKS.length ? _wikiDetailLinks(qid, explicitTitle, explicitPrefix) : null;
+    var ap = links ? links[0] : (explicitTitle || _wikiArticlePath(qid, null));
     if (ap) {
       var ab = createEl('button', 'wiki-article-btn', szT('popup.read_article', '📖 Read full article'));
       ab.style.cssText = 'display:block;width:100%;margin-bottom:8px;padding:9px 10px;border:0;border-radius:6px;background:#2a4a7a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-sizing:border-box;';
+      if (links) ab.setAttribute('data-wiki-lang', ap.lang);
       ab.addEventListener('click', function() {
-        openWikiArticle(ap);
+        if (links) openWikiArticle(ap.title, ap.prefix);
+        else openWikiArticle(ap);
       });
       wrap.appendChild(ab);
+      var also = links && _wikiAlsoIn(links);
+      if (also) wrap.appendChild(also);
     } else {
       var noa = createEl('div', 'wiki-detail-noarticle', szT('wiki.no_article', 'No bundled article for this place.'));
       noa.style.cssText = 'font-size:12px;color:var(--szd-fg-3, #888);margin-bottom:8px;';
@@ -327,7 +346,8 @@ function initWikiSidebar(map, config) {
   function updateSidebar() {
     if (!active) return;
     // Prefer the baked geo-index (any-zoom list + markers) when available.
-    if (WIKI_GEO_INDEX) { updateSidebarFromGeo(); return; }
+    // With Wikipedia packs the geo-indexes are the list, loaded or not yet.
+    if (WIKI_GEO_INDEX || WIKI_PACKS.length) { updateSidebarFromGeo(); return; }
 
     var myScan = ++_wikiScanSeq;
     loadingEl.style.display = 'block';
@@ -343,7 +363,7 @@ function initWikiSidebar(map, config) {
       if (!qid || !qid.match(/^Q\d+$/) || seen[qid]) continue;
       seen[qid] = true;
 
-      var name = szLabelOf(props) || props.label || '';
+      var name = szDisplayLabelOf(props) || props.label || '';
       if (!name) continue;
 
       var cls = props['class'] || '';
