@@ -218,7 +218,7 @@ def tile_inputs(rev):
 def checkout_inputs():
     """tile_inputs of the checkout, which must have no change to them that
     is not committed (no image has those)."""
-    dirty = _git("status", "--porcelain", "--untracked-files=all", "--", *TILE_PATHS)
+    dirty = _git("status", "--porcelain", "--", *TILE_PATHS)       # untracked files too
     if dirty is None:
         fail(f"cannot read the git status of {CHECKOUT}")
     if dirty:

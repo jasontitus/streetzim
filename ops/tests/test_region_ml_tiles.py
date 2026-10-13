@@ -627,7 +627,10 @@ def test_a_host_commit_merged_into_main_is_not_taken(lookup):
     co.git("checkout", "-q", "host")
     co.commit("host: torrent 2", {"rebuild-old.list": "c\n"})
     assert co.git("merge-base", "HEAD", "origin/main") == h1
+    n = len(_calls(host))
     assert m.image_commit(_inputs(co)) == base
+    # Main's first-parent line only: the merged host commit is not even asked for.
+    assert _calls(host)[n:] == [["manifest", "inspect", tag(base)]]
 
 
 def test_no_image_with_these_inputs_fails_precisely(lookup):
@@ -751,6 +754,8 @@ def test_a_signal_to_the_wrapper_reaches_the_tile_step(tmp_path, sig):
     py.write_text(textwrap.dedent(f"""\
         #!{sys.executable}
         import os, signal, sys, time
+        # Not holding the test's pipe: only the wrapper's exit ends communicate().
+        os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
         def end(n, f):
             open("{tmp_path}/py.signal", "w").write(str(n))
             time.sleep(0.5)                       # its cleanup
@@ -774,7 +779,7 @@ def test_a_signal_to_the_wrapper_reaches_the_tile_step(tmp_path, sig):
     out, _ = p.communicate(timeout=30)
     assert p.returncode == -sig                  # the wrapper ends by the same signal
     assert (tmp_path / "py.signal").read_text() == str(int(sig))
-    assert (tmp_path / "py.cleaned").read_text() == "yes"     # waited for its cleanup
+    assert (tmp_path / "py.cleaned").read_text() == "yes"     # the wrapper waited for it
     assert not Path(f"/proc/{child}").exists()
     assert "MBTILES=" not in out
 
