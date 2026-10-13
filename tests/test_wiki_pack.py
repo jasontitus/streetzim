@@ -558,6 +558,12 @@ def test_relative_links_and_excerpts() -> None:
     assert wiki_pack.geo_position('<meta name="geo.position" content="40.63;22.95">') == \
         (40.63, 22.95)
     assert wiki_pack.geo_position('<meta name="geo.position" content="0;0">') is None
+    # No meta: the body's Geo microformat, else its geo: link.
+    body = ('<a href="geo:34.05,-118.25"><span class="geo-dms">北緯34度3分0秒</span></a>'
+            '<span style="display:none"> / <span class="geo">34.05000; -118.25000</span></span>')
+    assert wiki_pack.geo_position(body) == (34.05, -118.25)
+    assert wiki_pack.geo_position('<a href="geo:-33.9,151.2">x</a>') == (-33.9, 151.2)
+    assert wiki_pack.geo_position('<meta name="geo.position" content="1;2">' + body) == (1.0, 2.0)
     assert wiki_pack.guess_type({"i": "human settlement", "p": 10}) == "place"
     assert wiki_pack.guess_type({"i": "mountain"}) == "peak"
     assert wiki_pack.guess_type({"i": "church building"}) == "poi"

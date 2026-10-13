@@ -706,14 +706,25 @@ _EXTERNAL_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*:)?//|^(?:mailto|geo|tel|data|j
 _URL_SAFE = "/()'!*,;:@&=+$-._~"
 
 
+# The Geo microformat ({{Coord}}: <span class="geo">34.05; -118.25</span>)
+# and the geo: links beside it, in the body.
+_GEO_SPAN_RE = re.compile(
+    r'<span class="geo">\s*(-?\d+(?:\.\d+)?)\s*[;,]\s*(-?\d+(?:\.\d+)?)\s*</span>')
+_GEO_HREF_RE = re.compile(r'href="geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)')
+
+
 def geo_position(raw: str) -> tuple[float, float] | None:
-    """The article's coordinates, from mwoffliner's geo.position meta."""
-    m = _GEO_META_RE.search(raw[:20000])
-    if not m:
-        return None
-    lat, lon = float(m.group(1)), float(m.group(2))
-    if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat or lon):
-        return round(lat, 5), round(lon, 5)
+    """The article's coordinates: mwoffliner's geo.position meta (the
+    page's primary coordinates), else the first Geo microformat or geo:
+    link of the body (some mwoffliner versions write no meta: ja Wikipedia
+    2026-06 has none for Los Angeles)."""
+    for rx, text in ((_GEO_META_RE, raw[:20000]), (_GEO_SPAN_RE, raw), (_GEO_HREF_RE, raw)):
+        m = rx.search(text)
+        if not m:
+            continue
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat or lon):
+            return round(lat, 5), round(lon, 5)
     return None
 
 
