@@ -8,13 +8,15 @@
 //
 // Port protocol (assembler-worker.js is the other end):
 //   in:  chunk {chunk} | end | error {reason} | ping
-//   out: ack | pulled {bytes} | drained | cancelled {reason} | pong
+//   out: started | ack | pulled {bytes} | drained | cancelled {reason} | pong
+// 'started' means the browser has asked for the download (the page waits
+// for it, and offers a "Start download" button if it does not come).
 // 'pulled' counts the bytes the browser has read from the stream; 'drained'
 // means it has read all of them. A download that does not start within
 // START_TIMEOUT_MS (the iframe was blocked or never loaded) is cancelled; one
 // whose writer goes silent for SILENT_MS (it pings every 5 s) is failed, so
 // the browser does not keep a half-finished download open forever.
-const VERSION = 2;
+const VERSION = 3;
 const streams = new Map();            // id -> {stream, filename, size, started}
 const HWM = 64 * 1048576;             // bytes held here before it stops acking
 const START_TIMEOUT_MS = 20000;
@@ -63,7 +65,7 @@ self.addEventListener('message', (e) => {
     else if (x.type === 'error') { try { ctrl.error(new Error(x.reason)); } catch (err) { /* closed */ } forget(); }
     else if (x.type === 'ping') port.postMessage({ type: 'pong' });
   };
-  const s = { stream, filename: d.filename, size: d.size, started: false };
+  const s = { stream, filename: d.filename, size: d.size, started: false, port };
   startTimer = setTimeout(() => {
     if (s.started) return;
     forget();
@@ -82,6 +84,7 @@ self.addEventListener('fetch', (e) => {
   const s = streams.get(decodeURIComponent(u.pathname.slice(prefix.length)));
   if (!s || s.started) { e.respondWith(new Response('This download is no longer running.', { status: 404 })); return; }
   s.started = true;
+  s.port.postMessage({ type: 'started' });
   e.respondWith(new Response(s.stream, { headers: {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': `attachment; filename="${s.filename.replace(/["\\\r\n]/g, '')}"`,
