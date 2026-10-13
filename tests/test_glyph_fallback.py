@@ -149,12 +149,19 @@ def text_field_keys(src: str) -> set[str]:
     for m in re.finditer(r"""(["']?)text-field\1\s*[:,]""", src):
         found += 1
         if src[m.end():m.end() + 40].lstrip().startswith("szLabelField()"):
-            # The viewer's label rule (130-lowzoom-lakes.js): its literal
-            # gets, plus name:<language> ("name:" + SZ_LANG).
-            body = src[src.index("function szLabelField()"):]
-            body = body[:body.index("\n}\n")]
-            assert '["get", "name:" + SZ_LANG]' in body
-            body = body.replace('["get", "name:" + SZ_LANG]', "")
+            # The viewer's label rule (130-lowzoom-lakes.js): the local
+            # label's literal gets (_szLocalLabelField), plus
+            # name:<language> ("name:" + SZ_LANG) and, on a merged map shown
+            # in another language than its base's, that language's name
+            # under it (["get", key], key = "name:" + SZ_LANG2).
+            def body_of(fn: str) -> str:
+                body = src[src.index(f"function {fn}()"):]
+                return body[:body.index("\n}\n")]
+            local, outer = body_of("_szLocalLabelField"), body_of("szLabelField")
+            assert '["get", "name:" + SZ_LANG]' in local
+            assert 'var key = "name:" + SZ_LANG2;' in outer
+            body = local.replace('["get", "name:" + SZ_LANG]', "") + outer.replace('["get", key]', "")
+            assert "get" not in outer.replace('["get", key]', ""), "szLabelField reads another key"
             keys |= {g[2] for g in re.findall(
                 r"""\[\s*(["'])get\1\s*,\s*(["'])(.*?)\2\s*[\],]""", body, re.S)}
             keys.add("name:<language>")

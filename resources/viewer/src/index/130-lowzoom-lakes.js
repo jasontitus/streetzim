@@ -33,13 +33,38 @@ function _szLowzoomLakes() {
 // localize_feature names records in, so tapped labels find them. English
 // builds keep name:latin first. szLabelOf is the same rule for a feature's
 // properties (popups, the wiki list).
+//
+// A merged map (a base plus Wikipedia packs, docs/language-matrix.md) can
+// be in another language than its base: map-config "language" is then the
+// map language and "baseLanguage" the base's. Its labels are bilingual:
+// the local name first, as the base labels it (what the signs say), and
+// under it, smaller, the name in the map language when the tile has one
+// that differs. SZ_LANG is the local labels' language, SZ_LANG2 the map
+// language when that is another one, else ''.
 var SZ_LANG = 'en';
-function szLabelField() {
+var SZ_LANG2 = '';
+function _szLocalLabelField() {
   if (SZ_LANG !== 'en') {
     return ["coalesce", ["get", "name:" + SZ_LANG], ["get", "name"],
             ["get", "name_int"], ["get", "name:latin"]];
   }
   return ["coalesce", ["get", "name:latin"], ["get", "name_int"], ["get", "name"]];
+}
+function szLabelField() {
+  var local = _szLocalLabelField();
+  if (!SZ_LANG2) return local;
+  var key = "name:" + SZ_LANG2;
+  var localText = local.concat([""]);
+  return ["case",
+    ["all", ["has", key], ["!=", localText, ""], ["!=", ["get", key], localText]],
+    ["format", local, {}, "\n", {}, ["get", key], { "font-scale": 0.8 }],
+    local.concat([["get", key]])];
+}
+// The two label languages a map-config asks for: [local, second or ''].
+function szLabelLanguages(config) {
+  var lang = (config && typeof config.language === 'string' && config.language) || 'en';
+  var base = (config && typeof config.baseLanguage === 'string' && config.baseLanguage) || lang;
+  return [base, base !== lang ? lang : ''];
 }
 function szLabelOf(p) {
   p = p || {};
@@ -137,7 +162,9 @@ function szSatelliteHiddenIds(config) {
 }
 
 function makeStyle(config) {
-  SZ_LANG = (config && typeof config.language === 'string' && config.language) || 'en';
+  var _szLangs = szLabelLanguages(config);
+  SZ_LANG = _szLangs[0];
+  SZ_LANG2 = _szLangs[1];
   // Use zimtile:// protocol for tiles and fonts — this adds retry logic
   // for Kiwix JS PWA where the ServiceWorker can drop requests under load
   var tileUrl = "zimtile://" + baseUrl + "tiles/{z}/{x}/{y}.pbf";

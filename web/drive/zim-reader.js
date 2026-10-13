@@ -25,6 +25,57 @@
   const MAGIC = 0x44D495A;
   const EXACT = { exact: true };   // HttpRangeSource.slice() option
 
+  // The first read of a compressed cluster: the whole cluster when it is
+  // at most this long (measured: zstd clusters are 280 KB at the median
+  // and at most 2.5 MB on switzerland), else this much and then on to the
+  // end of its frame. It also bounds how far past the frame a read goes
+  // when the next boundary is far away (a merged ZIM's base, above).
+  const CLUSTER_FIRST_READ = 4 * 1024 * 1024;
+
+  // Where the zstd frame that starts at buf[pos] ends, from the frame
+  // header and the 3-byte block headers alone (RFC 8878 §3.1.1): {end}
+  // (an index into buf) once all of it is in buf, else {need}, a length
+  // of buf that lets the walk get further. Skippable frames count as
+  // frames. Throws on bytes that are not a frame.
+  function zstdFrameExtent(buf, pos) {
+    if (buf.length < pos + 8) return { need: pos + 8 };
+    const magic = (buf[pos] | buf[pos + 1] << 8 | buf[pos + 2] << 16 | buf[pos + 3] << 24) >>> 0;
+    if ((magic >>> 4) === 0x184D2A5) {     // skippable: magic, u32 size, data
+      const n = (buf[pos + 4] | buf[pos + 5] << 8 | buf[pos + 6] << 16 | buf[pos + 7] << 24) >>> 0;
+      const e = pos + 8 + n;
+      return e <= buf.length ? { end: e } : { need: e };
+    }
+    if (magic !== 0xFD2FB528) throw new Error('invalid zstd data (no frame at ' + pos + ')');
+    const fhd = buf[pos + 4];
+    if (fhd & 0x08) throw new Error('invalid zstd data (reserved bit set)');
+    const single = (fhd >> 5) & 1;
+    const fcs = [single, 2, 4, 8][fhd >> 6];
+    let p = pos + 5 + (single ? 0 : 1) + [0, 1, 2, 4][fhd & 3] + fcs;
+    for (;;) {
+      if (buf.length < p + 3) return { need: p + 3 };
+      const bh = buf[p] | buf[p + 1] << 8 | buf[p + 2] << 16;
+      const type = (bh >> 1) & 3;
+      if (type === 3) throw new Error('invalid zstd data (reserved block type)');
+      p += 3 + (type === 1 ? 1 : bh >>> 3);   // RLE blocks carry one byte
+      if (bh & 1) break;                       // last block
+    }
+    if (fhd & 0x04) p += 4;                    // content checksum
+    return p <= buf.length ? { end: p } : { need: p };
+  }
+
+  // The length a cluster's decoded data says it has: the last word of its
+  // blob offset table. null when `data` is too short to tell.
+  function clusterDataLength(data, extended) {
+    const w = extended ? 8 : 4;
+    if (data.length < w) return null;
+    const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const word = (o) => (extended ? v.getUint32(o, true) + v.getUint32(o + 4, true) * 0x100000000
+                                  : v.getUint32(o, true));
+    const first = word(0);
+    if (first < w || first % w || first > data.length) return null;
+    return word(first - w);
+  }
+
   function u8 (v, o) { return v.getUint8(o); }
   function u16(v, o) { return v.getUint16(o, true); }
   function u32(v, o) { return v.getUint32(o, true); }
@@ -364,19 +415,28 @@
       // because it decompresses streaming from the start and reads the
       // cluster's own blob-offset table, never needing an end offset.
       // Take the next-highest offset instead of the next index.
+      //
+      // That offset is only an upper bound. A merged ZIM (a base plus
+      // Wikipedia packs, docs/language-matrix.md) keeps the base's bytes
+      // where they were, so the base's last cluster is followed by the
+      // base's old tables and only then by the next cluster. A zstd
+      // cluster is therefore read up to the end of its own frame
+      // (_readZstdCluster), never to the boundary.
       const end = await this._clusterEnd(start);
-      const raw = await this._readRange(start, end - start);
-      const info = raw[0];
+      const first = await this._readRange(start, Math.min(end - start, CLUSTER_FIRST_READ));
+      const info = first[0];
       const compression = info & 0x0F;
       const extended = (info & 0x10) !== 0;
       let payload;
       if (compression === 1 || compression === 2) {
+        const raw = first.length === end - start
+          ? first : await this._readRange(start, end - start);
         payload = raw.subarray(1);
       } else if (compression === 5) {
         if (!global.fzstd || typeof global.fzstd.decompress !== 'function') {
           throw new Error('zstd decoder (fzstd) not loaded');
         }
-        payload = global.fzstd.decompress(raw.subarray(1));
+        payload = await this._readZstdCluster(start, end, first, extended);
       } else if (compression === 4) {
         throw new Error('xz-compressed ZIMs are not supported');
       } else {
@@ -385,6 +445,53 @@
       const cluster = { data: payload, extended };
       this.clusterCache.set(clusterNum, cluster);
       return cluster;
+    }
+
+    // The decoded payload of the zstd cluster at `start`: its frame is
+    // found from the frame and block headers (zstdFrameExtent, nothing
+    // decoded) as the bytes come in, and exactly that frame goes to fzstd.
+    // fzstd cannot do this itself: its one-shot decompress() treats every
+    // byte after a frame as the next frame, and so does the push() of its
+    // streaming Decompress, which also never reports where a frame ends;
+    // the old tables after a merged base's last cluster made both throw
+    // "invalid zstd data". `first` holds the bytes read so far from
+    // `start` (CLUSTER_FIRST_READ or the whole cluster, whichever is
+    // less: one read for nearly every cluster, as before); a longer frame
+    // is read on in growing steps, never past `end`. A writer may split a
+    // cluster over several frames (libzim's streaming decoder would read
+    // on), so frames are decoded until the cluster's own blob table is
+    // covered.
+    async _readZstdCluster(start, end, first, extended) {
+      let buf = first;
+      let pos = 1;                          // after the info byte
+      const parts = [];
+      let have = 0;
+      for (;;) {
+        let ext = zstdFrameExtent(buf, pos);
+        while (ext.end === undefined) {
+          if (buf.length >= end - start) {
+            throw new Error('zstd frame at ' + (start + pos) + ' runs past the cluster end ' + end);
+          }
+          const want = Math.min(end - start, Math.max(ext.need, buf.length * 4));
+          const more = await this._readRange(start + buf.length, want - buf.length);
+          const grown = new Uint8Array(want);
+          grown.set(buf);
+          grown.set(more, buf.length);
+          buf = grown;
+          ext = zstdFrameExtent(buf, pos);
+        }
+        const out = global.fzstd.decompress(buf.subarray(pos, ext.end));
+        parts.push(out);
+        have += out.length;
+        pos = ext.end;
+        const need = clusterDataLength(parts[0], extended);
+        if (need === null || have >= need || pos >= end - start) break;
+      }
+      if (parts.length === 1) return parts[0];
+      const all = new Uint8Array(have);
+      let o = 0;
+      for (const p of parts) { all.set(p, o); o += p.length; }
+      return all;
     }
 
     async _readBlob(clusterNum, blobNum) {
