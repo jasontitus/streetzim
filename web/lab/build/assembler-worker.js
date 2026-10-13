@@ -169,10 +169,12 @@ function httpReader(url, size, net, signal, onRetry) {
   const win = { k: 4, done: 0, t: performance.now(), bytes: 0, rate: 0 };
   const read = async (a, b) => {
     const out = new Uint8Array(b - a);
+    if (!net.base_t0) net.base_t0 = performance.now();
     try {
       await SZFetch.fetchRetrying(url, out, a, a, b, size, signal, net.http, (n) => { net.base_bytes += n; }, onRetry,
         { tries: 8, maxBackoffMs: 30000 });
     } catch (e) { e.baseDownload = true; throw e; }
+    net.base_t1 = performance.now();
     if (++win.done % 4 === 0) {
       const now = performance.now();
       const rate = (net.base_bytes - win.bytes) / ((now - win.t) / 1000);
@@ -364,8 +366,10 @@ function summary(net) {
   return { local_mb: +(net.local_bytes / 1e6).toFixed(1),
            local_mbps: net.local_ms ? +(net.local_bytes / 1e6 / (net.local_ms / 1000)).toFixed(1) : null,
            base_mb: +((net.base_bytes || 0) / 1e6).toFixed(1),
-           base_mbps_avg: h.ms ? +(h.bytes / 1e6 / (h.ms / 1000)).toFixed(2) : null,
-           base_mbps_p10: SZFetch.pct(h.mbps, 0.1), base_ttfb_p50: SZFetch.pct(h.ttfb, 0.5),
+           // wall clock, all requests together; then per request
+           base_mbps: net.base_t1 > net.base_t0 ? +(net.base_bytes / 1e6 / ((net.base_t1 - net.base_t0) / 1000)).toFixed(2) : null,
+           base_stream_mbps_avg: h.ms ? +(h.bytes / 1e6 / (h.ms / 1000)).toFixed(2) : null,
+           base_stream_mbps_p10: SZFetch.pct(h.mbps, 0.1), base_ttfb_p50: SZFetch.pct(h.ttfb, 0.5),
            base_requests: h.requests, base_retries: h.retries, base_slow_retries: h.slow_retries,
            base_resets: h.resets, base_hash_retries: net.hash_retries || 0 };
 }

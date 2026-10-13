@@ -132,7 +132,8 @@
       a2.textContent = `${langName(m.lang, m.label)} ${region.title}`;
       a2.lang = 'en';
       a2.onclick = (ev) => {
-        if (running || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
+        if (running) { ev.preventDefault(); return; }    // one build at a time
+        if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
         ev.preventDefault();
         $('lang').value = m.lang; pickLang();
         build('net');
@@ -667,7 +668,8 @@
     const rn = result.net || {};
     track('build_end', Object.assign({}, base, netParams(), {
       outcome: result.outcome, secs: Math.round((performance.now() - t0) / 1000), mbps_total: result.mbps_total,
-      local_mbps: rn.local_mbps, base_mbps_avg: rn.base_mbps_avg, base_mbps_p10: rn.base_mbps_p10, base_ttfb_ms_p50: rn.base_ttfb_p50,
+      local_mbps: rn.local_mbps, base_mbps: rn.base_mbps, base_stream_mbps_avg: rn.base_stream_mbps_avg,
+      base_stream_mbps_p10: rn.base_stream_mbps_p10, base_ttfb_ms_p50: rn.base_ttfb_p50,
       base_retries: rn.base_retries, base_slow_retries: rn.base_slow_retries, base_resets: rn.base_resets,
       hidden_s: Math.round(hiddenMs / 1000), hash_ok: result.ok ? 1 : 0 }));
     running = null;
@@ -676,7 +678,7 @@
     if (result.ok) {
       const secs = Math.round(result.ms / 1000);
       const tail = ` ${fmtMB(result.size)} in ${secs < 120 ? secs + ' s' : fmtDur(secs)}` +
-        (rn.base_mbps_avg ? ` (map downloaded at ${rn.base_mbps_avg} MB/s)` : '') + `. MD5 (as md5sum prints it): ${result.file_md5}`;
+        (rn.base_mbps ? ` (map downloaded at ${rn.base_mbps} MB/s)` : '') + `. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
         opfsState(fileName, 'ready');
         setStatus('Done and verified; one more step: save it.' + tail, true);
