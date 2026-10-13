@@ -1,4 +1,5 @@
 {
+ "_compact": "intl",
  "_lang": "zh-Hans",
  "_machine": true,
  "about.built_when": "构建于 {when}",

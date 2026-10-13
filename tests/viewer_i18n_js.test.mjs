@@ -46,7 +46,7 @@ function load(tables, els = []) {
   const window = { dispatchEvent: (e) => events.push(e.type) };
   const api = new Function('document', 'window', RUNTIME + `
     return { szSetUiLanguage, szUseLanguage, szT, szTn, szFixed, szLocaleNum, szMonthYear,
-             szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szMachineTranslated,
+             szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szCompactIntl, szMachineTranslated,
              get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; } };`)(document, window);
   return { api, docEl, events };
 }
@@ -153,6 +153,45 @@ await ok('Spanish, French, Japanese, Korean, Greek: a table, <html lang> = the m
   // Places.html carries them too.
   const places = JSON.parse(pageTables('places.html').json);
   for (const lang of NEW_MACHINE) assert.ok(places[lang] && places[lang]._machine === true, lang);
+});
+
+await ok('Japanese, Korean, Chinese: large numbers in ten thousands, smaller ones written out', () => {
+  const NS = [999, 1234, 9999, 12000, 123456, 5600000, 1.1e9];
+  const want = {
+    ja: ['999', '1,234', '9,999', '1.2万', '12.3万', '560万', '11億'],
+    ko: ['999', '1,234', '9,999', '1.2만', '12.3만', '560만', '11억'],
+    zh: ['999', '1,234', '9,999', '1.2万', '12.3万', '560万', '11亿'],
+  };
+  for (const [lang, w] of Object.entries(want)) {
+    assert.strictEqual(TABLES[lang]._compact, 'intl', lang);
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    assert.deepStrictEqual(NS.map((n) => r.api.szCompactNum(n)), w, lang);
+    assert.deepStrictEqual(NS.map((n) => r.api.szCompactIntl(n)), w, lang);
+  }
+  // Every other table, and English: num.* as before; szCompactIntl says ''.
+  for (const lang of ['de', 'th', 'es', 'fr', 'el']) {
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    assert.strictEqual(r.api.szCompactIntl(5600000), '', lang);
+    assert.strictEqual(r.api.szCompactNum(5600000), TABLES[lang]['num.millions'].replace('{n}', r.api.szFixed(5.6, 1)), lang);
+  }
+  const en = load(INDEX_TABLES);
+  en.api.szSetUiLanguage('en', '');
+  assert.deepStrictEqual([999, 1234, 5600000].map((n) => en.api.szCompactNum(n)), ['999', '1.2K', '5.6M']);
+  assert.strictEqual(en.api.szCompactIntl(5600000), '');
+  // Where Intl has no compact notation (an older engine ignores the
+  // option): the number written out, never a 千 / 천 form.
+  const NF = Intl.NumberFormat;
+  try {
+    Intl.NumberFormat = function(l, o) { const f = new NF(l, Object.assign({}, o, { notation: 'standard' })); return f; };
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage('ja', '');
+    assert.strictEqual(r.api.szCompactNum(5600000), '5,600,000');
+  } finally { Intl.NumberFormat = NF; }
+  // The Wiki list's population (410) takes it too.
+  const panel = fs.readFileSync(`${REPO}/resources/viewer/src/index/410-wiki-sidebar.js`, 'utf8');
+  assert.match(panel, /var pop = szCompactIntl\(wd\.p\) \|\| \(wd\.p >= 1e6/);
 });
 
 await ok('the machine-translation note shows for machine tables only', () => {

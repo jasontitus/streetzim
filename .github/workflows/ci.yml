@@ -437,10 +437,12 @@ jobs:
       # The viewer in another UI language (docs/i18n.md). The pseudo-locale
       # (?uilang=qps) brackets every translated string, so chrome text
       # without brackets never went through szT; ?uilang=de must show the
-      # German table. Then the in-ZIM smoke again under the pseudo-locale:
+      # German table, every machine-translated table (th, zh, es, fr, ja,
+      # ko, el) its own and the note, and the navigation HUD must fit a
+      # 320 px phone in every language. Then the in-ZIM smoke again under the pseudo-locale:
       # no gate may depend on English UI text. Uses the kiwix-serve started
       # by the overlap-check step.
-      - name: Viewer UI in another language (pseudo-locale + German)
+      - name: Viewer UI in another language (pseudo-locale, German, machine tables)
         run: |
           ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \

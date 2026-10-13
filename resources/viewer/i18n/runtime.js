@@ -155,7 +155,25 @@ function szUseLanguage(lang, search) {
 }
 
 // "1.2K" / "3.4M" / "1.1B" (Wikidata population and the like).
+// Japanese, Korean and Chinese count large numbers in ten thousands (万 / 億,
+// 만 / 억, 万 / 亿), which num.* (thousands, millions) cannot say. Their
+// tables set "_compact": "intl": 10,000 and up then go through Intl's
+// compact notation in the UI language ("1.2万", "560만", "11亿"); smaller
+// numbers are written out ("1,234"), and so is any number where Intl has no
+// compact notation. '' for every other table: the caller's own form.
+function szCompactIntl(n) {
+  if (!SZ_I18N || SZ_I18N._compact !== 'intl') return '';
+  if (n >= 1e4) {
+    try {
+      var f = new Intl.NumberFormat(SZ_UI_LANG, { notation: 'compact', maximumFractionDigits: 1 });
+      if (f.resolvedOptions().notation === 'compact') return f.format(n);
+    } catch (e) {}
+  }
+  return szLocaleNum(n);
+}
 function szCompactNum(n) {
+  var c = szCompactIntl(n);
+  if (c) return c;
   if (n >= 1e9) return szT('num.billions', '{n}B', { n: szFixed(n / 1e9, 1) });
   if (n >= 1e6) return szT('num.millions', '{n}M', { n: szFixed(n / 1e6, 1) });
   if (n >= 1e3) return szT('num.thousands', '{n}K', { n: szFixed(n / 1e3, 1) });

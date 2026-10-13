@@ -14,8 +14,11 @@
 //    bracketed or carry no letters, unless the row is listed in MIXED.
 // 2. German (?uilang=de): <html lang>, and fixed elements read de.json;
 //    no "translated by machine" note (German is reviewed).
-// 3. Thai and Chinese (?uilang=th, ?uilang=zh): the same, and the
-//    machine-translation note shows in About and on the Find page.
+// 3. Every machine-translated table (th, zh, es, fr, ja, ko, el: the
+//    tables with "_machine": true in resources/viewer/i18n): the same, and
+//    the machine-translation note shows in About and on the Find page.
+// 4. Every table: the navigation HUD's row (arrow, distance and street,
+//    fullscreen, exit) fits a 320 px phone with room for the distance.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/i18n_pseudo_check.mjs
@@ -32,6 +35,10 @@ if (!origin) { console.error('ZIM_ORIGIN is required'); process.exit(2); }
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const table = (lang) => JSON.parse(fs.readFileSync(`${REPO}/resources/viewer/i18n/${lang}.json`, 'utf8'));
 const DE = table('de');
+// The tables marked as machine-translated, and every table, by code.
+const LANGS = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
+  .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
+const MACHINE = LANGS.filter((l) => table(l)._machine === true);
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
 const ORIGIN = pt(process.env.ORIGIN, '43.7396,7.4246');
@@ -320,9 +327,11 @@ try {
   check(dp.title === DE['places.title'], 'German: Find page', dp.title);
   check(dp.note && dp.note[0] === false, 'German: no note on the Find page', JSON.stringify(dp.note));
 
-  // ---- 3. Thai and Chinese (machine-translated tables)
-  for (const [lang, tag] of [['th', 'th'], ['zh', 'zh-Hans']]) {
+  // ---- 3. The machine-translated tables
+  check(MACHINE.length >= 7, 'machine tables found', MACHINE.join(','));
+  for (const lang of MACHINE) {
     const T = table(lang);
+    const tag = T._lang || lang;
     await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
     const v = await viewerState();
@@ -338,6 +347,27 @@ try {
     check(f.note && f.note[0] === true && f.note[1] === T['common.machine_translated'],
           `${lang}: machine-translation note on the Find page`, JSON.stringify(f.note));
   }
+  // ---- 4. The navigation HUD on a 320 px phone, in every language: its
+  // buttons do not shrink, so a long "Exit" leaves the distance no room.
+  await page.setViewport({ width: 320, height: 640 });
+  for (const lang of LANGS) {
+    await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
+    const hud = await page.evaluate(() => {
+      const h = document.getElementById('drive-hud');
+      h.style.display = 'block';
+      document.getElementById('drive-dist').textContent = '12.3 km';
+      const r = (id) => document.getElementById(id).getBoundingClientRect();
+      const out = { text: Math.round(r('drive-text').width), exit: document.getElementById('drive-exit').textContent,
+                    right: Math.round(Math.max(r('drive-exit').right, r('drive-fullscreen').right)),
+                    hud: Math.round(r('drive-hud').right), dist: document.getElementById('drive-dist').scrollWidth };
+      h.style.display = '';
+      return out;
+    });
+    check(hud.right <= hud.hud && hud.text >= hud.dist, `${lang}: navigation HUD fits 320 px`,
+          JSON.stringify(hud));
+  }
+  await page.setViewport({ width: 420, height: 860 });
   check(!errors.length, 'no page errors', errors.join(' | '));
 } finally {
   await browser.close();

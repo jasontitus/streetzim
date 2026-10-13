@@ -476,9 +476,10 @@ function initWikiSidebar(map, config) {
         var typeText = item.cls ? szPlaceType(item.cls) : item.layer.replace(/-/g, ' ');
         metaDiv.appendChild(createEl('span', 'wiki-item-type', typeText));
         if (wd.p) {
-          var pop = wd.p >= 1e6 ? szT('num.millions', '{n}M', { n: szFixed(wd.p / 1e6, 1) })
+          // 万 / 만 for a table that counts in ten thousands (runtime.js).
+          var pop = szCompactIntl(wd.p) || (wd.p >= 1e6 ? szT('num.millions', '{n}M', { n: szFixed(wd.p / 1e6, 1) })
                   : wd.p >= 1e3 ? szT('num.thousands', '{n}K', { n: szFixed(wd.p / 1e3, 0) })
-                  : (SZ_I18N ? szLocaleNum(wd.p) : String(wd.p));
+                  : (SZ_I18N ? szLocaleNum(wd.p) : String(wd.p)));
           metaDiv.appendChild(createEl('span', 'wiki-item-pop', szT('wiki.pop', 'pop. {n}', { n: pop })));
         }
         div.appendChild(metaDiv);

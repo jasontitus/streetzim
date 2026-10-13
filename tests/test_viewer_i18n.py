@@ -187,6 +187,8 @@ def test_machine_note_is_in_both_pages_hidden_until_the_runtime_shows_it() -> No
     ({"_lang": "de-Hans"}, "must be zh-<subtag>"),
     ({"_lang": "zh"}, "must be zh-<subtag>"),
     ({"_reviewed": True}, "unknown table setting"),
+    ({"_compact": True}, "must be a str"),
+    ({"_compact": "myriad"}, 'must be "intl"'),
 ])
 def test_table_settings_are_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                     bad: dict[str, Any], why: str) -> None:

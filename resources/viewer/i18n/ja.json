@@ -1,4 +1,5 @@
 {
+ "_compact": "intl",
  "_machine": true,
  "about.built_when": "{when}に作成",
  "about.built_when_with": "{when}に {generator} で作成",

@@ -1,4 +1,5 @@
 {
+ "_compact": "intl",
  "_machine": true,
  "about.built_when": "{when} 제작",
  "about.built_when_with": "{when} 제작, 사용 도구: {generator}",
