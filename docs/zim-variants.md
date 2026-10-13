@@ -85,7 +85,9 @@ folding takes 2 minutes on one core. The densest city tiles grow most
 (central Zürich 152 → 525 KB raw), and when zoomed past 13 the map lays out
 every path of the overzoomed tile, so phones do more work there. A build
 without a search cache also takes trail names into search. A z14 tile that
-will not decode is skipped with a warning. `derive_zim.py --light` copies
+will not decode, or whose paths cannot be read, is skipped with a warning
+(its siblings still fold). Folded paths carry no feature id, so two
+identical features (same tags and geometry) in one tile are added once. `derive_zim.py --light` copies
 blobs and does not fold: its ZIMs still draw no paths.
 
 ## Tier 2 now: one derive tool with recipes

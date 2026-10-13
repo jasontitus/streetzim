@@ -415,3 +415,107 @@ def test_a_create_zim_build_stores_the_folded_tile(tmp_path, mb, monkeypatch):
         xapian_mode="none", max_zoom=13, fold_paths=True)
     data = bytes(Archive(out).get_entry_by_path(f"tiles/13/{X13}/{Y13}.pbf").get_item().content)
     assert _paths_in(data) == 1
+
+
+# ---- round-2 review: children with broken paths, holes, wiring --------------
+
+def test_a_child_whose_paths_cannot_be_read_is_skipped_and_its_sibling_folds():
+    # gunzips fine, but its feature's packed tags end in an unterminated varint
+    broken = pf._enc_len(3, pf._enc_varint(15 << 3) + pf._enc_varint(2)
+                         + pf._enc_len(1, b"transportation")
+                         + pf._enc_len(2, pf._enc_len(2, b"\x80"))
+                         + pf._enc_len(3, b"class") + pf._enc_len(4, pf.PATH_VALUE))
+    good = tile({"transportation": [FOOTWAY]})
+    stats: dict = {}
+    got = added_features(pf.fold(PARENT, [(0, 0, broken), (1, 0, good)], stats))
+    assert len(got) == 1 and stats["bad_children"] == 1
+
+
+def test_a_bug_in_the_fold_is_not_swallowed(monkeypatch):
+    def boom(*_a, **_k):
+        raise IndexError("a bug")
+    monkeypatch.setattr(pf, "_encode_geometry", boom)
+    with pytest.raises(IndexError):
+        pf.fold(PARENT, [(0, 0, tile({"transportation": [FOOTWAY]}))])
+
+
+def test_bad_children_are_counted_across_processes_and_warned_about(tmp_path, capsys):
+    from streetzim import tiles as T
+    mb = _mbtiles(tmp_path / "bad.mbtiles", {
+        (14, 2 * X13, 2 * Y13): b"\x1f\x8b" + b"broken",
+        (14, 2 * X13 + 1, 2 * Y13): gzip.compress(tile({"transportation": [FOOTWAY]})),
+    }, gz=False)
+    for workers in (1, 2):
+        stats: dict = {}
+        out = list(pf.fold_tiles(mb, [(13, X13, Y13, PARENT)], workers=workers, stats=stats))
+        assert stats["bad_children"] == 1 and _paths_in(out[0][3]) == 1
+    T._print_fold({"tiles": 1, "features": 1, "bad_children": 1})
+    assert "1 z14 tiles would not decode" in capsys.readouterr().out
+
+
+def test_the_streaming_reader_hands_over_decoded_tiles(mb, monkeypatch):
+    from streetzim import tiles as T
+    monkeypatch.setattr(T, "build_cpus", lambda: 1)
+    got = {(z, x, y): d for z, x, y, d in T.iter_tiles_from_mbtiles(mb, max_zoom=13, fold_paths=True)}
+    assert got[(13, X13, Y13)][:2] != b"\x1f\x8b" and _paths_in(got[(13, X13, Y13)]) == 1
+    loaded, _m = T.extract_tiles_from_mbtiles(mb, max_zoom=13, fold_paths=True)
+    assert loaded[(13, X13, Y13)][:2] == b"\x1f\x8b"
+
+
+def _ring(*pts: tuple[int, int]) -> list[int]:
+    cmds = line(*pts)
+    return cmds + [pf._CLOSE_PATH | 1 << 3]
+
+
+def test_holes_that_survive_are_kept_and_broken_ones_dropped():
+    outer = _ring((0, 0), (2000, 0), (2000, 2000), (0, 2000))           # area > 0
+    hole = _ring((500, 500), (500, 1500), (1500, 1500), (1500, 500))    # area < 0
+    # a hole the halving turns inside out: area -1 (surveyor's formula, y
+    # down), halved to (300,300) (302,301) (301,301): area +1
+    flip = _ring((600, 600), (603, 602), (602, 601))
+    assert pf._ring_area2([(600, 600), (603, 602), (602, 601)]) < 0
+    child = raw_tile("transportation", [(3, [("class", "path")], outer + hole + flip)])
+    got = added_features(pf.fold(PARENT, [(0, 0, child)]))
+    assert got[0]["geometry"]["type"] == "Polygon"
+    assert len(got[0]["geometry"]["coordinates"]) == 2      # outer + surviving hole; flip dropped
+
+
+def test_holes_go_with_an_outer_ring_that_turns_inside_out():
+    flip_outer = _ring((0, 0), (2, 1), (3, 2))               # +1, halved to -1
+    big_hole = _ring((100, 100), (100, 900), (900, 900), (900, 100))
+    child = raw_tile("transportation", [(3, [("class", "path")], flip_outer + big_hole)])
+    assert pf.fold(PARENT, [(0, 0, child)]) is PARENT
+
+
+def test_rings_are_written_without_their_closing_point():
+    # an encoder that repeats the first point before ClosePath
+    ring = _ring((0, 0), (400, 0), (400, 400), (0, 400), (0, 0))
+    child = raw_tile("transportation", [(3, [("class", "path")], ring)])
+    layer = pf._Layer(layers_raw(pf.fold(PARENT, [(0, 0, child)]))["transportation"])
+    geom = [pf._packed(wt, v) for fno, wt, v, _s, _e in pf._fields(layer.features[-1]) if fno == 4][0]
+    assert geom[3] == pf._LINE_TO | 3 << 3                  # 4 corners: MoveTo + 3 LineTo
+
+
+def test_features_with_one_geometry_but_different_tags_are_both_added():
+    a = raw_tile("transportation", [(2, [("class", "path"), ("subclass", "footway")], line((10, 10), (300, 10))),
+                                    (2, [("class", "path"), ("subclass", "cycleway")], line((10, 10), (300, 10)))])
+    assert len(added_features(pf.fold(PARENT, [(0, 0, a)]))) == 2
+
+
+def test_the_note_for_fold_paths_with_another_zoom(mb, monkeypatch, capsys):
+    import create_osm_zim as C
+    monkeypatch.setattr(C, "generate_sdf_font_glyphs", lambda **_k: {})
+    monkeypatch.setattr(C, "fallback_scripts_in_tiles", lambda *_a, **_k: set())
+    C._process_tiles(args=argparse.Namespace(max_zoom=14, fold_paths=True), mbtiles_path=mb, total_steps=1)
+    assert "--fold-paths applies to --max-zoom 13 only" in capsys.readouterr().out
+
+
+def test_the_streetzim_command_forwards_no_fold_paths(tmp_path):
+    from streetzim import cli
+    p = cli.build_parser()
+    common = ["--name", "x", "--title", "x", "--description", "x", "--bbox", "1,1,2,2",
+              "--profile", "basic", "--max-zoom", "13"]
+    for extra, want in (([], False), (["--no-fold-paths"], True)):
+        argv = cli._builder_argv(p.parse_args(common + extra), "1,1,2,2", None, tmp_path, None)  # pyright: ignore[reportPrivateUsage]
+        assert ("--no-fold-paths" in argv) is want
+

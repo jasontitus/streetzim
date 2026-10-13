@@ -259,7 +259,7 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
         stats: dict = {}
         yield from path_fold.fold_tiles(
             mbtiles_path, iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom),
-            workers=build_cpus(), stats=stats)
+            workers=build_cpus(), stats=stats, keep_gzip=False)
         _print_fold(stats)
         return
     conn = sqlite3.connect(str(mbtiles_path))

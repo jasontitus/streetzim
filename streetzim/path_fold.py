@@ -327,12 +327,23 @@ def fold(tile: bytes, children: Iterable[tuple[int, int, bytes]],
     """`tile` (a decoded z13 MVT) with the class=path features of
     `children` ((dx, dy, decoded z14 MVT), dx/dy 0 or 1: the child's
     column/row within it) appended. Returns `tile` itself when there is
-    nothing to add."""
+    nothing to add. A child whose paths cannot be read (malformed
+    protobuf) is skipped and counted in stats["bad_children"]; the other
+    children still fold."""
     adds: dict[bytes, list] = {n.encode(): [] for n in LAYERS}
     for dx, dy, child in children:
-        if child:
-            for name, feats in adds.items():
+        if not child:
+            continue
+        found: dict[bytes, list] = {n: [] for n in adds}
+        try:
+            for name, feats in found.items():
                 _path_features(child, name, dx, dy, feats)
+        except _BAD_TILE:
+            if stats is not None:
+                stats["bad_children"] = stats.get("bad_children", 0) + 1
+            continue
+        for name, feats in found.items():
+            adds[name] += feats
     if not any(adds.values()):
         return tile
     out = bytearray()
@@ -384,16 +395,19 @@ class Folder:
     """Folds z14 paths into the z13 tiles of an MBTiles file (see `fold`).
     One per thread or process: it holds a SQLite connection."""
 
-    def __init__(self, mbtiles_path):
+    def __init__(self, mbtiles_path, keep_gzip: bool = True):
         self.conn = sqlite3.connect(_ro_uri(mbtiles_path), uri=True)
+        self.keep_gzip = keep_gzip
         self.stats: dict[str, int] = {}
 
     def __call__(self, z: int, x: int, y: int, data: bytes) -> bytes:
-        """The tile at XYZ (z, x, y) with its children's paths, in the same
-        encoding (gzip or not) when anything was added, else `data`
+        """The tile at XYZ (z, x, y) with its children's paths when
+        anything was added (gzip again if `data` was and keep_gzip is set:
+        the in-memory reader holds tiles compressed; the streaming one
+        hands them to a writer that would only gunzip them), else `data`
         itself. A child that will not decode is skipped and counted
-        ("bad_children"); a parent that will not decode is returned as
-        it came, for the writer's own check to report."""
+        ("bad_children"); a parent that will not decode is returned as it
+        came, for the writer's own check to report."""
         if z != FOLD_ZOOM or not data:
             return data
         n = 1 << SOURCE_ZOOM
@@ -408,9 +422,6 @@ class Folder:
         for col, row, blob in cur:
             try:
                 child = _decoded(blob)
-                # Parse it here, so a malformed child is caught alone.
-                for _f in _fields(child):
-                    pass
             except _BAD_TILE:
                 self.stats["bad_children"] = self.stats.get("bad_children", 0) + 1
                 continue
@@ -419,12 +430,16 @@ class Folder:
             return data
         try:
             tile = _decoded(data)
-            folded = fold(tile, children, self.stats)
+            for _f in _fields(tile):           # a parent the writer will reject
+                pass
         except _BAD_TILE:
             return data
+        folded = fold(tile, children, self.stats)
         if folded is tile:
             return data
-        return gzip.compress(folded, compresslevel=6, mtime=0) if data[:2] == b"\x1f\x8b" else folded
+        if self.keep_gzip and data[:2] == b"\x1f\x8b":
+            return gzip.compress(folded, compresslevel=6, mtime=0)
+        return folded
 
     def close(self) -> None:
         self.conn.close()
@@ -445,9 +460,9 @@ def has_source_zoom(mbtiles_path) -> bool:
 _WORKER: Folder | None = None
 
 
-def _init_worker(mbtiles_path) -> None:
+def _init_worker(mbtiles_path, keep_gzip: bool = True) -> None:
     global _WORKER
-    _WORKER = Folder(mbtiles_path)
+    _WORKER = Folder(mbtiles_path, keep_gzip)
 
 
 def _fold_with(folder: Folder, x: int, y: int, data: bytes) -> tuple[bytes | None, int, int]:
@@ -466,7 +481,7 @@ def _fold_one(item: tuple[int, int, bytes]) -> tuple[bytes | None, int, int]:
 
 def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
                workers: int = 1, stats: dict | None = None,
-               batch: int = 4096) -> Iterator[tuple[int, int, int, bytes]]:
+               batch: int = 4096, keep_gzip: bool = True) -> Iterator[tuple[int, int, int, bytes]]:
     """`items` ((z, x, y, data), XYZ rows) with every z13 tile folded
     (see `fold`), in the same order. `workers` > 1 folds in that many
     processes; `stats` gets "tiles" (tiles that gained paths), "features"
@@ -480,9 +495,9 @@ def fold_tiles(mbtiles_path, items: Iterable[tuple[int, int, int, bytes]],
         if workers > 1:
             import multiprocessing
             pool = multiprocessing.get_context("spawn").Pool(
-                workers, initializer=_init_worker, initargs=(str(mbtiles_path),))
+                workers, initializer=_init_worker, initargs=(str(mbtiles_path), keep_gzip))
         else:
-            folder = Folder(mbtiles_path)
+            folder = Folder(mbtiles_path, keep_gzip)
         it = iter(items)
         while True:
             chunk = []
