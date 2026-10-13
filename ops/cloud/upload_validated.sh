@@ -78,14 +78,23 @@ echo "validation passed."
 # stamp features, prune the previous good ZIMs and redeploy the site —
 # all on top of a file that never arrived — and exit 0 so every wrapper
 # reported success.
-# --checksum: skip a file archive.org already holds with the same md5, so
-# re-running after a false "not listed" failure completes the remaining
-# steps without re-sending gigabytes.
-if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum; then
-    echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
-    exit 3
+# A rerun to finish a "listing pending" upload must not send the file
+# again. `ia upload --checksum` skips it only when the item has NO pending
+# task, and a queued derive can sit for a day (it re-sent 15-25 GB ZIMs and
+# left permanent history/ copies), so ask first: listed with the same MD5
+# is the same file (ops/cloud/archive_has_file.py).
+local_md5=$(md5sum "$dated" | cut -d' ' -f1)
+if "$IA" metadata "streetzim-${id}" 2>/dev/null \
+        | "$PYTHON" "${PROJECT_DIR}/ops/cloud/archive_has_file.py" "$(basename "$dated")" "$local_md5"; then
+    echo "  archive.org already holds $(basename "$dated") (md5 ${local_md5}): not sent again"
+else
+    # --checksum still skips it when the metadata above was stale.
+    if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum; then
+        echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
+        exit 3
+    fi
+    sleep 30
 fi
-sleep 30
 
 # --- 3. metadata modify ---
 "$IA" metadata "streetzim-${id}" --modify="date:${today}" || true
