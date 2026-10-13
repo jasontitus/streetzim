@@ -177,7 +177,7 @@ def test_a_search_cut_without_native_names_is_parked_for_the_world_file(tmp_path
     assert not [c for c in calls if c.startswith(("osmium", "python", "ROW"))], calls
     dst = regions / "r.search.jsonl"
     assert dst.is_symlink() and os.readlink(dst) == str(tmp_path / "world.s2.jsonl")
-    assert os.readlink(regions / "r.search.jsonl.schema") == str(tmp_path / "world.s2.jsonl.schema")
+    _schema_copy(regions / "r.search.jsonl.schema", tmp_path)
     parked = sorted(regions.glob("r.search.jsonl.stale-*"))
     main = [p for p in parked if not p.name.endswith((".bbox", ".schema"))]
     assert len(main) == 1 and main[0].read_text() == "x"
@@ -216,4 +216,40 @@ def test_a_symlinked_cut_gets_the_world_files_schema(tmp_path):
     calls = _run(tmp_path, env, "r")
     assert "BUILD r" in calls, calls
     assert os.readlink(regions / "r.search.jsonl") == str(tmp_path / "world.s2.jsonl")
-    assert os.readlink(regions / "r.search.jsonl.schema") == str(tmp_path / "world.s2.jsonl.schema")
+    _schema_copy(regions / "r.search.jsonl.schema", tmp_path)
+
+
+def _schema_copy(side: Path, tmp: Path) -> None:
+    """A copy of the world file's .schema, never a symlink to it (the next
+    derive's copy_schema would write through a link)."""
+    assert not side.is_symlink() and side.read_text() == (tmp / "world.s2.jsonl.schema").read_text()
+
+
+@pytest.mark.parametrize("which", ["search.jsonl", "mbtiles"])
+def test_a_cut_for_another_box_is_parked_for_the_world_file(tmp_path, which):
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=2)
+    (regions / f"r.{which}.bbox").write_text(OTHER + "\n")
+    calls = _run(tmp_path, env, "r")
+    assert "BUILD r" in calls and any("cut for another bbox" in c for c in calls), calls
+    world = tmp_path / ("world.s2.jsonl" if which == "search.jsonl" else "world.mbtiles")
+    assert os.readlink(regions / f"r.{which}") == str(world)
+    main = [p for p in regions.glob(f"r.{which}.stale-*") if not p.name.endswith((".bbox", ".schema"))]
+    assert len(main) == 1 and main[0].read_text() == "x"
+    assert (regions / (main[0].name + ".bbox")).read_text() == OTHER + "\n"
+    other = "mbtiles" if which == "search.jsonl" else "search.jsonl"
+    assert not (regions / f"r.{other}").is_symlink()
+
+
+def test_a_later_schema_is_kept_and_a_stale_sidecar_beside_a_link_is_replaced(tmp_path):
+    env = _setup(tmp_path)
+    regions = _own_files(tmp_path, "r", search_schema=3)
+    calls = _run(tmp_path, env, "r")
+    assert "BUILD r" in calls and not (regions / "r.search.jsonl").is_symlink(), calls
+    # A symlinked cut whose old sidecar is a link (as fd0c6f8 made them).
+    (regions / "r.search.jsonl").unlink()
+    (regions / "r.search.jsonl.schema").unlink()
+    (regions / "r.search.jsonl").symlink_to(tmp_path / "world.s2.jsonl")
+    (regions / "r.search.jsonl.schema").symlink_to(tmp_path / "world.s2.jsonl.schema")
+    _run(tmp_path, env, "r")
+    _schema_copy(regions / "r.search.jsonl.schema", tmp_path)

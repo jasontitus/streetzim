@@ -199,13 +199,15 @@ for ID in $ORDER; do
   # A search cut without native-script names (no schema-2 .schema sidecar;
   # the cuts of 2026-09-06 have none) is as stale as one cut for another
   # box: a build from it only warns. Its sidecars are parked with it, and a
-  # symlink to the world file gets the world file's .schema beside it.
+  # symlink to the world file gets a copy of the world file's .schema beside
+  # it (a copy: a symlinked sidecar would be written through by the next
+  # derive).
   for _pair in "${DATA_ID}.mbtiles:$WORLD_MB" "${DATA_ID}.search.jsonl:$WORLD_SEARCH"; do
     _dst="world-data/regions/${_pair%%:*}"; _src="${_pair#*:}"
     _why=""
     if [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
       if bbox_stale "$_dst" "$BBOX"; then _why="cut for another bbox"
-      elif [ "${_dst%.search.jsonl}" != "$_dst" ] && ! grep -q '"search_schema": *2[,}]' "$_dst.schema" 2>/dev/null; then
+      elif [ "${_dst%.search.jsonl}" != "$_dst" ] && ! grep -qE '"search_schema": *([2-9]|[1-9][0-9]+)[,}]' "$_dst.schema" 2>/dev/null; then
         _why="no native-script names (search schema < 2)"; fi
     fi
     if [ -n "$_why" ]; then
@@ -217,13 +219,13 @@ for ID in $ORDER; do
       fi
       for _side in bbox schema; do [ ! -e "$_dst.$_side" ] || mv -n "$_dst.$_side" "$_park.$_side"; done
       ln -sfn "$_src" "$_dst"
-      [ ! -e "$_src.schema" ] || ln -sfn "$_src.schema" "$_dst.schema"
+      rm -f "$_dst.schema"; [ ! -e "$_src.schema" ] || cp "$_src.schema" "$_dst.schema"
       log "  $(basename "$_dst"): $_why, parked as $(basename "$_park"); now -> world file"
     elif [ -e "$_dst" ] && [ ! -L "$_dst" ]; then
       log "  keeping existing extract $(basename "$_dst") ($(du -h "$_dst" | cut -f1))"
     else
       ln -sfn "$_src" "$_dst"
-      [ ! -e "$_src.schema" ] || ln -sfn "$_src.schema" "$_dst.schema"
+      rm -f "$_dst.schema"; [ ! -e "$_src.schema" ] || cp "$_src.schema" "$_dst.schema"
     fi
   done
 

@@ -130,10 +130,20 @@ def cache_language_error(cache_path, lang):
 
 
 def copy_schema(src_path, dst_path):
-    """Carry a features file's schema marker to a copy or cut of it."""
-    import shutil
-    if os.path.exists(str(src_path) + ".schema"):
-        shutil.copyfile(str(src_path) + ".schema", str(dst_path) + ".schema")
+    """Carry a features file's schema marker to a copy or cut of it. The
+    cut's old marker is removed first, not written through: it may be a
+    symlink to another file's (the rebuild driver's, beside a symlinked
+    cut), and a source without a marker leaves the cut without one."""
+    src, dst = str(src_path) + ".schema", str(dst_path) + ".schema"
+    data = None
+    if os.path.exists(src):
+        with open(src, "rb") as f:          # read first: src may be dst
+            data = f.read()
+    if os.path.lexists(dst):
+        os.unlink(dst)
+    if data is not None:
+        with open(dst, "wb") as f:
+            f.write(data)
 
 
 def native_name(props, name):

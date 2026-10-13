@@ -144,6 +144,28 @@ def test_a_language_build_refuses_a_cache_without_the_language(tmp_path, monkeyp
     assert E.schema_languages(q) == ["fr"]
 
 
+
+def test_copy_schema_replaces_a_linked_marker(tmp_path):
+    """A cut's old marker that is a symlink (the rebuild driver once linked
+    the world file's) is replaced, never written through; a source with no
+    marker leaves the cut with none."""
+    from streetzim import search_extract as E
+    w = tmp_path / "world.jsonl"
+    E.mark_schema(w, languages=["fr"])
+    r = tmp_path / "r.jsonl"
+    (tmp_path / "r.jsonl.schema").symlink_to(tmp_path / "world.jsonl.schema")
+    E.mark_schema(tmp_path / "s.jsonl", languages=["th"])
+    E.copy_schema(tmp_path / "s.jsonl", r)
+    assert E.schema_languages(r) == ["th"] and E.schema_languages(w) == ["fr"]
+    assert not (tmp_path / "r.jsonl.schema").is_symlink()
+    q = tmp_path / "q.jsonl.schema"
+    q.symlink_to(tmp_path / "world.jsonl.schema")
+    E.copy_schema(tmp_path / "none.jsonl", tmp_path / "q.jsonl")
+    assert not q.is_symlink() and not q.exists() and E.schema_of(w) == 2
+    # The same file both ways (a cut over its own source) keeps the marker.
+    E.copy_schema(w, w)
+    assert E.schema_languages(w) == ["fr"]
+
 def test_shared_cache_dirs(tmp_path):
     import os
     from streetzim.cache_permissions import make_shared_dirs
