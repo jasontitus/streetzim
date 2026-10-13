@@ -182,9 +182,10 @@ async function run(o) {
   // A chunk stays cached from its first read until its last use. The tail of
   // a merged ZIM interleaves hundreds of small base ranges (from one or two
   // chunks) with generated pieces, so dropping a chunk whenever the next
-  // step differs re-read it hundreds of times. lastUse[i] says step i is the
-  // last to need its chunk; MAX_LIVE caps memory if a plan ever spreads a
-  // chunk's uses far apart (the chunk with the furthest next use goes first).
+  // step differs re-read it hundreds of times. nextUse[i] is the next step
+  // that needs step i's chunk (Infinity after its last use); MAX_LIVE caps
+  // memory if a plan ever spreads a chunk's uses far apart (the chunk with
+  // the furthest next use goes first).
   const MAX_LIVE = 6;
   const keyOf = (s) => s.src + '#' + s.k;
   const nextUse = new Array(steps.length).fill(Infinity);

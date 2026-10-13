@@ -124,6 +124,7 @@
 
   function pickLang() {
     entry = region.menu.find((m) => m.lang === $('lang').value);
+    if (/^Could not load the recipe/.test($('notice').textContent)) $('notice').textContent = '';
     const ul = $('packs');
     ul.innerHTML = '';
     for (const p of entry.packs) {
@@ -300,8 +301,17 @@
     }
   }
   // One pack, chunk by chunk; each chunk's SHA-256 must match the recipe. A
-  // chunk that does not match is downloaded once more before giving up.
-  async function downloadPack(p, signal, onProgress) {
+  // chunk that does not match is downloaded once more before giving up. A
+  // range that fails for good stops the other ranges in flight.
+  async function downloadPack(p, outer, onProgress) {
+    const ac = new AbortController();
+    const stop = () => ac.abort();
+    outer.addEventListener('abort', stop, { once: true });
+    try { return await downloadPackRanges(p, ac, onProgress); }
+    finally { ac.abort(); outer.removeEventListener('abort', stop); }
+  }
+  async function downloadPackRanges(p, ac, onProgress) {
+    const signal = ac.signal;
     const out = new Uint8Array(p.size);
     let got = 0;
     const bump = (n) => { got += n; onProgress(got, null); };
@@ -317,7 +327,7 @@
             await fetchRetrying(p.url, out, a, b, p.size, signal, bump, (note) => onProgress(got, note));
           }
         };
-        await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, lane));
+        await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, () => lane().catch((e) => { ac.abort(); throw e; })));
         const sum = hex(await crypto.subtle.digest('SHA-256', out.subarray(a0, b0)));
         if (sum === p.sha256[k]) break;
         if (pass >= 1) throw new FetchError('it arrived damaged twice (it does not match its checksum)', true);
