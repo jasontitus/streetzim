@@ -5,8 +5,8 @@
 // Analytics: GA4 (the site's Firebase project) gets packs_start, packs_end,
 // build_start, build_progress (25/50/75%), build_end and build_probe, so we
 // learn what download speeds visitors really get: region, language, sizes,
-// speeds and timings, never file names. GA is loaded only when the first
-// report is sent (a build or a speed test). Nothing is sent when the visitor
+// speeds and timings, never file names. Nothing is loaded or sent before the
+// visitor's first click on the page; GA is loaded with the first report. Nothing is sent when the visitor
 // ticks "Don't send speed reports" (remembered: localStorage.sz_no_reports),
 // on localhost, from an automated browser, with ?notrack, or with
 // localStorage.sz_dev set.
@@ -39,12 +39,14 @@
       }));
       return (name, params) => { try { an.logEvent(a, name, Object.assign({ env }, params)); } catch (e) { /* ignore */ } };
     }).catch(() => null);
+  let clicked = false;                 // nothing is reported before the first click
+  document.addEventListener('click', () => { clicked = true; }, { capture: true, once: true });
   const track = (name, params) => {
-    if (devSession || optedOut()) return;
+    if (devSession || optedOut() || !clicked) return;
     if (!analytics) analytics = loadAnalytics();
     analytics.then((log) => { if (log && !optedOut()) log(name, params); });
   };
-  $('trackNote').textContent = 'Speed reports: when you choose a map file, build, or test your speed, this page sends Google Analytics the region, the language, file sizes, download speeds and timings, never file names or anything from your files. Google Analytics also records the page address and your browser type, and sets a cookie with a random ID.';
+  $('trackNote').textContent = 'Speed reports: once you press Download, choose a map file or test your speed, this page sends Google Analytics the region, the language, file sizes, download speeds and timings, never file names or anything from your files. Google Analytics also records the page address and your browser type, and sets a cookie with a random ID. Nothing is sent before you click.';
   $('noReports').checked = devSession || optedOut();
   $('noReports').disabled = devSession;
   if (devSession) $('noReportsLabel').append(' (off for this session)');
@@ -176,6 +178,7 @@
       ? `The same ${region.title} map with its map language set to ${name}.`
       : `The ${region.title} map in ${name}, with Wikipedia in:`;
     $('oneclick').textContent = `Download ${name} ${region.title} (${fmtMB(entry.size)})`;
+    showEstimate();
     $('haveBaseSummary').textContent = nothingNew
       ? `Already have the ${region.title} map? Use it, with nothing else to download`
       : `Already have the ${region.title} map? Use it and download only ${fmtMB(entry.download_bytes)}`;
@@ -721,26 +724,48 @@
       secs: Math.round((performance.now() - running.t0) / 1000) }));
   });
 
-  // ------------------------------------------------------------ speed test
-  $('probe').onclick = async () => {
+  // ------------------------------------------------------------ speed and estimate
+  // A short check of the connection once someone is on the page (4 ranges of
+  // 512 KiB in parallel from the region's probe file, as the build downloads
+  // 4 at a time; nothing is reported), so the time a download takes can be
+  // shown before the click. "Test my download speed" measures 4 x 2 MiB and
+  // reports it. During a build the real speed replaces the estimate.
+  let speedBps = null, speedState = 'none';
+  async function measureSpeed(manual) {
     const p = region && region.probe;
-    if (!p) return;
+    if (!p || document.visibilityState !== 'visible' && !manual) return null;
+    const part = manual ? 2 * 1048576 : 512 * 1024;
+    speedState = 'measuring'; showEstimate();
+    const t = performance.now();
+    const one = async () => {
+      const start = Math.floor(Math.random() * Math.max(1, (p.size - part) / 65536)) * 65536;
+      const t1 = performance.now();
+      const r = await fetch(p.url, { headers: { Range: `bytes=${start}-${start + part - 1}` }, cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined });
+      const ttfb = performance.now() - t1;
+      const n = (await r.arrayBuffer()).byteLength;
+      if (r.status !== 206 || n !== part) throw new Error('HTTP ' + r.status);
+      return { n, ttfb };
+    };
+    let res;
+    try { res = await Promise.all([one(), one(), one(), one()]); } catch (e) { speedState = 'failed'; showEstimate(); return null; }
+    const secs = (performance.now() - t) / 1000;
+    speedBps = res.reduce((a, r) => a + r.n, 0) / secs;
+    speedState = 'done'; showEstimate();
+    return { mbps: +(speedBps / 1e6).toFixed(2), ttfb: Math.round(res.reduce((a, r) => a + r.ttfb, 0) / res.length) };
+  }
+  function showEstimate() {
+    if (!entry) return;
+    $('estimate').textContent = speedState === 'measuring' ? 'Checking your connection…'
+      : speedState === 'done' ? `About ${fmtDur(entry.size / speedBps)} at your connection's speed now (${(speedBps / 1e6).toFixed(1)} MB/s).`
+      : speedState === 'failed' ? "Could not check your connection's speed."
+      : `About ${fmtDur(entry.size / 1e6)} at 1 MB/s, ${fmtDur(entry.size / 1e7)} at 10 MB/s.`;
+  }
+  $('probe').onclick = async () => {
+    if (!region || !region.probe) return;
     $('probeOut').textContent = 'Testing…';
-    const out = [];
-    for (let i = 0; i < 2; i++) {
-      const start = Math.floor(Math.random() * Math.max(1, (p.size - PROBE_BYTES) / 65536)) * 65536;
-      const t = performance.now();
-      try {
-        const r = await fetch(p.url, { headers: { Range: `bytes=${start}-${start + PROBE_BYTES - 1}` }, cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined });
-        const ttfb = performance.now() - t;
-        const n = (await r.arrayBuffer()).byteLength;
-        out.push({ ttfb: Math.round(ttfb), mbps: +(n / 1e6 / ((performance.now() - t) / 1000)).toFixed(2), status: r.status });
-      } catch (e) { out.push({ error: String(e.message || e) }); }
-    }
-    const ok = out.filter((o) => o.mbps);
-    $('probeOut').textContent = ok.length ? `About ${ok.map((o) => o.mbps).join(' and ')} MB/s (first byte after ${ok.map((o) => o.ttfb).join(' / ')} ms).` : 'The test failed: ' + JSON.stringify(out);
-    track('build_probe', { region: region.id, ttfb_ms_1: out[0] && out[0].ttfb, mbps_1: out[0] && out[0].mbps,
-                           ttfb_ms_2: out[1] && out[1].ttfb, mbps_2: out[1] && out[1].mbps, ok: ok.length });
+    const r = await measureSpeed(true);
+    $('probeOut').textContent = r ? `About ${r.mbps} MB/s with 4 downloads at once (first byte after ${r.ttfb} ms).` : 'The test failed.';
+    track('build_probe', { region: region.id, mbps: r && r.mbps, ttfb_ms: r && r.ttfb, ok: r ? 1 : 0 });
   };
 
   load().catch((e) => { $('notice').textContent = 'Could not load the list of maps (' + (e.message || e) + '). Try again later.'; });
