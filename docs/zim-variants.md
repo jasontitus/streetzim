@@ -70,6 +70,18 @@ chosen from numbers rather than guesses. The z14 share is unmeasured; the
 1.40 GB figure quoted for the z13 build came from a defective lineage and is
 void.
 
+**Paths in a z13 build.** The tile profile writes footways, cycleways,
+bridleways, paths, steps and pedestrian ways (transportation class `path`)
+and their names only at z14, so a build capped at z13 used to draw no trails
+at all, though its routing graph still routed walkers and cyclists along
+them. `create_osm_zim --max-zoom 13` now copies each z13 tile's four z14
+children's paths, halved into its grid, onto the end of its `transportation`
+and `transportation_name` layers (`streetzim/path_fold.py`; `--no-fold-paths`
+turns it off). Measured on Switzerland: 10,999 of 11,305 z13 tiles gain
+1.7 M paths, the z13 tiles grow 23% raw (311 → 384 MB, about 16% after
+compression), and folding takes 2 minutes on one core. `derive_zim.py
+--light` copies blobs and does not fold: its ZIMs still draw no paths.
+
 ## Tier 2 now: one derive tool with recipes
 
 `swap_viewer_rust.py`, `repackage_zim.py` and `upgrade_spatial_zim.py` all do

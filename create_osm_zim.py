@@ -463,6 +463,11 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
+    parser.add_argument("--fold-paths", action=argparse.BooleanOptionalAction, default=None,
+                        help="With --max-zoom 13, copy footways, cycleways, bridleways, "
+                             "steps and other paths (and their names), which the tiles "
+                             "carry only from z14, into the z13 tiles, so a build capped "
+                             "at z13 still draws them. Default: on with --max-zoom 13")
     parser.add_argument("--cluster-size", type=int, default=2048,
                         help="ZIM cluster size in KiB (default: 2048 = 2 MiB)")
     parser.add_argument("--fast", action="store_true",
@@ -956,6 +961,13 @@ def _acquire_tiles(*, args, bbox_str, geofabrik_path, pbf_path, tmpdir, total_st
     return mbtiles_path, work_pbf, work_pbf_cut
 
 
+def fold_paths_on(args):
+    """Whether z14 paths go into the z13 tiles (--fold-paths; on by default
+    with --max-zoom 13, the only cap it applies to)."""
+    fold = getattr(args, "fold_paths", None)
+    return args.max_zoom == 13 and (fold is None or bool(fold))
+
+
 def _process_tiles(*, args, mbtiles_path, total_steps):
     """Step 3: read the tiles (streamed when the MBTiles is large) and fetch the font glyphs."""
     # Step 4: Extract tiles from MBTiles
@@ -973,7 +985,7 @@ def _process_tiles(*, args, mbtiles_path, total_steps):
         print(f"    Name: {tile_metadata.get('name', 'unknown')}")
     else:
         tiles, tile_metadata = extract_tiles_from_mbtiles(
-            mbtiles_path, max_zoom=args.max_zoom)
+            mbtiles_path, max_zoom=args.max_zoom, fold_paths=fold_paths_on(args))
         total_tile_count = len(tiles)
 
     # Generate font glyphs (with fallback glyphs for the scripts the labels use)
@@ -1881,6 +1893,7 @@ def _write_zim(
         address_count=address_count,
         zim_builder=getattr(args, "zim_builder", "python"),
         max_zoom=args.max_zoom,
+        fold_paths=fold_paths_on(args),
         xapian_mode=getattr(args, "xapian", "libzim"),
         kiwix_poi_pages=bool(getattr(args, "kiwix_poi_pages", False)),
         xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),

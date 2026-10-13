@@ -761,6 +761,7 @@ def _create_zim(
     split_find_chips=False,
     zim_builder="python",
     max_zoom=None,
+    fold_paths=False,
     xapian_mode="libzim",
     xapianbuilder_bin=None,
     xapian_workdir=None,
@@ -955,7 +956,8 @@ def _create_zim(
                     name=name)
         _add_vector_tiles(creator, MapItem, output_path=output_path, tiles=tiles,
                           mbtiles_path=mbtiles_path, tile_count=tile_count,
-                          bbox=bbox, zim_builder=zim_builder, max_zoom=max_zoom)
+                          bbox=bbox, zim_builder=zim_builder, max_zoom=max_zoom,
+                          fold_paths=fold_paths)
         _add_raster_layers(creator, MapItem, satellite_dir=satellite_dir,
                            satellite_max_zoom=satellite_max_zoom,
                            satellite_format=satellite_format,
@@ -1366,7 +1368,8 @@ def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=No
     ))
 
 
-def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, tile_count, bbox, zim_builder, max_zoom):
+def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, tile_count, bbox, zim_builder, max_zoom,
+                      fold_paths=False):
     """Vector tiles, streamed from the MBTiles (or the in-memory dict), with
     libzim backpressure and a stall watchdog."""
     # Watchdog thread: monitors progress and dumps all thread stacks on stall
@@ -1443,7 +1446,8 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
             # MBTiles (345 M tiles), which made the progress ETA useless.
             total_tiles = estimate_tile_total(
                 mbtiles_path, bbox=bbox, max_zoom=max_zoom) or (tile_count or 0)
-            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom)
+            tile_source = iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom,
+                                                  fold_paths=fold_paths)
         else:
             total_tiles = len(tiles)
             tile_source = iter([(z, x, y, data) for (z, x, y), data in sorted(tiles.items())])

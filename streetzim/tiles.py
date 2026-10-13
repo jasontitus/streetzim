@@ -18,7 +18,7 @@ from streetzim.common import (
     GEOFABRIK_BASE,
     download_file,
 )
-from streetzim import viewer_assets
+from streetzim import path_fold, viewer_assets
 from streetzim.cpus import build_cpus
 
 
@@ -241,8 +241,12 @@ def _tile_scan_order(conn):
     return "zoom_level, tile_column, tile_row"
 
 
-def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None):
+def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=None,
+                            fold_paths=False):
     """Yield (z, x, y, data) tuples from MBTiles, streaming from SQLite.
+
+    With `fold_paths` and max_zoom 13, each z13 tile also carries its z14
+    children's footways, cycleways and other paths (streetzim/path_fold.py).
 
     If zoom_level is specified, only yields tiles at that zoom.
     If max_zoom is specified (and zoom_level is not), yields tiles at zoom <= max_zoom.
@@ -250,6 +254,14 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
     tiles that intersect the bounding box.
     Yields in (z, x, TMS row) sorted order on the regional path.
     """
+    if (fold_paths and zoom_level is None and max_zoom == path_fold.FOLD_ZOOM
+            and path_fold.has_source_zoom(mbtiles_path)):
+        stats: dict = {}
+        yield from path_fold.fold_tiles(
+            mbtiles_path, iter_tiles_from_mbtiles(mbtiles_path, bbox=bbox, max_zoom=max_zoom),
+            workers=build_cpus(), stats=stats)
+        _print_fold(stats)
+        return
     conn = sqlite3.connect(str(mbtiles_path))
     try:
         cursor = conn.cursor()
@@ -304,7 +316,7 @@ def iter_tiles_from_mbtiles(mbtiles_path, zoom_level=None, bbox=None, max_zoom=N
         conn.close()
 
 
-def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
+def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None, fold_paths=False):
     """Extract individual tiles from an MBTiles file.
 
     Returns a dict of {(z, x, y): tile_data_bytes}.
@@ -324,6 +336,9 @@ def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
     extracted from this dict (extract_searchable_features(tiles=...)), which
     reads z14 for POIs. Capping the zoom therefore also thins the search index
     unless a prebuilt search cache is supplied.
+
+    With `fold_paths` and max_zoom 13, the z13 tiles also carry their z14
+    children's paths (see iter_tiles_from_mbtiles).
     """
     print("  Extracting tiles from MBTiles...")
     conn = sqlite3.connect(str(mbtiles_path))
@@ -361,7 +376,21 @@ def extract_tiles_from_mbtiles(mbtiles_path, max_zoom=None):
 
     conn.close()
     print(f"\r    Extracted {count} total tiles")
+    if (fold_paths and max_zoom == path_fold.FOLD_ZOOM
+            and path_fold.has_source_zoom(mbtiles_path)):
+        stats: dict = {}
+        top = [(z, x, y, d) for (z, x, y), d in tiles.items() if z == path_fold.FOLD_ZOOM]
+        for z, x, y, d in path_fold.fold_tiles(mbtiles_path, top, workers=build_cpus(),
+                                               stats=stats):
+            tiles[(z, x, y)] = d
+        _print_fold(stats)
     return tiles, metadata
+
+
+def _print_fold(stats):
+    print(f"    Paths at z13: folded {stats.get('features', 0):,} footways, cycleways and "
+          f"other paths from z14 into {stats.get('tiles', 0):,} tiles "
+          "(--max-zoom 13; --no-fold-paths leaves them out)", flush=True)
 
 
 FALLBACK_SCAN_MAX_BYTES = 200_000_000

@@ -287,7 +287,9 @@ def build_parser() -> argparse.ArgumentParser:
                            "places, parks, peaks, water and airports. Adds "
                            "about 440 B per POI (+16%% on Luxembourg). Default: off")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
-                      help="Maximum zoom of the vector tiles. Default: 14")
+                      help="Maximum zoom of the vector tiles. At 13, footways, cycleways "
+                           "and other paths, which the tiles carry only from 14, are copied "
+                           "into the zoom-13 tiles. Default: 14")
     feat.add_argument("--default-view",
                       help="Initial map view as latitude,longitude[,zoom]")
     feat.add_argument("--zim-workers", type=positive_int,

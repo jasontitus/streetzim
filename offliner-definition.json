@@ -210,7 +210,7 @@
       "type": "integer",
       "required": false,
       "title": "Max zoom",
-      "description": "Maximum zoom of the vector tiles. Default: 14",
+      "description": "Maximum zoom of the vector tiles. At 13, footways, cycleways and other paths, which the tiles carry only from 14, are copied into the zoom-13 tiles. Default: 14",
       "min": 0,
       "max": 14
     },

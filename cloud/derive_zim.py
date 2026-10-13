@@ -767,7 +767,14 @@ def main(argv=None) -> int:
     if not a.dst and not a.dry_run:
         print("error: DST required unless --dry-run", file=sys.stderr)
         return 2
-    res = derive(a.src, a.dst or "", recipe_from_args(a), dry_run=a.dry_run, verbose=not a.quiet,
+    recipe = recipe_from_args(a)
+    if recipe.max_tile_zoom is not None and recipe.max_tile_zoom < 14 and not a.quiet:
+        # Paths reach the tiles only at z14 (process-openmaptiles.lua); the
+        # builder copies them into z13 (streetzim/path_fold.py), this
+        # blob-copying trim does not.
+        print("note: footways, cycleways and other paths are only in the z14 tiles, so this "
+              "ZIM draws none; create_osm_zim --max-zoom 13 keeps them", file=sys.stderr)
+    res = derive(a.src, a.dst or "", recipe, dry_run=a.dry_run, verbose=not a.quiet,
                  estimate=a.estimate)
     if a.quiet:
         print(json.dumps(res))
