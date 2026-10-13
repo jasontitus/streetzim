@@ -65,29 +65,44 @@ function _szLocalLabelField() {
 function _szNativeLabelField() {
   return ["coalesce", ["get", "name"], ["get", "name_int"], ["get", "name:latin"]];
 }
+// A name as a label shows it: the part before its first ";". OSM puts
+// variants in one value ("洛杉矶;洛杉磯", "Biel;Bienne"); a label shows the
+// first. A value that starts with ";" is kept whole. No name is "", which
+// is what MapLibre makes of a text-field that gives none (null).
+function _szFirstName(e) {
+  var v = ["var", "sz_name"];
+  return ["let", "sz_name", ["to-string", e],
+    ["case", [">", ["index-of", ";", v], 0], ["slice", v, 0, ["index-of", ";", v]], v]];
+}
+function _szFirstNameOf(s) {
+  if (typeof s !== 'string') return s;
+  var i = s.indexOf(';');
+  return i > 0 ? s.slice(0, i) : s;
+}
 // Point labels (places, POIs, water, peaks, parks, airports). Labels
 // along a line (roads) take szLineLabelField: two lines there would double
 // their height and their collisions.
 function szLabelField() {
   var local = _szLocalLabelField();
-  if (!SZ_LANG2) return local;
+  if (!SZ_LANG2) return _szFirstName(local);
   var key = "name:" + SZ_LANG2;
+  var mine = _szFirstName(["get", key]);
   if (SZ_REGION) {
     var nat = _szNativeLabelField();
-    var natText = nat.concat([""]);
+    var natName = _szFirstName(nat);
     return ["case",
-      ["all", ["has", key], ["!=", natText, ""], ["!=", ["get", key], natText]],
-      ["format", ["get", key], {}, "\n", {}, nat, { "font-scale": 0.8 }],
-      ["coalesce", ["get", key]].concat(nat.slice(1))];
+      ["all", ["has", key], ["!=", natName, ""], ["!=", mine, natName]],
+      ["format", mine, {}, "\n", {}, natName, { "font-scale": 0.8 }],
+      _szFirstName(["coalesce", ["get", key]].concat(nat.slice(1)))];
   }
-  var localText = local.concat([""]);
+  var localName = _szFirstName(local);
   return ["case",
-    ["all", ["has", key], ["!=", localText, ""], ["!=", ["get", key], localText]],
-    ["format", local, {}, "\n", {}, ["get", key], { "font-scale": 0.8 }],
-    local.concat([["get", key]])];
+    ["all", ["has", key], ["!=", localName, ""], ["!=", mine, localName]],
+    ["format", localName, {}, "\n", {}, mine, { "font-scale": 0.8 }],
+    _szFirstName(local.concat([["get", key]]))];
 }
 function szLineLabelField() {
-  return _szLocalLabelField();
+  return _szFirstName(_szLocalLabelField());
 }
 // The two label languages a map-config asks for: [local, second or ''].
 function szLabelLanguages(config) {
@@ -115,13 +130,13 @@ function szLabelOf(p) {
 // szLabelOf stays the local name, which search records are named by.
 function szDisplayLabelOf(p) {
   if (SZ_REGION && SZ_LANG2 && p) {
-    var mine = p['name:' + SZ_LANG2];
-    var nat = p.name || p.name_int || p['name:latin'] || '';
-    if (!mine || typeof mine !== 'string') return nat || szLabelOf(p);
+    var mine = _szFirstNameOf(p['name:' + SZ_LANG2]);
+    var nat = _szFirstNameOf(p.name || p.name_int || p['name:latin'] || '');
+    if (!mine || typeof mine !== 'string') return nat || _szFirstNameOf(szLabelOf(p));
     return !nat || nat === mine ? mine : mine + ' \u00B7 ' + nat;
   }
-  var local = szLabelOf(p);
-  var other = SZ_LANG2 && p && p['name:' + SZ_LANG2];
+  var local = _szFirstNameOf(szLabelOf(p));
+  var other = SZ_LANG2 && p && _szFirstNameOf(p['name:' + SZ_LANG2]);
   if (!other || typeof other !== 'string') return local;
   if (!local) return other;
   return other === local ? local : local + ' \u00B7 ' + other;

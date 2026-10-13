@@ -882,13 +882,21 @@ const LBL = new Function(slice('var SZ_LANG = ', 'function makeStyle') +
   ' line: szLineLabelField, langs: szLabelLanguages, region: szRegionLanguages, of: szLabelOf, shown: szDisplayLabelOf };')();
 
 // Enough of MapLibre's expression language to evaluate a label: get, has,
-// coalesce, case, all, ==, != and format (a formatted value is returned as
-// [[text, options], …]).
-function evalExpr(e, props) {
+// coalesce, case, all, ==, !=, >, let, var, to-string, index-of, slice and
+// format (a formatted value is returned as [[text, options], …]). The same
+// expressions gave the same texts in MapLibre 5.23 itself (Chromium,
+// layer.layout.get('text-field').evaluate) for the ";" cases below.
+function evalExpr(e, props, vars = {}) {
   if (!Array.isArray(e)) return e;
   const [op, ...a] = e;
-  const v = (x) => evalExpr(x, props);
+  const v = (x) => evalExpr(x, props, vars);
   switch (op) {
+    case 'let': return evalExpr(a[2], props, { ...vars, [a[0]]: v(a[1]) });
+    case 'var': assert.ok(a[0] in vars, 'unbound ' + a[0]); return vars[a[0]];
+    case 'to-string': { const r = v(a[0]); return r === null || r === undefined ? '' : String(r); }
+    case 'index-of': return v(a[1]).indexOf(v(a[0]));
+    case 'slice': return v(a[0]).slice(v(a[1]), a.length > 2 ? v(a[2]) : undefined);
+    case '>': return v(a[0]) > v(a[1]);
     case 'get': return Object.prototype.hasOwnProperty.call(props, a[0]) ? props[a[0]] : null;
     case 'has': return Object.prototype.hasOwnProperty.call(props, a[0]);
     case 'coalesce': for (const x of a) { const r = v(x); if (r !== null && r !== undefined) return r; } return null;
@@ -905,8 +913,24 @@ function evalExpr(e, props) {
   }
 }
 const text = (r) => (Array.isArray(r) ? r.map((s) => s[0]).join('') : r);
-const TODAY_EN = ['coalesce', ['get', 'name:latin'], ['get', 'name_int'], ['get', 'name']];
-const TODAY_FR = ['coalesce', ['get', 'name:fr'], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']];
+// The local label rules (as before: the name each picks), and the part
+// before a ";" of a name (OSM's "洛杉矶;洛杉磯"): every label is FIRST(...).
+const RAW_EN = ['coalesce', ['get', 'name:latin'], ['get', 'name_int'], ['get', 'name']];
+const RAW_FR = ['coalesce', ['get', 'name:fr'], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']];
+const FIRST = (e) => ['let', 'sz_name', ['to-string', e],
+  ['case', ['>', ['index-of', ';', ['var', 'sz_name']], 0],
+    ['slice', ['var', 'sz_name'], 0, ['index-of', ';', ['var', 'sz_name']]], ['var', 'sz_name']]];
+const TODAY_EN = FIRST(RAW_EN);
+const TODAY_FR = FIRST(RAW_FR);
+// The labels before names were cut at ";": what a name without one must
+// still give ("" for no name: MapLibre's default for a null text-field).
+const OLD = {
+  one: (local) => local,
+  bilingual: (local, key) => ['case',
+    ['all', ['has', key], ['!=', local.concat(['']), ''], ['!=', ['get', key], local.concat([''])]],
+    ['format', local, {}, '\n', {}, ['get', key], { 'font-scale': 0.8 }], local.concat([['get', key]])],
+};
+const shownText = (r) => (r === null ? '' : text(r));
 
 await ok('labels: one language as before when the map is in the base\'s', () => {
   LBL.set('en'); assert.deepStrictEqual(LBL.field(), TODAY_EN);
@@ -931,13 +955,53 @@ await ok('labels: local name first, the map language\'s under it, smaller', () =
   assert.strictEqual(evalExpr(f, { 'name:latin': 'Vaduz', 'name:th': 'Vaduz' }), 'Vaduz');
   // No local name at all: the map language's name rather than nothing.
   assert.strictEqual(evalExpr(f, { 'name:th': 'วาดุซ' }), 'วาดุซ');
-  assert.strictEqual(evalExpr(f, {}), null);
+  assert.strictEqual(evalExpr(f, {}), '');
   // The local name is the base's own rule: name:latin first for English.
   assert.strictEqual(text(evalExpr(f, { 'name:latin': 'Tokyo', name: '東京', 'name:th': 'โตเกียว' })), 'Tokyo\nโตเกียว');
   // A Greek base shown in English: name:el first, then name:en.
   LBL.set('el', 'en');
   assert.strictEqual(text(evalExpr(LBL.field(), { 'name:el': 'Αθήνα', name: 'Αθήνα', 'name:en': 'Athens' })), 'Αθήνα\nAthens');
   assert.strictEqual(evalExpr(LBL.field(), { name: 'Πλάκα' }), 'Πλάκα');
+  LBL.set('en');
+});
+
+await ok('labels: a name with several values (";") shows the first; the rest is unchanged', () => {
+  LBL.set('en', 'zh');
+  const f = LBL.field();
+  assert.deepStrictEqual(evalExpr(f, { 'name:latin': 'Los Angeles', 'name:zh': '洛杉矶;洛杉磯' }),
+    [['Los Angeles', {}], ['\n', {}], ['洛杉矶', { 'font-scale': 0.8 }]]);
+  assert.strictEqual(evalExpr(f, { 'name:latin': 'Biel;Bienne', 'name:zh': 'Biel' }), 'Biel');   // equal once cut
+  assert.strictEqual(evalExpr(f, { 'name:zh': '洛杉矶;洛杉磯' }), '洛杉矶');
+  assert.strictEqual(evalExpr(f, { 'name:latin': ';x', 'name:zh': ';x' }), ';x');               // a leading ";": whole
+  LBL.set('en');
+  assert.strictEqual(evalExpr(LBL.field(), { 'name:latin': 'Biel;Bienne' }), 'Biel');
+  assert.strictEqual(evalExpr(LBL.field(), { name_int: 'A;B;C' }), 'A');
+  assert.strictEqual(evalExpr(LBL.line(), { 'name:latin': 'Rue A;Rue B' }), 'Rue A');
+  LBL.set('fr');
+  assert.strictEqual(evalExpr(LBL.field(), { 'name:fr': 'Bienne;Biel', 'name:latin': 'Biel' }), 'Bienne');
+  LBL.set('en', 'th');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Los Angeles', 'name:th': 'ลอสแอนเจลิส;แอลเอ' }), 'Los Angeles · ลอสแอนเจลิส');
+  LBL.set('en');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Biel;Bienne' }), 'Biel');
+  assert.strictEqual(LBL.of({ 'name:latin': 'Biel;Bienne' }), 'Biel;Bienne');       // search records: as named
+  // Names without ";": exactly what the labels gave before, for every
+  // combination of present, missing, equal and differing names.
+  const vals = [undefined, 'A', 'B', 'Ä b'];
+  const keys = ['name:latin', 'name_int', 'name', 'name:fr', 'name:th'];
+  const props = [];
+  (function walk(i, p) {
+    if (i === keys.length) { props.push(p); return; }
+    for (const x of vals) walk(i + 1, x === undefined ? p : { ...p, [keys[i]]: x });
+  })(0, {});
+  for (const [loc, second, raw] of [['en', '', RAW_EN], ['fr', '', RAW_FR], ['en', 'th', RAW_EN], ['fr', 'th', RAW_FR]]) {
+    LBL.set(loc, second);
+    const want = second ? OLD.bilingual(raw, 'name:' + second) : OLD.one(raw);
+    for (const p of props) {
+      assert.deepStrictEqual(shownText(evalExpr(LBL.field(), p)), shownText(evalExpr(want, p)), `${loc} ${second} ${JSON.stringify(p)}`);
+      assert.deepStrictEqual(evalExpr(LBL.line(), p), shownText(evalExpr(raw, p)));
+    }
+  }
+  assert.ok(props.length === 1024);
   LBL.set('en');
 });
 
@@ -988,7 +1052,7 @@ await ok('the style is unchanged unless the map is in another language than its 
     assert.strictEqual(JSON.stringify(makeStyle({ ...cfg, baseLanguage: lang || 'en' })), plain, String(lang));
     assert.strictEqual(JSON.stringify(makeStyle({ ...cfg, wikiPacks: [{ lang: 'de', prefix: '~w/de/' }] })), plain);
     const want = lang && lang !== 'en'
-      ? ['coalesce', ['get', 'name:' + lang], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']]
+      ? FIRST(['coalesce', ['get', 'name:' + lang], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']])
       : TODAY_EN;
     const layers = labelLayers(makeStyle(cfg));
     assert.ok(layers.length >= 9, String(layers.length));
@@ -1011,7 +1075,7 @@ await ok('a merged map in another language: point labels bilingual, road labels 
       continue;
     }
     assert.strictEqual(tf[0], 'case', l.id);
-    assert.deepStrictEqual(tf[2], ['format', TODAY_EN, {}, '\n', {}, ['get', 'name:th'], { 'font-scale': 0.8 }], l.id);
+    assert.deepStrictEqual(tf[2], ['format', TODAY_EN, {}, '\n', {}, FIRST(['get', 'name:th']), { 'font-scale': 0.8 }], l.id);
   }
   // Back to a one-language map: the globals are reset by the next style.
   const again = labelLayers(makeStyle({ ...BASE_CFG, language: 'en' }));
@@ -1040,7 +1104,11 @@ await ok('region languages: a German map shows "Athen" over "Αθήνα"; a Gree
   assert.strictEqual(LBL.shown(PLAKA), 'Πλάκα');
   assert.strictEqual(evalExpr(LBL.field(), ZURICH), 'Zürich');
   assert.strictEqual(LBL.shown(ZURICH), 'Zürich');
-  assert.strictEqual(evalExpr(LBL.field(), {}), null);
+  assert.strictEqual(evalExpr(LBL.field(), {}), '');
+  // Several values: the first of each.
+  assert.deepStrictEqual(text(evalExpr(LBL.field(), { 'name:latin': 'Athens', name_int: 'Αθήνα;Athína', 'name:de': 'Athen;Athena' })),
+    'Athen\nΑθήνα');
+  assert.strictEqual(LBL.shown({ 'name:latin': 'Athens', name_int: 'Αθήνα;Athína', 'name:de': 'Athen;Athena' }), 'Athen · Αθήνα');
   // A Greek map of the same English base: name:el is the native name.
   LBL.set('en', 'el', true);
   assert.strictEqual(evalExpr(LBL.field(), ATHENS), 'Αθήνα');
@@ -1096,8 +1164,8 @@ await ok('the style: regionLanguages changes only a map in another language than
   for (const l of labelLayers(st)) {
     const tf = l.layout['text-field'];
     if (l.layout['symbol-placement'] === 'line') { assert.deepStrictEqual(tf, TODAY_EN, l.id); continue; }
-    assert.deepStrictEqual(tf[2], ['format', ['get', 'name:de'], {}, '\n', {}, NATIVE, { 'font-scale': 0.8 }], l.id);
-    assert.deepStrictEqual(tf[3], ['coalesce', ['get', 'name:de'], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']], l.id);
+    assert.deepStrictEqual(tf[2], ['format', FIRST(['get', 'name:de']), {}, '\n', {}, FIRST(NATIVE), { 'font-scale': 0.8 }], l.id);
+    assert.deepStrictEqual(tf[3], FIRST(['coalesce', ['get', 'name:de'], ['get', 'name'], ['get', 'name_int'], ['get', 'name:latin']]), l.id);
   }
   // The next style without it is the plain merged one again (globals reset).
   assert.strictEqual(JSON.stringify(makeStyle(merged)), plainMerged);

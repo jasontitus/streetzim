@@ -212,13 +212,17 @@ ok('a record answers to its English name in a build in another language', () => 
 // szLabelOf): name:<lang>, then the place's own name (OpenFreeMap: name;
 // StreetZim tilemaker: name_int, then name:latin).
 const LBL = new Function(slice(HTML, 'var SZ_LANG = ', 'function makeStyle') +
-  '\nreturn { set: (l) => { SZ_LANG = l; }, field: szLabelField, of: szLabelOf };')();
+  '\nreturn { set: (l) => { SZ_LANG = l; }, field: szLabelField, local: _szLocalLabelField, first: _szFirstName,' +
+  ' of: szLabelOf };')();
 ok('labels follow the build language', () => {
   LBL.set('en');
-  assert.deepStrictEqual(LBL.field()[1], ['get', 'name:latin']);
+  // The label is the local rule's name, cut at a ";" (130, _szFirstName).
+  assert.deepStrictEqual(LBL.field(), LBL.first(LBL.local()));
+  assert.deepStrictEqual(LBL.local()[1], ['get', 'name:latin']);
   assert.strictEqual(LBL.of({ 'name:latin': 'Tokyo', name_int: '東京', 'name:fr': 'Tokyo' }), 'Tokyo');
   LBL.set('fr');
-  assert.deepStrictEqual(LBL.field().slice(1).map((g) => g[1]),
+  assert.deepStrictEqual(LBL.field(), LBL.first(LBL.local()));
+  assert.deepStrictEqual(LBL.local().slice(1).map((g) => g[1]),
     ['name:fr', 'name', 'name_int', 'name:latin']);
   assert.strictEqual(LBL.of({ 'name:latin': 'Imperial Palace', name_int: '皇居', 'name:fr': 'Palais impérial' }), 'Palais impérial');
   assert.strictEqual(LBL.of({ 'name:latin': 'Peking University', name_int: '北京大学' }), '北京大学');

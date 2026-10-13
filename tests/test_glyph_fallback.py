@@ -157,11 +157,13 @@ def text_field_keys(src: str) -> set[str]:
             # (["get", key], key = "name:" + SZ_LANG2) with the local or,
             # given regionLanguages, the native name (_szNativeLabelField).
             def body_of(fn: str) -> str:
-                body = src[src.index(f"function {fn}()"):]
+                body = src[src.index(f"function {fn}("):]
                 return body[:body.index("\n}\n")]
             local, outer = body_of("_szLocalLabelField"), body_of("szLabelField")
             native = body_of("_szNativeLabelField")
-            assert body_of("szLineLabelField").split("{", 1)[1].strip() == "return _szLocalLabelField();"
+            assert (body_of("szLineLabelField").split("{", 1)[1].strip()
+                    == "return _szFirstName(_szLocalLabelField());")
+            assert "get" not in body_of("_szFirstName"), "_szFirstName reads a key"
             assert '["get", "name:" + SZ_LANG]' in local
             assert 'var key = "name:" + SZ_LANG2;' in outer
             assert "_szNativeLabelField()" in outer
