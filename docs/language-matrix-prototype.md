@@ -26,6 +26,7 @@ A pack is a ZIM, `osm_<region>_wiki-<xx>_<date>.zim`, whose content paths all li
 | `~w/<xx>/wiki-article/<Title>` | a cleaned article (the builder's `clean_article_html`), front article, title = the article title |
 | `~w/<xx>/wiki-image/<hash>.webp` | images, named as the base names them (content hash) |
 | `~w/<xx>/wiki-geo-index.json` | `{title: [lat, lon, type, desc, qid]}`: the base format plus the Q-ID as the 5th element |
+| `~w/<xx>/wikidata-text.json` | `{qid: [label, description]}` in xx for every region Q-ID with an xx label or description, not only those with an article. Popups use it. |
 | `~w/<xx>/pack.json` | `{"lang": "xx", "region": "...", "base_uuid": "...", "articles": N, "images": N, "source": "wikipedia_xx_all_maxi_YYYY-MM.zim", "built": "YYYY-MM-DD"}` |
 
 **Pack metadata (M/):** Name `osm_<region>_wiki-<xx>`; Title of at most 30 UTF-16 units; Language (ISO 639-3); Description of at most 80 characters; Date; Creator, Publisher; Illustration 48×48 (copied from the base). No Xapian. Its own v1 listing lists the articles as front articles. In the prototype, Kiwix's own search (the base's Xapian title index) finds base pages only. Pack articles are reached from the map's Wiki panel and place popups.
@@ -49,6 +50,8 @@ The base's own Wikipedia stays implicit (`hasWikiArticles`, `wiki-article/`, the
 - **Several geo-indexes.** Read `config.wikiPacks`. Load each pack's `wiki-geo-index.json` next to the base's. Join them by Q-ID, from the 5th element in packs and from search records' `q` in the base.
 - **Which article opens.** The Wiki panel and place popups offer the map language's article first, then the base's language, then the other packs. A place with articles in several languages shows "Also in: …" links.
 - **Links:** article links point to `<prefix>wiki-article/<Title>`.
+- **Bilingual labels.** When the map language differs from the local language, labels show the local name, then a second, smaller line with `name:<lang>` where it exists and differs (a MapLibre `format` expression). Otherwise the labels are exactly as today.
+- **Popups and place sheet:** they show `wikidata-text.json`'s label and description in the map language when present.
 - **Old base, no packs:** with no `wikiPacks` the viewer behaves exactly as today.
 - **`sw.js`:** `isArticle` also matches `~w/<xx>/wiki-article/`, so the back-to-map bar is injected for older articles too.
 
