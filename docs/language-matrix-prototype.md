@@ -81,6 +81,12 @@ There is one per menu entry (region, map language L, packs = the region's own �
 
 **Where things live:** recipes are published on the site at `/lab/build/recipes/<region>/<L>.json`. Packs go in the archive.org item `streetzim-<region>-lang`.
 
+## Required showcase entries
+
+The prototype passes only if these four menu entries pass every gate: California → de, California → th, Greece → de, Greece → th. That is a German and a Thai visitor to each region.
+- The German UI table exists; Thai's is added, machine-translated and marked as such.
+- Greece's entries carry the Greek pack as the region's own language.
+
 ## Gates (build host, per region per round)
 
 For the base:
