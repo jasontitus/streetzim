@@ -48,6 +48,7 @@
   });
 
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
+  const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 
   async function getJSON(url) {
     let r;
@@ -99,20 +100,65 @@
       ul.append(li);
     }
     $('total').textContent = `The new file: ${fmtMB(entry.size)}. To download now: ${fmtMB(entry.download_bytes)}.`;
-    checkReady();
+    recipeFor(entry).catch((e) => { $('notice').textContent = `Could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`; });
+    checkBase();
   }
 
   $('baseFile').onchange = () => {
     baseFile = $('baseFile').files[0] || null;
-    $('baseCheck').textContent = '';
-    if (baseFile && region && baseFile.size !== region.base.size) {
-      $('baseCheck').textContent = `This file has ${baseFile.size.toLocaleString()} bytes; the expected ${region.base.file} has ${region.base.size.toLocaleString()}. Pick that file.`;
-    }
-    checkReady();
+    checkBase();
   };
 
+  // ------------------------------------------------------------ base check
+  // Before anything is downloaded or saved, the visitor's map file must be
+  // the one the recipe was made from: same size, same ZIM UUID (header bytes
+  // 8-24), and the SHA-256 of its first and last 16 MiB chunks as listed in
+  // the recipe. The worker still checks every other chunk as it reads it.
+  let baseOk = false, baseSeq = 0;
+  const baseVerdicts = new Map();      // file+recipe base -> true | message
+  async function verifyBase(file, b) {
+    const wrong = `This isn't the right ${region.title} map file (a different version, or damaged). Download it again from the link above.`;
+    if (file.size !== b.size) return wrong;
+    const head = new Uint8Array(await file.slice(0, 24).arrayBuffer());
+    if (head.length < 24 || head[0] !== 0x5a || head[1] !== 0x49 || head[2] !== 0x4d || head[3] !== 0x04) return wrong;
+    if (b.uuid && hex(head.subarray(8, 24)) !== b.uuid.replace(/-/g, '').toLowerCase()) return wrong;
+    const n = b.sha256.length;
+    for (const k of n > 1 ? [0, n - 1] : [0]) {
+      const a = k * b.chunk;
+      const buf = await file.slice(a, Math.min(a + b.chunk, b.size)).arrayBuffer();
+      if (hex(await crypto.subtle.digest('SHA-256', buf)) !== b.sha256[k]) return wrong;
+    }
+    return true;
+  }
+  async function checkBase() {
+    const seq = ++baseSeq;
+    const out = $('baseCheck');
+    baseOk = false; out.className = ''; out.textContent = '';
+    checkReady();
+    if (!baseFile || !entry || !region) return;
+    const file = baseFile;
+    let verdict;
+    if (file.size !== region.base.size) verdict = await verifyBase(file, region.base);
+    else {
+      out.textContent = 'Checking the file…';
+      let b = null;
+      try { b = (await recipeFor(entry)).base; } catch (e) { verdict = `Could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`; }
+      if (b) {
+        const key = [file.name, file.size, file.lastModified, b.file, b.size, b.uuid, b.sha256[0], b.sha256[b.sha256.length - 1]].join('|');
+        try {
+          if (!baseVerdicts.has(key)) baseVerdicts.set(key, await verifyBase(file, b));
+          verdict = baseVerdicts.get(key);
+        } catch (e) { verdict = `Could not read the file (${e.message || e}). Open it again.`; }
+      }
+    }
+    if (seq !== baseSeq) return;     // a newer file or language took over
+    if (verdict === true) { baseOk = true; out.className = 'ok'; out.textContent = '✓ right file'; }
+    else { out.className = 'bad'; out.textContent = verdict; }
+    checkReady();
+  }
+
   function checkReady() {
-    $('go').disabled = !(baseFile && region && entry && baseFile.size === region.base.size) || !!running;
+    $('go').disabled = !(baseOk && region && entry) || !!running;
   }
 
   // The recipe of the chosen language; fetched once per language.

@@ -21,7 +21,8 @@
   progress { width: 100%; height: 14px; }
   .dim { color: var(--dim); font-size: .9rem; }
   a { color: var(--accent); }
-  #baseCheck { color: #ef4444; }
+  #baseCheck.bad { color: #ef4444; }
+  #baseCheck.ok { color: #22c55e; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -37,7 +38,7 @@
     <p id="baseInfo" class="dim"></p>
     <label for="baseFile">Your copy of the map file</label>
     <input id="baseFile" type="file" accept=".zim">
-    <p id="baseCheck"></p>
+    <p id="baseCheck" role="status" aria-live="polite"></p>
   </section>
 
   <section>
