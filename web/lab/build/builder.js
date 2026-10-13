@@ -138,7 +138,7 @@
     $('total').textContent = nothingNew
       ? `Nothing to download: the new file is the same map with its map language set to ${langName(entry.lang, entry.label)} (${fmtMB(entry.size)}).`
       : `The new file: the map in ${langName(entry.lang, entry.label)}, ${fmtMB(entry.size)}. To download now: ${fmtMB(entry.download_bytes)}.`;
-    recipeFor(entry).catch((e) => { $('notice').textContent = `Could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`; });
+    recipeFor(entry).catch((e) => { $('notice').textContent = `Could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`; });
     checkBase();
   }
 
@@ -180,7 +180,7 @@
     else {
       out.textContent = 'Checking the file…';
       let b = null;
-      try { b = (await recipeFor(entry)).base; } catch (e) { verdict = `Could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`; }
+      try { b = (await recipeFor(entry)).base; } catch (e) { verdict = `Could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`; }
       if (b) {
         const key = [file.name, file.size, file.lastModified, b.file, b.size, b.uuid, b.sha256[0], b.sha256[b.sha256.length - 1]].join('|');
         try {
@@ -570,7 +570,7 @@
       sinkInfo = await prepareSink(fileName, recipe.size);
     } catch (e) {
       running = null; checkReady();
-      setStatus(!recipe ? `Not started: could not load the recipe for ${entry.label} (${e.message || e}). Try again later.`
+      setStatus(!recipe ? `Not started: could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`
         : e.name === 'AbortError' ? 'Not started: no place to save the file was chosen.'
         : 'Not started: ' + (e.message || e), true);
       announce($('status').textContent);
