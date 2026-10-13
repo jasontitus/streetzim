@@ -72,8 +72,9 @@ def list_streetzim_items() -> List[str]:
     docs = data["response"]["docs"]
     # archive.org lists at most `rows` (it was 100 with 78 items in 2026-10):
     # never act on part of the list.
-    if data["response"].get("numFound", 0) > len(docs):
-        raise SystemExit(f"archive.org listed {len(docs)} of {data['response']['numFound']} items: raise rows")
+    found = data["response"].get("numFound")
+    if isinstance(found, int) and found > len(docs):
+        raise SystemExit(f"archive.org listed {len(docs)} of {found} streetzim-* items: raise rows")
     return sorted(d["identifier"] for d in docs)
 
 

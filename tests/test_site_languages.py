@@ -178,4 +178,4 @@ def test_a_listing_cut_short_by_archive_org_stops_the_page(monkeypatch, found, l
     else:
         with pytest.raises(SystemExit, match=f"listed {listed} of {found}"):
             gen.fetch_archive_items()
-    assert "rows=1000" in seen["url"]
+    assert "&rows=1000&" in seen["url"]

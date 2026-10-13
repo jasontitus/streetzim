@@ -87,7 +87,9 @@ def list_all_streetzim_items() -> List[str]:
     """Enumerate all streetzim-* items this uploader owns."""
     # `ia search` with a collection filter is the canonical way; we match
     # by identifier prefix since all our items follow `streetzim-<id>`.
-    out = ia(["search", "identifier:streetzim-*", "--field=identifier", "--parameters=rows:200"])
+    # No rows parameter: with one, internetarchive makes a single request and
+    # lists at most that many items; without, it pages through all of them.
+    out = ia(["search", "identifier:streetzim-*", "--field=identifier"])
     if out.returncode != 0:
         print("ia search failed:", out.stderr, file=sys.stderr)
         sys.exit(1)

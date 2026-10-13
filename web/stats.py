@@ -39,7 +39,7 @@ def fetch_all_items():
     docs = data.get("response", {}).get("docs", [])
     found = data.get("response", {}).get("numFound")
     if isinstance(found, int) and found > len(docs):   # at most `rows` are listed
-        raise SystemExit(f"archive.org listed {len(docs)} of {found} items: raise rows")
+        raise SystemExit(f"archive.org listed {len(docs)} of {found} streetzim-* items: raise rows")
     return docs
 
 
