@@ -101,14 +101,18 @@ function _showPlaceDetail(map, r, idx) {
       szT('place.website', 'Website'), '🌐', false,
       function() { window.open(r.ws, '_blank', 'noopener'); }));
   }
-  // Full bundled Wikipedia article (in-ZIM) when this place has one.
-  var _detailArt = _wikiArticlePath(r.q, r.w);
+  // Full bundled Wikipedia article (in-ZIM) when this place has one; with
+  // Wikipedia packs, the preferred language's, and the others below.
+  var _detailLinks = _wikiArticleLinks(r.q, r.w);
+  var _detailArt = _detailLinks[0];
   if (_detailArt) {
     actions.appendChild(_detailActionBtn(
       szT('place.wikipedia', 'Wikipedia'), '📖', false,
-      function() { openWikiArticle(_detailArt); }));
+      function() { openWikiArticle(_detailArt.title, _detailArt.prefix); }));
   }
   panel.appendChild(actions);
+  var _detailAlso = _wikiAlsoIn(_detailLinks);
+  if (_detailAlso) panel.appendChild(_detailAlso);
 
   // Address line (if location string distinct from subhead)
   // Plus phone/website spelled out for accessibility / copy-paste

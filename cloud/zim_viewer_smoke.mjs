@@ -144,7 +144,9 @@ try {
         return [
           ['attr-satellite-section', !!c.hasSatellite, shown('attr-satellite-section')],
           ['attr-terrain-section', !!c.hasTerrain, shown('attr-terrain-section')],
-          ['attr-wiki-section', !!(c.hasWikidata || c.hasWikiArticles), shown('attr-wiki-section')],
+          // Wikipedia packs (a merged ZIM's wikiPacks) are Wikipedia text too.
+          ['attr-wiki-section', !!(c.hasWikidata || c.hasWikiArticles
+                                   || (Array.isArray(c.wikiPacks) && c.wikiPacks.length)), shown('attr-wiki-section')],
         ];
       }).catch(e => [['map-config.json', true, String(e)]]));
     for (const [id, want, got] of credits) {
