@@ -99,6 +99,8 @@ The prototype passes only if these four menu entries pass every gate: California
 
 ## Gates (build host, per region per round)
 
+The tools that build packs, merge, gate and write the site files, and their rules, are in [language-pack-pipeline.md](language-pack-pipeline.md) (`tools/langpack/`).
+
 For the base:
 - zimcheck
 - the v1 count
