@@ -202,12 +202,12 @@
   // memory as soon as the language and a right map file are chosen. Build is
   // enabled only after that, so a missing or damaged pack stops the visitor
   // before any save target is opened or any byte is written.
-  const STALL_MS = 30000;              // no byte for this long: abort and retry
-  const PART = 4 * 1048576;            // range request size
-  const PARALLEL = 4;                  // range requests in flight
-  const TRIES = 5;                     // per range, with backoff 1, 2, 4, 8 s
-  const SLOW_AFTER_MS = 20000, SLOW_BPS = 50e3, SLOW_TRIES = 3;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Range requests come from fetcher.js (shared with the worker): 30 s stall
+  // timeout, resume from the first missing byte, laggards asked again,
+  // backoff retries.
+  const { FetchError, newNet, pct, fetchRetrying } = self.SZFetch;
+  const PART = 4 * 1048576;            // range request size for packs
+  const PARALLEL = 4;                  // pack range requests in flight
   const langName = (() => {
     let dn = null;
     try { dn = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (e) { /* old browser */ }
@@ -217,92 +217,11 @@
     const m = entry && entry.packs.find((p) => p.lang === id);
     return langName(id, m ? m.label.replace(/ Wikipedia$/, '') : id) + ' Wikipedia';
   };
-  const newNet = () => ({ requests: 0, bytes: 0, ms: 0, ttfb: [], mbps: [], retries: 0, slow_retries: 0, errors: 0, resets: 0, hash_retries: 0 });
   let net = newNet();
   let packsOk = false, packSeq = 0, packAbort = null;
   const packBytes = new Map();         // url|size|hashes -> verified Uint8Array
   const packKey = (p) => [p.url, p.size, p.sha256.join(',')].join('|');
 
-  class FetchError extends Error {
-    constructor(msg, permanent) { super(msg); this.permanent = !!permanent; }
-  }
-  // One range request, its bytes handed to onChunk as they arrive. Aborted
-  // when no byte has arrived for STALL_MS (while waiting for the answer,
-  // too); with crawlCheck, also when it is a laggard: after SLOW_AFTER_MS
-  // at under SLOW_BPS, and under a quarter of the median speed of the
-  // requests that have finished (the proxy's upstream sometimes trickles one
-  // request while the next is fast; when every request is slow, asking
-  // again only costs another wait for the first byte).
-  async function fetchRange(url, a, b, size, signal, onChunk, crawlCheck) {
-    const ac = new AbortController();
-    const outer = () => ac.abort();
-    if (signal.aborted) throw new DOMException('aborted', 'AbortError');
-    signal.addEventListener('abort', outer, { once: true });
-    let timer = null, stalled = false, n = 0;
-    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { stalled = true; ac.abort(); }, STALL_MS); };
-    const t0 = performance.now();
-    arm();
-    try {
-      const r = await fetch(url, { headers: { Range: `bytes=${a}-${b - 1}` }, cache: 'no-store', signal: ac.signal });
-      const ttfb = performance.now() - t0;
-      if (r.status !== 206) {
-        const permanent = r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429;
-        throw new FetchError(r.status === 200 ? 'the server ignored the range request' : `HTTP ${r.status}`, permanent);
-      }
-      const cr = r.headers.get('Content-Range');
-      const m = cr && /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(cr);
-      if (cr && (!m || +m[1] !== a || +m[2] !== b - 1 || (m[3] !== '*' && +m[3] !== size))) throw new FetchError(`unexpected Content-Range ${cr}`);
-      const reader = r.body.getReader();
-      for (;;) {
-        arm();
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (n + value.length > b - a) throw new FetchError('the server sent too many bytes');
-        onChunk(value); n += value.length;
-        const ms = performance.now() - t0;
-        const bps = n / (ms / 1000);
-        if (crawlCheck && n < b - a && ms > SLOW_AFTER_MS && bps < SLOW_BPS && net.mbps.length && bps * 4 < pct(net.mbps, 0.5) * 1e6) {
-          reader.cancel().catch(() => {});
-          const e = new FetchError(`only ${Math.round(bps / 1e3)} KB/s`); e.slow = true; throw e;
-        }
-      }
-      if (n !== b - a) throw new FetchError(`the server sent ${n} of ${b - a} bytes`);
-      const ms = performance.now() - t0;
-      net.requests++; net.ttfb.push(Math.round(ttfb));
-      net.mbps.push(+(n / 1e6 / (ms / 1000)).toFixed(2));
-    } catch (e) {
-      if (signal.aborted) throw new DOMException('aborted', 'AbortError');
-      if (stalled) throw new FetchError(`no data for ${STALL_MS / 1000} s`);
-      if (e instanceof FetchError) throw e;
-      net.resets++;
-      throw new FetchError('the connection failed (' + (e.message || e) + ')');
-    } finally {
-      net.bytes += n; net.ms += performance.now() - t0;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', outer);
-    }
-  }
-  // Fills out[a, b) from the same bytes of url. After a failure it resumes
-  // from the first missing byte: at once for a crawling request (up to
-  // SLOW_TRIES times), else after a backoff of 1, 2, 4, 8 s (TRIES requests
-  // in all). onRetry(note) explains each retry.
-  async function fetchRetrying(url, out, a, b, size, signal, onBytes, onRetry) {
-    let pos = a, failures = 0, slow = 0;
-    for (;;) {
-      try {
-        await fetchRange(url, pos, b, size, signal, (chunk) => { out.set(chunk, pos); pos += chunk.length; onBytes(chunk.length); }, slow < SLOW_TRIES);
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError' || e.permanent) throw e;
-        net.errors++;
-        if (e.slow) { slow++; net.slow_retries++; onRetry(`${e.message}; asking again`); continue; }
-        if (++failures >= TRIES) throw new FetchError(`${e.message}, ${TRIES} tries`);
-        net.retries++;
-        onRetry(`${e.message}; trying again (${failures + 1} of ${TRIES})`);
-        await sleep(1000 * 2 ** (failures - 1));
-      }
-    }
-  }
   // One pack, chunk by chunk; each chunk's SHA-256 must match the recipe. A
   // chunk that does not match is downloaded once more before giving up. A
   // range that fails for good stops the other ranges in flight.
@@ -327,7 +246,7 @@
         const lane = async () => {
           while (next < parts.length) {
             const [a, b] = parts[next++];
-            await fetchRetrying(p.url, out, a, b, p.size, signal, bump, (note) => onProgress(got, note));
+            await fetchRetrying(p.url, out, 0, a, b, p.size, signal, net, bump, (note) => onProgress(got, note));
           }
         };
         await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, () => lane().catch((e) => { ac.abort(); throw e; })));
@@ -401,7 +320,6 @@
   }
   $('packRetry').onclick = () => ensurePacks();
 
-  function pct(a, p) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
   function netParams() {
     return { net_mb: +(net.bytes / 1e6).toFixed(1), net_mbps_avg: net.ms ? +(net.bytes / 1e6 / (net.ms / 1000)).toFixed(2) : null,
              net_mbps_p10: pct(net.mbps, 0.1), ttfb_ms_p50: pct(net.ttfb, 0.5), retries: net.retries, resets: net.resets,
@@ -590,7 +508,7 @@
                    download_mb: Math.round(entry.download_bytes / 1e6), sink: sinkInfo.sink };
     track('build_start', base);
     if (sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
-    const worker = new Worker('assembler-worker.js?v=2');
+    const worker = new Worker('assembler-worker.js?v=3');
     running = { worker, base, t0, sent: new Set() };
     checkReady();
     holdScreen();

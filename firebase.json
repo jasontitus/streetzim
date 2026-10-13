@@ -60,7 +60,7 @@
         ]
       },
       {
-        "source": "lab/build/@(builder|assembler-worker).js",
+        "source": "lab/build/@(builder|assembler-worker|fetcher).js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache" }
         ]
