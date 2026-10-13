@@ -53,8 +53,8 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~489 KB (2026-10-06: built without comments, below; the German table is ~20 KB of it, [i18n.md](i18n.md)) | 2.1x |
-| places.html | 256 KB | ~138 KB (2026-10-05: + UI strings and the German table, ~11 KB) | 1.9x |
+| index.html | 1 MB | ~548 KB (2026-10-13: built without comments, below; the German, Thai and Chinese tables are ~73 KB of it, [i18n.md](i18n.md)) | 1.9x |
+| places.html | 256 KB | ~163 KB (2026-10-13: + UI strings and the German, Thai and Chinese tables, ~38 KB) | 1.6x |
 | routing-worker.js | 128 KB | ~68 KB | 1.9x |
 
 **index.html is built without comments.** About a third of the viewer's
