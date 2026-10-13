@@ -355,18 +355,38 @@
   }
 
   // ------------------------------------------------------------ sinks
+  // A streamed download that stopped once is not tried again in this tab.
+  const swFailedBefore = () => { try { return !!sessionStorage.getItem('sz_sw_failed'); } catch (e) { return false; } };
+  const swFailed = () => { try { sessionStorage.setItem('sz_sw_failed', '1'); } catch (e) { /* no storage */ } };
   const within = (p, ms) => Promise.race([p, new Promise((r, j) => setTimeout(() => j(new Error('timed out')), ms))]);
 
+  const SW_VERSION = 2;                // the sw.js protocol this page speaks
+  const controllerChange = (ms) => new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, ms); });
+  // {v, busy} from a service worker; null if it does not answer (an old one).
+  function swStatus(w) {
+    return new Promise((r) => {
+      if (!w) { r(null); return; }
+      const ch = new MessageChannel();
+      const t = setTimeout(() => r(null), 1000);
+      ch.port1.onmessage = (e) => { clearTimeout(t); r(e.data); };
+      w.postMessage({ type: 'status' }, [ch.port2]);
+    });
+  }
   // The service worker that streams downloads, or null when it cannot be had
   // (no support, a failed registration, private modes): then OPFS is used.
+  // A newer sw.js waits until the running one has no download in progress.
   async function swController() {
     if (!('serviceWorker' in navigator)) return null;
     try {
-      await within(navigator.serviceWorker.register('sw.js', { scope: './' }), 10000);
+      const reg = await within(navigator.serviceWorker.register('sw.js', { scope: './' }), 10000);
       await within(navigator.serviceWorker.ready, 10000);
-      if (!navigator.serviceWorker.controller) {
-        await new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 3000); });
+      const inst = reg.installing;
+      if (inst) await new Promise((r) => { inst.addEventListener('statechange', () => { if (inst.state !== 'installing') r(); }); setTimeout(r, 5000); });
+      if (reg.waiting) {
+        const st = await swStatus(reg.active);
+        if (!st || !st.busy) { const changed = controllerChange(3000); reg.waiting.postMessage({ type: 'skipWaiting' }); await changed; }
       }
+      if (!navigator.serviceWorker.controller) await controllerChange(3000);
       return navigator.serviceWorker.controller;
     } catch (e) {
       console.warn('service worker unavailable, saving through browser storage instead:', e);
@@ -379,20 +399,25 @@
       const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'ZIM file', accept: { 'application/octet-stream': ['.zim'] } }] });
       return { sink: 'fsa', handle, transfer: [] };
     }
-    const ctl = await swController();
+    const ctl = swFailedBefore() ? null : await swController();
     if (ctl) {
       const ch = new MessageChannel();
       const id = Math.random().toString(36).slice(2);
-      const ok = new Promise((r) => { ch.port1.onmessage = (e) => { if (e.data.type === 'registered') r(); }; });
+      const ok = new Promise((r) => { ch.port1.onmessage = (e) => { if (e.data.type === 'registered') r(e.data.v); }; });
       ctl.postMessage({ type: 'register', id, filename: fileName, size }, [ch.port2]);
-      let registered = true;
-      await within(ok, 5000).catch(() => { registered = false; });
+      const v = await within(ok, 5000).catch(() => null);
       ch.port1.onmessage = null;
-      if (!registered) return { sink: 'opfs', transfer: [] };
-      const ifr = document.createElement('iframe');
-      ifr.style.display = 'none'; ifr.src = '__dl/' + encodeURIComponent(id);
-      document.body.append(ifr);
-      return { sink: 'sw', port: ch.port1, transfer: [ch.port1] };
+      if (v === SW_VERSION) {
+        const ifr = document.createElement('iframe');
+        ifr.hidden = true; ifr.title = 'download'; ifr.src = '__dl/' + encodeURIComponent(id);
+        document.body.append(ifr);
+        // Messages to the service worker keep the browser from stopping it
+        // while the download runs (Firefox stops idle ones after 30 s).
+        const keepalive = setInterval(() => { const c = navigator.serviceWorker.controller; if (c) c.postMessage({ type: 'keepalive' }); }, 10000);
+        return { sink: 'sw', port: ch.port1, transfer: [ch.port1],
+                 cleanup: (ok) => { clearInterval(keepalive); setTimeout(() => ifr.remove(), ok ? 5000 : 0); } };
+      }
+      ch.port1.close();
     }
     return { sink: 'opfs', transfer: [] };
   }
@@ -430,9 +455,10 @@
     const result = await new Promise((resolve) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
-          const { written, size, ms } = e.data;
+          const { written, size, ms, closing } = e.data;
           $('prog').value = written / size;
-          $('status').textContent = `${fmtMB(written)} of ${fmtMB(size)} — keep this tab open`;
+          $('status').textContent = closing && sinkInfo.sink === 'sw' ? `All ${fmtMB(size)} built and checked; your browser is saving the rest — keep this tab open`
+            : `${fmtMB(written)} of ${fmtMB(size)} — keep this tab open`;
           for (const p of [25, 50, 75]) {
             if (written / size * 100 >= p && !running.sent.has(p)) {
               running.sent.add(p);
@@ -446,6 +472,8 @@
                            port: sinkInfo.port, fileName }, sinkInfo.transfer);
     });
     worker.terminate();
+    if (sinkInfo.cleanup) sinkInfo.cleanup(result.ok);
+    if (result.outcome === 'download_stopped') swFailed();
     if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = performance.now(); }
     track('build_end', Object.assign({}, base, netParams(), {
       outcome: result.outcome, secs: Math.round((performance.now() - t0) / 1000), mbps_total: result.mbps_total,
@@ -453,7 +481,8 @@
     running = null;
     checkReady();
     if (result.ok) {
-      $('status').textContent = `Done and verified. ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
+      $('status').textContent = (sinkInfo.sink === 'sw' ? 'Done and verified. Your browser has the whole file and is finishing the download; look in your downloads.'
+        : 'Done and verified.') + ` ${fmtMB(result.size)} in ${Math.round(result.ms / 1000)} s. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
         const root = await navigator.storage.getDirectory();
         const f = await (await root.getFileHandle(fileName)).getFile();
@@ -462,6 +491,8 @@
         $('status').append(' ', a);
       }
       $('after').hidden = false;
+    } else if (result.outcome === 'download_stopped') {
+      $('status').textContent = 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).';
     } else {
       $('status').textContent = 'Stopped: ' + result.error;
     }

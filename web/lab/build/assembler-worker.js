@@ -16,7 +16,6 @@
 /* global hashwasm */
 importScripts('vendor/md5.umd.min.js');
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 const b64dec = (s) => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
 const sha256 = async (u8) => hex(await crypto.subtle.digest('SHA-256', u8));
@@ -31,23 +30,62 @@ class WritableSink {                 // File System Access: the visitor picked a
   async abort() { try { await this.w.abort(); } catch (e) { /* already closed */ } }
 }
 
-class SwDownloadSink {               // the page's service worker streams a download
+// The page's service worker streams a download (sw.js has the protocol).
+// Watchdogs, so a dead stream ends the build instead of hanging it:
+// - the service worker answers a ping every PING_MS; no answer for DEAD_MS
+//   means the browser stopped it;
+// - a write that waits STALL_MS for room (an 'ack'), or an end that waits
+//   STALL_MS without the browser reading more ('pulled'), means the browser
+//   is not reading the download (never started, cancelled, or stuck);
+// - 'cancelled' from the service worker ends it at once.
+// close() returns only when the browser has read the whole stream.
+const PING_MS = 5000, DEAD_MS = 20000, STALL_MS = 60000;
+class SinkStopped extends Error {}
+class SwDownloadSink {
   constructor(port) {
-    this.port = port; this.waiters = []; this.credit = 0; this.cancelled = null;
+    this.port = port; this.waiters = []; this.credit = 0; this.failed = null;
+    this.pulled = 0; this.drained = false; this.lastPong = this.lastPull = Date.now(); this.waitingSince = null;
     port.onmessage = (e) => {
-      if (e.data.type === 'ack') { this.credit++; const w = this.waiters.shift(); if (w) { this.credit--; w(); } }
-      else if (e.data.type === 'cancelled') { this.cancelled = e.data.reason || 'cancelled'; this.waiters.splice(0).forEach((w) => w()); }
+      const d = e.data || {};
+      if (d.type === 'ack') { this.credit++; this.wake(); }
+      else if (d.type === 'pong') this.lastPong = Date.now();
+      else if (d.type === 'pulled') { if (d.bytes !== this.pulled) { this.pulled = d.bytes; this.lastPull = Date.now(); } }
+      else if (d.type === 'drained') { this.drained = true; this.wake(); }
+      else if (d.type === 'cancelled') this.fail('the browser cancelled the download (' + (d.reason || 'cancelled') + ')');
     };
   }
-  async open() { this.credit = 1; }
+  wake() { this.waiters.splice(0).forEach((w) => w()); }
+  fail(why) { if (!this.failed) { this.failed = new SinkStopped(why); this.wake(); } }
+  async open() {
+    this.credit = 1;
+    this.timer = setInterval(() => {
+      const now = Date.now();
+      this.port.postMessage({ type: 'ping' });
+      if (now - this.lastPong > DEAD_MS) this.fail('the service worker stopped');
+      else if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > STALL_MS) this.fail('the browser stopped reading the download');
+    }, PING_MS);
+  }
+  async until(ready) {               // wait for ready(), or a failure
+    this.waitingSince = Date.now();
+    try {
+      while (!ready()) {
+        if (this.failed) throw this.failed;
+        await new Promise((r) => this.waiters.push(r));
+      }
+      if (this.failed) throw this.failed;
+    } finally { this.waitingSince = null; }
+  }
   async write(u8) {
-    if (this.credit > 0) this.credit--; else await new Promise((r) => this.waiters.push(r));
-    if (this.cancelled) throw new Error('download cancelled: ' + this.cancelled);
+    await this.until(() => this.credit > 0);
+    this.credit--;
     const c = u8.slice();            // a private copy to transfer
     this.port.postMessage({ type: 'chunk', chunk: c }, [c.buffer]);
   }
-  async close() { this.port.postMessage({ type: 'end' }); }
-  async abort(reason) { this.port.postMessage({ type: 'error', reason: String(reason) }); }
+  async close() {
+    this.port.postMessage({ type: 'end' });
+    try { await this.until(() => this.drained); } finally { clearInterval(this.timer); }
+  }
+  async abort(reason) { clearInterval(this.timer); this.port.postMessage({ type: 'error', reason: String(reason) }); }
 }
 
 class OpfsSink {                     // browser-private storage; the page offers the file after
@@ -227,12 +265,14 @@ async function run(o) {
       await sink.write(data);
       written += n;
       const now = performance.now();
-      if (now - lastProg > 300) { lastProg = now; postMessage({ type: 'progress', written, size: recipe.size, ms: now - t0 }); }
+      if (now - lastProg > 300) { lastProg = now; postMessage({ type: 'progress', written, size: recipe.size, ms: now - t0, saved: sink.pulled }); }
     }
+    postMessage({ type: 'progress', written, size: recipe.size, ms: performance.now() - t0, saved: sink.pulled, closing: true });
     await sink.close();
   } catch (e) {
     await sink.abort(e);
-    return { ok: false, outcome: /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error', error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
+    const outcome = e instanceof SinkStopped ? 'download_stopped' : /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error';
+    return { ok: false, outcome, error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
   }
   const ms = performance.now() - t0;
   return { ok: true, outcome: 'ok', md5: digest, file_md5: fileMd5, size: recipe.size, written, ms: Math.round(ms),
