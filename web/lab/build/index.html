@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetZim: maps in other languages (prototype)</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --bg: #0b1220; --card: #131c2e; --text: #e6edf7; --dim: #94a3b8; --accent: #3b82f6; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f8fb; --card: #fff; --text: #0f172a; --dim: #475569; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .lab { display: inline-block; font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: #f59e0b33; color: #f59e0b; }
+  section { background: var(--card); border-radius: 12px; padding: 16px; margin: 16px 0; }
+  label { display: block; font-weight: 600; margin: 8px 0 4px; }
+  select, input[type=file] { font: inherit; max-width: 100%; }
+  button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 6px 12px; }
+  progress { width: 100%; height: 14px; }
+  .dim { color: var(--dim); font-size: .9rem; }
+  a { color: var(--accent); }
+  #baseCheck { color: #ef4444; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Maps in other languages <span class="lab">prototype</span></h1>
+  <p class="dim">Add Wikipedia in other languages to a StreetZim map, and choose the map's language. Your browser builds the new file from your copy of the map plus small language packs, and checks every byte.</p>
+
+  <section>
+    <label for="region">Region</label>
+    <select id="region"></select>
+    <p id="baseInfo" class="dim"></p>
+    <label for="baseFile">Your copy of the map file</label>
+    <input id="baseFile" type="file" accept=".zim">
+    <p id="baseCheck"></p>
+  </section>
+
+  <section>
+    <label for="lang">Map language</label>
+    <select id="lang"></select>
+    <p class="dim">Wikipedia in the new file:</p>
+    <ul id="packs"></ul>
+    <p id="total" class="dim"></p>
+  </section>
+
+  <section>
+    <button id="go" disabled>Build and save</button>
+    <p><progress id="prog" value="0" max="1"></progress></p>
+    <p id="status" class="dim" aria-live="polite"></p>
+    <div id="after" hidden>
+      <p class="dim">Open the new file in Kiwix, or in the <a href="/drive/">StreetZim web app</a>.</p>
+    </div>
+  </section>
+
+  <section>
+    <button id="probe" class="secondary">Test my download speed</button>
+    <p id="probeOut" class="dim"></p>
+    <p id="trackNote" class="dim"></p>
+  </section>
+</main>
+<script src="builder.js"></script>
+</body>
+</html>
