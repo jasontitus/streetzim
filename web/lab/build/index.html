@@ -30,36 +30,39 @@
   .bad { color: var(--bad); }
   .ok { color: var(--ok); font-weight: 600; }
   label.check { display: flex; gap: 8px; align-items: center; font-weight: normal; }
+  h2 { font-size: 1.1rem; margin: 16px 0 4px; }
+  ul.downloads { list-style: none; padding: 0; margin: 0; }
+  ul.downloads li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent); }
+  ul.downloads li:first-child { border-top: 0; }
+  ul.downloads a { font-weight: 600; }
+  button.big { display: block; width: 100%; font-size: 1.1rem; padding: 14px 18px; margin: 12px 0 4px; }
+  summary { cursor: pointer; color: var(--accent); }
+  details[open] summary { margin-bottom: 8px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Maps in other languages <span class="lab">prototype</span></h1>
-  <p class="dim">Add Wikipedia in other languages to a StreetZim map, and choose the map's language. Your browser builds the new file from your copy of the map plus small language packs, and checks every byte.</p>
+  <p class="dim">A StreetZim map with Wikipedia in another language (as well as English), and its labels in that language. Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</p>
 
   <p id="notice" role="alert"></p>
 
   <section>
     <label for="region">Region</label>
     <select id="region"></select>
-    <p id="baseInfo" class="dim"></p>
-    <label for="baseFile">Your copy of the map file</label>
-    <input id="baseFile" type="file" accept=".zim">
-    <p id="baseCheck" role="status" aria-live="polite"></p>
+    <h2 id="dlHead">Downloads</h2>
+    <ul id="downloads" class="downloads"></ul>
   </section>
 
   <section>
     <label for="lang">Map language</label>
     <select id="lang"></select>
-    <p class="dim">Wikipedia in the new file:</p>
-    <ul id="packs"></ul>
     <p id="total" class="dim"></p>
+    <ul id="packs" class="dim"></ul>
+    <button id="oneclick" class="big" disabled>Download</button>
     <p id="packStatus"></p>
     <button id="packRetry" class="secondary" hidden>Try again</button>
-  </section>
-
-  <section>
-    <button id="go" disabled>Build and save</button>
+    <button id="startDl" hidden>Start download</button>
     <p><progress id="prog" value="0" max="1" aria-label="Build progress"></progress></p>
     <p id="status" class="dim"></p>
     <div id="save" hidden></div>
@@ -67,6 +70,17 @@
     <div id="after" hidden>
       <p class="dim">Open the new file in Kiwix, or in the <a href="/drive/">StreetZim web app</a>.</p>
     </div>
+  </section>
+
+  <section>
+    <details id="haveBase">
+      <summary id="haveBaseSummary">Already have the map? Use it and download only Wikipedia</summary>
+      <p id="baseInfo" class="dim"></p>
+      <label for="baseFile">Your copy of the map file</label>
+      <input id="baseFile" type="file" accept=".zim">
+      <p id="baseCheck" role="status" aria-live="polite"></p>
+      <button id="go" disabled>Build from my copy and save</button>
+    </details>
   </section>
 
   <section>
