@@ -101,7 +101,7 @@ _REGION_CODE = re.compile(r"[a-z]{2,3}")
 
 def region_languages(text: str) -> list[str]:
     """A region's own languages (cloud/region-languages.tsv; map-config
-    ``regionLanguages``): ISO 639 codes, most used first, once each. Any
+    ``regionLanguages``): ISO 639 codes, largest first, once each. Any
     two- or three-letter code: a region's language need not be one a build
     can be made in (ht, ka)."""
     langs: list[str] = []

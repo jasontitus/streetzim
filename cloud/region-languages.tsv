@@ -2,84 +2,106 @@
 # tests/test_region_languages.py checks that every registry row has one).
 # Columns (tab-separated):
 #   id	languages
-# languages = the languages of the region, comma-separated ISO 639 codes
-# (ISO 639-1 where there is one), largest first. Largest means the most
-# speakers, first and second language together, living in what the region's
-# ZIM covers: its outline where cloud/region-outlines.tsv clips it, else its
-# whole box, neighbours included (central-asia's box reaches Beijing and
-# Delhi, so zh and hi lead it). Counts are rough (census and Ethnologue
-# orders of magnitude). The list holds every national or official language
-# of a country in the region, and other languages with millions of speakers
-# there. A language-ready build (STREETZIM_ML_TILES=1,
-# docs/language-ready.md) records the row in map-config.json as
-# regionLanguages; the viewer reads it for label order.
-silicon-valley	en
-washington-dc	en
+# languages = comma-separated ISO 639 codes (639-1 where there is one).
+#
+# The region's countries: those its site card names (web/generate.py
+# REGIONS; "and dozens more" and "all of" mean every country of the
+# continent), and for a region the border clip cuts to an outline, those of
+# its row in cloud/region-outlines.tsv. For a region inside one country, the
+# part of it the region covers. Its people: the people of those countries,
+# or parts, inside the region. A neighbour that the box overlaps but the
+# card does not name counts for nothing.
+#
+# Its languages, each once:
+#  a. each country's official language, or, where it has several, the one
+#     most of its people speak (de facto official counts: English in the
+#     United States and the United Kingdom);
+#  b. every other official language of those countries, or of a state,
+#     province or constituent country the region covers (Wales, Catalonia,
+#     Hawaii), that at least 1% of the region's people speak;
+#  c. any other language that its people speak at home: at least two
+#     million of them and at least 1%, or at least 10% of them;
+#  d. French in Morocco, Algeria and Tunisia, which their signs and
+#     administration use beside the official languages.
+# A macrolanguage counts as one (zh: Mandarin, Cantonese, Wu; ar: the forms
+# of Arabic), and Morocco's Tamazight varieties as zgh.
+#
+# Order: most speakers first, first and second language together, among the
+# region's people; near ties by the number of its countries where a language
+# is official. Counts are rough (censuses, Ethnologue).
+#
+# A language-ready build (STREETZIM_ML_TILES=1, docs/language-ready.md)
+# records the row in map-config.json as regionLanguages. The viewer
+# (resources/viewer, szRegionLanguages) reads only whether there is one: a
+# map in another language than its base's then shows the visitor's name over
+# the native one. It does not read the order; that is for later uses.
+silicon-valley	en,es
+washington-dc	en,es
 hawaii	en,haw
-chicago-metro	en
-nyc-metro	en
-greater-la	en
+chicago-metro	en,es
+nyc-metro	en,es
+greater-la	en,es
 hispaniola	ht,es,fr
-colorado	en
-florida	en
+colorado	en,es
+florida	en,es
 carolinas	en
-new-york-state	en
-alaska	en
-california	en
-texas	en
+new-york-state	en,es
+alaska	en,esu
+california	en,es
+texas	en,es
 iceland	is
 south-korea	ko
 egypt	ar
-turkey	tr
+turkey	tr,ku,ar
 japan	ja
-iran	fa
-ukraine	uk,ru,ro
+iran	fa,az,ku,glk,mzn
+ukraine	ru,uk,ro
 argentina	es
 mexico	es
 brazil	pt
 baltics	lt,lv,et
-caucasus	az,ru,tr,ka,hy,ku
-himalayas	hi,ur,pa,ne,bn,zh,bo,dz
-central-america-caribbean	es,en,fr,ht
-pacific-islands	en,tpi,fr,fj,bi,ho
-west-africa	en,fr,pt
-southern-africa	en,pt,af,zu
-east-africa	sw,am,om,en,so,rw,rn,fr
+caucasus	ru,az,tr,ka,hy,ku,ce,av,dar,kbd,os,kum,lez,inh,krc
+himalayas	ne,hi,ur,ks,mai,bo,phr,doi,bho,en,zh,dz
+central-america-caribbean	es,ht,en,jam,fr,pap,nl
+pacific-islands	tpi,en,fj,hif,fr,bi,gil,mh,tvl,na
+west-africa	en,pcm,ha,yo,fr,ig,ff,ak,bm,wo,dyu,mos,ee,kr
+southern-africa	zu,en,xh,af,ny,sn,st,nso,pt,tn,vmw,bem,ts,ss,seh,nd,nr,ve
+east-africa	sw,am,om,en,so,rw,rn,lg,ki,ti,suk,luy,kln,luo,kam,sid,din
 korea-mongolia	ko,mn
-west-asia	ar,fa,tr,ku,az,he,ps,el,ur
-central-asia	zh,hi,ur,fa,bn,ar,uz,ps,ru,ne,kk,az,tg,ky,tk,ka,hy,mn,ku
-central-us	en
-west-coast-us	en
-midwest-us	en
-east-coast-us	en
-southeast-asia	zh,id,vi,tl,th,en,my,ms,km,lo,tet,pt
-australia-nz	en,mi
+west-asia	ar,tr,fa,ku,az,he,el,ur
+central-asia	uz,ru,fa,ps,kk,az,tg,ky,tk,ka,hy
+central-us	en,es
+west-coast-us	en,es
+midwest-us	en,es
+east-coast-us	en,es
+southeast-asia	id,vi,tl,jv,th,en,my,su,ms,ceb,km,tts,zh,ilo,hil,mad,lo,tet
+australia-nz	en
 canada	en,fr
-indian-subcontinent	hi,bn,ur,en,mr,te,ta,ne,si
-china	zh
-africa	ar,fr,en,pt,sw,am
-south-america	es,pt,en,nl,fr
-russia	ru
-united-states	en
-europe	ru,de,tr,fr,en,it,es,pl,uk,ro,nl,el,hu,cs,sv,pt,ca,be,bg,sr,az,da,fi,sk,no,hr,ka,hy,sq,lt,sl,mk,bs,lv,et,ga,is,lb,mt,rm
-france	fr
+indian-subcontinent	hi,bn,en,ur,pa,mr,te,ta,gu,kn,bho,sd,or,ml,mai,ps,skr,ne,as,si,dv,dz
+china	zh,za
+africa	ar,en,sw,fr,ha,am,om,yo,pt,ln,ff,ig,zu,mg,zgh,so,xh,af,sn,ny,bm,rw,st,rn,ti,mos,sg,ss,es,zdj,crs
+south-america	es,qu,gn,ay,en,nl,fr
+russia	ru,tt,ce
+united-states	en,es,zh
+europe	en,de,fr,tr,it,ru,es,pl,uk,ro,nl,ku,el,hu,cs,sv,ar,pt,ca,az,sr,bg,sq,da,fi,sk,no,hr,ka,lt,hy,sl,bs,mk,lv,et,mt,is
+france	fr,ar
 germany	de
-britain-ireland	en,cy,ga,gd,gv
-italy	it
+britain-ireland	en,ga,cy
+italy	it,sc
 iberia	es,pt,ca,gl,eu
 poland	pl
-benelux	nl,fr,de,lb
+benelux	nl,fr,de,lb,fy
 nordics	sv,da,fi,no
-austria-czech	de,cs,sk
-balkans	sr,hr,bs,sl,sq,mk
+austria-czech	de,cs,sk,hu
+balkans	sr,hr,sq,bs,sl,mk,cnr
 greece	el
 carpathians	ro,hu,bg
-switzerland	de,fr,it,rm
-switzerland-nosat	de,fr,it,rm
-switzerland-nosat-z13	de,fr,it,rm
-switzerland-light	de,fr,it,rm
-north-africa	ar,fr,zgh,es,it,mt
-central-africa	fr,pt,en,sw,ln,ar,es
-horn-of-africa	am,om,so,sw,en,ti,ar,fr
-east-polynesia	fr,ty,en
-africa-light	ar,fr,en,pt,sw,am
+switzerland	de,fr,it
+switzerland-nosat	de,fr,it
+switzerland-nosat-z13	de,fr,it
+switzerland-light	de,fr,it
+north-africa	ar,fr,zgh,kab
+central-africa	fr,ln,sw,pt,en,ar,kg,bem,lua,umb,sg,ff,kmb,ny,es
+horn-of-africa	am,om,so,en,ti,sid,ar,din,aa,wal,sw,fr
+east-polynesia	fr,ty,en,rar
+africa-light	ar,en,sw,fr,ha,am,om,yo,pt,ln,ff,ig,zu,mg,zgh,so,xh,af,sn,ny,bm,rw,st,rn,ti,mos,sg,ss,es,zdj,crs

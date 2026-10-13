@@ -43,9 +43,18 @@ def test_every_row_is_a_clean_language_list():
 @pytest.mark.parametrize("rid, first", [("greece", "el"), ("japan", "ja"), ("iran", "fa"),
                                         ("united-states", "en"), ("switzerland", "de"),
                                         ("benelux", "nl"), ("hispaniola", "ht"),
-                                        ("central-asia", "zh")])
+                                        # Led by the countries the site card names,
+                                        # not by neighbours the box overlaps.
+                                        ("central-asia", "uz"), ("southeast-asia", "id"),
+                                        ("himalayas", "ne")])
 def test_known_regions(rid, first):
     assert dict(_rows(TABLE))[rid].split(",")[0] == first
+
+
+@pytest.mark.parametrize("rid", ["united-states", "california", "texas", "florida",
+                                 "new-york-state", "nyc-metro", "greater-la"])
+def test_spanish_where_millions_speak_it(rid):
+    assert dict(_rows(TABLE))[rid].split(",")[:2] == ["en", "es"]
 
 
 def test_the_matrix_list():

@@ -4,14 +4,16 @@ A language-ready ZIM is today's region ZIM plus what a later language
 switch or language pack needs ([language-packs.md](language-packs.md),
 [language-matrix.md](language-matrix.md)): its tiles carry `name:xx` for
 the matrix languages, and its `map-config.json` records which ones, and the
-region's own languages. Labels, search and the viewer do not change.
+region's own languages. Labels and search do not change; the viewer
+uses the region's languages only on a map in another language than its
+base's (below).
 
 ## The builder
 
 | flag | effect |
 |---|---|
 | `--tile-languages ar,de,…` | The `name:xx` the tiles carry besides English (`name:latin`). With `--mbtiles` the caller vouches for them; without, the build's own tilemaker run writes them. Sets `STREETZIM_TILE_LANGUAGES` for the build (the fallback glyphs then cover their scripts, [formats.md](formats.md)) and records `tileLanguages` (sorted) in `map-config.json`. `en` is refused: English is always there. |
-| `--region-languages el` | The region's own languages, most used first. Recorded as `regionLanguages` in `map-config.json`; nothing else reads it yet. |
+| `--region-languages el` | The region's own languages, largest first. Recorded as `regionLanguages` in `map-config.json`. |
 
 A build that passes neither is byte for byte what it was.
 
@@ -27,7 +29,18 @@ with this profile; the world tiles change only when they are rebuilt.
 `streetzim.languages.MATRIX_TILE_LANGUAGES` is the list (21: ar de el es fa
 fr he hi id it ja ko nl pl pt ru th tr uk vi zh).
 `cloud/region-languages.tsv` holds every registry region's own languages;
-`tests/test_region_languages.py` keeps it complete.
+`tests/test_region_languages.py` keeps it complete. Its header has the
+rule: the languages of the countries the region's site card names (and its
+outline row, if the border clip cuts it), official ones and those its
+people speak at home in the millions or as a tenth of them, largest first;
+neighbours the box only overlaps do not count.
+
+**Who reads `regionLanguages`:** the viewer (`szRegionLanguages`, on the
+`viewer-language-ready` branch) checks only that there is one. Then, on a
+map shown in another language than its base's, a label is the visitor's
+name with the native name under it ("Athen" over "Αθήνα"); without one, the
+style is as before. The order is not read yet; it is there for later uses,
+such as a default map language.
 
 ## Production: `STREETZIM_ML_TILES=1`
 
