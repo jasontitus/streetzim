@@ -76,7 +76,8 @@ class Source {
   }
   span(k) { return [k * this.C, Math.min((k + 1) * this.C, this.size)]; }
   get(k) {
-    if (this.cache.has(k)) return this.cache.get(k);
+    // Always a promise: prefetch() chains .catch() on what this returns.
+    if (this.cache.has(k)) return Promise.resolve(this.cache.get(k));
     if (!this.inflight.has(k)) {
       const [a, b] = this.span(k);
       this.inflight.set(k, (async () => {
