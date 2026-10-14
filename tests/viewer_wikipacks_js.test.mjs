@@ -913,6 +913,67 @@ await ok('names with several values: the first in the sheet, Find cards, nearby 
   assert.strictEqual(popupDom.textContent, '(unnamed)');
 });
 
+await ok('names with several values: a search row shows the first; data-name and the record keep it all', () => {
+  // renderResults and escapeHtml as initSearch has them (300-search.js).
+  const src = (from, to) => { const a = HTML.indexOf(from); return HTML.slice(a, HTML.indexOf(to, a)) + '\n'; };
+  const R = new Function('szPlaceType', 'szT',
+    'var activeIdx = -1, lastSearchMatches = [], resultsEl = { style: {}, innerHTML: "" };\n' +
+    src('  function renderResults(matches) {', '\n  function doSearch(') +
+    src('  function escapeHtml(s) {', '\n  function selectResult(') +
+    '\nreturn { renderResults, el: resultsEl, last: function() { return lastSearchMatches; } };')(szPlaceType, szT);
+  const rec = { ...MULTI, nn: '杭亞巷;唐人街' };
+  R.renderResults([{ item: rec, score: 1, dist: '0.1 mi' }, { item: { n: 'Zug', a: 1, o: 2, t: 'place' }, score: 1 }]);
+  const html = R.el.innerHTML;
+  assert.match(html, /data-name="Hang Ah Alley;Pagoda Alley"/);                       // what selectResult looks up
+  assert.match(html, /<span class="search-result-name">Hang Ah Alley <span class="search-result-native">杭亞巷<\/span>/);
+  assert.doesNotMatch(html, /search-result-name">[^<]*Pagoda/);
+  assert.match(html, /data-name="Zug"><span class="search-result-name">Zug</);
+  // The record itself is untouched (selectResult reads it by index).
+  assert.strictEqual(rec.n, 'Hang Ah Alley;Pagoda Alley');
+  assert.strictEqual(R.last()[0].item.n, 'Hang Ah Alley;Pagoda Alley');
+});
+
+await ok('names with several values: the Find page\'s #dest=…&label= hand-off fills the route with the first', () => {
+  // applyHash as the map's load handler has it (120-map-init-and-style.js).
+  const a = HTML.indexOf('    function validLatLon(lat, lon) {');
+  const b = HTML.indexOf("    map.on('load', applyHash);", a);
+  assert.ok(a > 0 && b > a);
+  const run = (hash) => {
+    const calls = [];
+    const win = { location: { hash }, streetzimRouting: { open() {}, setDest: (...x) => calls.push(['dest', ...x]),
+                                                           setOrigin: (...x) => calls.push(['origin', ...x]) } };
+    const pins = [];
+    new Function('window', 'map', 'placeSearchPin', 'SZ_HERE', 'renderFindResultsFromStash',
+      HTML.slice(a, b) + '\napplyHash();')(win, { flyTo() {}, fitBounds() {} }, (m, la, lo, name) => pins.push(name),
+      'HERE', () => {});
+    return { calls, pins };
+  };
+  let r = run('#dest=37.79,-122.27&label=' + encodeURIComponent('Oakland Amtrak;Oakland, CA - Jack London Square (OKJ)'));
+  assert.deepStrictEqual(r.calls, [['dest', 37.79, -122.27, 'Oakland Amtrak']]);
+  r = run('#dest=37.79,-122.27&label=Zug');
+  assert.deepStrictEqual(r.calls, [['dest', 37.79, -122.27, 'Zug']]);
+  r = run('#dest=37.79,-122.27');
+  assert.deepStrictEqual(r.calls, [['dest', 37.79, -122.27, '']]);
+  // A pin's popup cuts the name itself (_szPlacePopupDOM).
+  r = run('#pin=37.79,-122.27&label=' + encodeURIComponent('A;B'));
+  assert.deepStrictEqual(r.pins, ['A;B']);
+});
+
+await ok('names with several values: route steps and the navigation HUD show the first street name', () => {
+  const steps = fs.readFileSync(`${PARTS_DIR}/540-routing-worker-bridge.js`, 'utf8');
+  assert.match(steps, /var name = szFirstName\(graph\.getName \? graph\.getName\(r\.nameIdx\) : ''\);/);
+  const hud = fs.readFileSync(`${PARTS_DIR}/600-driving-mode.js`, 'utf8');
+  assert.match(hud, /name = szFirstName\(graph\.getName\(nextTurn\.nameIdx\) \|\| ''\);/);
+  assert.strictEqual((hud.match(/var nm = szFirstName\(graph\.getName\(tt\.nameIdx\)\);/g) || []).length, 2);
+  // Every graph name shown goes through it.
+  for (const part of fs.readdirSync(PARTS_DIR).filter((n) => /^[1-9].*\.js$/.test(n) && !n.startsWith('510'))) {
+    const t = fs.readFileSync(`${PARTS_DIR}/${part}`, 'utf8');
+    const all = (t.match(/graph\.getName\(/g) || []).length;
+    const cut = (t.match(/szFirstName\(graph\.getName/g) || []).length;
+    assert.strictEqual(cut, all, part);
+  }
+});
+
 await ok('names with several values: search rows and the Find page show the first, lookups keep it all', () => {
   const search = fs.readFileSync(`${PARTS_DIR}/300-search.js`, 'utf8');
   assert.match(search, /'" data-name="' \+ escapeHtml\(m\.n\) \+ '">'/);                 // the lookup's value

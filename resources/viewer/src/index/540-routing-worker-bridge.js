@@ -608,7 +608,9 @@
     if (!roads || !roads.length) return;
     for (var i = 0; i < roads.length; i++) {
       var r = roads[i];
-      var name = graph.getName ? graph.getName(r.nameIdx) : '';
+      // Street names cut at a ";" ("McKee Road;East Julian Street"),
+      // as everywhere names are shown (runtime szFirstName).
+      var name = szFirstName(graph.getName ? graph.getName(r.nameIdx) : '');
       var row = document.createElement('div');
       row.className = 'road-row';
       var nameSpan = document.createElement('span');

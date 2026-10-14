@@ -2673,7 +2673,7 @@ if (routingApi && typeof routingApi.open === 'function') {
 routingApi.open();
 }
 if (routingApi && typeof routingApi.setDest === 'function') {
-routingApi.setDest(dLat, dLon, label || '');
+routingApi.setDest(dLat, dLon, szFirstName(label) || '');
 }
 if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
 var oLat = parseFloat(origMatch[1]), oLon = parseFloat(origMatch[2]);
@@ -10184,7 +10184,7 @@ while (roadsEl.firstChild) roadsEl.removeChild(roadsEl.firstChild);
 if (!roads || !roads.length) return;
 for (var i = 0; i < roads.length; i++) {
 var r = roads[i];
-var name = graph.getName ? graph.getName(r.nameIdx) : '';
+var name = szFirstName(graph.getName ? graph.getName(r.nameIdx) : '');
 var row = document.createElement('div');
 row.className = 'road-row';
 var nameSpan = document.createElement('span');
@@ -11036,12 +11036,12 @@ var d = nextTurn.distM - proj.distAlong;
 distEl.textContent = formatDistanceLocalized(d, unit);
 var name = '';
 if (graph && graph.getName) {
-name = graph.getName(nextTurn.nameIdx) || '';
+name = szFirstName(graph.getName(nextTurn.nameIdx) || '');
 if (!name) {
 for (var t = 0; t < state.route.turns.length; t++) {
 var tt = state.route.turns[t];
 if (tt.distM <= proj.distAlong + 2) continue;
-var nm = graph.getName(tt.nameIdx);
+var nm = szFirstName(graph.getName(tt.nameIdx));
 if (nm) { name = nm; break; }
 }
 }
@@ -11057,7 +11057,7 @@ for (var t = 0; t < state.route.turns.length; t++) {
 var tt = state.route.turns[t];
 if (tt.distM <= nextTurn.distM) continue;
 if (tt.flags & 1) continue;
-var nm = graph.getName(tt.nameIdx);
+var nm = szFirstName(graph.getName(tt.nameIdx));
 if (nm) { exitName = nm; break; }
 }
 streetEl.textContent = exitName

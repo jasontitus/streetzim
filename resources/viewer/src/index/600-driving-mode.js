@@ -461,12 +461,13 @@
         // first) than just "next road".
         var name = '';
         if (graph && graph.getName) {
-          name = graph.getName(nextTurn.nameIdx) || '';
+          // Cut at a ";" for display (runtime szFirstName).
+          name = szFirstName(graph.getName(nextTurn.nameIdx) || '');
           if (!name) {
             for (var t = 0; t < state.route.turns.length; t++) {
               var tt = state.route.turns[t];
               if (tt.distM <= proj.distAlong + 2) continue;
-              var nm = graph.getName(tt.nameIdx);
+              var nm = szFirstName(graph.getName(tt.nameIdx));
               if (nm) { name = nm; break; }
             }
           }
@@ -486,7 +487,7 @@
             var tt = state.route.turns[t];
             if (tt.distM <= nextTurn.distM) continue;
             if (tt.flags & 1) continue;
-            var nm = graph.getName(tt.nameIdx);
+            var nm = szFirstName(graph.getName(tt.nameIdx));
             if (nm) { exitName = nm; break; }
           }
           streetEl.textContent = exitName

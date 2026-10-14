@@ -582,7 +582,8 @@ if (!window.__szUnsupported) fetchConfig(1)
           routingApi.open();
         }
         if (routingApi && typeof routingApi.setDest === 'function') {
-          routingApi.setDest(dLat, dLon, label || '');
+          // The routing input shows the name cut at a ";" (runtime szFirstName).
+          routingApi.setDest(dLat, dLon, szFirstName(label) || '');
         }
         if (origMatch && routingApi && typeof routingApi.setOrigin === 'function') {
           var oLat = parseFloat(origMatch[1]), oLon = parseFloat(origMatch[2]);
