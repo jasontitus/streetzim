@@ -206,10 +206,14 @@ nvme_ml_reserved() {
         b=""; st=""
         read -r b st < "$f" || true
         case "$b" in ''|*[!0-9]*) continue ;; esac
+        # More than 15 digits (999 TB) would overflow bash's arithmetic:
+        # count it as more than any disk, so nothing is staged beside it.
+        [ "${#b}" -le 15 ] || b=1000000000000000000
         cur=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20) || cur=""
         if { [ -n "$cur" ] && [ "$cur" = "$st" ]; } \
            || [ -n "$(find "$NVME_SCRATCH" -maxdepth 3 -path "*/ml-store-*-$pid/*" -type f -mmin -10 -print -quit 2>/dev/null)" ]; then
             sum=$(( sum + b ))
+            [ "$sum" -le 1000000000000000000 ] || sum=1000000000000000000
         fi
     done
     echo "$sum"

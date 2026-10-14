@@ -594,20 +594,29 @@ def reap(out_dir, store_dir, lock_path):
     # start time recorded: a store with none is a dead run's (a store there
     # is made and reserved together, under the stagers' lock). Only this
     # reap deletes them, after the containers above; the stagers never do.
+    # A dead run's store still being written (an orphaned container under
+    # another lock, which the removal above did not reach) is left, with its
+    # reservation, as nvme_reserved still counts it.
     nvme = nvme_dir()
     if nvme and os.path.isdir(nvme):
         live = set()
         for n in os.listdir(nvme):
-            if n.startswith(".reserve-ml-"):
-                pid = n.rsplit("-", 1)[-1]
-                r = _reservation(os.path.join(nvme, n))
-                if r and proc_start(pid) == r[1]:
-                    live.add(pid)
-                else:
-                    say(f"  removing {os.path.join(nvme, n)}, left by a dead run")
-                    os.unlink(os.path.join(nvme, n))
+            path = os.path.join(nvme, n)
+            if not n.startswith(".reserve-ml-") or not os.path.isfile(path):
+                continue
+            pid = n.rsplit("-", 1)[-1]
+            r = _reservation(path)
+            if r and proc_start(pid) == r[1]:
+                live.add(pid)
+            elif not _store_busy(nvme, pid):
+                say(f"  removing {path}, left by a dead run")
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
         for n in os.listdir(nvme):
-            if n.startswith("ml-store-") and n.rsplit("-", 1)[-1] not in live:
+            pid = n.rsplit("-", 1)[-1]
+            if n.startswith("ml-store-") and pid not in live and not _store_busy(nvme, pid):
                 say(f"  removing {os.path.join(nvme, n)}, left by a dead run")
                 shutil.rmtree(os.path.join(nvme, n), ignore_errors=True)
 
