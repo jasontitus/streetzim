@@ -50,6 +50,14 @@
       }));
       return (name, params) => { try { an.logEvent(a, name, Object.assign({ env }, params)); } catch (e) { /* ignore */ } };
     }).catch(() => null);
+  // Keyboard activation (a click event with detail 0) of a download control
+  // within 1 s of the page being ready or of the control getting focus is
+  // ignored: it is more likely a keystroke meant for another window.
+  let armedAt = Infinity;
+  const focusedAt = new WeakMap();
+  document.addEventListener('focusin', (e) => focusedAt.set(e.target, performance.now()));
+  const tooSoon = (ev, el) => ev.detail === 0 &&
+    performance.now() - Math.max(armedAt === Infinity ? performance.now() : armedAt, focusedAt.get(el) || 0) < 1000;
   let clicked = false;                 // nothing is reported before the first click
   document.addEventListener('click', () => { clicked = true; }, { capture: true, once: true });
   const track = (name, params) => {
@@ -116,15 +124,18 @@
     sel.onchange = () => { $('notice').textContent = ''; pickRegion(); };
     pickRegion();
     // ?go=1 (a download link): the language is chosen and the Download
-    // button focused; one click starts it. Nothing starts without a click,
-    // so another site cannot start a download by linking or redirecting here.
+    // button shown and highlighted, not focused (a page that opened ours
+    // as a popup could otherwise catch a typing visitor's Enter); one click
+    // starts it. Nothing starts without a click, so another site cannot
+    // start a download by linking or redirecting here.
     if (q.get('go') === '1' && region && entry && region.menu.some((m) => m.lang === q.get('lang'))) {
       const u = new URL(location.href); u.searchParams.delete('go');
       history.replaceState(null, '', u);
       $('goHint').hidden = false;
-      $('oneclick').focus();
+      $('oneclick').classList.add('attention');
       $('oneclick').scrollIntoView({ block: 'center' });
     }
+    armedAt = performance.now();
     // The connection check waits for a sign of a person on the page (a
     // pointer, a key, a touch, a wheel; not 'scroll', which the page's own
     // scrollIntoView fires): a page opened by a redirect from another site
@@ -155,7 +166,7 @@
       a2.textContent = `${langName(m.lang, m.label)} ${region.title}`;
       a2.lang = 'en';
       a2.onclick = (ev) => {
-        if (running) { ev.preventDefault(); return; }    // one build at a time
+        if (running || tooSoon(ev, a2)) { ev.preventDefault(); return; }    // one build at a time
         if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
         ev.preventDefault();
         $('lang').value = m.lang; pickLang();
@@ -531,7 +542,7 @@
         got = await new Promise((resolve) => {
           const b = $('startDl');
           b.hidden = false; b.disabled = false; b.focus();
-          b.onclick = async () => { b.disabled = true; resolve(await streamSink(ctl, fileName, size)); };
+          b.onclick = async (ev) => { if (tooSoon(ev, b)) return; b.disabled = true; resolve(await streamSink(ctl, fileName, size)); };
         });
         $('startDl').hidden = true;
       }
@@ -608,7 +619,7 @@
   // one, a save dialog. Both claim the running slot before their first
   // await, so a double click cannot start a second build.
   $('go').onclick = () => { if (!running && !$('go').disabled) build('file'); };
-  $('oneclick').onclick = () => { if (!running && !$('oneclick').disabled) build('net'); };
+  $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev, $('oneclick'))) build('net'); };
 
   // The base map's URL on the range proxy: index.json's base.url, else made
   // from base.download (https://archive.org/download/<item>/<file>) and the
@@ -624,6 +635,7 @@
 
   async function build(mode) {
     running = { starting: true, mode };
+    $('oneclick').classList.remove('attention');
     checkReady();                    // locks region, language and file too
     $('save').hidden = true; $('after').hidden = true;
     holdScreen();
