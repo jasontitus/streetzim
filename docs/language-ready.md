@@ -86,8 +86,12 @@ pulled it. The store (`ml-store-<id>-<pid>`) goes on the NVMe scratch
 for three times the extract beside what other stores there have reserved
 and above the wrapper's reserve (`$NVME_RESERVE_GB`, 120), decided under
 the stagers' lock; else in `tmp/`. While it grows it keeps
-`.reserve-ml-<pid>` there, the bytes it may still take, which the stagers
-count as used; they also remove a dead run's reservation and store.
+`.reserve-ml-<pid>` there (the bytes it may still take and its process's
+start time, so a reused pid does not pass for it), which the stagers count
+as used, also for a dead run whose store is still being written (a
+SIGKILLed client's container goes on). Stagers delete nothing; the next
+tile run's reap removes dead runs' containers, then their stores and
+reservations.
 tilemaker runs under `timeout` inside the container: an hour plus half an
 hour per GB of extract, at most 12 hours (`STREETZIM_ML_TIMEOUT`
 overrides); `.run.json` records each run's seconds per GB and peak memory.

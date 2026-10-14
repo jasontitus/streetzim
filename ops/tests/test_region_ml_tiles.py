@@ -234,6 +234,15 @@ def tag(rev):
     return f"{REPO}:sha-{rev[:12]}"
 
 
+def start_of(pid) -> str:
+    """/proc/<pid>/stat field 22, as the step records it."""
+    stat = Path(f"/proc/{pid}/stat").read_text()
+    return stat[stat.rindex(")") + 2:].split()[19]
+
+
+DEAD = 2 ** 22 + 12345                     # above pid_max's default: never alive
+
+
 def _load():
     spec = importlib.util.spec_from_file_location("region_ml_tiles", SCRIPT)
     assert spec and spec.loader
@@ -626,44 +635,124 @@ def test_the_store_goes_on_the_nvme_scratch_when_it_has_room(host, nvme):
     assert (nvme / ".stage.lock").exists()                # checked under the stagers' lock
     # While it ran, it reserved three times the extract (300 bytes) there.
     during = json.loads((host / "docker" / "nvme-during").read_text())
-    assert during == {".stage.lock": "", f".reserve-ml-{os.getpid()}": "900\n",
+    assert during == {".stage.lock": "", f".reserve-ml-{os.getpid()}": f"900 {start_of(os.getpid())}\n",
                       Path(_store_mount(host)).parent.name: ""}
     assert [p.name for p in nvme.iterdir()] == [".stage.lock"]     # all gone after
 
 
 def test_live_reservations_count_as_used_and_dead_ones_are_dropped(host, nvme, monkeypatch):
     nvme.mkdir()
-    dead = 2 ** 22 + 12345
-    (nvme / f".reserve-ml-{dead}").write_text(str(10**18))      # a dead run's: ignored
+    (nvme / f".reserve-ml-{DEAD}").write_text(f"{10**18} 1")      # a dead run's: ignored
+    (nvme / f"ml-store-x-{DEAD}").mkdir()
     monkeypatch.setenv("NVME_RESERVE_GB", "1")
     m = _load()
     free = m.shutil.disk_usage(nvme).free
-    (nvme / ".reserve-ml-1").write_text(str(free))              # pid 1 lives: counted
+    (nvme / ".reserve-ml-1").write_text(f"{free} {start_of(1)}")   # pid 1 lives: counted
+    (nvme / "ml-store-x-1").mkdir()
     m.make("hispaniola", "hispaniola", BOX)
     assert _store_mount(host).startswith(f"{host}/store/")
-    assert sorted(p.name for p in nvme.iterdir()) == [".reserve-ml-1", ".stage.lock"]
-    (nvme / ".reserve-ml-1").write_text("0")
+    # The reap removed the dead run's reservation and store, not the live one's.
+    assert sorted(p.name for p in nvme.iterdir()) == [".reserve-ml-1", ".stage.lock",
+                                                      "ml-store-x-1"]
+    (nvme / ".reserve-ml-1").write_text(f"0 {start_of(1)}")
     monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "de")
     m.make("hispaniola", "hispaniola", BOX)
     assert _store_mount_last(host).startswith(f"{nvme}/")
+
+
+def test_a_reused_pid_does_not_pass_for_a_dead_run(host, nvme):
+    nvme.mkdir()
+    m = _load()
+    other = str(int(start_of(1)) + 1)
+    (nvme / ".reserve-ml-1").write_text(f"{10**18} {other}")     # pid 1 now is not that run
+    (nvme / "ml-store-x-1").mkdir()
+    assert m.nvme_reserved(str(nvme)) == 0
+    m.make("hispaniola", "hispaniola", BOX)
+    assert _store_mount(host).startswith(f"{nvme}/")
+    assert [p.name for p in nvme.iterdir()] == [".stage.lock"]
+
+
+def test_a_dead_runs_store_still_being_written_keeps_its_reservation(tmp_path):
+    """A SIGKILLed client leaves its container writing the store for hours:
+    while it does, its reservation counts, and only the reap, which removes
+    the container first, deletes it."""
+    m = _load()
+    (tmp_path / f".reserve-ml-{DEAD}").write_text("5000 1")
+    store = tmp_path / f"ml-store-x-{DEAD}" / "tm"
+    store.mkdir(parents=True)
+    (store / "mmap_0.dat").write_text("x")
+    assert m.nvme_reserved(str(tmp_path)) == 5000
+    old = time.time() - m.STORE_BUSY - 60
+    os.utime(store / "mmap_0.dat", (old, old))
+    assert m.nvme_reserved(str(tmp_path)) == 0
+    assert (tmp_path / f".reserve-ml-{DEAD}").exists()           # counting deletes nothing
 
 
 def test_a_reservation_shrinks_as_the_store_grows(tmp_path):
     m = _load()
     store = tmp_path / "store"
     store.mkdir()
+    me = start_of(os.getpid())
     r = m.Reservation(str(tmp_path), str(store), 10 * 2**20)
     path = tmp_path / f".reserve-ml-{os.getpid()}"
-    assert path.read_text() == f"{10 * 2**20}\n"
+    assert path.read_text() == f"{10 * 2**20} {me}\n"
     (store / "mmap_0.dat").write_bytes(b"x" * 2**21)            # 2 MiB written
     r.write()
-    left = int(path.read_text())
-    assert 8 * 2**20 - 2**16 <= left <= 8 * 2**20
+    left, start = path.read_text().split()
+    assert 8 * 2**20 - 2**16 <= int(left) <= 8 * 2**20 and start == me
     (store / "mmap_1.dat").write_bytes(b"x" * 2**24)            # past the estimate
     r.write()
-    assert path.read_text() == "0\n"
+    assert path.read_text() == f"0 {me}\n"
     r.release()
     assert not path.exists()
+
+
+def test_a_sparse_store_counts_what_it_holds_not_its_length(tmp_path):
+    """tilemaker's store files are mapped and sparse (mmap_0.dat starts at
+    1 GB long): what they take on disk is their blocks."""
+    m = _load()
+    store = tmp_path / "store"
+    store.mkdir()
+    with open(store / "mmap_0.dat", "wb") as f:
+        f.truncate(2**30)
+    assert m.dir_bytes(str(store)) < 2**20
+    r = m.Reservation(str(tmp_path), str(store), 2**31)
+    assert int((tmp_path / f".reserve-ml-{os.getpid()}").read_text().split()[0]) > 2**31 - 2**20
+    r.release()
+
+
+def test_the_reservation_is_refreshed_while_the_store_grows(tmp_path, monkeypatch):
+    m = _load()
+    monkeypatch.setattr(m, "RESERVE_EVERY", 0.05)
+    store = tmp_path / "store"
+    store.mkdir()
+    r = m.Reservation(str(tmp_path), str(store), 10 * 2**20)
+    path = tmp_path / f".reserve-ml-{os.getpid()}"
+    r.start()
+    (store / "mmap_0.dat").write_bytes(b"x" * 2**22)
+    for _ in range(100):
+        if int(path.read_text().split()[0]) <= 6 * 2**20:
+            break
+        time.sleep(0.05)
+    assert int(path.read_text().split()[0]) <= 6 * 2**20
+    r.release()
+    r.join(timeout=5)
+    assert not r.is_alive() and not path.exists()
+
+
+def test_the_reservation_is_written_under_a_name_readers_skip(tmp_path, monkeypatch):
+    m = _load()
+    seen = []
+    real = os.replace
+
+    def replace(src, dst):
+        seen.append(os.path.basename(src))
+        real(src, dst)
+    monkeypatch.setattr(m.os, "replace", replace)
+    store = tmp_path / "store"
+    store.mkdir()
+    m.Reservation(str(tmp_path), str(store), 1).release()
+    assert seen and not any(n.startswith(".reserve-ml-") for n in seen)
 
 
 def test_without_room_on_the_nvme_the_store_stays_on_storage(host, nvme, monkeypatch):
@@ -966,29 +1055,37 @@ def _wrapper_staging() -> str:
 
 
 def _nvme_files(d: Path):
-    dead = 2 ** 22 + 12345
     d.mkdir()
-    (d / ".reserve-ml-1").write_text(str(3 * 2**30))             # pid 1 lives
-    (d / f".reserve-ml-{dead}").write_text(str(10**15))
+    (d / ".reserve-ml-1").write_text(f"{3 * 2**30} {start_of(1)}\n")      # pid 1, live
     (d / "ml-store-x-1").mkdir()
-    (d / f"ml-store-y-{dead}").mkdir()
-    (d / f"ml-store-y-{dead}" / "mmap_0.dat").write_text("x")
-    (d / "europe.123.mbtiles").write_text("x")                    # a stager's (pid 123 dead)
-    return dead
+    (d / ".reserve-ml-2").write_text(f"{5 * 2**30} 1\n")       # pid 2 now is another process
+    (d / f".reserve-ml-{DEAD}").write_text(f"{7 * 2**30} 1\n")      # dead, store idle
+    (d / f"ml-store-y-{DEAD}" / "tm").mkdir(parents=True)
+    old = time.time() - 3600
+    (d / f"ml-store-y-{DEAD}" / "tm" / "mmap_0.dat").write_text("x")
+    os.utime(d / f"ml-store-y-{DEAD}" / "tm" / "mmap_0.dat", (old, old))
+    (d / f".reserve-ml-{DEAD + 1}").write_text(f"{11 * 2**30} 1\n")  # dead, container writing
+    (d / f"ml-store-z-{DEAD + 1}" / "tm").mkdir(parents=True)
+    (d / f"ml-store-z-{DEAD + 1}" / "tm" / "mmap_0.dat").write_text("x")
+    (d / ".reserve-ml-x").write_text("junk")
+    (d / f".reserve-ml-{DEAD + 2}").write_text("not a number\n")
+    # A live run's file with junk for bytes must not stop the wrapper (set -e).
+    (d / f".reserve-ml-{os.getpid()}").write_text(f"12x {start_of(os.getpid())}\n")
+    (d / "europe.123.mbtiles").write_text("x")                    # a stager's copy
 
 
-def test_wrapper_counts_live_tile_stores_and_reaps_dead_ones(tmp_path):
+def test_wrapper_counts_live_and_still_written_stores_and_deletes_nothing(tmp_path):
     d = tmp_path / "nvme"
-    dead = _nvme_files(d)
+    _nvme_files(d)
+    before = sorted(p.name for p in d.rglob("*"))
     text = WRAPPER.read_text()
     i = text.index("nvme_ml_reserved() {")
     fn = text[i:text.index("\n}\n", i) + 3]
     r = subprocess.run(["bash", "-c", f"set -euo pipefail\nNVME_SCRATCH={d}\n{fn}\nnvme_ml_reserved"],
                        capture_output=True, text=True, timeout=30)
-    assert r.returncode == 0 and r.stdout == f"{3 * 2**30}\n"
-    assert sorted(p.name for p in d.iterdir()) == [".reserve-ml-1", "europe.123.mbtiles",
-                                                  "ml-store-x-1"]
-    assert f"ml-store-y-{dead}, left by a dead tile run" in r.stderr
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == f"{(3 + 11) * 2**30}\n"          # pid 1's and the still-written one
+    assert sorted(p.name for p in d.rglob("*")) == before
 
 
 @pytest.mark.parametrize("avail, staged", [(104, True), (103, False)])
@@ -996,8 +1093,8 @@ def test_wrapper_staging_leaves_room_for_reserved_tile_stores(tmp_path, avail, s
     """100G reserve, a 1G file, 3G reserved by a live tile store: 103G free
     is not enough (it would be without the reservation), 104G is."""
     d = tmp_path / "nvme"
-    _nvme_files(d)
-    (d / "europe.123.mbtiles").unlink()
+    d.mkdir()
+    (d / ".reserve-ml-1").write_text(f"{3 * 2**30} {start_of(1)}\n")
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     (bin_ / "df").write_text(f"#!/bin/sh\necho Avail; echo {avail}G\n")

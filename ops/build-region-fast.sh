@@ -191,19 +191,25 @@ NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
 NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
 # The multilingual tile step (ops/region-ml-tiles.py) keeps its tilemaker
 # store here when there is room, for hours, and reserves what it may still
-# grow into: one .reserve-ml-<pid> file each, in bytes. Under the stage
-# lock: print the live reservations' sum (a stager counts it as used), and
-# remove a dead run's reservation and store (ml-store-*-<pid>).
+# grow into: one .reserve-ml-<pid> file each, "<bytes> <start time>". Print
+# the bytes reserved by live runs (the pid started at the recorded time:
+# /proc/<pid>/stat field 22, so a reused pid does not count), and by dead
+# ones whose store is still being written (a SIGKILLed client's container
+# goes on). A stager counts them as used and deletes nothing: only the tile
+# step's own reap, which removes the containers first, removes stores.
 nvme_ml_reserved() {
-    local f pid b sum=0
-    for f in "$NVME_SCRATCH"/.reserve-ml-* "$NVME_SCRATCH"/ml-store-*; do
+    local f pid b st cur sum=0
+    for f in "$NVME_SCRATCH"/.reserve-ml-*; do
         [ -e "$f" ] || continue
         pid=${f##*-}
-        if [ -n "$pid" ] && [ "$pid" -eq "$pid" ] 2>/dev/null && [ -d "/proc/$pid" ]; then
-            case "$f" in */.reserve-ml-*) b=$(tr -dc '0-9' < "$f"); sum=$(( sum + ${b:-0} )) ;; esac
-        else
-            echo "  removing $(basename "$f"), left by a dead tile run" >&2
-            rm -rf "$f" || true
+        [ -n "$pid" ] && [ "$pid" -eq "$pid" ] 2>/dev/null || continue
+        b=""; st=""
+        read -r b st < "$f" || true
+        case "$b" in ''|*[!0-9]*) continue ;; esac
+        cur=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20) || cur=""
+        if { [ -n "$cur" ] && [ "$cur" = "$st" ]; } \
+           || [ -n "$(find "$NVME_SCRATCH" -maxdepth 3 -path "*/ml-store-*-$pid/*" -type f -mmin -10 -print -quit 2>/dev/null)" ]; then
+            sum=$(( sum + b ))
         fi
     done
     echo "$sum"

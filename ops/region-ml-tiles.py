@@ -134,8 +134,11 @@ NICE_SHIM = ("import ctypes, os, sys\n"
 BASE_SECONDS = 3600
 PER_GB_SECONDS = 1800
 MAX_SECONDS = 12 * 3600
-# How often a store on the NVMe scratch rewrites its reservation.
+# How often a store on the NVMe scratch rewrites its reservation, and how
+# recently a dead run's store must have been written for its reservation to
+# still count (its container may outlive its client).
 RESERVE_EVERY = 30
+STORE_BUSY = 600
 # The client waits this much longer than timeout(1) in the container, then
 # gives up on it (a hung daemon) and removes the container.
 CLIENT_MARGIN = 300
@@ -424,28 +427,59 @@ def dir_bytes(path):
     return total
 
 
-def nvme_reserved(nvme, own=None):
-    """Bytes the live runs' stores on the NVMe scratch may still grow into
-    (their .reserve-ml-<pid> files, but ``own``'s). A dead run's file is
-    removed. build-region-fast.sh's stagers count the same files
+def proc_start(pid):
+    """When process ``pid`` started (/proc/<pid>/stat field 22, clock ticks
+    since boot), or None if there is none: with the pid it names a process
+    even when the pid has been reused."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        return stat[stat.rindex(")") + 2:].split()[19]
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _reservation(path):
+    """(bytes, start time) of a .reserve-ml-<pid> file, or None."""
+    try:
+        b, start = (read_sidecar(path) or "").split()
+        return int(b), start
+    except ValueError:
+        return None
+
+
+def _store_busy(nvme, pid):
+    """Whether a store of ``pid`` on the NVMe scratch had a file written in
+    the last STORE_BUSY seconds: a run whose client was SIGKILLed has a
+    container still writing there."""
+    cutoff = time.time() - STORE_BUSY
+    for n in os.listdir(nvme):
+        if n.startswith("ml-store-") and n.rsplit("-", 1)[-1] == pid:
+            for top, _dirs, files in os.walk(os.path.join(nvme, n)):
+                for f in files:
+                    try:
+                        if os.lstat(os.path.join(top, f)).st_mtime > cutoff:
+                            return True
+                    except OSError:
+                        pass
+    return False
+
+
+def nvme_reserved(nvme):
+    """Bytes the stores on the NVMe scratch may still grow into: the
+    .reserve-ml-<pid> files of live runs (the pid with the start time the
+    file records), and of a dead run whose store is still being written.
+    Deletes nothing: only the reap does, after it has removed the
+    containers. build-region-fast.sh's stagers count the same
     (nvme_ml_reserved)."""
     total = 0
     for n in os.listdir(nvme):
         if not n.startswith(".reserve-ml-"):
             continue
         pid = n.rsplit("-", 1)[-1]
-        path = os.path.join(nvme, n)
-        if not pid.isdigit() or not os.path.exists(f"/proc/{pid}"):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-            continue
-        if int(pid) != own:
-            try:
-                total += int(read_sidecar(path) or 0)
-            except ValueError:
-                pass
+        r = _reservation(os.path.join(nvme, n))
+        if r and (proc_start(pid) == r[1] or _store_busy(nvme, pid)):
+            total += r[0]
     return total
 
 
@@ -454,12 +488,15 @@ class Reservation(threading.Thread):
     scratch may still take (the estimate less what it holds), rewritten
     every RESERVE_EVERY seconds. Stagers and other runs count it as used,
     so a store growing for hours is not overbooked by a stager that checked
-    the free space before it grew. Removed when the run ends, also on a
-    signal; a dead run's is ignored and removed by whoever reads it."""
+    the free space before it grew. The file holds the bytes and this
+    process's start time, so a reused pid does not pass for this run.
+    Removed when the run ends, also on a signal; a dead run's by the next
+    run's reap."""
 
     def __init__(self, nvme, store, need):
         super().__init__(daemon=True)
         self.path = os.path.join(nvme, f".reserve-ml-{os.getpid()}")
+        self.since = proc_start(os.getpid())    # not .start: a Thread method
         self.store = store
         self.need = int(need)
         self.halt = threading.Event()
@@ -469,7 +506,11 @@ class Reservation(threading.Thread):
         return max(0, self.need - dir_bytes(self.store))
 
     def write(self):
-        write_sidecar(self.path, str(self.remaining()))
+        # The temporary name must not match the readers' .reserve-ml-* glob.
+        tmp = os.path.join(os.path.dirname(self.path), f".ml-reserve-tmp-{os.getpid()}")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(f"{self.remaining()} {self.since}\n")
+        os.replace(tmp, self.path)
 
     def run(self):
         while not self.halt.wait(RESERVE_EVERY):
@@ -543,16 +584,32 @@ def reap(out_dir, store_dir, lock_path):
     for cid in (r.stdout.split() if r.returncode == 0 else []):
         say(f"  removing container {cid}, left by an earlier run")
         remove_container(cid)
-    places = [(out_dir, ".ml-part-"), (store_dir, "ml-store-")]
-    nvme = nvme_dir()
-    if nvme and os.path.isdir(nvme):
-        places.append((nvme, "ml-store-"))
-    for d, prefix in places:
+    for d, prefix in ((out_dir, ".ml-part-"), (store_dir, "ml-store-")):
         for n in os.listdir(d):
             pid = n.rsplit("-", 1)[-1]
             if n.startswith(prefix) and pid.isdigit() and not os.path.exists(f"/proc/{pid}"):
                 say(f"  removing {os.path.join(d, n)}, left by a dead run")
                 shutil.rmtree(os.path.join(d, n), ignore_errors=True)
+    # On the NVMe scratch a run is live while its reservation's pid has the
+    # start time recorded: a store with none is a dead run's (a store there
+    # is made and reserved together, under the stagers' lock). Only this
+    # reap deletes them, after the containers above; the stagers never do.
+    nvme = nvme_dir()
+    if nvme and os.path.isdir(nvme):
+        live = set()
+        for n in os.listdir(nvme):
+            if n.startswith(".reserve-ml-"):
+                pid = n.rsplit("-", 1)[-1]
+                r = _reservation(os.path.join(nvme, n))
+                if r and proc_start(pid) == r[1]:
+                    live.add(pid)
+                else:
+                    say(f"  removing {os.path.join(nvme, n)}, left by a dead run")
+                    os.unlink(os.path.join(nvme, n))
+        for n in os.listdir(nvme):
+            if n.startswith("ml-store-") and n.rsplit("-", 1)[-1] not in live:
+                say(f"  removing {os.path.join(nvme, n)}, left by a dead run")
+                shutil.rmtree(os.path.join(nvme, n), ignore_errors=True)
 
 
 class MemorySampler(threading.Thread):
