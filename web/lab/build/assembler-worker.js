@@ -38,17 +38,21 @@ class WritableSink {                 // File System Access: the visitor picked a
 
 // The page's service worker streams a download (sw.js has the protocol).
 // Watchdogs, so a dead stream ends the build instead of hanging it:
-// - the service worker answers a ping every PING_MS; no answer for DEAD_MS
-//   means the browser stopped it;
+// - every tick (PING_MS) sends a ping that the service worker answers;
+//   DEAD_PINGS ticks in a row without an answer mean the browser stopped
+//   it, however far apart the ticks are (a hidden tab's timers can be
+//   throttled to one a minute);
 // - a write that waits STALL_MS for room (an 'ack'), or an end that waits
 //   STALL_MS without the browser reading more ('pulled'), means the browser
 //   is not reading the download (never started, cancelled, or stuck);
 // - 'cancelled' from the service worker ends it at once.
-// A tick that comes more than 3 x PING_MS late means the device slept (or
-// the tab was suspended): the clocks of all three watchdogs restart instead
-// of firing; the downloads resume on their own (fetcher.js).
+// A tick that comes more than 3 times later than the ticks before it (at
+// least 3 x PING_MS) means the device slept: the clocks of the time-based
+// checks restart instead of firing, and the downloads resume on their own
+// (fetcher.js). Steadily slow ticks (throttling) are not sleep: after the
+// first one they set the pace, and the checks run on real time again.
 // close() returns only when the browser has read the whole stream.
-const PING_MS = 5000, DEAD_MS = 20000, STALL_MS = 60000;
+const PING_MS = 5000, DEAD_PINGS = 4, STALL_MS = 60000;
 class SinkStopped extends Error {
   constructor(msg, watchdog) { super(msg); this.watchdog = !!watchdog; }
 }
@@ -59,7 +63,7 @@ class SwDownloadSink {
     port.onmessage = (e) => {
       const d = e.data || {};
       if (d.type === 'ack') { this.credit++; this.wake(); }
-      else if (d.type === 'pong') this.lastPong = Date.now();
+      else if (d.type === 'pong') { this.lastPong = Date.now(); this.unanswered = 0; }
       else if (d.type === 'pulled') { if (d.bytes !== this.pulled) { this.pulled = d.bytes; this.lastPull = Date.now(); } }
       else if (d.type === 'drained') { this.drained = true; this.wake(); }
       else if (d.type === 'cancelled') this.fail('the browser cancelled the download (' + (d.reason || 'cancelled') + ')');
@@ -69,20 +73,23 @@ class SwDownloadSink {
   fail(why, watchdog) { if (!this.failed) { this.failed = new SinkStopped(why, watchdog); this.wake(); } }
   async open() {
     this.credit = 1;
+    this.unanswered = 0;
     this.lastTick = Date.now();
+    this.pace = PING_MS;             // the recent gap between ticks
     this.timer = setInterval(() => {
-      const now = Date.now();
+      const now = Date.now(), gap = now - this.lastTick;
+      const slept = gap > 3 * Math.max(PING_MS, this.pace);
+      this.pace = gap; this.lastTick = now;
+      if (this.unanswered >= DEAD_PINGS) { this.fail('the service worker stopped', true); return; }
       this.port.postMessage({ type: 'ping' });
-      const late = now - this.lastTick > 3 * PING_MS;
-      this.lastTick = now;
-      if (late) {                    // woke from sleep: start the watchdogs' clocks again
+      this.unanswered++;
+      if (slept) {                   // woke from sleep: the time-based checks start again
         this.suspensions = (this.suspensions || 0) + 1;
-        this.lastPong = this.lastPull = now;
+        this.lastPull = now;
         if (this.waitingSince !== null) this.waitingSince = now;
         return;
       }
-      if (now - this.lastPong > DEAD_MS) this.fail('the service worker stopped', true);
-      else if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > STALL_MS) this.fail('the browser stopped reading the download', true);
+      if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > Math.max(STALL_MS, 3 * this.pace)) this.fail('the browser stopped reading the download', true);
     }, PING_MS);
   }
   async until(ready) {               // wait for ready(), or a failure
@@ -428,7 +435,7 @@ function summary(net) {
 
 // PROTO: what builder.js sends. A tab opened before an update loads its old
 // builder.js with this worker; it gets a plain "reload" instead of a failure.
-const PROTO = 5;
+const PROTO = 6;
 let sinkReply = null;                // set while run() waits for {cmd:'sink'}
 onmessage = async (e) => {
   if (e.data.cmd === 'sink') { if (sinkReply) { const r = sinkReply; sinkReply = null; r(e.data); } return; }
