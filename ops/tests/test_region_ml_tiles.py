@@ -102,6 +102,11 @@ while i < len(argv):
 def opt(name):
     return argv[argv.index(name) + 1]
 open(os.path.join(mounts["/store"], "mmap_0.dat"), "w").write("store")
+nvme = os.environ.get("NVME_SCRATCH")
+if nvme and os.path.isdir(nvme):
+    seen = {n: (open(os.path.join(nvme, n)).read() if n.startswith(".reserve-ml-") else "")
+            for n in os.listdir(nvme)}
+    open(os.path.join(st, "nvme-during"), "w").write(json.dumps(seen))
 out = os.path.join(mounts["/out"], os.path.basename(opt("--output")))
 limit = int(argv[argv.index("timeout") + 2])
 mode = os.environ.get("FAKE_TM", "ok")
@@ -206,12 +211,13 @@ def host(tmp_path, monkeypatch):
     env = {"STREETZIM_ROOT": str(root), "DOCKER": str(docker), "FAKE_STATE": str(state),
            "FAKE_REV": co.head(), "STREETZIM_ML_CHECKOUT": str(co.path),
            "STREETZIM_ML_STORE_DIR": str(tmp_path / "store"),
-           "STREETZIM_ML_NVME": "0"}       # never the host's real NVMe scratch
+           "STREETZIM_ML_NVME": "0",       # never the host's real NVMe scratch,
+           "NVME_SCRATCH": str(tmp_path / "nvme-off")}     # even for a mutant that ignores it
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     for k in ("STREETZIM_TILE_LANGUAGES", "STREETZIM_ML_OUT_DIR", "STREETZIM_ML_IO",
               "STREETZIM_ML_TIMEOUT", "STREETZIM_ML_COMMIT", "FAKE_TM", "FAKE_PULL_FAIL",
-              "FAKE_IMAGE_ID", "FAKE_RM_SECS", "NVME_SCRATCH", "NVME_RESERVE_GB"):
+              "FAKE_IMAGE_ID", "FAKE_RM_SECS", "NVME_RESERVE_GB"):
         monkeypatch.delenv(k, raising=False)
     publish(tmp_path, co.head())
     h = Host(tmp_path)
@@ -618,7 +624,46 @@ def test_the_store_goes_on_the_nvme_scratch_when_it_has_room(host, nvme):
     _load().make("hispaniola", "hispaniola", BOX)
     assert _store_mount(host).startswith(f"{nvme}/ml-store-hispaniola-")
     assert (nvme / ".stage.lock").exists()                # checked under the stagers' lock
-    assert [p.name for p in nvme.iterdir()] == [".stage.lock"]     # and removed after
+    # While it ran, it reserved three times the extract (300 bytes) there.
+    during = json.loads((host / "docker" / "nvme-during").read_text())
+    assert during == {".stage.lock": "", f".reserve-ml-{os.getpid()}": "900\n",
+                      Path(_store_mount(host)).parent.name: ""}
+    assert [p.name for p in nvme.iterdir()] == [".stage.lock"]     # all gone after
+
+
+def test_live_reservations_count_as_used_and_dead_ones_are_dropped(host, nvme, monkeypatch):
+    nvme.mkdir()
+    dead = 2 ** 22 + 12345
+    (nvme / f".reserve-ml-{dead}").write_text(str(10**18))      # a dead run's: ignored
+    monkeypatch.setenv("NVME_RESERVE_GB", "1")
+    m = _load()
+    free = m.shutil.disk_usage(nvme).free
+    (nvme / ".reserve-ml-1").write_text(str(free))              # pid 1 lives: counted
+    m.make("hispaniola", "hispaniola", BOX)
+    assert _store_mount(host).startswith(f"{host}/store/")
+    assert sorted(p.name for p in nvme.iterdir()) == [".reserve-ml-1", ".stage.lock"]
+    (nvme / ".reserve-ml-1").write_text("0")
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "de")
+    m.make("hispaniola", "hispaniola", BOX)
+    assert _store_mount_last(host).startswith(f"{nvme}/")
+
+
+def test_a_reservation_shrinks_as_the_store_grows(tmp_path):
+    m = _load()
+    store = tmp_path / "store"
+    store.mkdir()
+    r = m.Reservation(str(tmp_path), str(store), 10 * 2**20)
+    path = tmp_path / f".reserve-ml-{os.getpid()}"
+    assert path.read_text() == f"{10 * 2**20}\n"
+    (store / "mmap_0.dat").write_bytes(b"x" * 2**21)            # 2 MiB written
+    r.write()
+    left = int(path.read_text())
+    assert 8 * 2**20 - 2**16 <= left <= 8 * 2**20
+    (store / "mmap_1.dat").write_bytes(b"x" * 2**24)            # past the estimate
+    r.write()
+    assert path.read_text() == "0\n"
+    r.release()
+    assert not path.exists()
 
 
 def test_without_room_on_the_nvme_the_store_stays_on_storage(host, nvme, monkeypatch):
@@ -656,6 +701,24 @@ def test_stores_dead_runs_left_on_the_nvme_are_removed(host, nvme):
     (nvme / "europe.123.mbtiles").write_text("a stager's copy: not ours")
     _load().make("hispaniola", "hispaniola", BOX)
     assert sorted(p.name for p in nvme.iterdir()) == [".stage.lock", "europe.123.mbtiles"]
+
+
+def test_a_signal_removes_a_store_on_the_nvme_at_once(host, nvme):
+    p = _cli(host, ("FAKE_TM", "sleep"), ("STREETZIM_ML_NVME", "1"),
+             ("NVME_SCRATCH", str(nvme)), ("NVME_RESERVE_GB", "0"))
+    for _ in range(100):
+        if _runs(host):
+            break
+        time.sleep(0.1)
+    time.sleep(0.5)
+    assert any(n.startswith(".reserve-ml-") for n in os.listdir(nvme))
+    p.send_signal(signal.SIGTERM)
+    p.communicate(timeout=60)
+    assert p.returncode == 128 + signal.SIGTERM
+    # The store and its reservation on the shared NVMe go at once; the
+    # part folder on /storage is left to the next run.
+    assert [n.name for n in nvme.iterdir()] == [".stage.lock"]
+    assert [n.split("-")[1] for n in _leftovers(host)] == ["part"]
 
 
 # ---- which image -----------------------------------------------------------------
@@ -893,6 +956,62 @@ def test_a_signal_to_the_wrapper_reaches_the_tile_step(tmp_path, sig):
     assert not Path(f"/proc/{child}").exists()
     assert "MBTILES=" not in out
     assert not list(tmp_path.glob("ml-tiles-*"))          # the step's output file too
+
+
+def _wrapper_staging() -> str:
+    text = WRAPPER.read_text()
+    i = text.index('NVME_SCRATCH="${NVME_SCRATCH:-')
+    end = "\n    exec 9>&-\nfi\n"
+    return text[i:text.index(end, i) + len(end)]
+
+
+def _nvme_files(d: Path):
+    dead = 2 ** 22 + 12345
+    d.mkdir()
+    (d / ".reserve-ml-1").write_text(str(3 * 2**30))             # pid 1 lives
+    (d / f".reserve-ml-{dead}").write_text(str(10**15))
+    (d / "ml-store-x-1").mkdir()
+    (d / f"ml-store-y-{dead}").mkdir()
+    (d / f"ml-store-y-{dead}" / "mmap_0.dat").write_text("x")
+    (d / "europe.123.mbtiles").write_text("x")                    # a stager's (pid 123 dead)
+    return dead
+
+
+def test_wrapper_counts_live_tile_stores_and_reaps_dead_ones(tmp_path):
+    d = tmp_path / "nvme"
+    dead = _nvme_files(d)
+    text = WRAPPER.read_text()
+    i = text.index("nvme_ml_reserved() {")
+    fn = text[i:text.index("\n}\n", i) + 3]
+    r = subprocess.run(["bash", "-c", f"set -euo pipefail\nNVME_SCRATCH={d}\n{fn}\nnvme_ml_reserved"],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and r.stdout == f"{3 * 2**30}\n"
+    assert sorted(p.name for p in d.iterdir()) == [".reserve-ml-1", "europe.123.mbtiles",
+                                                  "ml-store-x-1"]
+    assert f"ml-store-y-{dead}, left by a dead tile run" in r.stderr
+
+
+@pytest.mark.parametrize("avail, staged", [(104, True), (103, False)])
+def test_wrapper_staging_leaves_room_for_reserved_tile_stores(tmp_path, avail, staged):
+    """100G reserve, a 1G file, 3G reserved by a live tile store: 103G free
+    is not enough (it would be without the reservation), 104G is."""
+    d = tmp_path / "nvme"
+    _nvme_files(d)
+    (d / "europe.123.mbtiles").unlink()
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "df").write_text(f"#!/bin/sh\necho Avail; echo {avail}G\n")
+    (bin_ / "df").chmod(0o755)
+    tiles = tmp_path / "x.mbtiles"
+    tiles.write_text("t")
+    body = (f"set -euo pipefail\nID=x\nMBTILES={tiles}\nSTAGED_MBTILES=\"\"\n"
+            "cleanup_staged() { :; }\n" + _wrapper_staging() + 'echo "MBTILES=$MBTILES"\n')
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "NVME_SCRATCH": str(d),
+           "NVME_RESERVE_GB": "100", "STAGE_MBTILES_NVME": "1"}
+    r = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert "NVMe: 3G reserved by tile stores, counted as used" in r.stdout
+    assert (f"MBTILES={d}/x." in r.stdout) is staged
 
 
 def test_wrapper_order():

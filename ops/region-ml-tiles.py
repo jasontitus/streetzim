@@ -22,7 +22,8 @@ the region's own extract with tilemaker:
   (<store-dir>/.ml-tiles.lock), --memory 24g --memory-swap 24g --cpus 6,
   our own uid, nice 19, tilemaker under timeout(1) inside the container, the
   tilemaker store in a per-run folder on the shared NVMe scratch when it has
-  room (else <store-dir>) that is deleted afterwards, and the image tag
+  room, reserved there while it grows (else <store-dir>), deleted
+  afterwards, and the image tag
   removed again if this run pulled it. Under
   the lock, containers and folders a killed run left are removed first.
 
@@ -48,7 +49,7 @@ STREETZIM_ML_COMMIT (a main commit whose image to use; it must have the
 checkout's tile inputs too), STREETZIM_ML_OUT_DIR (default
 <root>/world-data/regions), STREETZIM_ML_STORE_DIR (the lock, and the
 store when the NVMe scratch has no room; default <root>/tmp), NVME_SCRATCH,
-NVME_RESERVE_GB and STREETZIM_ML_NVME=0 (store_parent),
+NVME_RESERVE_GB and STREETZIM_ML_NVME=0 (place_store),
 STREETZIM_ML_TIMEOUT (seconds; default from the extract's size, see
 timeout_for), STREETZIM_ML_IO (normal or idle, see NICE_SHIM),
 STREETZIM_ML_IMAGE_REPO, STREETZIM_ML_CHECKOUT and DOCKER (tests).
@@ -133,6 +134,8 @@ NICE_SHIM = ("import ctypes, os, sys\n"
 BASE_SECONDS = 3600
 PER_GB_SECONDS = 1800
 MAX_SECONDS = 12 * 3600
+# How often a store on the NVMe scratch rewrites its reservation.
+RESERVE_EVERY = 30
 # The client waits this much longer than timeout(1) in the container, then
 # gives up on it (a hung daemon) and removes the container.
 CLIENT_MARGIN = 300
@@ -408,41 +411,127 @@ def nvme_dir():
     return os.environ.get("NVME_SCRATCH") or NVME_SCRATCH
 
 
-def store_parent(pbf, fallback):
-    """Where this run's tilemaker store goes. The store is random I/O, so the
-    NVMe scratch when it has room: FREE_FACTOR (streetzim/tilemaker_store.py)
-    times the extract on top of build-region-fast.sh's reserve
-    ($NVME_RESERVE_GB, 120), checked under its stage lock like a stager, as
-    the volume is shared with another tenant. Else ``fallback``."""
+def dir_bytes(path):
+    """The disk space the files under ``path`` take (allocated blocks: the
+    store's mapped files are sparse)."""
+    total = 0
+    for top, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(top, f)).st_blocks * 512
+            except OSError:
+                pass
+    return total
+
+
+def nvme_reserved(nvme, own=None):
+    """Bytes the live runs' stores on the NVMe scratch may still grow into
+    (their .reserve-ml-<pid> files, but ``own``'s). A dead run's file is
+    removed. build-region-fast.sh's stagers count the same files
+    (nvme_ml_reserved)."""
+    total = 0
+    for n in os.listdir(nvme):
+        if not n.startswith(".reserve-ml-"):
+            continue
+        pid = n.rsplit("-", 1)[-1]
+        path = os.path.join(nvme, n)
+        if not pid.isdigit() or not os.path.exists(f"/proc/{pid}"):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            continue
+        if int(pid) != own:
+            try:
+                total += int(read_sidecar(path) or 0)
+            except ValueError:
+                pass
+    return total
+
+
+class Reservation(threading.Thread):
+    """<scratch>/.reserve-ml-<pid>: the bytes this run's store on the NVMe
+    scratch may still take (the estimate less what it holds), rewritten
+    every RESERVE_EVERY seconds. Stagers and other runs count it as used,
+    so a store growing for hours is not overbooked by a stager that checked
+    the free space before it grew. Removed when the run ends, also on a
+    signal; a dead run's is ignored and removed by whoever reads it."""
+
+    def __init__(self, nvme, store, need):
+        super().__init__(daemon=True)
+        self.path = os.path.join(nvme, f".reserve-ml-{os.getpid()}")
+        self.store = store
+        self.need = int(need)
+        self.halt = threading.Event()
+        self.write()
+
+    def remaining(self):
+        return max(0, self.need - dir_bytes(self.store))
+
+    def write(self):
+        write_sidecar(self.path, str(self.remaining()))
+
+    def run(self):
+        while not self.halt.wait(RESERVE_EVERY):
+            try:
+                self.write()
+            except OSError:
+                pass
+
+    def release(self):
+        self.halt.set()
+        try:
+            os.unlink(self.path)
+        except FileNotFoundError:
+            pass
+
+
+def place_store(pbf, fallback, src_id):
+    """Make this run's tilemaker store folder and say where: (path,
+    Reservation or None). The store is random I/O, so on the NVMe scratch
+    when it has room for FREE_FACTOR (streetzim/tilemaker_store.py) times
+    the extract beside what live stores there have reserved and above
+    build-region-fast.sh's reserve ($NVME_RESERVE_GB, 120); decided, made
+    and reserved under the stagers' .stage.lock, as the volume is shared
+    with another tenant. Else in ``fallback``."""
+    name = f"ml-store-{src_id}-{os.getpid()}"
     nvme = nvme_dir()
-    if not nvme:
-        return fallback
-    from streetzim.tilemaker_store import FREE_FACTOR
-    try:
-        os.makedirs(nvme, exist_ok=True)
-        with open(os.path.join(nvme, ".stage.lock"), "w") as lk:
-            deadline = time.monotonic() + 900
-            while True:
-                try:
-                    fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() > deadline:
-                        say("  NVMe stage lock busy for 15 min: store on /storage")
-                        return fallback
-                    time.sleep(5)
-            need = FREE_FACTOR * os.path.getsize(pbf) / 1e9
-            reserve = float(os.environ.get("NVME_RESERVE_GB") or 120)
-            free = shutil.disk_usage(nvme).free / 1e9
-            if free - need >= reserve:
-                say(f"  store on NVMe {nvme}: {free:.0f} GB free, needs {need:.0f} "
-                    f"+ {reserve:.0f} reserve")
-                return nvme
-            say(f"  store on {fallback}: NVMe has {free:.0f} GB free, needs {need:.0f} "
-                f"+ {reserve:.0f} reserve")
-    except (OSError, ValueError) as e:
-        say(f"  store on {fallback}: NVMe {nvme} not usable ({e})")
-    return fallback
+    if nvme:
+        from streetzim.tilemaker_store import FREE_FACTOR
+        try:
+            os.makedirs(nvme, exist_ok=True)
+            with open(os.path.join(nvme, ".stage.lock"), "w") as lk:
+                deadline = time.monotonic() + 900
+                while True:
+                    try:
+                        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() > deadline:
+                            raise OSError("its stage lock was busy for 15 min") from None
+                        time.sleep(5)
+                need = FREE_FACTOR * os.path.getsize(pbf)
+                reserve = float(os.environ.get("NVME_RESERVE_GB") or 120) * 1e9
+                free = shutil.disk_usage(nvme).free
+                held = nvme_reserved(nvme)
+                gb = 1e9
+                if free - held - need >= reserve:
+                    store = os.path.join(nvme, name)
+                    shutil.rmtree(store, ignore_errors=True)
+                    os.makedirs(store)
+                    resv = Reservation(nvme, store, need)
+                    say(f"  store on NVMe {nvme}: {free / gb:.0f} GB free, {held / gb:.0f} "
+                        f"reserved by other stores, needs {need / gb:.0f} "
+                        f"+ {reserve / gb:.0f} reserve")
+                    return store, resv
+                say(f"  store on {fallback}: NVMe has {free / gb:.0f} GB free, {held / gb:.0f} "
+                    f"reserved, needs {need / gb:.0f} + {reserve / gb:.0f} reserve")
+        except (OSError, ValueError) as e:
+            say(f"  store on {fallback}: NVMe {nvme} not usable ({e})")
+    store = os.path.join(fallback, name)
+    shutil.rmtree(store, ignore_errors=True)
+    os.makedirs(store)
+    return store, None
 
 
 def reap(out_dir, store_dir, lock_path):
@@ -475,11 +564,13 @@ class MemorySampler(threading.Thread):
         self.cidfile = cidfile
         self.peak = 0
         self.anon = 0
+        self.store = 0              # the store's largest size on disk
         self.stop = threading.Event()
 
     def run(self):
         cg = None
         while not self.stop.wait(5):
+            self.store = max(self.store, dir_bytes(os.path.dirname(self.cidfile)))
             if cg is None:
                 cid = read_sidecar(self.cidfile)
                 if cid:
@@ -538,9 +629,9 @@ def run_tilemaker(*, iid, name, lock_path, pbf, bbox, langs, part, store, timeou
     secs = time.time() - t0
     gib = 1 << 30
     say(f"  tilemaker rc={rc} in {secs:.0f} s; peak memory {sampler.peak / gib:.1f} GiB "
-        f"(anon {sampler.anon / gib:.1f} GiB)")
+        f"(anon {sampler.anon / gib:.1f} GiB); store up to {sampler.store / gib:.1f} GiB")
     return rc == 0, {"seconds": round(secs), "timeout": timeout, "peak_bytes": sampler.peak,
-                     "peak_anon_bytes": sampler.anon}
+                     "peak_anon_bytes": sampler.anon, "store_peak_bytes": sampler.store}
 
 
 # ---- the check ----------------------------------------------------------------
@@ -641,7 +732,7 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
         say(f"  waited {time.time() - t_wait:.0f} s")
     partdir = os.path.join(out_dir, f".ml-part-{src_id}-{os.getpid()}")
     part = os.path.join(partdir, f"{src_id}.ml.part.mbtiles")
-    store = None
+    store, resv = None, None
     name = f"{CONTAINER}{src_id}"
     tag, pulled = None, False
     try:
@@ -661,10 +752,11 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
                 os.unlink(f"{out}.{k}")
             except FileNotFoundError:
                 pass
-        store = os.path.join(store_parent(pbf, store_dir), f"ml-store-{src_id}-{os.getpid()}")
-        for d in (partdir, store):
-            shutil.rmtree(d, ignore_errors=True)
-            os.makedirs(d)
+        shutil.rmtree(partdir, ignore_errors=True)
+        os.makedirs(partdir)
+        store, resv = place_store(pbf, store_dir, src_id)
+        if resv:
+            resv.start()
         remove_container(name)
         ok, stats = run_tilemaker(iid=iid, name=name, lock_path=lock_path, pbf=pbf, bbox=bbox,
                                   langs=langs, part=part, store=store, timeout=timeout)
@@ -682,12 +774,14 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
         say(f"  wrote {out} ({os.path.getsize(out) / 1e6:.0f} MB)")
         return out
     finally:
-        # After a signal, quickly: the store can be tens of GB, and whoever
-        # sent it may not wait; the next run's reap removes what is left.
-        if not _SIGNALLED:
-            for d in (partdir, store):
-                if d:
-                    shutil.rmtree(d, ignore_errors=True)
+        # After a signal, quickly, as whoever sent it may not wait: a store
+        # on the shared NVMe goes at once (a few large files), one on
+        # /storage and the part folder are left to the next run's reap.
+        if resv:
+            resv.release()
+        for d, on_nvme in ((partdir, False), (store, resv is not None)):
+            if d and (on_nvme or not _SIGNALLED):
+                shutil.rmtree(d, ignore_errors=True)
         if tag:
             drop_tag(tag, pulled)
         lock.close()

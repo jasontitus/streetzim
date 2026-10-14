@@ -189,6 +189,25 @@ esac
 # /mnt/data itself is root-owned (shared host); /mnt/data/tilemaker is ours.
 NVME_SCRATCH="${NVME_SCRATCH:-/mnt/data/tilemaker/streetzim-scratch}"
 NVME_RESERVE_GB="${NVME_RESERVE_GB:-120}"
+# The multilingual tile step (ops/region-ml-tiles.py) keeps its tilemaker
+# store here when there is room, for hours, and reserves what it may still
+# grow into: one .reserve-ml-<pid> file each, in bytes. Under the stage
+# lock: print the live reservations' sum (a stager counts it as used), and
+# remove a dead run's reservation and store (ml-store-*-<pid>).
+nvme_ml_reserved() {
+    local f pid b sum=0
+    for f in "$NVME_SCRATCH"/.reserve-ml-* "$NVME_SCRATCH"/ml-store-*; do
+        [ -e "$f" ] || continue
+        pid=${f##*-}
+        if [ -n "$pid" ] && [ "$pid" -eq "$pid" ] 2>/dev/null && [ -d "/proc/$pid" ]; then
+            case "$f" in */.reserve-ml-*) b=$(tr -dc '0-9' < "$f"); sum=$(( sum + ${b:-0} )) ;; esac
+        else
+            echo "  removing $(basename "$f"), left by a dead tile run" >&2
+            rm -rf "$f" || true
+        fi
+    done
+    echo "$sum"
+}
 if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ] && mkdir -p "$NVME_SCRATCH" 2>/dev/null \
    && exec 9>"$NVME_SCRATCH/.stage.lock" && flock -w 900 9; then
     for _old in "$NVME_SCRATCH"/*.mbtiles; do
@@ -201,9 +220,11 @@ if [ "${STAGE_MBTILES_NVME:-1}" = 1 ] && [ -f "$MBTILES" ] && mkdir -p "$NVME_SC
             rm -f "$_old" || true
         fi
     done
+    _resv_gb=$(( ($(nvme_ml_reserved) + 1073741823) / 1073741824 ))
     _need_gb=$(( $(stat -c%s "$MBTILES") / 1073741824 + 1 ))
     _free_gb=$(df -BG --output=avail "$NVME_SCRATCH" 2>/dev/null | tail -1 | tr -dc '0-9')
-    if [ -n "$_free_gb" ] && [ $(( _free_gb - _need_gb )) -ge "$NVME_RESERVE_GB" ]; then
+    [ "$_resv_gb" = 0 ] || echo "  NVMe: ${_resv_gb}G reserved by tile stores, counted as used"
+    if [ -n "$_free_gb" ] && [ $(( _free_gb - _resv_gb - _need_gb )) -ge "$NVME_RESERVE_GB" ]; then
         _dst="$NVME_SCRATCH/${ID}.$$.mbtiles"
         echo "  staging ${ID}.mbtiles (${_need_gb}G) on NVMe — ${_free_gb}G free, keeping ${NVME_RESERVE_GB}G reserve"
         # Record the path BEFORE copying, so a signal mid-copy removes the partial.

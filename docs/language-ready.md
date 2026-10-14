@@ -83,14 +83,18 @@ uid, nice 19 (`STREETZIM_ML_IO=idle` adds the idle I/O class, which is
 much slower on a busy disk), and the image tag removed again if the run
 pulled it. The store (`ml-store-<id>-<pid>`) goes on the NVMe scratch
 `build-region-fast.sh` stages tiles on (`$NVME_SCRATCH`) when it has room
-for three times the extract on top of the wrapper's reserve
-(`$NVME_RESERVE_GB`, 120), checked under the stagers' lock; else in `tmp/`.
+for three times the extract beside what other stores there have reserved
+and above the wrapper's reserve (`$NVME_RESERVE_GB`, 120), decided under
+the stagers' lock; else in `tmp/`. While it grows it keeps
+`.reserve-ml-<pid>` there, the bytes it may still take, which the stagers
+count as used; they also remove a dead run's reservation and store.
 tilemaker runs under `timeout` inside the container: an hour plus half an
 hour per GB of extract, at most 12 hours (`STREETZIM_ML_TIMEOUT`
 overrides); `.run.json` records each run's seconds per GB and peak memory.
 A signal to `build-region-fast.sh` reaches the step, which removes its
-container and goes; the store and part folder of a run that was stopped or
-killed are removed by the next run, under the lock.
+container, its reservation and a store on the NVMe, and goes; a store in
+`tmp/` and the part folder of a run that was stopped or killed are removed
+by the next run, under the lock.
 
 **What differs from the world tiles** (Hispaniola, measured 2026-10-13):
 the world tiles were made by tilemaker 3.2 (master `facdf93`, the same
