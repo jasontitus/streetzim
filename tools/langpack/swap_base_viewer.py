@@ -61,7 +61,13 @@ def md5_whole(path: str) -> str:
 
 
 def copy_base(src: str, dst: str, allow_full: bool, cp: str = "cp") -> str:
-    """DST as a reflink of SRC; a full copy only when allowed. Returns how."""
+    """DST as a reflink of SRC; a full copy only when allowed. Returns how.
+    Nothing is removed before DST is known not to be SRC (by path, symlink
+    or hard link: published bases are often hard links)."""
+    if not os.path.isfile(src):
+        raise SystemExit(f"swap_base_viewer: SRC {src} is not a file")
+    if os.path.realpath(dst) == os.path.realpath(src) or (os.path.exists(dst) and os.path.samefile(src, dst)):
+        raise SystemExit(f"swap_base_viewer: DST {dst} is SRC {src}; the swap writes a new file beside it")
     if os.path.exists(dst):
         os.remove(dst)
     if subprocess.run([cp, "--reflink=always", src, dst], capture_output=True).returncode == 0:

@@ -127,8 +127,9 @@ def test_wiki_src_is_required(bp: SimpleNamespace, tmp_path: Path) -> None:
 
 def test_refuses_a_zimcheck_that_is_not_the_official_one(bp: SimpleNamespace, tmp_path: Path) -> None:
     zimru = lpzims.fake_zimcheck(tmp_path / "zc", "zimru", "", rc=0, version="zimcheck (zimru) 0.1.0")
-    out = tmp_path / "out"
+    out, work = tmp_path / "out", tmp_path / "work"
     r = subprocess.run([str(TOOLS / "build_packs.sh"), "testland", str(bp.base), str(out), "th"], capture_output=True,
-                       text=True, timeout=60, env={**bp.env, "FAKE_MODE": "good", "PACK_GATE_ZIMCHECK": zimru})
+                       text=True, timeout=60, env={**bp.env, "FAKE_MODE": "good", "PACK_GATE_ZIMCHECK": zimru,
+                                                   "LANGPACK_WORK": str(work)})
     assert r.returncode == 1 and "not the official zimcheck" in r.stderr, r.stderr
-    assert not (out / "build-th.log").exists()
+    assert not out.exists() and not work.exists()          # refused before creating anything

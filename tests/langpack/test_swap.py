@@ -51,3 +51,38 @@ def test_cli_stops_without_the_flag_when_cp_cannot_reflink(tmp_path: Path) -> No
              env={"PATH": f"{bindir}:{os.environ['PATH']}"})
     assert r.returncode != 0 and "--allow-full-copy" in r.stderr
     assert not (tmp_path / "b.zim").exists()
+
+
+@pytest.mark.parametrize("how", ["same path", "relative path", "symlink", "hard link"])
+def test_dst_that_is_src_is_refused_before_anything_is_removed(how: str, tmp_path: Path) -> None:
+    """`swap_base_viewer.py SRC SRC` must not delete the base."""
+    import os
+    src = tmp_path / "base.zim"
+    src.write_bytes(b"z" * 1000)
+    if how == "same path":
+        dst = src
+    elif how == "relative path":
+        (tmp_path / "sub").mkdir()
+        dst = tmp_path / "sub" / ".." / "base.zim"
+    elif how == "symlink":
+        dst = tmp_path / "link.zim"
+        dst.symlink_to(src)
+    else:
+        dst = tmp_path / "hard.zim"
+        os.link(src, dst)
+    with pytest.raises(SystemExit, match="is SRC"):
+        copy_base(str(src), str(dst), True, cp=_cp(tmp_path, True))
+    assert src.read_bytes() == b"z" * 1000 and dst.exists()
+
+
+def test_cli_swap_onto_itself_keeps_the_base(tmp_path: Path) -> None:
+    src = tmp_path / "base.zim"
+    src.write_bytes(b"z" * 1000)
+    r = tool("swap_base_viewer.py", src, src, tmp_path, "test", "--allow-full-copy")
+    assert r.returncode != 0 and "is SRC" in r.stderr and "reflink" not in r.stderr
+    assert src.read_bytes() == b"z" * 1000
+
+
+def test_missing_src(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="is not a file"):
+        copy_base(str(tmp_path / "nope.zim"), str(tmp_path / "b.zim"), True, cp=_cp(tmp_path, True))

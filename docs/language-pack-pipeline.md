@@ -147,7 +147,8 @@ lineage.
 
 **Viewer swaps.** `swap_base_viewer.py SRC DST VIEWER_EXPORT REV` (pass the
 repository root to use this checkout's viewer) gives the base a new viewer
-and a new UUID. DST starts as a reflink of SRC. Where the filesystem cannot
+and a new UUID. It refuses a DST that is SRC (same path, symlink or hard
+link) before touching anything. DST starts as a reflink of SRC. Where the filesystem cannot
 reflink, the swap stops unless `--allow-full-copy` is given; then it warns
 and copies every byte. It writes DST's sidecar only when every check passes, and
 otherwise deletes DST. The sidecar records SRC's UUID as the parent. It

@@ -13,14 +13,9 @@
 #   substitute a fake), LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it).
 set -uo pipefail
 R=$1; B=$(readlink -f "$2"); LANGS=$4
-mkdir -p "$3"; OUT=$(cd "$3" && pwd)
 T=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$T/../.." && pwd)
-export LANGPACK_WORK=${LANGPACK_WORK:-$PWD/langpack-work}
 SRC=${WIKI_SRC:?set WIKI_SRC to the Kiwix Wikipedia ZIMs, the --source of the builder}
-DATE=${PACK_DATE:-$(date +%F)}
-mkdir -p "$LANGPACK_WORK/tmp"
-export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$LANGPACK_WORK/tmp
 PY=${PYTHON:-python3}
 ZC=${PACK_GATE_ZIMCHECK:-zimcheck}
 # Only the official zimcheck (zim-tools) counts: zimru's prints the same
@@ -33,6 +28,12 @@ case "$ZV" in
 esac
 # the builder's own check (zimcheck -A -J) and pack_gate.py both use it
 export ZIMCHECK_BIN=$ZC PACK_GATE_ZIMCHECK=$ZC
+# checks done: only now create folders
+mkdir -p "$3"; OUT=$(cd "$3" && pwd)
+export LANGPACK_WORK=${LANGPACK_WORK:-$PWD/langpack-work}
+DATE=${PACK_DATE:-$(date +%F)}
+mkdir -p "$LANGPACK_WORK/tmp"
+export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$LANGPACK_WORK/tmp
 BUILDER=${BUILDER:-$ROOT/tools/build_wiki_pack.py}  # tests substitute a fake
 CACHE=(); [ -n "${WP_CACHE:-}" ] && CACHE=(--cache "$WP_CACHE")
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=8589934592 --)
