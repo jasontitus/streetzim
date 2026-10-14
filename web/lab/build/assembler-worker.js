@@ -44,6 +44,9 @@ class WritableSink {                 // File System Access: the visitor picked a
 //   STALL_MS without the browser reading more ('pulled'), means the browser
 //   is not reading the download (never started, cancelled, or stuck);
 // - 'cancelled' from the service worker ends it at once.
+// A tick that comes more than 3 x PING_MS late means the device slept (or
+// the tab was suspended): the clocks of all three watchdogs restart instead
+// of firing; the downloads resume on their own (fetcher.js).
 // close() returns only when the browser has read the whole stream.
 const PING_MS = 5000, DEAD_MS = 20000, STALL_MS = 60000;
 class SinkStopped extends Error {
@@ -66,9 +69,18 @@ class SwDownloadSink {
   fail(why, watchdog) { if (!this.failed) { this.failed = new SinkStopped(why, watchdog); this.wake(); } }
   async open() {
     this.credit = 1;
+    this.lastTick = Date.now();
     this.timer = setInterval(() => {
       const now = Date.now();
       this.port.postMessage({ type: 'ping' });
+      const late = now - this.lastTick > 3 * PING_MS;
+      this.lastTick = now;
+      if (late) {                    // woke from sleep: start the watchdogs' clocks again
+        this.suspensions = (this.suspensions || 0) + 1;
+        this.lastPong = this.lastPull = now;
+        if (this.waitingSince !== null) this.waitingSince = now;
+        return;
+      }
       if (now - this.lastPong > DEAD_MS) this.fail('the service worker stopped', true);
       else if (this.waitingSince !== null && now - Math.max(this.waitingSince, this.lastPull) > STALL_MS) this.fail('the browser stopped reading the download', true);
     }, PING_MS);
@@ -416,7 +428,7 @@ function summary(net) {
 
 // PROTO: what builder.js sends. A tab opened before an update loads its old
 // builder.js with this worker; it gets a plain "reload" instead of a failure.
-const PROTO = 4;
+const PROTO = 5;
 let sinkReply = null;                // set while run() waits for {cmd:'sink'}
 onmessage = async (e) => {
   if (e.data.cmd === 'sink') { if (sinkReply) { const r = sinkReply; sinkReply = null; r(e.data); } return; }

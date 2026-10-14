@@ -420,7 +420,7 @@
   const swFailed = () => { try { sessionStorage.setItem('sz_sw_failed', '1'); } catch (e) { /* no storage */ } };
   const within = (p, ms) => Promise.race([p, new Promise((r, j) => setTimeout(() => j(new Error('timed out')), ms))]);
 
-  const SW_VERSION = 4;                // the sw.js protocol this page speaks
+  const SW_VERSION = 5;                // the sw.js protocol this page speaks
   const controllerChange = (ms) => new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, ms); });
   // {v, busy} from a service worker; null if it does not answer (an old one).
   function swStatus(w) {
@@ -712,7 +712,7 @@
       // downloaded again for another build. From a copy they are copied, so
       // the Build button stays ready (its save dialog needs the click).
       const packBufs = mode === 'net' ? Object.values(bytes).map((u8) => u8.buffer) : [];
-      worker.postMessage({ cmd: 'run', proto: 4, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, packs: bytes, mem: MEM,
+      worker.postMessage({ cmd: 'run', proto: 5, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, packs: bytes, mem: MEM,
                            sink: sinkInfo ? sinkInfo.sink : 'later', handle: sinkInfo && sinkInfo.handle,
                            port: sinkInfo && sinkInfo.port, fileName }, (sinkInfo ? sinkInfo.transfer : []).concat(packBufs));
       if (mode === 'net') {

@@ -15,8 +15,10 @@
 // means it has read all of them. A download that does not start within
 // START_TIMEOUT_MS (the iframe was blocked or never loaded) is cancelled; one
 // whose writer goes silent for SILENT_MS (it pings every 5 s) is failed, so
-// the browser does not keep a half-finished download open forever.
-const VERSION = 4;
+// the browser does not keep a half-finished download open forever. Both are
+// checked every 5 s; a check that comes more than 15 s late means the device
+// slept, and the clocks start again instead.
+const VERSION = 5;
 const streams = new Map();            // id -> {stream, filename, size, started}
 const HWM = 64 * 1048576;             // bytes held here before it stops acking (the page may ask
                                       // for less: {hwm} at registration, 16 MiB on a small device)
@@ -36,11 +38,20 @@ self.addEventListener('message', (e) => {
   if (d.type !== 'register' || !e.ports[0]) return;
   const port = e.ports[0];
   const hwm = Math.min(HWM, Math.max(1048576, +d.hwm || HWM));
-  let ctrl, waiting = 0, enqueued = 0, ended = false, lastPulled = -1, startTimer = null, heard = Date.now();
+  let ctrl, waiting = 0, enqueued = 0, ended = false, lastPulled = -1, heard = Date.now(), since = Date.now(), tick = Date.now();
   const queued = () => hwm - ctrl.desiredSize;
-  const forget = () => { streams.delete(d.id); clearTimeout(startTimer); clearInterval(silence); };
-  const silence = setInterval(() => {
-    if (ended || Date.now() - heard < SILENT_MS) return;
+  const forget = () => { streams.delete(d.id); clearInterval(watch); };
+  const watch = setInterval(() => {
+    const now = Date.now();
+    if (now - tick > 15000) { heard = since = now; }      // woke from sleep
+    tick = now;
+    if (!s.started && now - since > START_TIMEOUT_MS) {
+      forget();
+      try { ctrl.error(new Error('not started')); } catch (err) { /* closed */ }
+      port.postMessage({ type: 'cancelled', reason: 'the download did not start' });
+      return;
+    }
+    if (ended || now - heard < SILENT_MS) return;
     forget();
     try { ctrl.error(new Error('the page stopped writing')); } catch (err) { /* closed */ }
   }, 5000);
@@ -68,12 +79,6 @@ self.addEventListener('message', (e) => {
     else if (x.type === 'ping') port.postMessage({ type: 'pong' });
   };
   const s = { stream, filename: d.filename, size: d.size, started: false, port };
-  startTimer = setTimeout(() => {
-    if (s.started) return;
-    forget();
-    try { ctrl.error(new Error('not started')); } catch (err) { /* closed */ }
-    port.postMessage({ type: 'cancelled', reason: 'the download did not start' });
-  }, START_TIMEOUT_MS);
   streams.set(d.id, s);
   port.postMessage({ type: 'registered', v: VERSION });
 });
