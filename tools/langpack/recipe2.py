@@ -297,8 +297,8 @@ def main(argv=None):
         st["peak_rss_MB"] = round(peak_rss_mb(), 1)
         print(json.dumps(st, indent=1))
     elif a.cmd == "menu":
-        from merge_zim import open_pack
-        from merge_zim import ZimReader, blob_of, KEY_MAPCFG
+        from tools.langpack.merge_zim import open_pack
+        from tools.langpack.merge_zim import ZimReader, blob_of, KEY_MAPCFG
         region = a.region
         if region is None:
             import re as _re
@@ -353,7 +353,7 @@ def main(argv=None):
     else:
         recipe = json.load(open(a.recipe))
         packs = {}
-        from merge_zim import open_pack
+        from tools.langpack.merge_zim import open_pack
         for p in a.packs:
             packs[open_pack(p).lang] = p
         t = time.perf_counter()

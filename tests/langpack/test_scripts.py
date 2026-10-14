@@ -37,3 +37,13 @@ def test_no_host_paths() -> None:
                 if re.search(r"/storage/|/home/\w", line):
                     bad.append(f"{p.relative_to(ROOT)}:{i}")
     assert not bad, bad
+
+
+def test_siblings_are_imported_through_the_package() -> None:
+    """`from merge_zim import ...` works only when run from tools/langpack and
+    makes a second copy of the module (two MergeError classes)."""
+    stems = "|".join(p.stem for p in TOOLS.glob("*.py"))
+    bare = re.compile(rf"^\s*(from ({stems}) import|import ({stems})\b)")
+    bad = [f"{p.name}:{i}" for p in sorted(TOOLS.glob("*.py"))
+           for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if bare.match(line)]
+    assert not bad, bad

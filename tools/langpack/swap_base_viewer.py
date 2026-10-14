@@ -125,7 +125,7 @@ def main():
         # record the parent only on PASS (review S4, r2 #2): packs built against SRC fit DST.
         # The sidecar names its child (UUID + MD5) so it cannot vouch for another file, and
         # carries forward only parents that SRC's own sidecar validly records.
-        from merge_zim import base_lineage
+        from tools.langpack.merge_zim import base_lineage
         parents = sorted(base_lineage(src, old_uuid, check_md5=True) - {old_uuid.hex()})
         side = {"child_uuid": new_uuid.hex(), "child_md5": md5_whole(dst), "child_file": os.path.basename(dst),
                 "parent_uuid": old_uuid.hex(), "parent_file": os.path.basename(src), "parents": parents,
