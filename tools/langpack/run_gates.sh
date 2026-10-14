@@ -19,8 +19,8 @@
 # Usage: run_gates.sh BASE PACKS_DIR LANGS REGION_LANGS REGION REGION_JSON PORT
 # Env: LANGUAGE_META (list|map), TITLES (JSON {L: title}),
 #   LANGPACK_WORK (default ./langpack-work: recipes, merged files, verdicts, gates/),
-#   PYTHON (python3), PACK_GATE_ZIMCHECK (the official zim-tools zimcheck; else
-#   zimcheck on PATH), KIWIX_SERVE (kiwix-serve), NODE (node), PLAYWRIGHT_CORE
+#   PYTHON (python3), PACK_GATE_ZIMCHECK (the official zim-tools zimcheck, else
+#   zimcheck on PATH; anything else is refused), KIWIX_SERVE (kiwix-serve), NODE (node), PLAYWRIGHT_CORE
 #   (path to playwright-core's index.mjs; else the playwright-core package),
 #   CHROME_PATH (a Chromium for it), BROWSER_LIBS (extra LD_LIBRARY_PATH for it),
 #   LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it; default 0).
@@ -32,6 +32,14 @@ W=$LANGPACK_WORK
 export PYTHONDONTWRITEBYTECODE=1
 PY=${PYTHON:-python3}
 ZC=${PACK_GATE_ZIMCHECK:-zimcheck}
+# Only the official zimcheck (zim-tools) counts: zimru's prints the same
+# "Overall Test Status" line but misreads hrefs with HTML entities.
+ZV=$("$ZC" --version 2>&1 | head -n 1)
+case "$ZV" in
+  "zim-tools "*) ;;
+  *) echo "$(basename "$0"): $ZC is not the official zimcheck (--version: '$ZV');" \
+       "set PACK_GATE_ZIMCHECK to zim-tools' zimcheck" >&2; exit 1 ;;
+esac
 KS=${KIWIX_SERVE:-kiwix-serve}
 NODE=${NODE:-node}
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=8589934592 --)
@@ -45,6 +53,7 @@ BASE=$1; PACKS=$2; LANGS=$3; RL=$4; REGION=$5; RJ=$6; PORT=$7
 LANGUAGE_META=${LANGUAGE_META:-map}; TITLES=${TITLES:-'{}'}
 TAG=$(basename "$BASE" .zim)
 OUT=$W/gates/$TAG; rm -rf "$OUT"; mkdir -p "$OUT" "$W/merged"
+printf '%s\n' "$ZV" > "$OUT/zimcheck.version"   # compose_verdicts.py records it
 # Chromium's profile sockets must fit a unix socket path (~107 bytes): a short TMPDIR
 CT=$(mktemp -d /tmp/lpgates.XXXXXX); trap 'rm -rf "$CT"' EXIT
 [ -n "${BROWSER_LIBS:-}" ] && export LD_LIBRARY_PATH=$BROWSER_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

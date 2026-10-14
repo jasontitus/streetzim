@@ -22,11 +22,14 @@ TITLES = json.dumps({"de": "Testland DE", "fr": "Testland FR", "th": "Testland T
 DL, PX = "https://dl.example", "https://proxy.example"
 
 
-def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, str] | None = None) -> None:
+def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, str] | None = None,
+                  zimcheck_version: str | None = "zim-tools 3.8.0") -> None:
     """What run_gates.sh leaves for compose_verdicts.py, every check passing
     unless `fail` names one (lang -> check)."""
     out.mkdir(parents=True, exist_ok=True)
     (out / "menu.jsonl").write_text(menu_jsonl)
+    if zimcheck_version is not None:
+        (out / "zimcheck.version").write_text(zimcheck_version + "\n")
     files = {"same": "PASS\n", "verify.log": "SUMMARY 22/22 PASS\n",
              "zimcheck.log": "[INFO] Overall Test Status: Pass\n", "route.log": "route OK 1.2 km\n",
              "kiwix.json": '{"pass": true}\n', "viewer.json": '{"pass": true}\n', "ui.json": '{"pass": true}\n',
@@ -202,3 +205,52 @@ def test_site_check_kills(name: str, site: SimpleNamespace, tmp_path: Path) -> N
         _jedit(s / where, fn)
     rc, lines = _check(site, s, v)
     assert rc != 0 and any(ln.startswith("FAIL") for ln in lines), lines
+
+
+@pytest.mark.parametrize("case", ["log_fail", "zimru", "no_version"])
+def test_zimcheck_must_pass_and_be_official(case: str, site: SimpleNamespace, lp: SimpleNamespace,
+                                            tmp_path: Path) -> None:
+    gates = tmp_path / "gates"
+    menu = (site.gates / "menu.jsonl").read_text()
+    if case == "log_fail":
+        _gate_outputs(gates, menu, LANGS.split(","), fail={"de": "zimcheck.log"})
+    elif case == "zimru":
+        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version="zimcheck (zimru) 0.1.0")
+    else:
+        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version=None)
+    env = {"LANGPACK_WORK": str(tmp_path / "work")}
+    shutil.copytree(site.work / "recipes", tmp_path / "work" / "recipes")
+    assert tool("compose_verdicts.py", gates, lp.base, LANGS, env=env).returncode == 0
+    v = json.loads((tmp_path / "work" / "verdicts" / site.tag / "de.json").read_text())
+    assert v["checks"]["zimcheck"] is False and v["all_pass"] is False
+    assert v["zimcheck_version"] == {"log_fail": "zim-tools 3.8.0", "zimru": "zimcheck (zimru) 0.1.0",
+                                     "no_version": ""}[case]
+
+
+def test_the_verdict_must_name_this_recipe(site: SimpleNamespace, lp: SimpleNamespace, tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """entry_verdict_ok (make_site's gate) compares the recipe's md5, uuid and
+    size with the verdict's; any difference refuses the entry."""
+    from tools.langpack.gatelib import entry_verdict_ok
+    monkeypatch.setenv("LANGPACK_WORK", str(site.work))
+    recipe = json.loads((site.out / "recipes" / "de.json").read_text())
+    assert entry_verdict_ok(str(lp.base), "de", recipe) == (True, "")
+    for k, v in (("md5", "0" * 32), ("uuid", "00000000-0000-5000-8000-000000000000"), ("size", recipe["size"] + 1)):
+        ok, why = entry_verdict_ok(str(lp.base), "de", dict(recipe, **{k: v}))
+        assert not ok and why == "verdict is for another recipe", k
+    # through make_site: a verdict for another recipe refuses the entry
+    work = tmp_path / "work"
+    shutil.copytree(site.work, work)
+    vp = work / "verdicts" / site.tag / "de.json"
+    v = json.loads(vp.read_text())
+    v["recipe_uuid"] = "00000000-0000-5000-8000-000000000000"
+    vp.write_text(json.dumps(v))
+    out = tmp_path / "site"
+    r = tool("make_site.py", lp.base, "--packs-dir", site.packs, "--region", "testland", "--region-title", "Testland",
+             "--region-langs", "en", "--langs", "de,th", "--titles", TITLES, "--language-meta", "map",
+             "--url-template", f"{DL}/p/{{file}}", "--base-download", f"{DL}/b/{lp.base.name}",
+             "-o", out / "recipes", env={"LANGPACK_WORK": str(work)})
+    assert r.returncode == 0, r.stderr
+    refused = json.loads((out / "recipes" / "refused.json").read_text())
+    assert refused == [{"lang": "de", "why": "verdict is for another recipe"}]
+    assert [m["lang"] for m in json.loads((out / "recipes" / "index.json").read_text())["regions"][0]["menu"]] == ["th"]

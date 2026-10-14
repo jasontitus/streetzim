@@ -8,7 +8,8 @@
 # Env: WIKI_SRC (required: the Kiwix Wikipedia ZIMs, --source), PYTHON (python3),
 #   LANGPACK_WORK (default ./langpack-work: locks/, tmp/), WP_CACHE (the builder's
 #   --cache; default its own), PACK_DATE (file-name date, default today),
-#   PACK_GATE_ZIMCHECK (the official zimcheck for pack_gate.py), BUILDER (tests
+#   PACK_GATE_ZIMCHECK (the official zimcheck, else zimcheck on PATH; anything
+#   else is refused; the builder gets it as ZIMCHECK_BIN too), BUILDER (tests
 #   substitute a fake), LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it).
 set -uo pipefail
 R=$1; B=$(readlink -f "$2"); LANGS=$4
@@ -21,6 +22,17 @@ DATE=${PACK_DATE:-$(date +%F)}
 mkdir -p "$LANGPACK_WORK/tmp"
 export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$LANGPACK_WORK/tmp
 PY=${PYTHON:-python3}
+ZC=${PACK_GATE_ZIMCHECK:-zimcheck}
+# Only the official zimcheck (zim-tools) counts: zimru's prints the same
+# "Overall Test Status" line but misreads hrefs with HTML entities.
+ZV=$("$ZC" --version 2>&1 | head -n 1)
+case "$ZV" in
+  "zim-tools "*) ;;
+  *) echo "$(basename "$0"): $ZC is not the official zimcheck (--version: '$ZV');" \
+       "set PACK_GATE_ZIMCHECK to zim-tools' zimcheck" >&2; exit 1 ;;
+esac
+# the builder's own check (zimcheck -A -J) and pack_gate.py both use it
+export ZIMCHECK_BIN=$ZC PACK_GATE_ZIMCHECK=$ZC
 BUILDER=${BUILDER:-$ROOT/tools/build_wiki_pack.py}  # tests substitute a fake
 CACHE=(); [ -n "${WP_CACHE:-}" ] && CACHE=(--cache "$WP_CACHE")
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=8589934592 --)

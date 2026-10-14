@@ -34,6 +34,7 @@ import argparse, json, os, shutil, sys, time
 ap = argparse.ArgumentParser(); ap.add_argument("-o"); ap.add_argument("--stats")
 a, _ = ap.parse_known_args()
 mode, src = os.environ["FAKE_MODE"], os.environ["FAKE_PACK"]
+open(os.path.join(os.path.dirname(a.stats), "zimcheck_bin.txt"), "w").write(os.environ.get("ZIMCHECK_BIN", ""))
 def pack(): shutil.copyfile(src, a.o)
 def stats():
     st = {"zim_bytes": os.path.getsize(a.o), "check": json.loads(os.environ["FAKE_CHECK"])}
@@ -84,6 +85,8 @@ def test_only_this_runs_stats_count(mode: str, lands: bool, bp: SimpleNamespace,
     assert bok.startswith("PROCEED" if lands else "REJECT"), bok
     assert ("gate=PASS" in r.stdout) is lands
     assert not (stale.exists() and stale.stat().st_mtime == 1_700_000_000)      # the stale file is gone
+    # the builder's own check uses the same (official) zimcheck as the gate
+    assert (out / "zimcheck_bin.txt").read_text() == bp.env["PACK_GATE_ZIMCHECK"]
     if lands:
         g = json.loads((out / f"{F}.zim.gate.json").read_text())
         assert g["ok"] and g["pack_md5"] == lpzims.md5_of(out / f"{F}.zim")
@@ -120,3 +123,12 @@ def test_wiki_src_is_required(bp: SimpleNamespace, tmp_path: Path) -> None:
     r = subprocess.run([str(TOOLS / "build_packs.sh"), "testland", str(bp.base), str(tmp_path / "o"), "th"],
                        capture_output=True, text=True, timeout=60, env={**env, "FAKE_MODE": "good"})
     assert r.returncode != 0 and "WIKI_SRC" in r.stderr
+
+
+def test_refuses_a_zimcheck_that_is_not_the_official_one(bp: SimpleNamespace, tmp_path: Path) -> None:
+    zimru = lpzims.fake_zimcheck(tmp_path / "zc", "zimru", "", rc=0, version="zimcheck (zimru) 0.1.0")
+    out = tmp_path / "out"
+    r = subprocess.run([str(TOOLS / "build_packs.sh"), "testland", str(bp.base), str(out), "th"], capture_output=True,
+                       text=True, timeout=60, env={**bp.env, "FAKE_MODE": "good", "PACK_GATE_ZIMCHECK": zimru})
+    assert r.returncode == 1 and "not the official zimcheck" in r.stderr, r.stderr
+    assert not (out / "build-th.log").exists()

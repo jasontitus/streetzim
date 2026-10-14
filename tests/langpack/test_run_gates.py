@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -84,7 +85,7 @@ def gates(lp: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory) -> Simp
            "TITLES": json.dumps({"de": "Testland DE", "th": "Testland TH"}), "PYTHONDONTWRITEBYTECODE": "1"}
     r = subprocess.run([str(TOOLS / "run_gates.sh"), str(lp.base), str(packs), "de,th,en", "en", "testland",
                         str(region), str(_free_port())], capture_output=True, text=True, timeout=1200, env=env)
-    return SimpleNamespace(r=r, work=work, tag=lp.base.name[:-4])
+    return SimpleNamespace(r=r, work=work, tag=lp.base.name[:-4], env=env, packs=packs, region=region, base=lp.base)
 
 
 @pytest.mark.parametrize("lang", ["de", "th", "en"])
@@ -98,9 +99,23 @@ def test_every_step_ran(lang: str, gates: SimpleNamespace) -> None:
     assert all(ok.values()), (ok, (out / f"{lang}.verify.log").read_text()[-2000:])
     # the stand-ins cannot route or answer kiwix-serve's search: those must FAIL, and so the verdict
     assert v["checks"]["route"] is False and v["checks"]["kiwix"] is False and v["all_pass"] is False
+    assert v["zimcheck_version"] == "zim-tools 3.8.0"
     title = {"de": "Testland DE", "th": "Testland TH"}.get(lang)
     merged = json.loads((out / f"{lang}.merge.json").read_text())
     assert merged["metadata"]["Title"] == (title or "OSM - Testland")
     assert (gates.work / "merged" / f"m-{gates.tag}-{lang}.zim").exists()
     # the region file's search.english.q is what the checks search for
     assert "INFO  suggest 'Alpha Town'" in (out / f"{lang}.verify.log").read_text()
+
+
+def test_refuses_a_zimcheck_that_is_not_the_official_one(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """zimru's zimcheck prints the same "Overall Test Status" line: run_gates.sh
+    must not start with it."""
+    zimru = lpzims.fake_zimcheck(tmp_path / "zc", "zimru", "[INFO] Overall Test Status: Pass\n", rc=0,
+                                 version="zimcheck (zimru) 0.1.0")
+    work = tmp_path / "work"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=120,
+                       env={**gates.env, "PACK_GATE_ZIMCHECK": zimru, "LANGPACK_WORK": str(work)})
+    assert r.returncode == 1 and "not the official zimcheck" in r.stderr, r.stderr
+    assert not (work / "verdicts").exists()

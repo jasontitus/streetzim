@@ -6,8 +6,10 @@
 Reads the gated recipes in $LANGPACK_WORK/recipes/<base>/ and writes
 $LANGPACK_WORK/verdicts/<base>/<L>.json:
   {"lang", "recipe_md5", "recipe_uuid", "recipe_size", "packs": {lang: md5},
-   "checks": {recipe_eq_merge, verify, zimcheck, route, kiwix, viewer, ui, smoke,
-              base_smoke, base_viewer, base_ui}, "all_pass", "evidence": {...}}
+   "zimcheck_version", "checks": {recipe_eq_merge, verify, zimcheck, route, kiwix,
+   viewer, ui, smoke, base_smoke, base_viewer, base_ui}, "all_pass", "evidence": {...}}
+zimcheck passes only when its log says "Overall Test Status: Pass" AND the
+zimcheck that wrote it was the official one (zimcheck.version: "zim-tools ...").
 and prints a table. make_site.py publishes an entry only with all_pass and a
 recipe md5/uuid/size equal to the one it is about to publish.
 """
@@ -57,6 +59,8 @@ def main():
     base_checks = {"base_smoke": smoke_ok(f"{out}/base.smoke.log")[0],
                    "base_viewer": bool(jline(f"{out}/base.viewer.json").get("pass")),
                    "base_ui": bool(jline(f"{out}/base.ui.json").get("pass"))}
+    zver = read(f"{out}/zimcheck.version").strip()      # run_gates.sh: `zimcheck --version`
+    official = zver.startswith("zim-tools ")
     rows = [["L", "packs", "recipe=merge", "verify", "zimcheck", "route", "kiwix", "viewer", "ui", "smoke", "ALL"]]
     for L in langs:
         rp = os.path.join(work_dir(), "recipes", tag, f"{L}.json")
@@ -74,7 +78,7 @@ def main():
         checks = {
             "recipe_eq_merge": read(f"{out}/{L}.same").strip().endswith("PASS"),
             "verify": bool(vm and vm.group(1) == vm.group(2)),
-            "zimcheck": "Overall Test Status: Pass" in read(f"{out}/{L}.zimcheck.log"),
+            "zimcheck": official and "Overall Test Status: Pass" in read(f"{out}/{L}.zimcheck.log"),
             "route": "route OK" in read(f"{out}/{L}.route.log"),
             "kiwix": bool(kj.get("pass")),
             "viewer": bool(vj.get("pass")),
@@ -83,7 +87,7 @@ def main():
         }
         checks.update(base_checks)
         v = {"tag": tag, "lang": L, "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
-             "recipe_file_md5": r.get("file_md5"), "packs": pack_md5, "checks": checks,
+             "recipe_file_md5": r.get("file_md5"), "packs": pack_md5, "zimcheck_version": zver, "checks": checks,
              "all_pass": all(checks.values()), "composed": datetime.datetime.now().isoformat(timespec="seconds"),
              "evidence": {"verify": vm.group(0) if vm else None, "smoke": sm[1],
                           "kiwix": kj.get("checks"), "catalog": kj.get("catalog"),
