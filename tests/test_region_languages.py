@@ -67,6 +67,15 @@ def test_no_spanish_where_it_falls_short(rid):
     assert "es" not in dict(_rows(TABLE))[rid].split(",")
 
 
+def test_europe_counts_european_russia():
+    langs = dict(_rows(TABLE))["europe"].split(",")
+    assert langs.index("ru") < 4
+
+
+def test_varieties_a_country_calls_dialects_are_not_languages():
+    assert dict(_rows(TABLE))["italy"].split(",") == ["it", "sc"]
+
+
 def test_the_matrix_list():
     assert len(L.MATRIX_TILE_LANGUAGES) == 21
     assert L.tile_languages(",".join(L.MATRIX_TILE_LANGUAGES)) == list(L.MATRIX_TILE_LANGUAGES)

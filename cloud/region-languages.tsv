@@ -7,7 +7,8 @@
 # The region's countries: those its site card names (web/generate.py
 # REGIONS; "and dozens more" and "all of" mean every country of the
 # continent), and for a region the border clip cuts to an outline, those of
-# its row in cloud/region-outlines.tsv. For a region inside one country, the
+# its row in cloud/region-outlines.tsv (Geofabrik's europe includes European
+# Russia, so Russian is third in europe). For a region inside one country, the
 # part of it the region covers. Its people: the people of those countries,
 # or parts, inside the region. A neighbour that the box overlaps but the
 # card does not name counts for nothing.
@@ -24,7 +25,12 @@
 #  d. French in Morocco, Algeria and Tunisia, which their signs and
 #     administration use beside the official languages.
 # A macrolanguage counts as one (zh: Mandarin, Cantonese, Wu; ar: the forms
-# of Arabic), and Morocco's Tamazight varieties as zgh.
+# of Arabic), and Morocco's Tamazight varieties as zgh. c counts languages,
+# not the varieties a country classes as dialects of its own language
+# (Italy's Neapolitan, Sicilian, Venetian and Lombard; Bavarian and Swiss
+# German in Germany and Switzerland). Iran's Luri is three languages (lrc,
+# bqi, luz), each under two million speakers by Ethnologue's counts, so it
+# is not listed; Gilaki and Mazandarani are just over.
 #
 # Order: most speakers first, first and second language together, among the
 # region's people; near ties by the number of its countries where a language
@@ -83,7 +89,7 @@ africa	ar,en,sw,fr,ha,am,om,yo,pt,ln,ff,ig,zu,mg,zgh,so,xh,af,sn,ny,bm,rw,st,rn,
 south-america	es,qu,gn,ay,en,nl,fr
 russia	ru,tt,ce
 united-states	en,es,zh
-europe	en,de,fr,tr,it,ru,es,pl,uk,ro,nl,ku,el,hu,cs,sv,ar,pt,ca,az,sr,bg,sq,da,fi,sk,no,hr,ka,lt,hy,sl,bs,mk,lv,et,mt,is
+europe	en,de,ru,fr,tr,it,es,pl,uk,ro,nl,ku,el,hu,cs,sv,ar,pt,ca,az,sr,bg,sq,da,fi,sk,no,hr,ka,lt,hy,sl,bs,mk,lv,et,mt,is
 france	fr,ar
 germany	de
 britain-ireland	en,ga,cy
