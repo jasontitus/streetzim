@@ -108,6 +108,7 @@ fi
 # tile step, below; the NVMe copy after it).
 STAGED_MBTILES=""
 ML_PID=""
+ML_OUT=""
 cleanup_staged() {
     if [ -n "$STAGED_MBTILES" ]; then rm -f "$STAGED_MBTILES" 2>/dev/null || true; fi
     STAGED_MBTILES=""
@@ -121,6 +122,7 @@ stop_ml() {
         wait "$ML_PID" 2>/dev/null || true
         ML_PID=""
     fi
+    if [ -n "$ML_OUT" ]; then rm -f "$ML_OUT"; fi
 }
 # EXIT does the cleanup. The signal traps must also END the script: a trap that
 # merely returns lets bash resume, so a killed build ran on to validate and
@@ -153,7 +155,7 @@ case "${STREETZIM_ML_TILES:-0}" in
         ML_RC=0
         wait "$ML_PID" || ML_RC=$?
         ML_PID=""
-        ML_MBTILES=$(tail -n 1 "$ML_OUT"); rm -f "$ML_OUT"
+        ML_MBTILES=$(tail -n 1 "$ML_OUT"); rm -f "$ML_OUT"; ML_OUT=""
         if [ "$ML_RC" != 0 ]; then
             echo "FATAL: multilingual tiles for $ID failed (STREETZIM_ML_TILES=1, rc=$ML_RC); not building from the world tiles" >&2
             exit 1

@@ -51,10 +51,20 @@ def test_known_regions(rid, first):
     assert dict(_rows(TABLE))[rid].split(",")[0] == first
 
 
-@pytest.mark.parametrize("rid", ["united-states", "california", "texas", "florida",
-                                 "new-york-state", "nyc-metro", "greater-la"])
-def test_spanish_where_millions_speak_it(rid):
+# Spanish at home: two million and 1% of the region's people, or a tenth.
+SPANISH = ["united-states", "california", "texas", "florida", "new-york-state", "nyc-metro",
+           "greater-la", "chicago-metro", "colorado", "washington-dc", "silicon-valley",
+           "west-coast-us", "east-coast-us", "midwest-us", "central-us"]
+
+
+@pytest.mark.parametrize("rid", SPANISH)
+def test_spanish_where_the_rule_puts_it(rid):
     assert dict(_rows(TABLE))[rid].split(",")[:2] == ["en", "es"]
+
+
+@pytest.mark.parametrize("rid", ["carolinas", "alaska", "hawaii"])
+def test_no_spanish_where_it_falls_short(rid):
+    assert "es" not in dict(_rows(TABLE))[rid].split(",")
 
 
 def test_the_matrix_list():

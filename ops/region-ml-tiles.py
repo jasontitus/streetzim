@@ -21,8 +21,9 @@ the region's own extract with tilemaker:
 - in docker as a guest of the shared host: one run at a time
   (<store-dir>/.ml-tiles.lock), --memory 24g --memory-swap 24g --cpus 6,
   our own uid, nice 19, tilemaker under timeout(1) inside the container, the
-  tilemaker store in a per-run folder of <store-dir> that is deleted
-  afterwards, and the image tag removed again if this run pulled it. Under
+  tilemaker store in a per-run folder on the shared NVMe scratch when it has
+  room (else <store-dir>) that is deleted afterwards, and the image tag
+  removed again if this run pulled it. Under
   the lock, containers and folders a killed run left are removed first.
 
 Output: <out-dir>/<src-id>.ml.mbtiles, written as .ml.part.mbtiles and
@@ -45,7 +46,9 @@ Prints the .ml.mbtiles path on stdout; everything else goes to stderr.
 Env: STREETZIM_ROOT (the data root), STREETZIM_TILE_LANGUAGES,
 STREETZIM_ML_COMMIT (a main commit whose image to use; it must have the
 checkout's tile inputs too), STREETZIM_ML_OUT_DIR (default
-<root>/world-data/regions), STREETZIM_ML_STORE_DIR (default <root>/tmp),
+<root>/world-data/regions), STREETZIM_ML_STORE_DIR (the lock, and the
+store when the NVMe scratch has no room; default <root>/tmp), NVME_SCRATCH,
+NVME_RESERVE_GB and STREETZIM_ML_NVME=0 (store_parent),
 STREETZIM_ML_TIMEOUT (seconds; default from the extract's size, see
 timeout_for), STREETZIM_ML_IO (normal or idle, see NICE_SHIM),
 STREETZIM_ML_IMAGE_REPO, STREETZIM_ML_CHECKOUT and DOCKER (tests).
@@ -90,6 +93,7 @@ sys.path.insert(0, CODE)
 CHECKOUT = os.environ.get("STREETZIM_ML_CHECKOUT") or CODE
 
 IMAGE_REPO = "ghcr.io/jasontitus/streetzim"
+NVME_SCRATCH = "/mnt/data/tilemaker/streetzim-scratch"     # build-region-fast.sh's
 CONTAINER = "streetzim-mltiles-"
 LOCK_LABEL = "streetzim.mltiles.lock"
 MEMORY = "24g"
@@ -100,6 +104,7 @@ TILE_PATHS = ("resources/tilemaker", "Dockerfile")
 # How far image_commit looks back on main, and how many registry lookups.
 MAIN_DEPTH = 500
 MAX_LOOKUPS = 25
+LOOKUP_SECONDS = 600
 # The profile inside the image: the tiles are what that commit's builder
 # makes, which is the checkout's (image_commit checks the inputs).
 PROFILE = ("/app/resources/tilemaker/config-openmaptiles.json",
@@ -123,10 +128,11 @@ NICE_SHIM = ("import ctypes, os, sys\n"
 # per GB of extract. Measured with the image's tilemaker at 6 threads
 # (2026-10-13, extracts of 0.07-1.65 GB): 1-5 minutes per region, about 2
 # minutes per GB plus a minute's start, slower on a busy disk. An hour plus
-# half an hour per GB leaves a large margin (France, 10.4 GB: 6.2 h); a
-# larger region's first run should be watched (.run.json).
+# half an hour per GB leaves a large margin (France, 10.4 GB: 6.2 h), up to
+# 12 hours; a larger region's first run should be watched (.run.json).
 BASE_SECONDS = 3600
 PER_GB_SECONDS = 1800
+MAX_SECONDS = 12 * 3600
 # The client waits this much longer than timeout(1) in the container, then
 # gives up on it (a hung daemon) and removes the container.
 CLIENT_MARGIN = 300
@@ -192,7 +198,7 @@ def timeout_for(pbf):
             return int(env)
         except ValueError:
             fail(f"STREETZIM_ML_TIMEOUT {env!r} is not a number of seconds")
-    return int(BASE_SECONDS + PER_GB_SECONDS * os.path.getsize(pbf) / 1e9)
+    return int(min(MAX_SECONDS, BASE_SECONDS + PER_GB_SECONDS * os.path.getsize(pbf) / 1e9))
 
 
 # ---- which image ------------------------------------------------------------
@@ -278,9 +284,14 @@ def image_commit(want):
              f"{CHECKOUT}'s HEAD; set STREETZIM_ML_COMMIT")
     head = _git("rev-parse", "HEAD") or "?"
     tried = []
+    t0 = time.monotonic()
     for rev in below:
         if tile_inputs(rev) != want:
             continue
+        if time.monotonic() - t0 > LOOKUP_SECONDS:
+            fail(f"the registry lookups passed {LOOKUP_SECONDS} s ({len(tried)} done: "
+                 f"{', '.join(tried)}); is the registry reachable? STREETZIM_ML_COMMIT "
+                 "skips the search")
         tried.append(rev[:12])
         if published(tag_of(rev)):
             if rev != head:
@@ -389,16 +400,65 @@ def remove_container(name):
         say(f"  could not remove container {name}: {r.stderr.strip()[:200]}")
 
 
+def nvme_dir():
+    """The shared NVMe scratch build-region-fast.sh stages tiles on
+    ($NVME_SCRATCH), unless STREETZIM_ML_NVME=0."""
+    if os.environ.get("STREETZIM_ML_NVME", "1") == "0":
+        return None
+    return os.environ.get("NVME_SCRATCH") or NVME_SCRATCH
+
+
+def store_parent(pbf, fallback):
+    """Where this run's tilemaker store goes. The store is random I/O, so the
+    NVMe scratch when it has room: FREE_FACTOR (streetzim/tilemaker_store.py)
+    times the extract on top of build-region-fast.sh's reserve
+    ($NVME_RESERVE_GB, 120), checked under its stage lock like a stager, as
+    the volume is shared with another tenant. Else ``fallback``."""
+    nvme = nvme_dir()
+    if not nvme:
+        return fallback
+    from streetzim.tilemaker_store import FREE_FACTOR
+    try:
+        os.makedirs(nvme, exist_ok=True)
+        with open(os.path.join(nvme, ".stage.lock"), "w") as lk:
+            deadline = time.monotonic() + 900
+            while True:
+                try:
+                    fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() > deadline:
+                        say("  NVMe stage lock busy for 15 min: store on /storage")
+                        return fallback
+                    time.sleep(5)
+            need = FREE_FACTOR * os.path.getsize(pbf) / 1e9
+            reserve = float(os.environ.get("NVME_RESERVE_GB") or 120)
+            free = shutil.disk_usage(nvme).free / 1e9
+            if free - need >= reserve:
+                say(f"  store on NVMe {nvme}: {free:.0f} GB free, needs {need:.0f} "
+                    f"+ {reserve:.0f} reserve")
+                return nvme
+            say(f"  store on {fallback}: NVMe has {free:.0f} GB free, needs {need:.0f} "
+                f"+ {reserve:.0f} reserve")
+    except (OSError, ValueError) as e:
+        say(f"  store on {fallback}: NVMe {nvme} not usable ({e})")
+    return fallback
+
+
 def reap(out_dir, store_dir, lock_path):
     """Under the lock, nothing of an earlier run may still be going: remove
     the containers runs under this lock left (a SIGKILLed client leaves its
     container running), then the part folders and stores of runs whose
-    process is gone."""
+    process is gone (a run stopped by a signal leaves them to this)."""
     r = docker("ps", "-aq", "--filter", f"label={LOCK_LABEL}={lock_path}")
     for cid in (r.stdout.split() if r.returncode == 0 else []):
         say(f"  removing container {cid}, left by an earlier run")
         remove_container(cid)
-    for d, prefix in ((out_dir, ".ml-part-"), (store_dir, "ml-store-")):
+    places = [(out_dir, ".ml-part-"), (store_dir, "ml-store-")]
+    nvme = nvme_dir()
+    if nvme and os.path.isdir(nvme):
+        places.append((nvme, "ml-store-"))
+    for d, prefix in places:
         for n in os.listdir(d):
             pid = n.rsplit("-", 1)[-1]
             if n.startswith(prefix) and pid.isdigit() and not os.path.exists(f"/proc/{pid}"):
@@ -570,7 +630,7 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
 
     # One run at a time on the host; the freshness check is under the lock
     # too, so a run that waited reuses what the one before it made.
-    lock_path = os.path.join(store_dir, ".ml-tiles.lock")
+    lock_path = os.path.realpath(os.path.join(store_dir, ".ml-tiles.lock"))
     lock = open(lock_path, "w")
     t_wait = time.time()
     try:
@@ -581,7 +641,7 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
         say(f"  waited {time.time() - t_wait:.0f} s")
     partdir = os.path.join(out_dir, f".ml-part-{src_id}-{os.getpid()}")
     part = os.path.join(partdir, f"{src_id}.ml.part.mbtiles")
-    store = os.path.join(store_dir, f"ml-store-{src_id}-{os.getpid()}")
+    store = None
     name = f"{CONTAINER}{src_id}"
     tag, pulled = None, False
     try:
@@ -601,6 +661,7 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
                 os.unlink(f"{out}.{k}")
             except FileNotFoundError:
                 pass
+        store = os.path.join(store_parent(pbf, store_dir), f"ml-store-{src_id}-{os.getpid()}")
         for d in (partdir, store):
             shutil.rmtree(d, ignore_errors=True)
             os.makedirs(d)
@@ -614,22 +675,32 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
         for k in SIDECARS:
             write_sidecar(f"{out}.{k}", want[k])
         stats.update(image=tag, image_id=iid, commit=rev, bbox=bbox, langs=langs,
-                     profile=profile, pbf_bytes=os.path.getsize(pbf),
-                     mbtiles_bytes=os.path.getsize(out))
+                     profile=profile, store=os.path.dirname(store),
+                     pbf_bytes=os.path.getsize(pbf), mbtiles_bytes=os.path.getsize(out),
+                     seconds_per_gb=round(stats["seconds"] / max(os.path.getsize(pbf) / 1e9, 0.001)))
         write_sidecar(f"{out}.run.json", json.dumps(stats))
         say(f"  wrote {out} ({os.path.getsize(out) / 1e6:.0f} MB)")
         return out
     finally:
-        for d in (partdir, store):
-            shutil.rmtree(d, ignore_errors=True)
+        # After a signal, quickly: the store can be tens of GB, and whoever
+        # sent it may not wait; the next run's reap removes what is left.
+        if not _SIGNALLED:
+            for d in (partdir, store):
+                if d:
+                    shutil.rmtree(d, ignore_errors=True)
         if tag:
             drop_tag(tag, pulled)
         lock.close()
 
 
+_SIGNALLED = False
+
+
 def _end(signum, _frame):
     # Once: a second signal (timeout's, a shell's) must not cut the cleanup
     # short, as one did on 2026-10-13 and left the image tag behind.
+    global _SIGNALLED
+    _SIGNALLED = True
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(s, signal.SIG_IGN)
     raise SystemExit(128 + signum)

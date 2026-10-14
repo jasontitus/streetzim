@@ -205,12 +205,13 @@ def host(tmp_path, monkeypatch):
     co = Checkout(tmp_path / "checkout")
     env = {"STREETZIM_ROOT": str(root), "DOCKER": str(docker), "FAKE_STATE": str(state),
            "FAKE_REV": co.head(), "STREETZIM_ML_CHECKOUT": str(co.path),
-           "STREETZIM_ML_STORE_DIR": str(tmp_path / "store")}
+           "STREETZIM_ML_STORE_DIR": str(tmp_path / "store"),
+           "STREETZIM_ML_NVME": "0"}       # never the host's real NVMe scratch
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     for k in ("STREETZIM_TILE_LANGUAGES", "STREETZIM_ML_OUT_DIR", "STREETZIM_ML_IO",
               "STREETZIM_ML_TIMEOUT", "STREETZIM_ML_COMMIT", "FAKE_TM", "FAKE_PULL_FAIL",
-              "FAKE_IMAGE_ID", "FAKE_RM_SECS"):
+              "FAKE_IMAGE_ID", "FAKE_RM_SECS", "NVME_SCRATCH", "NVME_RESERVE_GB"):
         monkeypatch.delenv(k, raising=False)
     publish(tmp_path, co.head())
     h = Host(tmp_path)
@@ -569,7 +570,92 @@ def test_a_signal_removes_the_container_and_the_store(host):
     assert done.read_text() == "xx"
     assert ["rm", "-f", "streetzim-mltiles-hispaniola"] in _calls(host)[-3:]
     assert _calls(host)[-1] == ["rmi", tag(host.co.head())]
-    assert _leftovers(host) == [] and not _out(host).exists()
+    assert not _out(host).exists()
+    # The store and the part folder are left (quick exit); the next run,
+    # under the lock, removes them: their process is gone.
+    left = _leftovers(host)
+    assert sorted(n.split("-")[0] for n in left) == [".ml", "ml"]
+    _load().make("hispaniola", "hispaniola", BOX)
+    assert _leftovers(host) == []
+
+
+def test_the_time_limit_stops_at_twelve_hours(host):
+    m = _load()
+    pbf = host / "root" / "world-data" / "regions" / "hispaniola.osm.pbf"
+    os.truncate(pbf, 30_000_000_000)                # sparse
+    assert m.timeout_for(str(pbf)) == 12 * 3600
+
+
+def test_the_label_names_the_locks_real_path(host, monkeypatch):
+    (host / "store").mkdir()
+    link = host / "store-link"
+    link.symlink_to(host / "store")
+    monkeypatch.setenv("STREETZIM_ML_STORE_DIR", str(link))
+    _load().make("hispaniola", "hispaniola", BOX)
+    run, = _runs(host)
+    assert f"streetzim.mltiles.lock={host}/store/.ml-tiles.lock" in run
+    ps, = [c for c in _calls(host) if c[0] == "ps"]
+    assert ps[-1] == f"label=streetzim.mltiles.lock={host}/store/.ml-tiles.lock"
+
+
+# ---- where the store goes ------------------------------------------------------
+
+@pytest.fixture
+def nvme(host, monkeypatch):
+    d = host / "nvme"
+    monkeypatch.setenv("STREETZIM_ML_NVME", "1")
+    monkeypatch.setenv("NVME_SCRATCH", str(d))
+    monkeypatch.setenv("NVME_RESERVE_GB", "0")
+    return d
+
+
+def _store_mount(host):
+    run, = _runs(host)
+    return next(v.split(":")[0] for v in run if v.endswith(":/store"))
+
+
+def test_the_store_goes_on_the_nvme_scratch_when_it_has_room(host, nvme):
+    _load().make("hispaniola", "hispaniola", BOX)
+    assert _store_mount(host).startswith(f"{nvme}/ml-store-hispaniola-")
+    assert (nvme / ".stage.lock").exists()                # checked under the stagers' lock
+    assert [p.name for p in nvme.iterdir()] == [".stage.lock"]     # and removed after
+
+
+def test_without_room_on_the_nvme_the_store_stays_on_storage(host, nvme, monkeypatch):
+    monkeypatch.setenv("NVME_RESERVE_GB", str(10**9))
+    _load().make("hispaniola", "hispaniola", BOX)
+    assert _store_mount(host).startswith(f"{host}/store/ml-store-hispaniola-")
+
+
+def test_an_unusable_or_busy_nvme_leaves_the_store_on_storage(host, nvme, monkeypatch):
+    m = _load()
+    nvme.write_text("not a folder")
+    m.make("hispaniola", "hispaniola", BOX)
+    assert _store_mount(host).startswith(f"{host}/store/")
+    nvme.unlink()
+    nvme.mkdir()
+    holder = open(nvme / ".stage.lock", "w")
+    fcntl.flock(holder, fcntl.LOCK_EX)                     # a stager copying
+    clock = iter(range(0, 10**6, 100))
+    monkeypatch.setattr(m.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "de")
+    m.make("hispaniola", "hispaniola", BOX)
+    assert _store_mount_last(host).startswith(f"{host}/store/")
+
+
+def _store_mount_last(host):
+    run = _runs(host)[-1]
+    return next(v.split(":")[0] for v in run if v.endswith(":/store"))
+
+
+def test_stores_dead_runs_left_on_the_nvme_are_removed(host, nvme):
+    nvme.mkdir()
+    dead = 2 ** 22 + 12345
+    (nvme / f"ml-store-x-{dead}").mkdir()
+    (nvme / "europe.123.mbtiles").write_text("a stager's copy: not ours")
+    _load().make("hispaniola", "hispaniola", BOX)
+    assert sorted(p.name for p in nvme.iterdir()) == [".stage.lock", "europe.123.mbtiles"]
 
 
 # ---- which image -----------------------------------------------------------------
@@ -641,6 +727,30 @@ def test_no_image_with_these_inputs_fails_precisely(lookup):
     co.main()
     with pytest.raises(SystemExit, match=f"no published image .*at or below {tip[:12]} "
                                          rf"with these inputs \({tip[:12]}, {first[:12]}\)"):
+        m.image_commit(_inputs(co))
+
+
+def test_the_registry_is_asked_a_bounded_number_of_times(lookup, monkeypatch):
+    m, co, host = lookup
+    (host / "docker" / "published").write_text("")
+    for i in range(4):
+        co.commit(f"main: docs {i}", {"README": f"{i}\n"})
+    co.main()
+    monkeypatch.setattr(m, "MAX_LOOKUPS", 2)
+    n = len(_calls(host))
+    with pytest.raises(SystemExit, match="no published image"):
+        m.image_commit(_inputs(co))
+    assert len([c for c in _calls(host)[n:] if c[0] == "manifest"]) == 2
+
+
+def test_the_registry_search_has_a_time_limit(lookup, monkeypatch):
+    m, co, host = lookup
+    (host / "docker" / "published").write_text("")
+    co.commit("main: docs", {"README": "x\n"})
+    co.main()
+    clock = iter([0, 0, 601, 601, 1202])
+    monkeypatch.setattr(m.time, "monotonic", lambda: next(clock))
+    with pytest.raises(SystemExit, match=r"registry lookups passed 600 s \(1 done"):
         m.image_commit(_inputs(co))
 
 
@@ -782,6 +892,7 @@ def test_a_signal_to_the_wrapper_reaches_the_tile_step(tmp_path, sig):
     assert (tmp_path / "py.cleaned").read_text() == "yes"     # the wrapper waited for it
     assert not Path(f"/proc/{child}").exists()
     assert "MBTILES=" not in out
+    assert not list(tmp_path.glob("ml-tiles-*"))          # the step's output file too
 
 
 def test_wrapper_order():

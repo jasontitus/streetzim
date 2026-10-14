@@ -80,14 +80,17 @@ The driver's marker check then requires `tileLanguages` and
 **On the shared host:** one tilemaker at a time (a lock in
 `tmp/.ml-tiles.lock`), `--memory 24g --memory-swap 24g --cpus 6`, our own
 uid, nice 19 (`STREETZIM_ML_IO=idle` adds the idle I/O class, which is
-much slower on a busy disk), the store in `tmp/ml-store-<id>-<pid>`
-(deleted after), and the image tag removed again if the run pulled it.
+much slower on a busy disk), and the image tag removed again if the run
+pulled it. The store (`ml-store-<id>-<pid>`) goes on the NVMe scratch
+`build-region-fast.sh` stages tiles on (`$NVME_SCRATCH`) when it has room
+for three times the extract on top of the wrapper's reserve
+(`$NVME_RESERVE_GB`, 120), checked under the stagers' lock; else in `tmp/`.
 tilemaker runs under `timeout` inside the container: an hour plus half an
-hour per GB of extract (`STREETZIM_ML_TIMEOUT` overrides; measured about 2
-minutes per GB on extracts up to 1.65 GB). A killed run's container, store
-and part folder are removed by the next run, under the lock. A signal to
-`build-region-fast.sh` reaches the step, which removes its container
-before the wrapper ends.
+hour per GB of extract, at most 12 hours (`STREETZIM_ML_TIMEOUT`
+overrides); `.run.json` records each run's seconds per GB and peak memory.
+A signal to `build-region-fast.sh` reaches the step, which removes its
+container and goes; the store and part folder of a run that was stopped or
+killed are removed by the next run, under the lock.
 
 **What differs from the world tiles** (Hispaniola, measured 2026-10-13):
 the world tiles were made by tilemaker 3.2 (master `facdf93`, the same
