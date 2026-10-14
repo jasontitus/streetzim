@@ -54,13 +54,22 @@
       return (name, params) => { try { an.logEvent(a, name, Object.assign({ env }, params)); } catch (e) { /* ignore */ } };
     }).catch(() => null);
   // Keyboard activation (a click event with detail 0) of a download control
-  // within 1 s of the page being ready or of the control getting focus is
-  // ignored: it is more likely a keystroke meant for another window.
+  // within 1 s of the page being ready, shown (pageshow) or of this window
+  // getting focus is ignored, with "Press again to start" said and shown:
+  // such a key was more likely typed for another window (a page that opened
+  // this one as a popup). Focus moving between controls does not count, so
+  // a screen reader's default action (focus and click at once) works the
+  // first time.
   let armedAt = Infinity;
-  const focusedAt = new WeakMap();
-  document.addEventListener('focusin', (e) => focusedAt.set(e.target, performance.now()));
-  const tooSoon = (ev, el) => ev.detail === 0 &&
-    performance.now() - Math.max(armedAt === Infinity ? performance.now() : armedAt, focusedAt.get(el) || 0) < 1000;
+  const rearm = () => { if (armedAt !== Infinity) armedAt = performance.now(); };
+  addEventListener('focus', rearm);
+  addEventListener('pageshow', rearm);
+  const tooSoon = (ev) => {
+    if (ev.detail !== 0 || performance.now() - (armedAt === Infinity ? performance.now() : armedAt) >= 1000) return false;
+    setStatus('Press again to start.', true);
+    announce('Press again to start.');
+    return true;
+  };
   let clicked = false;                 // nothing is reported before the first click
   document.addEventListener('click', () => { clicked = true; }, { capture: true, once: true });
   const track = (name, params) => {
@@ -169,7 +178,7 @@
       a2.textContent = `${langName(m.lang, m.label)} ${region.title}`;
       a2.lang = 'en';
       a2.onclick = (ev) => {
-        if (running || tooSoon(ev, a2)) { ev.preventDefault(); return; }    // one build at a time
+        if (running || tooSoon(ev)) { ev.preventDefault(); return; }    // one build at a time
         if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
         ev.preventDefault();
         $('lang').value = m.lang; pickLang();
@@ -545,7 +554,7 @@
         got = await new Promise((resolve) => {
           const b = $('startDl');
           b.hidden = false; b.disabled = false; b.focus();
-          b.onclick = async (ev) => { if (tooSoon(ev, b)) return; b.disabled = true; resolve(await streamSink(ctl, fileName, size)); };
+          b.onclick = async (ev) => { if (tooSoon(ev)) return; b.disabled = true; resolve(await streamSink(ctl, fileName, size)); };
         });
         $('startDl').hidden = true;
       }
@@ -622,7 +631,7 @@
   // one, a save dialog. Both claim the running slot before their first
   // await, so a double click cannot start a second build.
   $('go').onclick = () => { if (!running && !$('go').disabled) build('file'); };
-  $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev, $('oneclick'))) build('net'); };
+  $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev)) build('net'); };
 
   // The base map's URL on the range proxy: index.json's base.url, else made
   // from base.download (https://archive.org/download/<item>/<file>) and the
