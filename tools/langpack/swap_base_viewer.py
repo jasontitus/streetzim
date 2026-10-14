@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Make a base with a new viewer and a fresh UUID, keeping everything else.
 
-    swap_base_viewer.py SRC.zim DST.zim VIEWER_EXPORT_DIR REV
+    swap_base_viewer.py SRC.zim DST.zim VIEWER_EXPORT_DIR REV [--allow-full-copy]
 
-1. DST = copy of SRC (a reflink where the filesystem has them, e.g. XFS:
-   no data copied; SRC is never written).
+1. DST = reflink copy of SRC (XFS, Btrfs: no data copied; SRC is never
+   written). Where the filesystem cannot reflink, it stops, unless
+   --allow-full-copy says to copy every byte (warned loudly: slow, and the
+   disk holds the base twice).
 2. VIEWER_EXPORT_DIR/cloud/patch_viewer_inplace.py overwrites the three
    viewer slots (index.html, places.html, routing-worker.js) in DST with
    VIEWER_EXPORT_DIR/resources/viewer (a `git archive` of the branch, or
@@ -58,13 +60,30 @@ def md5_whole(path: str) -> str:
     return h.hexdigest()
 
 
-def main():
-    src, dst, vexp, rev = sys.argv[1:5]
-    src, dst, vexp = (os.path.abspath(x) for x in (src, dst, vexp))
-    t0 = time.perf_counter()
+def copy_base(src: str, dst: str, allow_full: bool, cp: str = "cp") -> str:
+    """DST as a reflink of SRC; a full copy only when allowed. Returns how."""
     if os.path.exists(dst):
         os.remove(dst)
-    subprocess.run(["cp", "--reflink=auto", src, dst], check=True)
+    if subprocess.run([cp, "--reflink=always", src, dst], capture_output=True).returncode == 0:
+        return "reflink"
+    if os.path.exists(dst):
+        os.remove(dst)
+    if not allow_full:
+        raise SystemExit(f"swap_base_viewer: cannot reflink {src} to {dst} on this filesystem; "
+                         "pass --allow-full-copy to copy every byte instead")
+    print(f"WARNING: swap_base_viewer: no reflink here; making a FULL copy of {src} "
+          f"({os.path.getsize(src) / 1e9:.1f} GB)", file=sys.stderr, flush=True)
+    subprocess.run([cp, src, dst], check=True)
+    return "full"
+
+
+def main():
+    args = [x for x in sys.argv[1:] if x != "--allow-full-copy"]
+    allow_full = len(args) != len(sys.argv) - 1
+    src, dst, vexp, rev = args[:4]
+    src, dst, vexp = (os.path.abspath(x) for x in (src, dst, vexp))
+    t0 = time.perf_counter()
+    how = copy_base(src, dst, allow_full)
     os.chmod(dst, 0o644)
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     r = subprocess.run([PY, os.path.join(vexp, "cloud", "patch_viewer_inplace.py"), dst,
@@ -107,7 +126,7 @@ def main():
             differ.append(x.path.decode())
     # bytes outside the three slots: compare the whole files minus header uuid / md5 / slot ranges
     res = {
-        "src": src, "dst": dst, "size": os.path.getsize(dst),
+        "copy": how, "src": src, "dst": dst, "size": os.path.getsize(dst),
         "old_uuid": str(uuidlib.UUID(bytes=old_uuid)), "new_uuid": str(uuidlib.UUID(bytes=new_uuid)),
         "header_same_except_uuid": hdr_same, "dirents_same": dirents_same, "items_compared": n,
         "items_differing": differ, "only_viewer_differs": {d.encode() for d in differ} <= VIEWER,

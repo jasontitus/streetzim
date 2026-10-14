@@ -16,14 +16,16 @@ Everything is set by arguments and environment variables.
 
 | variable | used by | meaning |
 |---|---|---|
-| `LANGPACK_WORK` | all | Working directory; default `./langpack-work`. It holds `recipes/<base>/` (gated recipes), `verdicts/<base>/`, `merged/`, `gates/<base>/` (gate logs), `sha-cache/`, `locks/` and `tmp/`. |
-| `PACK_GATE_ZIMCHECK` | pack_gate, run_gates, mutation_test | The **official** zimcheck (zim-tools, e.g. 3.8.0). The default is `zimcheck` on PATH. Any other zimcheck is refused: zimru's misreads hrefs that contain `&amp;` or `&#39;`. |
+| `LANGPACK_WORK` | all | Working directory; default `./langpack-work`. It holds `recipes/<base>/` (gated recipes), `verdicts/<base>/`, `merged/` (one full-size ZIM per gated entry), `gates/<base>/` (gate logs), `sha-cache/`, `locks/` and `tmp/`. **Production:** a disk with room for the merged files, and the same directory for every step of a round, since make_site reads the verdicts and gated recipes run_gates wrote. On StreetZim's build host that is `/storage/streetzim/langpack-work` (on `/storage`, never `/home`); `ops/langpack/host-env.sh` sets it. |
+| `PACK_GATE_ZIMCHECK` | pack_gate, build_packs, run_gates, mutation_test | The **official** zimcheck (zim-tools, e.g. 3.8.0). The default is `zimcheck` on PATH. Any other zimcheck is refused: zimru's misreads hrefs that contain `&amp;` or `&#39;`, and it prints the same "Overall Test Status" line. build_packs.sh and run_gates.sh refuse to start, and pack_gate.py fails the pack. build_packs.sh also passes it to the builder as `ZIMCHECK_BIN`, so the builder's own check uses it too. |
 | `PYTHON` | shell scripts | Default `python3`. |
 | `WIKI_SRC` | build_packs.sh | The Kiwix Wikipedia ZIMs, passed as `--source`. Required. |
 | `WP_CACHE`, `PACK_DATE` | build_packs.sh | The builder's `--cache` (default: its own); the date in pack file names (default: today). |
 | `KIWIX_SERVE`, `NODE` | run_gates.sh | Defaults `kiwix-serve` and `node`. |
 | `PLAYWRIGHT_CORE`, `CHROME_PATH`, `BROWSER_LIBS` | the browser gates | Path to playwright-core's `index.mjs` (default: the installed package); the Chromium to drive; extra `LD_LIBRARY_PATH` for that Chromium. |
-| `LANGPACK_MIN_FREE_GB` | shell scripts | Pause while MemAvailable is below this; default 0. On the shared build host, use 40. |
+| `LANGPACK_MIN_FREE_GB` | shell scripts | Pause while MemAvailable is below this; default 0. On the shared build host it is 40 (`ops/langpack/host-env.sh`). |
+
+On StreetZim's build host, source `ops/langpack/host-env.sh` first. It sets these variables for that host; values already set win.
 
 ## 1. Build packs
 
@@ -75,6 +77,9 @@ The viewer, UI and smoke gates also run on the base alone. kiwix-serve
 serves at most 3 merged files at a time.
 
 `compose_verdicts.py` then writes `$LANGPACK_WORK/verdicts/<base>/<L>.json`.
+Each verdict records the zimcheck version (`zimcheck_version`). The zimcheck
+check passes only when the log says "Overall Test Status: Pass" and that
+version is `zim-tools …`.
 
 **Verdict rule.** An entry may be published only with a verdict that has
 `all_pass` and that names this exact recipe: its `recipe_md5`, `recipe_uuid`
@@ -142,7 +147,9 @@ lineage.
 
 **Viewer swaps.** `swap_base_viewer.py SRC DST VIEWER_EXPORT REV` (pass the
 repository root to use this checkout's viewer) gives the base a new viewer
-and a new UUID. It writes DST's sidecar only when every check passes, and
+and a new UUID. DST starts as a reflink of SRC. Where the filesystem cannot
+reflink, the swap stops unless `--allow-full-copy` is given; then it warns
+and copies every byte. It writes DST's sidecar only when every check passes, and
 otherwise deletes DST. The sidecar records SRC's UUID as the parent. It
 carries SRC's own parents forward only from a sidecar that checks out, so a
 pack built against the unswapped base still fits.

@@ -4,12 +4,12 @@
 # from: the 13b base in item streetzim-langproto-california-v2, the packs in
 # streetzim-langproto-california (fr: streetzim-langproto-california-fr).
 # The tools are core (tools/langpack/; docs/language-pack-pipeline.md).
-# Env: LANGPACK_WORK (verdicts, gated recipes; default ./langpack-work),
-#   BASE, PACKS_DIR, SITE_OUT (default under $LANGPACK_WORK), PYTHON.
+# Env (defaults: ops/langpack/host-env.sh): LANGPACK_WORK, PYTHON; BASE,
+#   PACKS_DIR, SITE_OUT (default under $LANGPACK_WORK).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 TL=$ROOT/tools/langpack
-export LANGPACK_WORK=${LANGPACK_WORK:-$PWD/langpack-work}
+. "$ROOT/ops/langpack/host-env.sh"
 export PYTHONDONTWRITEBYTECODE=1
 export TITLES='{"de": "Kalifornien", "th": "แคลิฟอร์เนีย", "zh": "加利福尼亚州", "es": "California", "ja": "カリフォルニア州", "ko": "캘리포니아주", "fr": "Californie", "en": "California"}'
 PY=${PYTHON:-python3}
