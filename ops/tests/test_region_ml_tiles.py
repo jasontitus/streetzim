@@ -1144,6 +1144,21 @@ def test_wrapper_counts_live_and_still_written_stores_and_deletes_nothing(tmp_pa
     assert sorted(p.name for p in d.rglob("*")) == before
 
 
+@pytest.mark.parametrize("value, want", [("09", 9), ("010", 10), ("0", 0)])
+def test_wrapper_reads_a_leading_zero_as_decimal(tmp_path, value, want):
+    """A reservation written as "09" must not abort the wrapper ("value too
+    great for base") nor be read as octal ("010" as 8)."""
+    d = tmp_path / "nvme"
+    d.mkdir()
+    (d / f".reserve-ml-{os.getpid()}").write_text(f"{value} {start_of(os.getpid())}\n")
+    text = WRAPPER.read_text()
+    i = text.index("nvme_ml_reserved() {")
+    fn = text[i:text.index("\n}\n", i) + 3]
+    r = subprocess.run(["bash", "-c", f"set -euo pipefail\nNVME_SCRATCH={d}\n{fn}\nnvme_ml_reserved"],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and r.stdout == f"{want}\n", (r.returncode, r.stdout, r.stderr)
+
+
 # Bash wraps these: 30 nines to a large positive, the others to negative or 0.
 @pytest.mark.parametrize("huge", ["9" * 30, "123456789012345678901234567890",
                                   "18446744073709551616", "9223372036854775808"])

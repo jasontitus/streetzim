@@ -212,7 +212,7 @@ nvme_ml_reserved() {
         cur=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20) || cur=""
         if { [ -n "$cur" ] && [ "$cur" = "$st" ]; } \
            || [ -n "$(find "$NVME_SCRATCH" -maxdepth 3 -path "*/ml-store-*-$pid/*" -type f -mmin -10 -print -quit 2>/dev/null)" ]; then
-            sum=$(( sum + b ))
+            sum=$(( sum + 10#$b ))   # 10#: "09" is not octal
             [ "$sum" -le 1000000000000000000 ] || sum=1000000000000000000
         fi
     done
