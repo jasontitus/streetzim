@@ -760,7 +760,9 @@
         try { const f = await sinkInfo.handle.getFile(); if (f.size === 0 && sinkInfo.handle.remove) await sinkInfo.handle.remove(); } catch (e) { /* keep it */ }
       }
       setStatus(result.outcome === 'download_stopped' ? 'Stopped. The download stopped — try again (Chrome or Edge on a desktop works best).'
-        : result.outcome === 'base_download' ? `Stopped: could not download the ${region.title} map (${result.error}). The download was cancelled; try again when the connection is back.`
+        : result.outcome === 'base_download' ? `Stopped: could not download the ${region.title} map (${result.error}). ` +
+          (sinkInfo ? 'The download was cancelled; ' : 'Nothing was saved; ') +
+          (/nothing arrived/.test(result.error) ? 'try again when the connection is back.' : 'try again later.')
         : result.outcome === 'wrong_base' && mode === 'net' ? `Stopped: the ${region.title} map on the server is not the one this language was made for (${result.error}). Nothing was saved. Try again later.`
         : result.outcome === 'no_sink' ? 'Not started: ' + result.error
         : 'Stopped: ' + result.error, true);
