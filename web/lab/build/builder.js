@@ -15,8 +15,11 @@
   const q = new URLSearchParams(location.search);
   const $ = (id) => document.getElementById(id);
   // Never inside another page (firebase.json also sends frame-ancestors
-  // 'self' and X-Frame-Options): a framed copy could start downloads the
-  // visitor cannot see. Nothing below runs.
+  // 'none' and X-Frame-Options: DENY; nothing embeds this page, and the
+  // download iframe at __dl/ is answered by the service worker without
+  // them): a framed copy could start downloads the visitor cannot see.
+  // Nothing below runs. Cross-Origin-Opener-Policy: same-origin also cuts a
+  // page that opened this one off from it.
   let framed = true;
   try { framed = window.top !== window.self; } catch (e) { /* cross-origin parent */ }
   if (framed) {
