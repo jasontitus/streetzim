@@ -978,3 +978,44 @@ def test_structural_gate_rejects_serialized_damage(tmp_path, damage):
         pytest.raises((p.PackError, UnicodeError, sqlite3.IntegrityError)),
     ):
         p._verify_structure(io.BytesIO(data), db)
+
+
+def test_clusters_are_numbered_in_file_order(tmp_path):
+    # A bucket took its number when it opened but was written when it
+    # flushed: index.html's raw bucket stayed open while compressed ones
+    # flushed, so cluster 0 sat 22.77 GB into Europe and libzim mapped all
+    # of it at open (iOS Kiwix: "unable to open file").
+    records = [
+        {"kind": "config", "compression": "zstd", "cluster_size_target": 64},
+        _item("index.html", "RAW", mime="text/html", compress=False),
+    ]
+    records += [_item(f"t{i}", "x" * 80) for i in range(5)]
+    records.append(_item("late", "RAW2", compress=False))
+    dest, _ = archive(tmp_path, records)
+    data = dest.read_bytes()
+    h = p.HEADER.unpack(data[:80])
+    offsets = struct.unpack_from("<" + "Q" * h[5], data, h[8])
+    assert h[5] >= 6 and list(offsets) == sorted(offsets)
+    assert offsets[0] == p.HEADER.size + p.MIME_RESERVE
+    clusters = raw_clusters(dest)
+    # The raw bucket opened first but was written later: no longer cluster 0.
+    assert clusters[(67, "index.html")][0] == clusters[(67, "late")][0] != 0
+
+
+def test_structural_gate_rejects_clusters_out_of_file_order(tmp_path):
+    path, _ = archive(
+        tmp_path,
+        [
+            {"kind": "config", "compression": "none", "cluster_size_target": 1},
+            _item("a", "BODY"),
+            _item("b", "SECOND"),
+        ],
+    )
+    data = bytearray(path.read_bytes())
+    pointers = p.HEADER.unpack(data[:80])[8]
+    first, second = struct.unpack_from("<QQ", data, pointers)
+    struct.pack_into("<QQ", data, pointers, second, first)
+    damaged = tmp_path / "damaged.zim"
+    damaged.write_bytes(bytes(data))
+    with damaged.open("rb") as stream, pytest.raises(p.PackError, match="out of file order"):
+        p._verify_structure(stream, sqlite3.connect(":memory:"))

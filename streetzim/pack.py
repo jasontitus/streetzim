@@ -470,10 +470,15 @@ def _verify_structure(stream: BinaryIO, db: sqlite3.Connection) -> None:
         db.execute("UPDATE verified_entries SET visited=2 WHERE visited=1")
     if main != MAX_U32 and not db.execute("SELECT 1 FROM verified_entries WHERE idx=? AND ns=87 AND path=? AND target IS NOT NULL", (main, b"mainPage")).fetchone():
         raise PackError("invalid main page index")
+    previous = -1
     for index in range(clusters):
         offset, = U64.unpack(read_at(pointers + index * 8, 8))
         if not HEADER.size + MIME_RESERVE <= offset < urls:
             raise PackError("invalid cluster pointer")
+        if offset <= previous:
+            # libzim maps the MIME list up to cluster 0's offset at open.
+            raise PackError("cluster pointers out of file order")
+        previous = offset
         db.execute("INSERT INTO verified_clusters VALUES(?,?)", (index, offset))
     db.execute("CREATE INDEX verified_blob_refs ON verified_entries(cluster,blob)")
     position = HEADER.size + MIME_RESERVE
@@ -790,13 +795,23 @@ class Writer:
             self.output.write(U64.pack(offset))
         for index, in self.db.execute("SELECT idx FROM entries ORDER BY ns,title,idx"):
             self.output.write(U32.pack(index))
-        for offset, in self.db.execute("SELECT offset FROM clusters ORDER BY idx"):
+        # Clusters are numbered in file order. A bucket takes its number when
+        # it opens but is written when it flushes, so the first raw bucket
+        # (index.html's, open until satellite images fill it) landed 22.77 GB
+        # into Europe; libzim reads everything from the MIME list to cluster
+        # 0 into one buffer at open (getMimeListEndUpperLimit), which iOS
+        # Kiwix cannot map ("unable to open file").
+        rank = {}
+        for index, offset in self.db.execute("SELECT idx,offset FROM clusters ORDER BY offset"):
             if offset is None:
                 raise PackError("unfinished cluster")
+            rank[index] = len(rank)
             self.output.write(U64.pack(offset))
+        if len(rank) != self.cluster_count:
+            raise PackError("unfinished cluster")
         for ns, path, title, mime, cluster, blob, target in self.db.execute("SELECT ns,path,title,mime,cluster,blob,target FROM entries ORDER BY idx"):
             if target is None:
-                self.output.write(ARTICLE.pack(mime, 0, ns, 0, cluster, blob))
+                self.output.write(ARTICLE.pack(mime, 0, ns, 0, rank[cluster], blob))
             else:
                 target_index, = self.db.execute("SELECT idx FROM entries WHERE ns=67 AND path=?", (target,)).fetchone()
                 self.output.write(REDIRECT.pack(0xFFFF, 0, ns, 0, target_index))
