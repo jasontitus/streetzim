@@ -232,6 +232,42 @@ function pickRoutePair(zimUrl) {
 }
 
 const failures = [];
+function urlPath(u) {
+  try { return new URL(u).pathname; } catch { return ''; }
+}
+
+// GeoJSON (FeatureCollection, Feature or geometry) to a list of rings.
+function clipRings(g) {
+  if (!g) return [];
+  if (g.type === 'FeatureCollection') return (g.features || []).flatMap(f => clipRings(f));
+  if (g.type === 'Feature') return clipRings(g.geometry);
+  if (g.type === 'Polygon') return g.coordinates;
+  if (g.type === 'MultiPolygon') return g.coordinates.flat();
+  return [];
+}
+
+function inRings(rings, x, y) {     // even-odd over every ring, holes included
+  let c = false;
+  for (const r of rings) {
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+  }
+  return c;
+}
+
+// Tile z/x/y wholly inside the area: its four corners are, and no outline
+// vertex lies inside its box (with every corner inside, no edge can cut it).
+function tileInsideArea(area, z, x, y) {
+  const n = 2 ** z, lon = t => t / n * 360 - 180;
+  const lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
+  const w = lon(x), e = lon(x + 1), N = lat(y), s = lat(y + 1), rings = clipRings(area);
+  if (!rings.length) return false;
+  if (![[w, s], [w, N], [e, s], [e, N]].every(([a, b]) => inRings(rings, a, b))) return false;
+  return !rings.some(r => r.some(([a, b]) => a > w && a < e && b > s && b < N));
+}
+
 function fail(label, detail) {
   failures.push(label + ': ' + detail);
   console.log('  [FAIL] ' + label + ' — ' + detail);
@@ -263,6 +299,15 @@ async function main() {
   let currentStep = 'init';
   const consoleErrs = [];
   const network404s = [];
+  // A --clip-poly build has ctx/z/x/y only for clip-zoom tiles that reach
+  // past the outline (streetzim/clip.py needs_context); inside it the
+  // viewer's context copies get a quick 404 by design (viewer
+  // 130-lowzoom-lakes.js, clipContext). Past the outline a missing ctx tile
+  // is a defect (a blank map beyond the border), and nothing else checks
+  // for one: so each ctx 404 is held and, at the summary, passes only when
+  // the tile lies wholly inside the map-config's clipArea.
+  let clipConfig = null;
+  const clipCtx404s = [];
   page.on('pageerror', err => {
     console.log('  ! pageerror [' + currentStep + ']:', err.message);
     consoleErrs.push(currentStep + ': pageerror: ' + err.message);
@@ -289,6 +334,10 @@ async function main() {
   page.on('response', resp => {
     const u = resp.url();
     const s = resp.status();
+    if (s === 200 && /\/map-config\.json$/.test(urlPath(u))) {
+      resp.json().then(c => { clipConfig = c; }).catch(() => {});
+      return;
+    }
     if (s !== 404) return;
     const ours = u.includes('/drive/') || u.includes(ZIM_URL);
     // Vector tiles missing at the bbox edge are a pre-existing gap in the
@@ -297,6 +346,7 @@ async function main() {
     // the 09-18 output), and validate_zim only warns about missing tile
     // zooms. Report them; never fail a region on them.
     const isTile = /\/tiles\/\d+\/\d+\/\d+\.pbf(\?|$)/.test(u);
+    const ctxTile = /\/ctx\/(\d+)\/(\d+)\/(\d+)\.pbf$/.exec(urlPath(u));
     // /drive/wiki-qid-titles.json is generated at deploy time and served
     // by Firebase; a local copy of web/drive has no such file and the
     // viewer treats its absence as "no titles" (cloud/preview_smoke_test
@@ -304,8 +354,10 @@ async function main() {
     const isOptional = /\/drive\/wiki-qid-titles\.json(\?|$)/.test(u);
     console.log('  ! 404 [' + currentStep + ']' + (ours ? '' : ' (off-origin)')
                 + (isTile ? ' (missing tile, not fatal)' : '')
+                + (ctxTile ? ' (clip context; checked against the outline at the end)' : '')
                 + (isOptional ? ' (optional, deploy-generated)' : '') + ':', u);
-    if (ours && !isTile && !isOptional) network404s.push(currentStep + ': 404 ' + u);
+    if (ours && ctxTile) clipCtx404s.push({step: currentStep, u, zxy: ctxTile.slice(1).map(Number)});
+    else if (ours && !isTile && !isOptional) network404s.push(currentStep + ': 404 ' + u);
   });
   page.on('requestfailed', req => {
     const u = req.url();
@@ -1068,6 +1120,12 @@ async function main() {
   // Summary.
   console.log('\n=== summary ===');
   for (const e of consoleErrs) failures.push('console-error: ' + e);
+  for (const c of clipCtx404s) {
+    const area = clipConfig && clipConfig.clipArea;
+    if (area && tileInsideArea(area, ...c.zxy)) continue;
+    network404s.push(c.step + ': 404 ' + c.u + (area ? ' (clip context past the outline: missing)'
+                                                     : ' (no clipArea read from map-config.json)'));
+  }
   for (const e of network404s) failures.push('network-404: ' + e);
   if (failures.length === 0) {
     console.log('all checks passed (no console errors, no /drive/ 404s)');
