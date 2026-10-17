@@ -192,7 +192,10 @@ while :; do
     [ -n "${id:-}" ] || continue
     case "$id" in "#"*|id) continue;; esac
     case " $processed " in *" $id "*) continue;; esac
-    grep -qP "^\Q$id\E\tuploaded\t" "$DONE" 2>/dev/null && { processed="$processed $id"; continue; }
+    # upload-pending too: its patched file is on archive.org, waiting for the
+    # listing; finish_pending_uploads.sh completes it. Redoing it here would
+    # re-validate for hours and send the whole ZIM again.
+    grep -qP "^\Q$id\E\t(uploaded|upload-pending)\t" "$DONE" 2>/dev/null && { processed="$processed $id"; continue; }
     next="$id	$zim	$term	$bytes"; break
   done < "$TSV"
   [ -z "$next" ] && break

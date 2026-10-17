@@ -13,9 +13,13 @@ unset _ops_real _ops_old
 # listed (upload_validated exit 6 → pending-uploads.tsv).
 #
 # archive.org lists a file only after its archive.php task runs, and that
-# queue can sit for hours. Re-running upload_validated with --checksum
-# skips the transfer entirely and just does the metadata stamp, torrent,
-# prune and deploy. Safe to run repeatedly; still-pending rows stay.
+# queue can sit for hours. A row is complete once archive.org lists the file
+# WITH ITS MD5 (the row's 4th column, else computed): a same-named re-upload
+# (a viewer patch) is listed by name at once, as the previous file, and
+# re-running upload_validated then would send the whole ZIM again. Listed
+# with its md5, the re-run skips the transfer (archive_has_file.py) and does
+# the metadata stamp, torrent, prune and deploy. Safe to run repeatedly;
+# still-pending rows stay.
 #
 # Other jobs (the build queue, retrofit-chips-queue.sh) append rows while
 # this runs — it can wait hours for a build gap — so the rewrite at the end
@@ -32,11 +36,13 @@ LOG=/storage/streetzim/finish-pending.log
 n0=$(wc -l < "$PENDING")
 still=$(mktemp "${TMPDIR:-/storage/streetzim/tmp}/pending.XXXXXX")
 declare -A seen=()
-while IFS=$'\t' read -r id zim when; do
+while IFS=$'\t' read -r id zim when md5; do
   [ -n "${id:-}" ] || continue
   [ -n "${seen[$id/$zim]:-}" ] && continue
   seen[$id/$zim]=1
   [ -s "$zim" ] || { echo "$id: $zim gone locally — dropping" | tee -a "$LOG"; continue; }
+  # Rows written before the md5 column: compute it (once; the row keeps it).
+  [[ "${md5:-}" =~ ^[0-9a-f]{32}$ ]] || md5=$(md5sum "$zim" | cut -d' ' -f1)
   # One `ia metadata` call answers both questions: is this ZIM listed, and has
   # a LATER build of the same region already been listed? A superseded row is
   # not just wasted work -- completing it rebuilds web/torrents/<id>.torrent
@@ -47,14 +53,21 @@ while IFS=$'\t' read -r id zim when; do
     | venv-linux/bin/python3 -c '
 import sys, json, re
 want = sys.argv[1]
-names = [f.get("name", "") for f in json.load(sys.stdin).get("files", [])]
+md5 = (sys.argv[2] if len(sys.argv) > 2 else "").strip().lower()
+files = [f for f in json.load(sys.stdin).get("files", []) if isinstance(f, dict)]
+names = [f.get("name", "") for f in files]
+# Listed = listed with this md5 (the archive_has_file.py rule: the first entry
+# of that name decides).
+entry = next((f for f in files if f.get("name") == want), None)
+listed = bool(re.match(r"^[0-9a-f]{32}$", md5)) and entry is not None \
+    and str(entry.get("md5", "")).strip().lower() == md5
 def stamp(n):
     m = re.match(r"osm-.+-(\d{4}-\d{2}-\d{2})([a-z]?)\.zim$", n)
     return (m.group(1), m.group(2)) if m else None
 mine = stamp(want)
 newer = sorted((n for n in names if stamp(n) and mine and stamp(n) > mine), key=stamp)
-print(("yes" if want in names else "no") + "\t" + (newer[-1] if newer else ""))
-' "$zim" 2>/dev/null)
+print(("yes" if listed else "no") + "\t" + (newer[-1] if newer else ""))
+' "$zim" "$md5" 2>/dev/null)
   listed=${state%%$'\t'*}
   superseded=${state#*$'\t'}
   if [ -n "$superseded" ]; then
@@ -62,8 +75,8 @@ print(("yes" if want in names else "no") + "\t" + (newer[-1] if newer else ""))
     continue
   fi
   if [ "$listed" != "yes" ]; then
-    echo "$id: still not listed (queued since $when)" | tee -a "$LOG"
-    printf '%s\t%s\t%s\n' "$id" "$zim" "$when" >> "$still"
+    echo "$id: not listed with md5 $md5 yet (queued since $when)" | tee -a "$LOG"
+    printf '%s\t%s\t%s\t%s\n' "$id" "$zim" "$when" "$md5" >> "$still"
     continue
   fi
   # Wait for a build gap so this never competes for the disk.
@@ -76,7 +89,7 @@ print(("yes" if want in names else "no") + "\t" + (newer[-1] if newer else ""))
     rc=$?; echo "  $id rc=$rc — keeping it pending" | tee -a "$LOG"
     # upload_validated exit 6 has already appended its own row again; a
     # second copy would only be dropped as a duplicate on the next run.
-    [ "$rc" -eq 6 ] || printf '%s\t%s\t%s\n' "$id" "$zim" "$when" >> "$still"
+    [ "$rc" -eq 6 ] || printf '%s\t%s\t%s\t%s\n' "$id" "$zim" "$when" "$md5" >> "$still"
   fi
 done < <(head -n "$n0" "$PENDING")
 # Rows appended after this run started (including exit-6 re-appends above).

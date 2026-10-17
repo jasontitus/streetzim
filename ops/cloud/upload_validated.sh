@@ -84,6 +84,12 @@ echo "validation passed."
 # left permanent history/ copies), so ask first: listed with the same MD5
 # is the same file (ops/cloud/archive_has_file.py).
 local_md5=$(md5sum "$dated" | cut -d' ' -f1)
+# Every later step keys on it (the listing below waits for it): without one
+# the upload could never be confirmed, and each rerun would send it again.
+if ! [[ "$local_md5" =~ ^[0-9a-f]{32}$ ]]; then
+    echo "FATAL ${id}: no md5 for $(basename "$dated") (got '${local_md5}') — nothing sent" >&2
+    exit 3
+fi
 if "$IA" metadata "streetzim-${id}" 2>/dev/null \
         | "$PYTHON" "${PROJECT_DIR}/ops/cloud/archive_has_file.py" "$(basename "$dated")" "$local_md5"; then
     echo "  archive.org already holds $(basename "$dated") (md5 ${local_md5}): not sent again"
@@ -177,7 +183,9 @@ if ! "$IA" metadata "streetzim-${id}" 2>/dev/null \
         echo "PENDING ${id}: ${target_file} transferred but archive.org still lists the previous ${target_file} (not md5 ${local_md5})"
     fi
     echo "  (its archive.php task is queued; prune and deploy deferred)"
-    printf '%s\t%s\t%s\n' "$id" "$target_file" "$(date -Iseconds)" \
+    # 4th column: the md5 finish_pending_uploads.sh waits for (the name alone
+    # is listed at once for a same-named re-upload, as the previous file).
+    printf '%s\t%s\t%s\t%s\n' "$id" "$target_file" "$(date -Iseconds)" "$local_md5" \
         >> "${PROJECT_DIR}/pending-uploads.tsv"
     exit 6
 fi

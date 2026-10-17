@@ -36,8 +36,9 @@ the local directory instead picks up rejected builds and superseded dates.
 
 Generate the list at rollout start, not in advance: regions that ship while
 the rollout waits belong in it. A region that already carries the current
-viewer costs nothing — the patch rewrites identical bytes and
-`ia upload --checksum` skips the transfer.
+viewer costs nothing — the patch rewrites identical bytes, and
+upload_validated does not send a file archive.org already lists with the
+same md5 (ops/cloud/archive_has_file.py).
 
 ## Per region
 
@@ -158,5 +159,8 @@ flock .retrofit-upload.lock env PROJECT_DIR=/storage/streetzim \
   bash cloud/upload_validated.sh <id> <zim>
 ```
 
-The re-run is cheap: `ia upload --checksum` skips the transfer because the
-md5 already matches.
+The re-run is cheap once archive.org lists the file with its md5:
+upload_validated then skips the transfer. Before that, a same-named
+re-upload (every rollout region) is listed by name as the PREVIOUS file, and
+a re-run would send the whole ZIM again; finish_pending_uploads.sh waits for
+the md5 (pending-uploads.tsv's 4th column).
