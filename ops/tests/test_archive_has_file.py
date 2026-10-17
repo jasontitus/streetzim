@@ -61,9 +61,12 @@ case "$1" in
   metadata)
     case "$*" in *--modify*) exit 0;; esac
     if [ -n "$IA_LISTED" ]; then
-      printf '{"files":[{"name":"%s","md5":"%s","size":"%s"}]}' "$ZIM" "$IA_MD5" "$ZIM_SIZE"
+      md5="$IA_MD5"
+      # archive.org's task for an upload has run: the new file is listed.
+      [ -n "${IA_MD5_AFTER:-}" ] && [ -f "$IA_LOG.uploaded" ] && md5="$IA_MD5_AFTER"
+      printf '{"files":[{"name":"%s","md5":"%s","size":"%s"}]}' "$ZIM" "$md5" "$ZIM_SIZE"
     else printf '{}'; fi ;;
-  upload) exit 0 ;;
+  upload) touch "$IA_LOG.uploaded"; exit 0 ;;
 esac
 """
 
@@ -89,6 +92,8 @@ def _project(tmp: Path) -> Path:
 
 @pytest.mark.parametrize("listed_md5, uploads", [("same", 0), ("other", 1)])
 def test_the_script_sends_only_what_archive_org_lacks(tmp_path, listed_md5, uploads):
+    # "other": the previous file under this name; archive.org lists the new
+    # one once its task has run (IA_MD5_AFTER).
     p = _project(tmp_path)
     zim = p / "osm-x-2026-10-13.zim"
     zim.write_bytes(b"ZIM\x04" + os.urandom(4096))
@@ -96,8 +101,9 @@ def test_the_script_sends_only_what_archive_org_lacks(tmp_path, listed_md5, uplo
     log = tmp_path / "ia.log"
     env = dict(os.environ, PROJECT_DIR=str(p), IA=str(tmp_path / "bin/ia"), PYTHON=sys.executable,
                IA_LOG=str(log), IA_LISTED="1", ZIM=zim.name, ZIM_SIZE=str(zim.stat().st_size),
-               IA_MD5=md5 if listed_md5 == "same" else "0" * 32,
-               PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}", STREETZIM_NO_TORRENT_COMMIT="1")
+               IA_MD5=md5 if listed_md5 == "same" else "0" * 32, IA_MD5_AFTER=md5,
+               PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}", STREETZIM_NO_TORRENT_COMMIT="1",
+               STREETZIM_LISTING_POLL_SECS="5", STREETZIM_LISTING_POLL_INTERVAL="1")
     r = subprocess.run(["bash", "cloud/upload_validated.sh", "x", zim.name], cwd=p, env=env,
                        capture_output=True, text=True, timeout=180)
     calls = log.read_text().splitlines()
@@ -105,3 +111,27 @@ def test_the_script_sends_only_what_archive_org_lacks(tmp_path, listed_md5, uplo
     assert r.returncode == 0 and "DONE x" in r.stdout, r.stdout + r.stderr
     if uploads == 0:
         assert "not sent again" in r.stdout
+
+
+def test_a_same_named_reupload_is_pending_while_the_previous_file_is_listed(tmp_path):
+    """A re-upload under the same name and size (a viewer patch): archive.org
+    keeps listing the previous file (another md5) until its task runs. That
+    is "listing pending" (exit 6, no prune, no deploy, a pending row), not a
+    shipped upload."""
+    p = _project(tmp_path)
+    zim = p / "osm-x-2026-10-13.zim"
+    zim.write_bytes(b"ZIM\x04" + os.urandom(4096))
+    log = tmp_path / "ia.log"
+    env = dict(os.environ, PROJECT_DIR=str(p), IA=str(tmp_path / "bin/ia"), PYTHON=sys.executable,
+               IA_LOG=str(log), IA_LISTED="1", ZIM=zim.name, ZIM_SIZE=str(zim.stat().st_size),
+               IA_MD5="0" * 32,
+               PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}", STREETZIM_NO_TORRENT_COMMIT="1",
+               STREETZIM_LISTING_POLL_SECS="3", STREETZIM_LISTING_POLL_INTERVAL="1")
+    r = subprocess.run(["bash", "cloud/upload_validated.sh", "x", zim.name], cwd=p, env=env,
+                       capture_output=True, text=True, timeout=180)
+    calls = log.read_text().splitlines()
+    assert sum(c.startswith("ia upload") for c in calls) == 1, (calls, r.stdout, r.stderr)
+    assert r.returncode == 6, r.stdout + r.stderr
+    assert "still lists the previous" in r.stdout
+    assert "deployed" not in r.stdout and "DONE x" not in r.stdout
+    assert zim.name in (p / "pending-uploads.tsv").read_text()

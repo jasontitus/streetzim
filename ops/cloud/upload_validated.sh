@@ -128,18 +128,24 @@ target_file="$(basename "$dated")"
 # a 30 min ceiling.
 _size_gb=$(( ( $(stat -c %s "$dated" 2>/dev/null || stat -f %z "$dated") ) / 1000000000 ))
 _poll_secs=$(( 180 + _size_gb * 60 )); [ "$_poll_secs" -gt 1800 ] && _poll_secs=1800
+_poll_secs=${STREETZIM_LISTING_POLL_SECS:-$_poll_secs}   # tests
 echo "  allowing ${_poll_secs}s for archive.org to list a ${_size_gb} GB file"
 metadata_deadline=$(( $(date +%s) + _poll_secs ))
 metadata_started=$(date +%s)
 echo "waiting for archive.org metadata to list ${target_file}..."
+# Listed WITH THIS FILE'S MD5, not just by name: a re-upload under the same
+# name (a viewer patch keeps the size too) is listed by name at once, as the
+# PREVIOUS file, until archive.org's task for the new one runs. On 2026-10-17
+# east-coast-us passed "metadata reflects ... after 1s" and "remote size
+# matches" that way, and got its torrent and deploy while archive.org still
+# served the old bytes.
 while [ "$(date +%s)" -lt "$metadata_deadline" ]; do
     if "$IA" metadata "streetzim-${id}" 2>/dev/null \
-            | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); sys.exit(0 if any(f.get('name')==sys.argv[1] for f in m.get('files', [])) else 1)" \
-                "$target_file"; then
-        echo "  metadata reflects ${target_file} after $(( $(date +%s) - metadata_started ))s"
+            | "$PYTHON" "${PROJECT_DIR}/ops/cloud/archive_has_file.py" "$target_file" "$local_md5"; then
+        echo "  metadata lists ${target_file} with md5 ${local_md5} after $(( $(date +%s) - metadata_started ))s"
         break
     fi
-    sleep 10
+    sleep "${STREETZIM_LISTING_POLL_INTERVAL:-10}"
 done
 if [ "$(date +%s)" -ge "$metadata_deadline" ]; then
     echo "WARN ${id}: metadata still didn't list ${target_file} after ${_poll_secs}s — cleanup may be stale"
@@ -152,7 +158,8 @@ local_size=$(stat -c %s "$dated" 2>/dev/null || stat -f %z "$dated")
 remote_size=$("$IA" metadata "streetzim-${id}" 2>/dev/null \
     | "$PYTHON" -c "import sys, json; m=json.load(sys.stdin); print(next((f.get('size') for f in m.get('files', []) if f.get('name')==sys.argv[1]), ''))" \
         "$target_file")
-if [ -z "$remote_size" ]; then
+if ! "$IA" metadata "streetzim-${id}" 2>/dev/null \
+        | "$PYTHON" "${PROJECT_DIR}/ops/cloud/archive_has_file.py" "$target_file" "$local_md5"; then
     # The transfer completed (ia upload returned 0 above). archive.org
     # lists a file only after its archive.php task runs, and that queue
     # can sit for hours — iceland's was still queued 4 h after a clean
@@ -162,7 +169,13 @@ if [ -z "$remote_size" ]; then
     # Exit 6 = "transferred, listing pending". Prune and deploy are
     # correctly skipped (both need the listing to be safe); the region is
     # recorded for cloud/finish_pending_uploads.sh to complete later.
-    echo "PENDING ${id}: ${target_file} transferred but archive.org has not listed it yet"
+    # Not listed, or listed as the previous file under this name (another
+    # md5): either way its task is still queued, so the same exit.
+    if [ -z "$remote_size" ]; then
+        echo "PENDING ${id}: ${target_file} transferred but archive.org has not listed it yet"
+    else
+        echo "PENDING ${id}: ${target_file} transferred but archive.org still lists the previous ${target_file} (not md5 ${local_md5})"
+    fi
     echo "  (its archive.php task is queued; prune and deploy deferred)"
     printf '%s\t%s\t%s\n' "$id" "$target_file" "$(date -Iseconds)" \
         >> "${PROJECT_DIR}/pending-uploads.tsv"

@@ -172,10 +172,21 @@ ok('with room to spare the padding is the chrome plus 20, as before', () => {
 
 ok('a box that cannot fit at all: fly to its centre at the zoom given', () => {
   const m = fakeMap(50, 430);     // left + right padding alone fill the width
-  V._szFitAdminBox(m, ATL_BOX, 110, V.SZ_ADMIN_ZOOM[8]);
+  // A country's zoom (5), not a city's 12, so a hardcoded zoom shows.
+  V._szFitAdminBox(m, ATL_BOX, 110, V.SZ_ADMIN_ZOOM[2]);
   assert.strictEqual(m.moved.kind, 'fly');
   assert.deepStrictEqual(m.moved.opts.center, [(ATL_BOX[0][0] + ATL_BOX[1][0]) / 2, (ATL_BOX[0][1] + ATL_BOX[1][1]) / 2]);
-  assert.strictEqual(m.moved.opts.zoom, 12);
+  assert.strictEqual(m.moved.opts.zoom, 5);
+});
+
+ok('the padding is capped by the canvas height, not its width', () => {
+  // A wide, short canvas (landscape, keyboard up): capped by the 1200 px
+  // width, the top padding would leave the box no room.
+  const m = fakeMap(1200, 430);
+  V._szFitAdminBox(m, ATL_BOX, 395, 12);
+  assert.strictEqual(m.moved && m.moved.kind, 'fit');
+  assert.ok(m.moved.opts.padding.top + m.moved.opts.padding.bottom <= 430 - 60,
+            JSON.stringify(m.moved.opts.padding));
 });
 
 ok('selectResult measures the chrome with the results list closed, and the camera moves', () => {
