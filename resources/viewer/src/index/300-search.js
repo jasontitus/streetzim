@@ -163,6 +163,26 @@ function _szAdminKeys(entries) {
   }
   return keys;
 }
+
+// Frame an area's box below the top chrome (`topChrome`: the bottom of the
+// search box and chips, px). The padding always leaves the box room: with an
+// iPhone's keyboard up the canvas is ~430 px tall, and a top padding taken to
+// the bottom of the open results list (~400 px) made fitBounds refuse ("Map
+// cannot fit within canvas") and leave the camera where it was, so a tap on
+// Atlanta from New York only closed the list. If the box still cannot fit,
+// fly to its centre at `zoom` instead.
+function _szFitAdminBox(map, bounds, topChrome, zoom) {
+  var h = map.getCanvas().clientHeight || 600;
+  var bottom = 30;
+  var top = Math.max(0, Math.min(topChrome + 20, h - bottom - 60));
+  var opts = { duration: 1500, maxZoom: 16,
+               padding: { top: top, bottom: bottom, left: 30, right: 30 } };
+  var cam = null;
+  try { cam = map.cameraForBounds(bounds, opts); } catch (e) {}
+  if (cam) { map.fitBounds(bounds, opts); return; }
+  map.flyTo({ center: [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2],
+              zoom: zoom, duration: 1500 });
+}
 // END admin-search
 
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
@@ -1109,6 +1129,10 @@ var SEARCH_SHARDS = (function () {
         wd:    item.wd,
       };
     }
+    // Close the list first: it sits inside #search-container, so measured
+    // open, that box's bottom is the list's (~400 px down), not the chips'.
+    resultsEl.style.display = 'none';
+    input.blur();
     // Start the camera move BEFORE dropping the pin: placeSearchPin
     // opens the popup immediately when no move is in flight, and
     // defers to moveend when one is — we want the latter here.
@@ -1134,14 +1158,11 @@ var SEARCH_SHARDS = (function () {
     var _dy = Math.min(Math.round(_h * 0.18), _topChrome + 60);
     if (adminCam && adminCam.bounds) {
       // An area: show all of it, clear of the search box.
-      map.fitBounds(adminCam.bounds, { duration: 1500, maxZoom: 16,
-        padding: { top: _topChrome + 20, bottom: 30, left: 30, right: 30 } });
+      _szFitAdminBox(map, adminCam.bounds, _topChrome, SZ_ADMIN_ZOOM[item.al] || 12);
     } else {
       _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0, _dy] });
     }
     placeSearchPin(map, lat, lon, name, enrich);
-    resultsEl.style.display = 'none';
-    input.blur();
   }
 
   // Input handler with debounce
