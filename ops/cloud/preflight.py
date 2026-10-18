@@ -64,9 +64,9 @@ WORLD_MBTILES = ROOT / "world-data" / "world-tiles-v2.mbtiles"
 REGIONS = {
     "australia-nz":  (112.0, -47.5, 179.5, -10.0),
     "texas":         (-107.0, 25.5, -93.4, 36.6),
-    "west-coast-us": (-125.0, 32.0, -114.0, 46.0),
+    "west-coast-us": (-125.0, 32.0, -114.0, 49.5),   # cloud/regions.tsv, 2026-10-18
     "east-coast-us": (-88.5, 24.2, -66.8, 47.5),   # cloud/regions.tsv, 2026-10-16
-    "central-us":    (-120.0, 31.3, -104.0, 49.0),
+    "central-us":    (-120.0, 31.3, -102.0, 49.1),   # cloud/regions.tsv, 2026-10-18
     "iran":          (44.0, 25.0, 63.5, 39.8),
     "japan":         (122.9, 24.0, 146.0, 45.6),
     "silicon-valley":(-122.6, 37.2, -121.7, 37.9),
