@@ -1998,16 +1998,6 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
 # this pattern.
 # MapLibre source/layer IDs that zimcheck (libzim variant) heuristically
 # flags because they appear inside JS string literals that look href-like.
-def _zimcheck_timeout() -> float:
-    """zimcheck's time limit: STREETZIM_ZIMCHECK_TIMEOUT seconds when it is a
-    positive number, else 1800."""
-    try:
-        v = float(os.environ.get("STREETZIM_ZIMCHECK_TIMEOUT", ""))
-    except ValueError:
-        return 1800.0
-    return v if v > 0 else 1800.0
-
-
 _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS = (
     "mcpzim-places",
     "mcpzim-places-dots",
@@ -2029,6 +2019,20 @@ _ZIMCHECK_KNOWN_FALSE_POSITIVE_PAIRS = (
     # exist. Production Kiwix/PWA viewer handles the hash correctly.
     ("search/index.html", "search/"),
 )
+
+
+def _zimcheck_timeout() -> float:
+    """zimcheck's time limit in seconds: STREETZIM_ZIMCHECK_TIMEOUT when it is
+    a positive number up to a day (larger makes subprocess.run raise, which
+    would read as "zimcheck unrunnable (skipped)"), else 3600. zimru on the
+    35 GB and 61 GB maps ran past 1800 s while builds shared the disk
+    (2026-10-18); a caller's own outer timeout still caps it."""
+    import math
+    try:
+        v = float(os.environ.get("STREETZIM_ZIMCHECK_TIMEOUT", ""))
+    except ValueError:
+        return 3600.0
+    return v if math.isfinite(v) and 0 < v <= 86400 else 3600.0
 
 
 def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
@@ -2088,8 +2092,8 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # everything we ship today on a quiet host; legit zimcheck failures
     # surface in well under a minute on smaller ZIMs. With the disk
     # shared by builds, zimru on united-states (35 GB) and europe (61 GB)
-    # ran past 1800 s (viewer rollout, 2026-10-18):
-    # STREETZIM_ZIMCHECK_TIMEOUT (seconds) raises it for such a run.
+    # ran past 1800 s (viewer rollout, 2026-10-18): 3600 s by default now,
+    # STREETZIM_ZIMCHECK_TIMEOUT for more (_zimcheck_timeout).
     timeout = _zimcheck_timeout()
     try:
         proc = subprocess.run([bin_path, zim_path], capture_output=True,
