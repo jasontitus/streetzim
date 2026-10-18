@@ -50,7 +50,7 @@ central-asia	Central Asia	40.0,25.0,120.0,56.0	multi-country	43.2220,76.8512	42.
 central-us	Central US	-120.0,31.3,-104.0,49.0	us-region	39.7392,-104.9903	40.0150,-105.2705	Denver	
 west-coast-us	West Coast US	-125.0,32.0,-116.5,49.5	us-region	47.6062,-122.3321	45.5152,-122.6784	Seattle	
 midwest-us	Midwest US	-104.1,36.0,-80.5,49.4	us-region	41.8781,-87.6298	43.0389,-87.9065	Chicago	
-east-coast-us	East Coast US	-82.0,24.0,-66.5,47.6	us-region	40.7128,-74.0060	39.9526,-75.1652	Boston	
+east-coast-us	East Coast US	-88.5,24.2,-66.8,47.5	us-region	40.7128,-74.0060	39.9526,-75.1652	Boston	box = the 18 states in cloud/region-outlines.tsv (border cut); was -82.0,24.0,-66.5,47.6 before 2026-10-16
 # --- continent (largest last) ---
 southeast-asia	Southeast Asia	92.0,-11.0,141.5,28.5	continent	13.7563,100.5018	12.9236,100.8825	Bangkok	
 australia-nz	Australia & New Zealand	110.0,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	

@@ -78,6 +78,10 @@ checks = {
     # ship a 400 MB upload that changed nothing.
     "lakes layer":     b"water-lowzoom" in idx and b"_SZ_LAKES" in idx,
     "chip nearest":    b"_ranked.sort" in idx,
+    # The 2026-10-18 search-fix rollout: a tap on a city frames it with the
+    # keyboard up (300-search.js _szFitAdminBox). Without it a run started
+    # from an unmerged viewer would ship every region unchanged.
+    "search fit":      b"_szFitAdminBox" in idx,
     "slot marker idx": b"SZVSLOT1:index.html" in idx,
     "slot marker plc": b"SZVSLOT1:places.html" in plc,
     "archive check":   a.check(),
@@ -192,7 +196,10 @@ while :; do
     [ -n "${id:-}" ] || continue
     case "$id" in "#"*|id) continue;; esac
     case " $processed " in *" $id "*) continue;; esac
-    grep -qP "^\Q$id\E\tuploaded\t" "$DONE" 2>/dev/null && { processed="$processed $id"; continue; }
+    # upload-pending too: its patched file is on archive.org, waiting for the
+    # listing; finish_pending_uploads.sh completes it. Redoing it here would
+    # re-validate for hours and send the whole ZIM again.
+    grep -qP "^\Q$id\E\t(uploaded|upload-pending)\t" "$DONE" 2>/dev/null && { processed="$processed $id"; continue; }
     next="$id	$zim	$term	$bytes"; break
   done < "$TSV"
   [ -z "$next" ] && break

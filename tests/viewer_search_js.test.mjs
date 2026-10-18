@@ -34,7 +34,7 @@ function slice(src, from, to) {
   return src.slice(a, b);
 }
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
-  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys };')();
+  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM };')();
 // The viewer's normalizeText (300-search.js, initSearch): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -124,12 +124,96 @@ ok('a pick fits the box, else zooms by level', () => {
 ok('selectResult and applyHash use the box', () => {
   const search = fs.readFileSync(`${REPO}/resources/viewer/src/index/300-search.js`, 'utf8');
   assert.match(search, /adminCam = \(item && item\.t === 'admin'\) \? _szAdminCamera\(item\)/);
-  assert.match(search, /map\.fitBounds\(adminCam\.bounds/);
+  assert.match(search, /_szFitAdminBox\(map, adminCam\.bounds, _topChrome, SZ_ADMIN_ZOOM\[item\.al\] \|\| 12\)/);
   assert.match(search, /_szFormsContain\(rec, qNorm, normalizeText\)/);
   assert.match(search, /var textScore = _szTextScore\(item, q, words, normalizeText\);/);
   const init = fs.readFileSync(`${REPO}/resources/viewer/src/index/120-map-init-and-style.js`, 'utf8');
   assert.match(init, /hash\.match\(\/bounds=/);
   assert.match(init, /if \(!fitted\) map\.flyTo/);
+});
+
+// ---- an area pick's camera on a short canvas -----------------------------
+// MapLibre 5's rule (cameraForBounds): no camera when the padding leaves the
+// box no room; fitBounds then does not move.
+function fakeMap(w, h) {
+  const m = { moved: null };
+  m.getCanvas = () => ({ clientHeight: h, clientWidth: w });
+  m.cameraForBounds = (b, o) => {
+    const p = o.padding;
+    if (p.top + p.bottom >= h || p.left + p.right >= w) return undefined;
+    return { center: [0, 0], zoom: 10 };
+  };
+  m.fitBounds = (b, o) => { if (m.cameraForBounds(b, o)) m.moved = { kind: 'fit', bounds: b, opts: o }; };
+  m.flyTo = (o) => { m.moved = { kind: 'fly', opts: o }; };
+  return m;
+}
+const ATLANTA = { n: 'Atlanta', t: 'admin', s: 'city', al: 8, a: 33.75447, o: -84.38982,
+                  bb: [-84.55085, 33.64792, -84.28956, 33.88682] };
+const ATL_BOX = [[ATLANTA.bb[0], ATLANTA.bb[1]], [ATLANTA.bb[2], ATLANTA.bb[3]]];
+
+ok('an area is framed on a canvas the keyboard shortened', () => {
+  // 390x430 (iPhone, keyboard up) with the top chrome at 395 px: the old
+  // padding (415 + 30) left no room, and the camera stayed put.
+  const m = fakeMap(390, 430);
+  V._szFitAdminBox(m, ATL_BOX, 395, 12);
+  assert.strictEqual(m.moved && m.moved.kind, 'fit');
+  const p = m.moved.opts.padding;
+  assert.ok(p.top + p.bottom <= 430 - 60, JSON.stringify(p));
+  assert.deepStrictEqual(m.moved.bounds, ATL_BOX);
+});
+
+ok('with room to spare the padding is the chrome plus 20, as before', () => {
+  const m = fakeMap(390, 844);
+  V._szFitAdminBox(m, ATL_BOX, 110, 12);
+  assert.strictEqual(m.moved.kind, 'fit');
+  assert.deepStrictEqual(m.moved.opts.padding, { top: 130, bottom: 30, left: 30, right: 30 });
+  assert.strictEqual(m.moved.opts.maxZoom, 16);
+});
+
+ok('a box that cannot fit at all: fly to its centre at the zoom given', () => {
+  const m = fakeMap(50, 430);     // left + right padding alone fill the width
+  // A country's zoom (5), not a city's 12, so a hardcoded zoom shows.
+  V._szFitAdminBox(m, ATL_BOX, 110, V.SZ_ADMIN_ZOOM[2]);
+  assert.strictEqual(m.moved.kind, 'fly');
+  assert.deepStrictEqual(m.moved.opts.center, [(ATL_BOX[0][0] + ATL_BOX[1][0]) / 2, (ATL_BOX[0][1] + ATL_BOX[1][1]) / 2]);
+  assert.strictEqual(m.moved.opts.zoom, 5);
+});
+
+ok('the padding is capped by the canvas height, not its width', () => {
+  // A wide, short canvas (landscape, keyboard up): capped by the 1200 px
+  // width, the top padding would leave the box no room.
+  const m = fakeMap(1200, 430);
+  V._szFitAdminBox(m, ATL_BOX, 395, 12);
+  assert.strictEqual(m.moved && m.moved.kind, 'fit');
+  assert.ok(m.moved.opts.padding.top + m.moved.opts.padding.bottom <= 430 - 60,
+            JSON.stringify(m.moved.opts.padding));
+});
+
+ok('selectResult measures the chrome with the results list closed, and the camera moves', () => {
+  const SEARCH = fs.readFileSync(`${REPO}/resources/viewer/src/index/300-search.js`, 'utf8');
+  const body = slice(SEARCH, '  function selectResult(el) {', '\n  // Input handler with debounce');
+  const resultsEl = { style: { display: 'block' } };
+  const input = { blurred: false, blur() { this.blurred = true; } };
+  // The list lives inside #search-container: open, the box ends at its
+  // bottom (415 px); closed, at the chips' (110 px).
+  const doc = { getElementById: (id) => (id === 'search-container'
+    ? { getBoundingClientRect: () => ({ bottom: resultsEl.style.display === 'none' ? 110 : 415 }) } : null) };
+  const map = fakeMap(390, 430);
+  const fitCalls = [];
+  const selectResult = new Function('lastSearchMatches', 'resultsEl', 'input', 'map', 'document',
+    '_szAdminCamera', 'SZ_ADMIN_ZOOM', '_szFitAdminBox', '_szFlyToClear', 'placeSearchPin',
+    body + '\nreturn selectResult;')(
+    [{ item: ATLANTA }], resultsEl, input, map, doc, V._szAdminCamera, V.SZ_ADMIN_ZOOM,
+    (m, b, top, z) => { fitCalls.push(top); V._szFitAdminBox(m, b, top, z); },
+    () => { throw new Error('an area must not take the point path'); }, () => {});
+  const attrs = { 'data-idx': '0', 'data-lat': String(ATLANTA.a), 'data-lon': String(ATLANTA.o),
+                  'data-type': 'admin', 'data-name': 'Atlanta' };
+  selectResult({ getAttribute: (k) => attrs[k] });
+  assert.deepStrictEqual(fitCalls, [110]);
+  assert.strictEqual(resultsEl.style.display, 'none');
+  assert.ok(input.blurred);
+  assert.strictEqual(map.moved && map.moved.kind, 'fit');
+  assert.strictEqual(map.moved.opts.padding.top, 130);
 });
 
 // ---- places.html -------------------------------------------------------
