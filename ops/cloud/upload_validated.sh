@@ -83,10 +83,11 @@ echo "validation passed."
 # task, and a queued derive can sit for a day (it re-sent 15-25 GB ZIMs and
 # left permanent history/ copies), so ask first: listed with the same MD5
 # is the same file (ops/cloud/archive_has_file.py).
-local_md5=$(md5sum "$dated" | cut -d' ' -f1)
 # A pending row's `when` (finish_pending_uploads.sh trusts the row's md5 only
-# for a file not changed since): the moment of this md5, not the end of the run.
+# for a file not changed since): taken before the md5 read starts, so a change
+# made while it reads (minutes for 60 GB) is seen as one.
 md5_when=$(date -Iseconds)
+local_md5=$(md5sum "$dated" | cut -d' ' -f1)
 # Every later step keys on it (the listing below waits for it): without one
 # the upload could never be confirmed, and each rerun would send it again.
 if ! [[ "$local_md5" =~ ^[0-9a-f]{32}$ ]]; then

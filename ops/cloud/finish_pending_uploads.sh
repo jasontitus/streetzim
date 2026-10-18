@@ -94,6 +94,9 @@ while IFS=$'\t' read -r id zim when md5; do
   [ -n "${when:-}" ] && t_row=$(date -d "$when" +%s 2>/dev/null) || t_row=""
   if ! [[ "${md5:-}" =~ ^[0-9a-f]{32}$ ]] || [ -z "$t_row" ] \
       || [ "$(stat -c %Z "$zim")" -gt "$t_row" ]; then
+    # The row keeps this read's start as its `when`: kept as it was, the next
+    # run would see the same change and read the whole file again.
+    when=$(date -Iseconds)
     md5=$(ionice -c3 nice -n10 md5sum "$zim" | cut -d' ' -f1)
   fi
   state=$(printf '%s' "$meta" | "$PYTHON" -c "$STATE_PY" "$zim" "$md5" 2>/dev/null)

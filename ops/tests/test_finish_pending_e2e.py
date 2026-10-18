@@ -241,3 +241,20 @@ def test_a_pending_file_without_a_final_newline_keeps_every_row(tmp_path):
     r = P.run()
     assert sorted(P.pending_rows()) == [["x", NAME, when, md5], ["y", NAME, when, md5]], \
         r.stdout + P.pending.read_text()
+
+
+def test_a_recomputed_md5_is_not_read_again_on_the_next_run(tmp_path):
+    # The file changed after its row (a new hard link, a chmod, a patch never
+    # uploaded): one read, then the row carries that read's time and the next
+    # run trusts it instead of reading the whole ZIM again.
+    P = Proj(tmp_path)
+    now = time.time()
+    md5 = P.write_zim(os.urandom(4096))                 # ctime: now
+    P.list_files((NAME, "0" * 32))                      # still the previous file
+    P.rows(("x", NAME, _iso(now - 3600), "1" * 32))     # older than the file
+    P.run()
+    assert len(P.md5_reads()) == 1
+    assert P.pending_rows()[0][3] == md5
+    time.sleep(1.1)
+    P.run()
+    assert len(P.md5_reads()) == 1, P.md5_reads()
