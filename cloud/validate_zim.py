@@ -1998,6 +1998,16 @@ def validate(zim_path: str, *, audit_tiles: bool = False) -> list[Result]:
 # this pattern.
 # MapLibre source/layer IDs that zimcheck (libzim variant) heuristically
 # flags because they appear inside JS string literals that look href-like.
+def _zimcheck_timeout() -> float:
+    """zimcheck's time limit: STREETZIM_ZIMCHECK_TIMEOUT seconds when it is a
+    positive number, else 1800."""
+    try:
+        v = float(os.environ.get("STREETZIM_ZIMCHECK_TIMEOUT", ""))
+    except ValueError:
+        return 1800.0
+    return v if v > 0 else 1800.0
+
+
 _ZIMCHECK_KNOWN_FALSE_POSITIVE_LINKS = (
     "mcpzim-places",
     "mcpzim-places-dots",
@@ -2075,13 +2085,17 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # Big regions take much longer than small. Australia-NZ (6 GB +
     # 6.8 M routing nodes) hit 600 s and false-failed; libzim
     # zimcheck on canada (28 GB) is even worse. 1800 s covers
-    # everything we ship today; legit zimcheck failures surface in
-    # well under a minute on smaller ZIMs.
+    # everything we ship today on a quiet host; legit zimcheck failures
+    # surface in well under a minute on smaller ZIMs. With the disk
+    # shared by builds, zimru on united-states (35 GB) and europe (61 GB)
+    # ran past 1800 s (viewer rollout, 2026-10-18):
+    # STREETZIM_ZIMCHECK_TIMEOUT (seconds) raises it for such a run.
+    timeout = _zimcheck_timeout()
     try:
         proc = subprocess.run([bin_path, zim_path], capture_output=True,
-                              text=True, env=env, timeout=1800)
+                              text=True, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return "fail", "zimcheck timed out after 1800 s"
+        return "fail", f"zimcheck timed out after {timeout:g} s"
     except Exception as exc:
         return "pass", f"zimcheck unrunnable: {exc} (skipped)"
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
