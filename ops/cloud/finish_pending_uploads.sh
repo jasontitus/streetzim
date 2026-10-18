@@ -120,6 +120,6 @@ done < <(head -n "$n0" "$PENDING" | tac)
 # Rows appended after this run started (including exit-6 re-appends above)
 # come last, so the keep-last dedupe below lets them win.
 tail -n +"$((n0 + 1))" "$PENDING" >> "$still"
-tac "$still" | awk -F'\t' '!seen[$1 "/" $2]++' | tac > "$still.dedup" && mv -f "$still.dedup" "$still"
+awk 1 "$still" | tac | awk -F'\t' '!seen[$1 "/" $2]++' | tac > "$still.dedup" && mv -f "$still.dedup" "$still"
 mv -f "$still" "$PENDING"
 echo "remaining pending: $(wc -l < "$PENDING")"

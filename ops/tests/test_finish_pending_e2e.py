@@ -227,3 +227,17 @@ def test_a_repatch_that_keeps_the_old_mtime_is_still_seen(tmp_path):
     assert P.pending_rows() == [], r.stdout
     assert P.uploads() == 0
     assert "DONE x" in P.finish_log()
+
+
+def test_a_pending_file_without_a_final_newline_keeps_every_row(tmp_path):
+    # A hand-edited file can end without a newline; tac would glue the last
+    # row onto the one before it, and that row would be lost.
+    P = Proj(tmp_path)
+    now = time.time()
+    md5 = P.write_zim(os.urandom(4096), mtime=now - 600)
+    P.list_files((NAME, "0" * 32))                     # still the previous file
+    when = _iso(now + 60)
+    P.pending.write_text(f"x\t{NAME}\t{when}\t{md5}\ny\t{NAME}\t{when}\t{md5}")
+    r = P.run()
+    assert sorted(P.pending_rows()) == [["x", NAME, when, md5], ["y", NAME, when, md5]], \
+        r.stdout + P.pending.read_text()

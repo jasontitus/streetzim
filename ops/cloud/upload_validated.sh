@@ -84,6 +84,9 @@ echo "validation passed."
 # left permanent history/ copies), so ask first: listed with the same MD5
 # is the same file (ops/cloud/archive_has_file.py).
 local_md5=$(md5sum "$dated" | cut -d' ' -f1)
+# A pending row's `when` (finish_pending_uploads.sh trusts the row's md5 only
+# for a file not changed since): the moment of this md5, not the end of the run.
+md5_when=$(date -Iseconds)
 # Every later step keys on it (the listing below waits for it): without one
 # the upload could never be confirmed, and each rerun would send it again.
 if ! [[ "$local_md5" =~ ^[0-9a-f]{32}$ ]]; then
@@ -185,7 +188,7 @@ if ! "$IA" metadata "streetzim-${id}" 2>/dev/null \
     echo "  (its archive.php task is queued; prune and deploy deferred)"
     # 4th column: the md5 finish_pending_uploads.sh waits for (the name alone
     # is listed at once for a same-named re-upload, as the previous file).
-    printf '%s\t%s\t%s\t%s\n' "$id" "$target_file" "$(date -Iseconds)" "$local_md5" \
+    printf '%s\t%s\t%s\t%s\n' "$id" "$target_file" "$md5_when" "$local_md5" \
         >> "${PROJECT_DIR}/pending-uploads.tsv"
     exit 6
 fi
