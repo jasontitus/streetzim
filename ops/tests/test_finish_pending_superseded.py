@@ -21,7 +21,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "cloud" / "finish_pending_uploads
 
 def _snippet() -> str:
     text = SCRIPT.read_text(encoding="utf-8")
-    m = re.search(r"python3 -c '\n(.*?)\n' \"\$zim\"", text, re.S)
+    m = re.search(r"^STATE_PY='\n(.*?)\n'$", text, re.S | re.M)
     assert m, "the superseded check moved or changed shape; update this test"
     return m.group(1)
 

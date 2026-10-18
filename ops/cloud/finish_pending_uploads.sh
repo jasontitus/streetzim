@@ -14,43 +14,49 @@ unset _ops_real _ops_old
 #
 # archive.org lists a file only after its archive.php task runs, and that
 # queue can sit for hours. A row is complete once archive.org lists the file
-# WITH ITS MD5 (the row's 4th column, else computed): a same-named re-upload
-# (a viewer patch) is listed by name at once, as the previous file, and
-# re-running upload_validated then would send the whole ZIM again. Listed
-# with its md5, the re-run skips the transfer (archive_has_file.py) and does
-# the metadata stamp, torrent, prune and deploy. Safe to run repeatedly;
-# still-pending rows stay.
+# WITH ITS MD5: a same-named re-upload (a viewer patch) is listed by name at
+# once, as the previous file, and re-running upload_validated then would send
+# the whole ZIM again. Listed with its md5, the re-run skips the transfer
+# (archive_has_file.py) and does the metadata stamp, torrent, prune and
+# deploy. Safe to run repeatedly; still-pending rows stay.
+#
+# The md5 is the row's 4th column (upload_validated writes it) unless the
+# file changed after the row was written (patched again in place: the row's
+# md5 would never be listed), or the row predates the column; then it is
+# computed, only for rows a later build has not superseded. "Changed" is the
+# inode's ctime, not the mtime: a patch that keeps the old mtime (touch -r)
+# still moves the ctime. (A new hard link moves it too; that costs a re-read
+# per run, nothing worse.)
+#
+# The LAST row per id/zim decides: a file re-uploaded while pending gets a
+# newer row with the new md5, and the older row is dropped with it.
 #
 # Other jobs (the build queue, retrofit-chips-queue.sh) append rows while
 # this runs — it can wait hours for a build gap — so the rewrite at the end
 # keeps every row added after the start instead of replacing the file with
 # this run's leftovers. One finisher at a time (flock).
+#
+# STREETZIM_ROOT, IA, PYTHON and STREETZIM_FINISH_NO_BUILD_WAIT=1 are for
+# tests (ops/tests/test_finish_pending_e2e.py); production sets none of them.
 set -uo pipefail
-cd /storage/streetzim
+ROOT=${STREETZIM_ROOT:-/storage/streetzim}
+cd "$ROOT" || exit 1
+IA=${IA:-$ROOT/venv-linux/bin/ia}
+PYTHON=${PYTHON:-$ROOT/venv-linux/bin/python3}
 PENDING=pending-uploads.tsv
-LOCK=/storage/streetzim/.finish-pending.lock
+LOCK=$ROOT/.finish-pending.lock
 exec 9> "$LOCK"
 flock -n 9 || { echo "another finish_pending_uploads.sh is running"; exit 0; }
 [ -s "$PENDING" ] || { echo "nothing pending"; exit 0; }
-LOG=/storage/streetzim/finish-pending.log
-n0=$(wc -l < "$PENDING")
-still=$(mktemp "${TMPDIR:-/storage/streetzim/tmp}/pending.XXXXXX")
-declare -A seen=()
-while IFS=$'\t' read -r id zim when md5; do
-  [ -n "${id:-}" ] || continue
-  [ -n "${seen[$id/$zim]:-}" ] && continue
-  seen[$id/$zim]=1
-  [ -s "$zim" ] || { echo "$id: $zim gone locally — dropping" | tee -a "$LOG"; continue; }
-  # Rows written before the md5 column: compute it (once; the row keeps it).
-  [[ "${md5:-}" =~ ^[0-9a-f]{32}$ ]] || md5=$(md5sum "$zim" | cut -d' ' -f1)
-  # One `ia metadata` call answers both questions: is this ZIM listed, and has
-  # a LATER build of the same region already been listed? A superseded row is
-  # not just wasted work -- completing it rebuilds web/torrents/<id>.torrent
-  # from the older file, which makes generate.py drop the region's Torrent
-  # button, and then cleanup_old_zims --keep 2 deletes the very file the row
-  # was about. Observed 2026-09-27 with southeast-asia 09-17 behind 09-20.
-  state=$(venv-linux/bin/ia metadata "streetzim-$id" 2>/dev/null \
-    | venv-linux/bin/python3 -c '
+LOG=$ROOT/finish-pending.log
+# One `ia metadata` answer, two questions: is this ZIM listed with this md5
+# (argv 2; empty: never listed), and has a LATER build of the same region
+# already been listed? A superseded row is not just wasted work -- completing
+# it rebuilds web/torrents/<id>.torrent from the older file, which makes
+# generate.py drop the region's Torrent button, and then cleanup_old_zims
+# --keep 2 deletes the very file the row was about. Observed 2026-09-27 with
+# southeast-asia 09-17 behind 09-20. (No single quotes in here.)
+STATE_PY='
 import sys, json, re
 want = sys.argv[1]
 md5 = (sys.argv[2] if len(sys.argv) > 2 else "").strip().lower()
@@ -67,33 +73,53 @@ def stamp(n):
 mine = stamp(want)
 newer = sorted((n for n in names if stamp(n) and mine and stamp(n) > mine), key=stamp)
 print(("yes" if listed else "no") + "\t" + (newer[-1] if newer else ""))
-' "$zim" "$md5" 2>/dev/null)
-  listed=${state%%$'\t'*}
+'
+n0=$(wc -l < "$PENDING")
+still=$(mktemp "${TMPDIR:-$ROOT/tmp}/pending.XXXXXX")
+declare -A seen=()
+while IFS=$'\t' read -r id zim when md5; do
+  [ -n "${id:-}" ] || continue
+  [ -n "${seen[$id/$zim]:-}" ] && continue      # read newest first (tac)
+  seen[$id/$zim]=1
+  [ -s "$zim" ] || { echo "$id: $zim gone locally — dropping" | tee -a "$LOG"; continue; }
+  meta=$("$IA" metadata "streetzim-$id" 2>/dev/null)
+  state=$(printf '%s' "$meta" | "$PYTHON" -c "$STATE_PY" "$zim" "" 2>/dev/null)
   superseded=${state#*$'\t'}
   if [ -n "$superseded" ]; then
     echo "$id: $zim superseded by $superseded — dropping" | tee -a "$LOG"
     continue
   fi
+  # The row's md5, unless the file changed (ctime) after the row was written.
+  t_row=""   # (`date -d ""` is today's midnight, not an error)
+  [ -n "${when:-}" ] && t_row=$(date -d "$when" +%s 2>/dev/null) || t_row=""
+  if ! [[ "${md5:-}" =~ ^[0-9a-f]{32}$ ]] || [ -z "$t_row" ] \
+      || [ "$(stat -c %Z "$zim")" -gt "$t_row" ]; then
+    md5=$(ionice -c3 nice -n10 md5sum "$zim" | cut -d' ' -f1)
+  fi
+  state=$(printf '%s' "$meta" | "$PYTHON" -c "$STATE_PY" "$zim" "$md5" 2>/dev/null)
+  listed=${state%%$'\t'*}
   if [ "$listed" != "yes" ]; then
-    echo "$id: not listed with md5 $md5 yet (queued since $when)" | tee -a "$LOG"
+    echo "$id: not listed with md5 ${md5:-?} yet (queued since $when)" | tee -a "$LOG"
     printf '%s\t%s\t%s\t%s\n' "$id" "$zim" "$when" "$md5" >> "$still"
     continue
   fi
   # Wait for a build gap so this never competes for the disk.
-  while pgrep -f '[c]reate_osm_zim' >/dev/null; do sleep 60; done
-  echo "=== $id listed — completing prune/torrent/deploy" | tee -a "$LOG"
-  if PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
+  if [ -z "${STREETZIM_FINISH_NO_BUILD_WAIT:-}" ]; then
+    while pgrep -f '[c]reate_osm_zim' >/dev/null; do sleep 60; done
+  fi
+  echo "=== $id listed with md5 $md5 — completing prune/torrent/deploy" | tee -a "$LOG"
+  if PROJECT_DIR="$ROOT" TERRAIN_STRIPE_TOLERATE=10 \
        bash cloud/upload_validated.sh "$id" "$zim" >> "$LOG" 2>&1; then
     echo "  $id done" | tee -a "$LOG"
   else
     rc=$?; echo "  $id rc=$rc — keeping it pending" | tee -a "$LOG"
-    # upload_validated exit 6 has already appended its own row again; a
-    # second copy would only be dropped as a duplicate on the next run.
+    # upload_validated exit 6 has already appended its own (newer) row.
     [ "$rc" -eq 6 ] || printf '%s\t%s\t%s\t%s\n' "$id" "$zim" "$when" "$md5" >> "$still"
   fi
-done < <(head -n "$n0" "$PENDING")
-# Rows appended after this run started (including exit-6 re-appends above).
+done < <(head -n "$n0" "$PENDING" | tac)
+# Rows appended after this run started (including exit-6 re-appends above)
+# come last, so the keep-last dedupe below lets them win.
 tail -n +"$((n0 + 1))" "$PENDING" >> "$still"
-awk -F'\t' '!seen[$1 "/" $2]++' "$still" > "$still.dedup" && mv -f "$still.dedup" "$still"
+tac "$still" | awk -F'\t' '!seen[$1 "/" $2]++' | tac > "$still.dedup" && mv -f "$still.dedup" "$still"
 mv -f "$still" "$PENDING"
 echo "remaining pending: $(wc -l < "$PENDING")"
