@@ -62,3 +62,14 @@ west-africa	africa/nigeria+africa/ghana+africa/ivory-coast+africa/senegal-and-ga
 west-asia	europe/turkey+asia/syria+asia/lebanon+asia/israel-and-palestine+asia/jordan+asia/iraq+asia/iran+asia/gcc-states+asia/yemen+africa/egypt+asia/afghanistan+asia/pakistan+europe/cyprus
 east-coast-us	north-america/us/maine+north-america/us/new-hampshire+north-america/us/vermont+north-america/us/massachusetts+north-america/us/rhode-island+north-america/us/connecticut+north-america/us/new-york+north-america/us/new-jersey+north-america/us/pennsylvania+north-america/us/delaware+north-america/us/maryland+north-america/us/district-of-columbia+north-america/us/virginia+north-america/us/west-virginia+north-america/us/north-carolina+north-america/us/south-carolina+north-america/us/georgia+north-america/us/florida
 new-york-state	north-america/us/new-york
+brazil	south-america/brazil
+south-america	south-america
+california	north-america/us/california
+florida	north-america/us/florida
+texas	north-america/us/texas
+colorado	north-america/us/colorado
+hawaii	north-america/us/hawaii
+carolinas	north-america/us/north-carolina+north-america/us/south-carolina
+west-coast-us	north-america/us/washington+north-america/us/oregon+north-america/us/california
+central-us	north-america/us/utah+north-america/us/colorado+north-america/us/wyoming+north-america/us/montana+north-america/us/idaho+north-america/us/nevada+north-america/us/arizona+north-america/us/new-mexico
+midwest-us	north-america/us/ohio+north-america/us/indiana+north-america/us/illinois+north-america/us/michigan+north-america/us/wisconsin+north-america/us/minnesota+north-america/us/iowa+north-america/us/missouri+north-america/us/north-dakota+north-america/us/south-dakota+north-america/us/nebraska+north-america/us/kansas

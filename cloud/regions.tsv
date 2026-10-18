@@ -16,13 +16,13 @@ chicago-metro	Chicago Metro	-88.5,41.0,-87.0,42.5	local	41.9742,-87.9073	41.8781
 nyc-metro	NYC Metro	-74.6,40.4,-73.4,41.4	local	40.7831,-73.9712	40.6782,-73.9442	Brooklyn	 ; dst was JFK terminal centroid (40.6413,-73.7781) which snaps 378 m to the nearest public road and trips the browser gate 100 m coverage check — moved to the Bed-Stuy street grid (4 m snap)
 greater-la	Greater Los Angeles	-119.0,33.5,-117.0,34.8	local	33.94257,-118.40757	34.09276,-118.32888	Hollywood	
 hispaniola	Hispaniola	-74.5,17.5,-68.3,20.1	local	18.4861,-69.9312	19.4517,-70.6970	Santo Domingo	
-colorado	Colorado	-109.06,36.99,-102.04,41.00	local	39.7392,-104.9903	40.0150,-105.2705	Denver	
+colorado	Colorado	-109.1,36.9,-101.9,41.1	local	39.7392,-104.9903	40.0150,-105.2705	Denver	border cut; box widened from -109.06,36.99,-102.04,41.00 on 2026-10-18 to take the state lines
 florida	Florida	-88.0,24.4,-79.5,31.5	local	25.7617,-80.1918	28.5384,-81.3789	Miami	
 carolinas	The Carolinas	-84.4,32.0,-75.3,36.6	local	35.7796,-78.6382	35.5951,-82.5515	Charlotte	2026-07 blank-terrain incident region; terrain gate mandatory
 new-york-state	New York State	-80.0,40.4,-71.8,45.0	local	40.7128,-74.0060	42.8864,-78.8784	Albany	
 alaska	Alaska	172.0,51.0,-130.0,72.0	local	61.2181,-149.9003	64.8378,-147.7164	Anchorage	crosses the antimeridian (minlon > maxlon): Aleutians west to Attu (172.4E) included; ~3h build
-california	California	-125.0,32.0,-114.0,42.0	local	37.7749,-122.4194	34.0522,-118.2437	Los Angeles	smoke pair is the 560 km SF->LA cross-state route (exercises spatial cell paging through the Central Valley + Grapevine)
-texas	Texas	-106.7,25.8,-93.5,36.5	local	30.2672,-97.7431	29.4241,-98.4936	Houston	
+california	California	-125.0,32.0,-114.0,42.1	local	37.7749,-122.4194	34.0522,-118.2437	Los Angeles	border cut; north edge 42.0 -> 42.1 on 2026-10-18 (the Oregon line runs to 42.008)
+texas	Texas	-106.7,25.8,-93.4,36.6	local	30.2672,-97.7431	29.4241,-98.4936	Houston	border cut; widened from -106.7,25.8,-93.5,36.5 on 2026-10-18 (Panhandle line, Sabine River)
 # --- country ---
 iceland	Iceland	-25.0,63.0,-13.0,67.0	country	64.1466,-21.9426	65.6826,-18.1107	Reykjavik	
 south-korea	South Korea	124.0,33.0,131.5,39.0	country	37.5665,126.9780	35.1796,129.0756	Seoul	
@@ -47,9 +47,9 @@ korea-mongolia	Korea & Mongolia	87.5,33.0,131.5,53.0	multi-country	37.5665,126.9
 west-asia	West Asia	25.0,12.0,62.5,42.0	multi-country	25.2048,55.2708	24.4539,54.3773	Dubai	
 central-asia	Central Asia	40.0,25.0,120.0,56.0	multi-country	43.2220,76.8512	42.8746,74.5698	Tashkent	
 # --- us-region ---
-central-us	Central US	-120.0,31.3,-104.0,49.0	us-region	39.7392,-104.9903	40.0150,-105.2705	Denver	
-west-coast-us	West Coast US	-125.0,32.0,-116.5,49.5	us-region	47.6062,-122.3321	45.5152,-122.6784	Seattle	
-midwest-us	Midwest US	-104.1,36.0,-80.5,49.4	us-region	41.8781,-87.6298	43.0389,-87.9065	Chicago	
+central-us	Central US	-120.1,31.3,-102.0,49.1	us-region	39.7392,-104.9903	40.0150,-105.2705	Denver	box = the 8 Mountain West states (border cut); was -120.0,31.3,-104.0,49.0 (missed eastern Colorado and New Mexico, the Nevada side of Lake Tahoe and Verdi) before 2026-10-18
+west-coast-us	West Coast US	-125.0,32.0,-114.0,49.5	us-region	47.6062,-122.3321	45.5152,-122.6784	Seattle	box = WA+OR+CA (border cut, cloud/region-outlines.tsv); was -125.0,32.0,-116.5,49.5 (missed California east of 116.5 W and the Snake River edge of Oregon) before 2026-10-18
+midwest-us	Midwest US	-104.1,35.9,-80.4,49.4	us-region	41.8781,-87.6298	43.0389,-87.9065	Chicago	box = its 12 states (border cut); widened from -104.1,36.0,-80.5,49.4 on 2026-10-18 (Missouri bootheel, Ohio-Pennsylvania line)
 east-coast-us	East Coast US	-88.5,24.2,-66.8,47.5	us-region	40.7128,-74.0060	39.9526,-75.1652	Boston	box = the 18 states in cloud/region-outlines.tsv (border cut); was -82.0,24.0,-66.5,47.6 before 2026-10-16
 # --- continent (largest last) ---
 southeast-asia	Southeast Asia	92.0,-11.0,141.5,28.5	continent	13.7563,100.5018	12.9236,100.8825	Bangkok	

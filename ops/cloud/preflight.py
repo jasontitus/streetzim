@@ -10,7 +10,7 @@ nonzero with a concrete punch list so we never start a build that will
 fail validation.
 
 Usage:
-  python cloud/preflight.py --bbox=-120,31.3,-104,49.0 --name central-us
+  python cloud/preflight.py --bbox=-120.1,31.3,-102.0,49.1 --name central-us
   python cloud/preflight.py --region central-us
   python cloud/preflight.py --region all     # every known region
 
@@ -63,18 +63,18 @@ WORLD_MBTILES = ROOT / "world-data" / "world-tiles-v2.mbtiles"
 # --bbox / --name.
 REGIONS = {
     "australia-nz":  (112.0, -47.5, 179.5, -10.0),
-    "texas":         (-107.0, 25.5, -93.4, 36.6),
-    "west-coast-us": (-125.0, 32.0, -114.0, 46.0),
+    "texas":         (-106.7, 25.8, -93.4, 36.6),   # cloud/regions.tsv, 2026-10-18
+    "west-coast-us": (-125.0, 32.0, -114.0, 49.5),   # cloud/regions.tsv, 2026-10-18
     "east-coast-us": (-88.5, 24.2, -66.8, 47.5),   # cloud/regions.tsv, 2026-10-16
-    "central-us":    (-120.0, 31.3, -104.0, 49.0),
+    "central-us":    (-120.1, 31.3, -102.0, 49.1),   # cloud/regions.tsv, 2026-10-18
     "iran":          (44.0, 25.0, 63.5, 39.8),
     "japan":         (122.9, 24.0, 146.0, 45.6),
     "silicon-valley":(-122.6, 37.2, -121.7, 37.9),
-    "colorado":      (-109.06, 36.99, -102.04, 41.00),
+    "colorado":      (-109.1, 36.9, -101.9, 41.1),   # cloud/regions.tsv, 2026-10-18
     "hispaniola":    (-74.5, 17.5, -68.3, 20.1),
     "washington-dc": (-77.12, 38.79, -76.91, 38.99),
     "baltics":       (20.9, 53.9, 28.3, 59.7),
-    "midwest-us":    (-104.1, 36.0, -80.5, 49.4),
+    "midwest-us":    (-104.1, 35.9, -80.4, 49.4),   # cloud/regions.tsv, 2026-10-18
     "central-asia":  (51.0, 35.0, 88.0, 56.0),
     "west-asia":     (25.0, 12.0, 63.0, 45.0),
     "africa":        (-18.0, -35.0, 52.0, 38.0),
