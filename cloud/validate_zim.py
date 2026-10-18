@@ -2021,6 +2021,20 @@ _ZIMCHECK_KNOWN_FALSE_POSITIVE_PAIRS = (
 )
 
 
+def _zimcheck_timeout() -> float:
+    """zimcheck's time limit in seconds: STREETZIM_ZIMCHECK_TIMEOUT when it is
+    a positive number up to a day (larger makes subprocess.run raise, which
+    would read as "zimcheck unrunnable (skipped)"), else 3600. zimru on the
+    35 GB and 61 GB maps ran past 1800 s while builds shared the disk
+    (2026-10-18); a caller's own outer timeout still caps it."""
+    import math
+    try:
+        v = float(os.environ.get("STREETZIM_ZIMCHECK_TIMEOUT", ""))
+    except ValueError:
+        return 3600.0
+    return v if math.isfinite(v) and 0 < v <= 86400 else 3600.0
+
+
 def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     """Run Kiwix's `zimcheck` binary and parse the verdict.
 
@@ -2075,13 +2089,17 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # Big regions take much longer than small. Australia-NZ (6 GB +
     # 6.8 M routing nodes) hit 600 s and false-failed; libzim
     # zimcheck on canada (28 GB) is even worse. 1800 s covers
-    # everything we ship today; legit zimcheck failures surface in
-    # well under a minute on smaller ZIMs.
+    # everything we ship today on a quiet host; legit zimcheck failures
+    # surface in well under a minute on smaller ZIMs. With the disk
+    # shared by builds, zimru on united-states (35 GB) and europe (61 GB)
+    # ran past 1800 s (viewer rollout, 2026-10-18): 3600 s by default now,
+    # STREETZIM_ZIMCHECK_TIMEOUT for more (_zimcheck_timeout).
+    timeout = _zimcheck_timeout()
     try:
         proc = subprocess.run([bin_path, zim_path], capture_output=True,
-                              text=True, env=env, timeout=1800)
+                              text=True, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return "fail", "zimcheck timed out after 1800 s"
+        return "fail", f"zimcheck timed out after {timeout:g} s"
     except Exception as exc:
         return "pass", f"zimcheck unrunnable: {exc} (skipped)"
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
