@@ -578,3 +578,38 @@ def test_the_gdal_cache_is_capped_unless_the_operator_set_it(tmp_path, fake_dem,
     monkeypatch.setenv("GDAL_CACHEMAX", "1024")
     T.generate_terrain_tiles(BBOX, str(tmp_path / "again"), max_zoom=10)
     assert os.environ["GDAL_CACHEMAX"] == "1024"
+
+
+def test_a_cached_area_without_its_marker_is_counted_not_walked(tmp_path, fake_dem, monkeypatch):
+    # The fast path for a fully cached area with no marker counted its tiles
+    # with os.walk over the whole shared cache (22 M files on the build host),
+    # which held a rebuild in this step for hours on a busy disk. It counts
+    # the area's tiles arithmetically now, like the marker path.
+    calls = fake_dem[0]
+    world = tmp_path / "world.tif"
+    world.write_bytes(b"x")
+    bbox = T.parse_bbox(BBOX)
+    plan = T.TerrainPlan(bbox, 10, low_zoom_world_vrt=str(world))
+    assert not plan.fresh
+    dest = tmp_path / "terrain"
+    for z in range(plan.min_zoom, 11):
+        for t in mercantile.tiles(*bbox, zooms=z):
+            d = dest / str(z) / str(t.x)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{t.y}.webp").write_bytes(b"x" * 300)
+    other = dest / "10" / "0"                       # another region's tiles
+    other.mkdir(parents=True, exist_ok=True)
+    for y in range(50):
+        (other / f"{y}.webp").write_bytes(b"x" * 300)
+    monkeypatch.setattr(T, "_terrain_tile_usable", os.path.isfile)
+    real_walk = os.walk
+
+    def no_walk(top, *a, **k):
+        assert not str(top).startswith(str(dest)), f"walked the cache: {top}"
+        return real_walk(top, *a, **k)
+
+    monkeypatch.setattr(os, "walk", no_walk)
+    n = T.generate_terrain_tiles(BBOX, str(dest), max_zoom=10, low_zoom_world_vrt=str(world))
+    assert n == T._bbox_tile_total(*bbox, 10, min_zoom=plan.min_zoom)
+    assert not calls                                # taken from the cache as it is
+    assert not (dest / plan.marker_name).exists()   # this path writes no marker, as before

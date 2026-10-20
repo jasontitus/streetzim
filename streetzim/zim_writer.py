@@ -1600,6 +1600,20 @@ def _add_vector_tiles(creator, MapItem, *, output_path, tiles, mbtiles_path, til
             close_source()
 
 
+def _bbox_columns(z, bbox):
+    """The tile columns (x ranges, inclusive) that `bbox` reaches at zoom z,
+    one per side of the antimeridian, widened by a column each way: a
+    superset of the columns holding a tile _tile_in_bbox keeps (it counts a
+    tile that only touches the box)."""
+    n = 2 ** z
+    out = []
+    for minlon, _minlat, maxlon, _maxlat in _area.split(bbox):
+        lo = int((minlon + 180.0) / 360.0 * n) - 1
+        hi = int((maxlon + 180.0) / 360.0 * n) + 1
+        out.append((max(0, lo), min(n - 1, hi)))
+    return out
+
+
 def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, satellite_format, terrain_dir, terrain_max_zoom, bbox, terrain_min_zoom=0):
     """Satellite and terrain raster tiles from their on-disk caches."""
     # Build bbox tile filter if bbox is provided (shared cache may have tiles from other areas)
@@ -1629,13 +1643,21 @@ def _add_raster_layers(creator, MapItem, *, satellite_dir, satellite_max_zoom, s
             z_dir = os.path.join(source_dir, str(z))
             if not os.path.isdir(z_dir):
                 continue
+            columns = _bbox_columns(z, bbox) if bbox else None
             for x_name in sorted(os.listdir(z_dir)):
-                x_dir = os.path.join(z_dir, x_name)
-                if not os.path.isdir(x_dir):
-                    continue
                 try:
                     x = int(x_name)
                 except ValueError:
+                    continue
+                # The cache is shared by every region: list only the columns
+                # the box reaches. Listing them all (Poland: 16 M satellite
+                # and 22 M terrain files outside its box) ran the packing at
+                # 2 tiles/s on a busy disk (2026-10-19). The tile test below
+                # still decides; this only spares the listing.
+                if columns is not None and not any(lo <= x <= hi for lo, hi in columns):
+                    continue
+                x_dir = os.path.join(z_dir, x_name)
+                if not os.path.isdir(x_dir):
                     continue
                 # Sorted: alias targets (first-seen) must not depend on
                 # the filesystem's directory order.

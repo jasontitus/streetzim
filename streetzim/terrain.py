@@ -1000,12 +1000,13 @@ def generate_terrain_tiles(bbox_str, dest_dir, max_zoom=12,
             for t in sample
         )
         if all_cached and _blank_sample() is None:
-            total = sum(
-                len([f for f in files if f.endswith(".webp")])
-                for _, _, files in os.walk(dest_dir)
-                if "dem_sources" not in _
-            )
-            print(f"    Using {total} cached terrain tiles")
+            # Arithmetically, as the marker path above does: this os.walk'd
+            # the whole shared terrain_cache (22 M files, every region) to
+            # print a number, and held the east-coast-us rebuild in this step
+            # for hours on a busy disk (2026-10-20).
+            total = _bbox_tile_total(minlon, minlat, maxlon, maxlat, max_zoom,
+                                     min_zoom=plan.min_zoom)
+            print(f"    Using ~{total} cached terrain tiles")
             return total
 
     stats = _DemStats()
