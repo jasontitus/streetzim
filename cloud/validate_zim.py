@@ -2024,15 +2024,17 @@ _ZIMCHECK_KNOWN_FALSE_POSITIVE_PAIRS = (
 def _zimcheck_timeout() -> float:
     """zimcheck's time limit in seconds: STREETZIM_ZIMCHECK_TIMEOUT when it is
     a positive number up to a day (larger makes subprocess.run raise, which
-    would read as "zimcheck unrunnable (skipped)"), else 3600. zimru on the
+    would read as "zimcheck unrunnable (skipped)"), else 5400. zimru on the
     35 GB and 61 GB maps ran past 1800 s while builds shared the disk
-    (2026-10-18); a caller's own outer timeout still caps it."""
+    (2026-10-18), and united-states took 5,727 s on 10-19: 5400 still leaves
+    the driver's `timeout 10800` room for the other checks. A caller's own
+    outer timeout still caps it."""
     import math
     try:
         v = float(os.environ.get("STREETZIM_ZIMCHECK_TIMEOUT", ""))
     except ValueError:
-        return 3600.0
-    return v if math.isfinite(v) and 0 < v <= 86400 else 3600.0
+        return 5400.0
+    return v if math.isfinite(v) and 0 < v <= 86400 else 5400.0
 
 
 def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
@@ -2092,7 +2094,7 @@ def _chk_zimcheck_external(zim_path: str) -> tuple[str, str]:
     # everything we ship today on a quiet host; legit zimcheck failures
     # surface in well under a minute on smaller ZIMs. With the disk
     # shared by builds, zimru on united-states (35 GB) and europe (61 GB)
-    # ran past 1800 s (viewer rollout, 2026-10-18): 3600 s by default now,
+    # ran past 1800 s (viewer rollout, 2026-10-18): 5400 s by default now,
     # STREETZIM_ZIMCHECK_TIMEOUT for more (_zimcheck_timeout).
     timeout = _zimcheck_timeout()
     try:

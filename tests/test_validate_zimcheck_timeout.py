@@ -1,4 +1,4 @@
-"""validate_zim's zimcheck time limit: 3600 s unless STREETZIM_ZIMCHECK_TIMEOUT
+"""validate_zim's zimcheck time limit: 5400 s unless STREETZIM_ZIMCHECK_TIMEOUT
 gives a positive number of seconds up to a day (a busy host ran zimru on the 35 GB and
 61 GB maps past 1800 s, 2026-10-18)."""
 import importlib.util
@@ -13,10 +13,10 @@ V = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(V)
 
 
-@pytest.mark.parametrize("value, want", [(None, 3600.0), ("", 3600.0), ("7200", 7200.0),
-                                         ("90.5", 90.5), ("0", 3600.0), ("-5", 3600.0),
-                                         ("abc", 3600.0), ("inf", 3600.0), ("nan", 3600.0),
-                                         ("1e9", 3600.0), ("86400", 86400.0)])
+@pytest.mark.parametrize("value, want", [(None, 5400.0), ("", 5400.0), ("7200", 7200.0),
+                                         ("90.5", 90.5), ("0", 5400.0), ("-5", 5400.0),
+                                         ("abc", 5400.0), ("inf", 5400.0), ("nan", 5400.0),
+                                         ("1e9", 5400.0), ("86400", 86400.0)])
 def test_the_limit(monkeypatch, value, want):
     if value is None:
         monkeypatch.delenv("STREETZIM_ZIMCHECK_TIMEOUT", raising=False)
