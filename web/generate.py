@@ -425,6 +425,13 @@ REGIONS = [
         "zim_file": "osm-south-korea.zim",
         "description": "South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.",
     },
+    {
+        "id": "taiwan",
+        "tier": "country",
+        "title": "Taiwan",
+        "zim_file": "osm-taiwan.zim",
+        "description": "Taiwan &mdash; Taipei, New Taipei, Taichung, Kaohsiung, Tainan, Taoyuan, Hsinchu, Keelung, Hualien; Taroko Gorge, Sun Moon Lake, Alishan, Yushan, Kenting, and the islands of Penghu, Kinmen, Matsu, Green Island, and Orchid Island.",
+    },
     # ── United States — sub-regions ──────────────────────────────────
     {
         "id": "east-coast-us",

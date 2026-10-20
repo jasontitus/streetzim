@@ -73,3 +73,8 @@ carolinas	north-america/us/north-carolina+north-america/us/south-carolina
 west-coast-us	north-america/us/washington+north-america/us/oregon+north-america/us/california
 central-us	north-america/us/utah+north-america/us/colorado+north-america/us/wyoming+north-america/us/montana+north-america/us/idaho+north-america/us/nevada+north-america/us/arizona+north-america/us/new-mexico
 midwest-us	north-america/us/ohio+north-america/us/indiana+north-america/us/illinois+north-america/us/michigan+north-america/us/wisconsin+north-america/us/minnesota+north-america/us/iowa+north-america/us/missouri+north-america/us/north-dakota+north-america/us/south-dakota+north-america/us/nebraska+north-america/us/kansas
+central-asia	asia/kazakhstan+asia/uzbekistan+asia/turkmenistan+asia/tajikistan+asia/kyrgyzstan+asia/afghanistan+europe/georgia+asia/armenia+asia/azerbaijan
+china	asia/china
+indian-subcontinent	asia/india+asia/pakistan+asia/bangladesh+asia/sri-lanka+asia/nepal+asia/bhutan+asia/maldives
+southeast-asia	asia/thailand+asia/vietnam+asia/myanmar+asia/cambodia+asia/laos+asia/malaysia-singapore-brunei+asia/indonesia+asia/philippines+asia/east-timor
+taiwan	asia/taiwan

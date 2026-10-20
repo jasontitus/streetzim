@@ -46,7 +46,7 @@ TERRAIN = ROOT / "terrain_cache"
 VRT = TERRAIN / "dem_sources" / "comprehensive.vrt"
 
 REGIONS = {
-    "australia-nz":  (112.0, -47.5, 179.5, -10.0),
+    "australia-nz":  (96.5, -50.0, 180.0, -8.0),   # cloud/regions.tsv, 2026-10-20
     "texas":         (-106.7, 25.8, -93.4, 36.6),   # cloud/regions.tsv, 2026-10-18
     "west-coast-us": (-125.0, 32.0, -114.0, 49.5),   # cloud/regions.tsv, 2026-10-18
     "east-coast-us": (-88.5, 24.2, -66.8, 47.5),   # cloud/regions.tsv, 2026-10-16
@@ -59,11 +59,11 @@ REGIONS = {
     "washington-dc": (-77.12, 38.79, -76.91, 38.99),
     "baltics":       (20.9, 53.9, 28.3, 59.7),
     "midwest-us":    (-104.1, 35.9, -80.4, 49.4),   # cloud/regions.tsv, 2026-10-18
-    "central-asia":  (51.0, 35.0, 88.0, 56.0),
+    "central-asia":  (39.8, 29.2, 87.6, 55.7),   # cloud/regions.tsv, 2026-10-20
     "west-asia":     (25.0, 12.0, 63.0, 45.0),
     "africa":        (-18.0, -35.0, 52.0, 38.0),
     "europe":        (-25.0, 34.0, 50.5, 72.0),
-    "indian-subcontinent": (60.0, 5.0, 97.5, 37.5),
+    "indian-subcontinent": (60.0, -1.5, 98.0, 38.0),   # cloud/regions.tsv, 2026-10-20
 }
 
 import math
