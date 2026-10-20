@@ -107,3 +107,13 @@ def test_the_columns_cover_every_tile_the_box_touches():
             for minlon, minlat, maxlon, maxlat in A.split(bbox):
                 for t in mercantile.tiles(minlon, minlat, maxlon, maxlat, zooms=z):
                     assert any(lo <= t.x <= hi for lo, hi in cols), (bbox, z, t)
+
+
+def test_a_tile_that_only_touches_the_west_edge_is_listed():
+    # The writer keeps a tile whose east edge equals the box's west edge
+    # (_tile_in_bbox counts touching), but mercantile.tiles starts at the tile
+    # containing the west edge and never yields it, so the test above cannot
+    # see a lost west column. At z8, x 63 ends at -90 and x 128 starts at 0.
+    cols = W._bbox_columns(8, (-90.0, -10.0, 0.0, 10.0))
+    assert any(lo <= 63 <= hi for lo, hi in cols), cols
+    assert any(lo <= 128 <= hi for lo, hi in cols), cols
