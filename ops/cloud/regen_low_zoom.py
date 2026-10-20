@@ -59,11 +59,11 @@ REGIONS = {
     "washington-dc": (-77.12, 38.79, -76.91, 38.99),
     "baltics":       (20.9, 53.9, 28.3, 59.7),
     "midwest-us":    (-104.1, 35.9, -80.4, 49.4),   # cloud/regions.tsv, 2026-10-18
-    "central-asia":  (51.0, 35.0, 88.0, 56.0),
+    "central-asia":  (39.8, 29.2, 87.6, 55.7),   # cloud/regions.tsv, 2026-10-20
     "west-asia":     (25.0, 12.0, 63.0, 45.0),
     "africa":        (-18.0, -35.0, 52.0, 38.0),
     "europe":        (-25.0, 34.0, 50.5, 72.0),
-    "indian-subcontinent": (60.0, 5.0, 97.5, 37.5),
+    "indian-subcontinent": (60.0, -1.5, 98.0, 38.0),   # cloud/regions.tsv, 2026-10-20
 }
 
 import math
