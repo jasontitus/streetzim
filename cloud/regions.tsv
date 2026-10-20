@@ -53,10 +53,10 @@ midwest-us	Midwest US	-104.1,35.9,-80.4,49.4	us-region	41.8781,-87.6298	43.0389,
 east-coast-us	East Coast US	-88.5,24.2,-66.8,47.5	us-region	40.7128,-74.0060	39.9526,-75.1652	Boston	box = the 18 states in cloud/region-outlines.tsv (border cut); was -82.0,24.0,-66.5,47.6 before 2026-10-16
 # --- continent (largest last) ---
 southeast-asia	Southeast Asia	92.0,-11.2,141.5,28.7	continent	13.7563,100.5018	12.9236,100.8825	Bangkok	border cut; widened from 92.0,-11.0,141.5,28.5 on 2026-10-20 (northern Kachin, Ndana Island)
-australia-nz	Australia & New Zealand	110.0,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	
+australia-nz	Australia & New Zealand	96.5,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	west 110.0 -> 96.5 on 2026-10-20 (Christmas Island and Cocos, in Geofabrik australia, were outside the box)
 canada	Canada	-141.0,41.5,-52.0,83.5	continent	43.6532,-79.3832	45.4215,-75.6972	Toronto	
 indian-subcontinent	Indian Subcontinent	60.0,-1.5,98.0,38.0	continent	28.6139,77.2090	27.1767,78.0081	Mumbai	~4h build; border cut; south 5.0 -> -1.5 on 2026-10-20 (the Maldives, on its card, were outside the box)
-china	China	73.0,18.0,135.0,53.7	continent	39.90432,116.40533	31.23044,121.47389	Beijing	~6h build; border cut (asia/china: Hong Kong and Macau in, Taiwan out); north 53.5 -> 53.7 on 2026-10-20 (the Amur bend at Mohe reaches 53.56)
+china	China	73.0,15.7,135.0,53.7	continent	39.90432,116.40533	31.23044,121.47389	Beijing	~6h build; border cut (asia/china: Hong Kong and Macau in, Taiwan out); north 53.5 -> 53.7 on 2026-10-20 (the Amur bend at Mohe reaches 53.56); south 18.0 -> 15.7 (the Paracels, in asia/china, had no map once Southeast Asia is cut)
 africa	Africa	-18.0,-35.0,52.0,38.0	continent	-1.2921,36.8219	-4.0435,39.6682	Cairo	
 south-america	South America	-82.0,-56.0,-32.0,13.5	continent	-34.6037,-58.3816	-32.9442,-60.6505	Lima	~15h build
 russia	Russia	27.0,41.0,180.0,82.0	continent	55.7558,37.6173	59.9311,30.3609	Moscow	~26h build; post-pack swap stall seen 2026-05-10

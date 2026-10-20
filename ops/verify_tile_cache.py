@@ -50,14 +50,14 @@ MIN_TILE_SIZE = 200  # bytes; anything smaller is almost certainly a broken stub
 # Pre-defined region bboxes (keep in sync with cloud/launch-build-vm.sh)
 REGIONS = {
     "united-states":     "-125.0,24.4,-66.9,49.4",
-    "midwest-us":        "-104.1,36.0,-80.5,49.4",
+    "midwest-us":        "-104.1,35.9,-80.4,49.4",   # cloud/regions.tsv, 2026-10-18
     "washington-dc":     "-77.12,38.79,-76.91,38.99",
     "california":        "-124.48,32.53,-114.13,42.01",
     "colorado":          "-109.06,36.99,-102.04,41.00",
     "europe":            "-25.0,34.5,45.0,72.0",
     "west-asia":         "25.0,12.0,62.5,42.0",
     "iran":              "44.0,25.0,63.5,39.8",
-    "indian-subcontinent": "60.0,5.0,97.5,37.0",
+    "indian-subcontinent": "60.0,-1.5,98.0,38.0",   # cloud/regions.tsv, 2026-10-20
     "africa":            "-18.0,-35.0,52.0,38.0",
     "asia":              "25.0,-12.0,180.0,82.0",
     "south-america":     "-82.0,-56.0,-34.0,13.0",

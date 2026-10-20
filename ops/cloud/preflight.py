@@ -62,7 +62,7 @@ WORLD_MBTILES = ROOT / "world-data" / "world-tiles-v2.mbtiles"
 # overture-rollout-redo.sh. An unknown region must be called with
 # --bbox / --name.
 REGIONS = {
-    "australia-nz":  (112.0, -47.5, 179.5, -10.0),
+    "australia-nz":  (96.5, -50.0, 180.0, -8.0),   # cloud/regions.tsv, 2026-10-20
     "texas":         (-106.7, 25.8, -93.4, 36.6),   # cloud/regions.tsv, 2026-10-18
     "west-coast-us": (-125.0, 32.0, -114.0, 49.5),   # cloud/regions.tsv, 2026-10-18
     "east-coast-us": (-88.5, 24.2, -66.8, 47.5),   # cloud/regions.tsv, 2026-10-16
