@@ -5,6 +5,7 @@
 # file, only zimru url_internal findings excused) and pack_gate.py passes.
 # --offline: Wikidata text from the cache only.
 # Usage: build_packs.sh REGION BASE OUTDIR "el de fr ..."
+# Packs are named osm_<REGION>_wiki-<L>_<date>_<first 8 hex of the base's UUID>.zim.
 # Env: WIKI_SRC (required: the Kiwix Wikipedia ZIMs, --source), PYTHON (python3),
 #   LANGPACK_WORK (default ./langpack-work: locks/, tmp/), WP_CACHE (the builder's
 #   --cache; default its own), PACK_DATE (file-name date, default today),
@@ -32,6 +33,10 @@ export ZIMCHECK_BIN=$ZC PACK_GATE_ZIMCHECK=$ZC
 mkdir -p "$3"; OUT=$(cd "$3" && pwd)
 export LANGPACK_WORK=${LANGPACK_WORK:-$PWD/langpack-work}
 DATE=${PACK_DATE:-$(date +%F)}
+# The base's UUID (first 8 hex digits) is part of every pack's file name:
+# packs for two bases of a region never share a name, on archive.org or here.
+BU8=$(od -An -tx1 -j8 -N4 "$B" | tr -d ' \n')
+[ ${#BU8} = 8 ] || { echo "$(basename "$0"): cannot read the base's UUID from $B" >&2; exit 1; }
 mkdir -p "$LANGPACK_WORK/tmp"
 export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$LANGPACK_WORK/tmp
 BUILDER=${BUILDER:-$ROOT/tools/build_wiki_pack.py}  # tests substitute a fake
@@ -39,7 +44,7 @@ CACHE=(); [ -n "${WP_CACHE:-}" ] && CACHE=(--cache "$WP_CACHE")
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=8589934592 --)
 MIN_GB=${LANGPACK_MIN_FREE_GB:-0}
 wait_mem() { while [ "$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo)" -lt "$MIN_GB" ]; do
-  echo "paused $(date +%T): MemAvailable < $MIN_GB GB"; sleep 60; done; }
+  echo "paused $(TZ=America/Los_Angeles date "+%T %Z"): MemAvailable < $MIN_GB GB"; sleep 60; done; }
 cd "$OUT"
 # one build per region+language at a time, whatever OUT (review r4): two runs would
 # share the stats file, the run marker and the staging path
@@ -52,12 +57,12 @@ for L in $LANGS; do
     exec {LK}>&-; RC_ALL=2; continue
   fi
   wait_mem
-  echo "== $L start $(date +%T)"
+  echo "== $L start $(TZ=America/Los_Angeles date "+%T %Z")"
   # build into .staging/; the pack reaches OUT only if pack_gate.py passes (review S1)
-  F=osm_${R}_wiki-${L}_${DATE}.zim; ST=$OUT/.staging; mkdir -p "$ST"; rm -f "$ST/$F" "$ST/$F.gate.json"
+  F=osm_${R}_wiki-${L}_${DATE}_${BU8}.zim; ST=$OUT/.staging; mkdir -p "$ST"; rm -f "$ST/$F" "$ST/$F.gate.json"
   # this run's stats only (review r3): a stats file left by an earlier build must
   # never excuse this one, so delete it and mark the run's start
-  STATS=$OUT/osm_${R}_wiki-${L}_${DATE}.stats.json; MARK=$ST/.run-$L
+  STATS=$OUT/${F%.zim}.stats.json; MARK=$ST/.run-$L
   rm -f "$STATS"; touch "$MARK"
   nice -n 19 "${LIM[@]}" timeout 3600 \
     "$PY" "$BUILDER" "$B" --lang "$L" \
@@ -72,11 +77,11 @@ for L in $LANGS; do
   echo "   builder: $(cat "$OUT/builder-ok-$L.log")"
   if [ $bok = 0 ] && [ -s "$ST/$F" ] && nice -n 19 "${LIM[@]}" timeout 3600 "$PY" "$T/pack_gate.py" "$ST/$F" --base "$B" > "$OUT/gate-$L.log" 2>&1; then
     mv "$ST/$F" "$OUT/$F" && mv "$ST/$F.gate.json" "$OUT/$F.gate.json"
-    echo "== $L builder_rc=$brc gate=PASS $(date +%T) $(stat -c %s "$OUT/$F")"
+    echo "== $L builder_rc=$brc gate=PASS $(TZ=America/Los_Angeles date "+%T %Z") $(stat -c %s "$OUT/$F")"
   else
-    echo "== $L builder_rc=$brc builder_ok=$bok gate=FAIL $(date +%T) (kept in .staging; not usable)"
+    echo "== $L builder_rc=$brc builder_ok=$bok gate=FAIL $(TZ=America/Los_Angeles date "+%T %Z") (kept in .staging; not usable)"
   fi
   exec {LK}>&-  # release the region+language lock
 done
-echo "== all done $(date +%T)"
+echo "== all done $(TZ=America/Los_Angeles date "+%T %Z")"
 exit $RC_ALL

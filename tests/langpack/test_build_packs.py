@@ -25,7 +25,6 @@ if not (shutil.which("bash") and shutil.which("flock")):
     pytest.skip("build_packs.sh needs bash and flock (util-linux)", allow_module_level=True)
 
 DATE = "2026-10-13"
-F = f"osm_testland_wiki-th_{DATE}"
 LINKS = {"ok": False, "problems": ["zimcheck: url_internal: The following links:\n- ./X_&amp;_Y"],
          "zimcheck_findings": {"url_internal": 1}, "zimcheck": "FAIL (1 findings)"}
 
@@ -57,7 +56,8 @@ def bp(lp: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory) -> SimpleN
     env = {**os.environ, "BUILDER": str(fake), "FAKE_PACK": str(lp.packs["th"]), "FAKE_CHECK": json.dumps(LINKS),
            "PACK_GATE_ZIMCHECK": zc, "WIKI_SRC": str(d / "wiki-src"), "LANGPACK_WORK": str(d / "work"),
            "PACK_DATE": DATE, "PYTHON": sys.executable, "PYTHONDONTWRITEBYTECODE": "1"}
-    return SimpleNamespace(dir=d, env=env, base=lp.base)
+    # pack names carry the base's UUID (its first 8 hex digits): review r3 M-2
+    return SimpleNamespace(dir=d, env=env, base=lp.base, F=f"osm_testland_wiki-th_{DATE}_{lpzims.read_uuid(lp.base)[:8]}")
 
 
 def _build(bp: SimpleNamespace, out: Path, mode: str, **extra: str) -> subprocess.CompletedProcess[str]:
@@ -65,7 +65,7 @@ def _build(bp: SimpleNamespace, out: Path, mode: str, **extra: str) -> subproces
                           capture_output=True, text=True, timeout=600, env={**bp.env, "FAKE_MODE": mode, **extra})
 
 
-def _stale(out: Path) -> Path:
+def _stale(out: Path, F: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     p = out / f"{F}.stats.json"
     p.write_text(json.dumps({"zim_bytes": 1, "check": LINKS}))
@@ -77,10 +77,10 @@ def _stale(out: Path) -> Path:
                                         ("good", True)])
 def test_only_this_runs_stats_count(mode: str, lands: bool, bp: SimpleNamespace, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    stale = _stale(out)
+    stale = _stale(out, bp.F)
     r = _build(bp, out, mode)
     bok = (out / "builder-ok-th.log").read_text().strip()
-    landed = (out / f"{F}.zim").exists()
+    landed = (out / f"{bp.F}.zim").exists()
     assert landed is lands, r.stdout + r.stderr
     assert bok.startswith("PROCEED" if lands else "REJECT"), bok
     assert ("gate=PASS" in r.stdout) is lands
@@ -88,10 +88,10 @@ def test_only_this_runs_stats_count(mode: str, lands: bool, bp: SimpleNamespace,
     # the builder's own check uses the same (official) zimcheck as the gate
     assert (out / "zimcheck_bin.txt").read_text() == bp.env["PACK_GATE_ZIMCHECK"]
     if lands:
-        g = json.loads((out / f"{F}.zim.gate.json").read_text())
-        assert g["ok"] and g["pack_md5"] == lpzims.md5_of(out / f"{F}.zim")
+        g = json.loads((out / f"{bp.F}.zim.gate.json").read_text())
+        assert g["ok"] and g["pack_md5"] == lpzims.md5_of(out / f"{bp.F}.zim")
     else:
-        assert not (out / f"{F}.zim.gate.json").exists()
+        assert not (out / f"{bp.F}.zim.gate.json").exists()
 
 
 def test_one_build_per_region_and_language(bp: SimpleNamespace, tmp_path: Path) -> None:
@@ -99,7 +99,7 @@ def test_one_build_per_region_and_language(bp: SimpleNamespace, tmp_path: Path) 
     p1 = subprocess.Popen([str(TOOLS / "build_packs.sh"), "testland", str(bp.base), str(out), "th"],
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           env={**bp.env, "FAKE_MODE": "slow_good", "FAKE_SLEEP": "6"})
-    staged, mark = out / ".staging" / f"{F}.zim", out / ".staging" / ".run-th"
+    staged, mark = out / ".staging" / f"{bp.F}.zim", out / ".staging" / ".run-th"
     t0 = time.time()
     while not staged.exists() and p1.poll() is None and time.time() - t0 < 120:
         time.sleep(0.1)
@@ -111,9 +111,9 @@ def test_one_build_per_region_and_language(bp: SimpleNamespace, tmp_path: Path) 
         assert r.returncode == 2 and "REFUSED" in r.stdout, r.stdout + r.stderr
         assert time.time() - t < 30
         assert mark.stat().st_mtime_ns == m0 and staged.stat().st_mtime_ns == s0
-        assert not (out / f"{F}.stats.json").exists()
+        assert not (out / f"{bp.F}.stats.json").exists()
     o1, _ = p1.communicate(timeout=600)
-    assert p1.returncode == 0 and "gate=PASS" in o1 and (out / f"{F}.zim").exists(), o1
+    assert p1.returncode == 0 and "gate=PASS" in o1 and (out / f"{bp.F}.zim").exists(), o1
     r = _build(bp, out2, "good")                # released: a new run gets the lock
     assert r.returncode == 0 and "gate=PASS" in r.stdout and "REFUSED" not in r.stdout, r.stdout
 

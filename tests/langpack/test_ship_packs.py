@@ -149,6 +149,11 @@ def _log(ship: SimpleNamespace) -> str:
     return (ship.work / "logs" / f"ship-testland-{ship.tag}.log").read_text()
 
 
+def _pk(ship: SimpleNamespace, lang: str) -> str:
+    """A pack's file name: the date and the base's UUID (review r3 M-2)."""
+    return f"osm_testland_wiki-{lang}_2026-10-21_{lpzims.read_uuid(ship.base)[:8]}.zim"
+
+
 def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None:
     r = _run(ship)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
@@ -166,7 +171,7 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
     assert len(ups) == 1 and ups[0]["item"] == "streetzim-testland-lang"
     sent = sorted(a for a in ups[0]["args"] if a.endswith(".zim"))
-    assert sent == [f"osm_testland_wiki-{x}_2026-10-21.zim" for x in ("de", "fr", "th")]
+    assert sent == [_pk(ship, x) for x in ("de", "fr", "th")]
     for m in ("--metadata=mediatype:data", "--metadata=collection:opensource", "--metadata=language:deu",
               "--metadata=language:fra", "--metadata=language:tha"):
         assert m in ups[0]["args"], ups[0]["args"]
@@ -179,7 +184,7 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     assert reg["base"]["download"] == f"https://archive.org/download/streetzim-testland/{ship.base.name}"
     assert all(m["recipe"] == f"recipes/testland/{m['lang']}.json" for m in reg["menu"])
     rde = json.loads((out / "de.json").read_text())
-    assert rde["packs"]["de"]["url"] == "{proxy}/streetzim-testland-lang/osm_testland_wiki-de_2026-10-21.zim"
+    assert rde["packs"]["de"]["url"] == "{proxy}/streetzim-testland-lang/" + _pk(ship, "de")
     assert "site_check.py FAILED" not in log and "SUMMARY" in log and "-> OK" in log
     # publish: into a web folder's build/recipes/, with the index the page reads
     web = tmp_path / "web"
@@ -215,10 +220,10 @@ def test_listing_pending_then_rerun(ship: SimpleNamespace) -> None:
 def test_never_overwrites_a_published_name(ship: SimpleNamespace) -> None:
     cache = ship.work / "ia-cache"
     (cache / "ia-streetzim-testland-lang.json").write_text(json.dumps({"files": [
-        {"name": "osm_testland_wiki-fr_2026-10-21.zim", "size": "1", "md5": "0" * 32}]}))
+        {"name": _pk(ship, "fr"), "size": "1", "md5": "0" * 32}]}))
     r = _run(ship)
     assert r.returncode == 1
-    assert "already holds osm_testland_wiki-fr_2026-10-21.zim with another MD5" in _log(ship)
+    assert f"already holds {_pk(ship, 'fr')} with another MD5" in _log(ship)
     assert _lines(ship.logs["ia"]) == []
 
 
@@ -230,7 +235,7 @@ def test_only_passing_entries_are_published(ship: SimpleNamespace) -> None:
     idx = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "index.json").read_text())
     assert [m["lang"] for m in idx["regions"][0]["menu"]] == ["de", "th", "en"]
     sent = [a for a in json.loads(_lines(ship.logs["ia"])[0])["args"] if a.endswith(".zim")]
-    assert "osm_testland_wiki-fr_2026-10-21.zim" not in sent
+    assert _pk(ship, "fr") not in sent
 
 
 def test_one_run_per_region(ship: SimpleNamespace) -> None:
@@ -382,3 +387,35 @@ def test_uploads_hold_the_host_upload_lock(ship: SimpleNamespace) -> None:
         assert _lines(ship.logs["ia"]) == []           # waiting for the lock
     assert p.wait(timeout=300) == 0
     assert len(_lines(ship.logs["ia"])) == 1
+
+
+def test_a_second_base_the_same_day_ships_too(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """Review r3 M-2: packs for another base of the region (a rebuild shipped
+    the same day) get their own names, so they neither clash with the first
+    base's on archive.org nor stop the run."""
+    assert _run(ship).returncode == 0
+    base_b = tmp_path / "bases-b" / "osm-testland-2026-10-22.zim"
+    base_b.parent.mkdir()
+    lpzims.write_base(base_b, description="Offline map of Testland, rebuilt")
+    assert lpzims.read_uuid(base_b) != lpzims.read_uuid(ship.base)
+    builder = tmp_path / "builder-b.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    listing = json.loads((ship.work / "ia-cache" / "ia-streetzim-testland.json").read_text())
+    listing["files"].append({"name": base_b.name, "size": str(base_b.stat().st_size), "md5": _md5(base_b)})
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(listing))
+    rb = subprocess.run(["bash", str(SHIP), "testland", str(base_b)], capture_output=True, text=True, timeout=900,
+                        env={**ship.env, "BUILDER": str(builder)})
+    log_b = (ship.work / "logs" / f"ship-testland-{base_b.name[:-4]}.log").read_text()
+    assert rb.returncode == 0, log_b[-3000:]
+    lang_item = json.loads((ship.work / "ia-cache" / "ia-streetzim-testland-lang.json").read_text())
+    names = {f["name"] for f in lang_item["files"]}
+    u8 = lpzims.read_uuid(base_b)[:8]
+    assert {f"osm_testland_wiki-{x}_2026-10-21_{u8}.zim" for x in ("de", "fr", "th")} <= names
+    assert {_pk(ship, x) for x in ("de", "fr", "th")} <= names          # the first base's are still there

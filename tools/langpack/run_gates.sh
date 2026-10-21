@@ -59,7 +59,7 @@ N="nice -n 19 ${LIM[*]} timeout 7200"
 NB="${LIMB[*]} timeout 900 nice -n 19"
 MIN_GB=${LANGPACK_MIN_FREE_GB:-0}
 wait_mem() { while [ "$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo)" -lt "$MIN_GB" ]; do
-  echo "paused $(date +%T): MemAvailable < $MIN_GB GB" >&2; sleep 60; done; }
+  echo "paused $(TZ=America/Los_Angeles date "+%T %Z"): MemAvailable < $MIN_GB GB" >&2; sleep 60; done; }
 BASE=$1; PACKS=$2; LANGS=$3; RL=$4; REGION=$5; RJ=$6; PORT=$7
 LANGUAGE_META=${LANGUAGE_META:-map}; TITLES=${TITLES:-'{}'}
 TAG=$(basename "$BASE" .zim)
