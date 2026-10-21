@@ -131,6 +131,7 @@ def ship(lp: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:
            "CORE": "de,fr,th,ja,en", "PACK_DATE": "2026-10-21", "FAKE_PACKS": str(fake_packs),
            "FAKE_BUILD_LOG": str(logs["build"]), "FAKE_GATES_LOG": str(logs["gates"]),
            "FAKE_IA_LOG": str(logs["ia"]), "FAKE_PREFETCH_LOG": str(logs["prefetch"]),
+           "UPLOAD_LOCK": str(d / "upload.lock"),
            "PYTHONDONTWRITEBYTECODE": "1"}
     return SimpleNamespace(d=d, base=base, work=work, env=env, logs=logs, tag=base.name[:-4])
 
@@ -345,3 +346,39 @@ def test_publish_replaces_in_one_step_and_rolls_back(ship: SimpleNamespace, tmp_
     assert (dst / "de.json").read_bytes() == before and not (web / "build" / "recipes" / "testland.new").exists()
     # and with a working index step it goes live
     assert _publish(ship, web).returncode == 0 and json.loads((dst / "de.json").read_text()) == {"changed": True}
+
+
+def test_no_second_send_while_the_listing_is_pending(ship: SimpleNamespace) -> None:
+    """Review r3 M-1: a rerun while archive.org has not listed the packs yet
+    waits for them; it never sends them again (ia upload --checksum does not
+    skip a file while the item has a pending task)."""
+    assert _run(ship, FAKE_IA_PENDING="1").returncode == 6
+    r2 = _run(ship, FAKE_IA_PENDING="1")
+    assert r2.returncode == 6 and "not sent again" in _log(ship)
+    assert len(_lines(ship.logs["ia"])) == 1
+    # still unlisted long after: the run stops and says what to do, and sends nothing
+    sent = ship.work / "uploads" / "streetzim-testland-lang.tsv"
+    rows = [x.split("\t") for x in sent.read_text().splitlines()]
+    sent.write_text("".join(f"{f}\t{m}\t0\n" for f, m, _t in rows))
+    r3 = _run(ship, FAKE_IA_PENDING="1")
+    assert r3.returncode == 1 and "still not listed: check the item's tasks" in _log(ship)
+    assert len(_lines(ship.logs["ia"])) == 1
+
+
+def test_uploads_hold_the_host_upload_lock(ship: SimpleNamespace) -> None:
+    """Review r3 L-1: uploads wait for the host's upload lock."""
+    import fcntl
+    with open(ship.env["UPLOAD_LOCK"], "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        p = subprocess.Popen(["bash", str(SHIP), "testland", str(ship.base)], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, env=ship.env)
+        import time
+        t0 = time.time()
+        while "upload to streetzim-testland-lang" not in (_log(ship) if (ship.work / "logs").exists()
+                                                           and list((ship.work / "logs").glob("*.log")) else ""):
+            assert time.time() - t0 < 300 and p.poll() is None
+            time.sleep(0.2)
+        time.sleep(2)
+        assert _lines(ship.logs["ia"]) == []           # waiting for the lock
+    assert p.wait(timeout=300) == 0
+    assert len(_lines(ship.logs["ia"])) == 1

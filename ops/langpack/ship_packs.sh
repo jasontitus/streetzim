@@ -38,7 +38,9 @@
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
 # (the region's most spoken languages every entry carries; default 3), IA (the
-# archive.org CLI; default venv-linux's ia), SHIP_SKIP_UPLOAD=1 (stop after
+# archive.org CLI; default venv-linux's ia), UPLOAD_LOCK (the host's upload
+# lock, default /storage/streetzim/.retrofit-upload.lock), SHIP_RESEND_AFTER_H
+# (72), SHIP_SKIP_UPLOAD=1 (stop after
 # the gates: a dry run), PACK_DATE (pack file names; default today),
 # GATES_PORT (default a free port). Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
 # and SHIP_RUN_GATES (stand-ins for prefetch.py and run_gates.sh), BUILDER
@@ -54,6 +56,7 @@ REGION=${1:?usage: ship_packs.sh REGION BASE.zim}
 BASE=$(readlink -f "${2:?usage: ship_packs.sh REGION BASE.zim}")
 PY=${PYTHON:-python3}
 IA=${IA:-/storage/streetzim/venv-linux/bin/ia}
+UPLOAD_LOCK=${UPLOAD_LOCK:-/storage/streetzim/.retrofit-upload.lock}
 export PYTHONDONTWRITEBYTECODE=1
 case "$REGION" in *[!a-z0-9-]*|"") echo "ship_packs: region id '$REGION': a-z 0-9 - only" >&2; exit 1 ;; esac
 [ -s "$BASE" ] || { echo "ship_packs: no base $BASE" >&2; exit 1; }
@@ -193,25 +196,46 @@ sys.exit(0 if f and str(f.get("md5", "")).lower() != sys.argv[2] else 1)' "$1" "
 }
 # one --metadata=language:<ISO 639-3> per pack language (archive.org keeps a list)
 mapfile -t LANG_META < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import iso639_3; [print("--metadata=language:" + iso639_3(x)) for x in sys.argv[1].split(",") if x]' "$PACK_LANGS" "$ROOT")
+# A pack sent before (its name and MD5 in $LANGPACK_WORK/uploads/<item>.tsv)
+# is never sent again while archive.org has not listed it yet: `ia upload
+# --checksum` does not skip a file while the item has a pending task, and a
+# second copy stays in history/. After SHIP_RESEND_AFTER_H (72) hours
+# unlisted, the run stops and says so; the operator looks at the item's
+# tasks and deletes the record line to send it again.
+SENT=$W/uploads/$ITEM.tsv
+mkdir -p "$W/uploads"; touch "$SENT"
+sent_at() { awk -F'\t' -v f="$1" -v m="$2" '$1 == f && $2 == m {t = $3} END {print t}' "$SENT"; }
 SEND=()
 fetch_meta
 for f in "${FILES[@]}"; do
   [ -n "$f" ] || continue
   if listed "$f"; then continue; fi
   if name_taken "$f"; then
-    say "archive.org $ITEM already holds $f with another MD5: not overwritten (set PACK_DATE and rebuild the packs)"
+    say "archive.org $ITEM already holds $f with another MD5: not overwritten"
     exit 1
+  fi
+  t=$(sent_at "$f" "${MD5[$f]}")
+  if [ -n "$t" ]; then
+    if [ $(( $(date +%s) - t )) -gt $(( ${SHIP_RESEND_AFTER_H:-72} * 3600 )) ]; then
+      say "$ITEM/$f was sent $(( ($(date +%s) - t) / 3600 )) h ago and is still not listed: check the item's tasks; delete its line in $SENT to send it again"
+      exit 1
+    fi
+    say "$f: sent $(( ($(date +%s) - t) / 60 )) min ago, waiting for archive.org to list it (not sent again)"
+    continue
   fi
   SEND+=("$PACKS/$f")
 done
 if [ ${#SEND[@]} -gt 0 ]; then
   say "upload to $ITEM: ${#SEND[@]} packs"
-  ( cd "$PACKS" && "${LOW[@]}" "$IA" upload "$ITEM" "${SEND[@]##*/}" --retries 5 --checksum \
+  # behind the host's upload lock, as every upload (MAINTAINING.md)
+  ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "${SEND[@]##*/}" --retries 5 --checksum \
       --metadata="mediatype:data" --metadata="collection:opensource" \
       --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
       "${LANG_META[@]}" \
       --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
       >> "$LOG" 2>&1 ) || { say "ia upload failed"; exit 1; }
+  now=$(date +%s)
+  for p in "${SEND[@]}"; do printf '%s\t%s\t%s\n' "${p##*/}" "${MD5[${p##*/}]}" "$now" >> "$SENT"; done
 fi
 # Every pack listed with its MD5, checked a round at a time.
 LEFT=("${FILES[@]}")
