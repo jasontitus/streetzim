@@ -81,6 +81,114 @@ def admin_wiki(feat, wiki_cross_refs):
     return {k: feat[k] for k in ("wikipedia", "wikidata") if feat.get(k)} or None
 
 
+def wiki_match_names(feat):
+    """The names a search feature's wiki cross-ref may be keyed under,
+    lowercased, each once: its search name, then its name in its own
+    script. The lookup (streetzim/addresses.extract_wiki_tags_pbf) keys
+    on the OSM object's own `name`, and that is the search name only
+    where it is already Latin: Athens' `name` is "Αθήνα", its search name
+    "Athens" (name_native keeps "Αθήνα"). Matching the search name alone
+    left Greece's three largest cities without their article's place in
+    the wiki geo-index (2,056 of the 5,830 bundled articles placed)."""
+    out = []
+    for nm in (feat.get("name"), feat.get("name_native")):
+        if nm and nm.lower() not in out:
+            out.append(nm.lower())
+    return out
+
+
+def wiki_link(entry):
+    """What a cross-ref entry links to: its Wikidata item, else its
+    Wikipedia title (spaces as underscores). Entries that differ only in
+    provenance (wikipedia_src, wikipedia_osm: one OSM-tagged, one
+    resolved from the Q-ID), or tag one item with titles in two languages
+    (an item with no English article keeps its OSM tags), link to the same
+    one; an entry with a Q-ID and one without never do."""
+    q = entry.get("wikidata")
+    if q:
+        return ("q", q)
+    return ("w", (entry.get("wikipedia") or "").replace(" ", "_"))
+
+
+def _one_link(hits):
+    """The first of `hits` (cross-ref entries) when they all link to the
+    same article (wiki_link), else None."""
+    if hits and all(wiki_link(h) == wiki_link(hits[0]) for h in hits[1:]):
+        return hits[0]
+    return None
+
+
+def wiki_folded_index(wiki_cross_refs):
+    """The cross-ref lookup by folded name (cloud.search_shards.norm:
+    accents off, lowercase), and by the first name of an OSM ";" list
+    (search_extract.native_name keeps only that one): (folded name, lat
+    cell, lon cell) -> entry, None where entries that differ fold to one
+    key (wiki_link). For feature_wiki's last try: a search name that is the OSM name
+    without its accents has no name_native (native_name drops a name
+    equal once folded), so Poznań, Kraków and Gdańsk are "Poznan",
+    "Krakow" and "Gdansk" and matched nothing."""
+    from cloud.search_shards import norm
+    out = {}
+    for key, entry in (wiki_cross_refs or {}).items():
+        if not (isinstance(key, tuple) and len(key) == 3):
+            continue                    # an admin area's ("admin", osm)
+        name, qlat, qlon = key
+        folded = norm(name)
+        if folded == name:
+            folded = name           # the key's own string, not a copy (Europe: 1.9 M)
+        first = norm(name.split(";")[0].strip())
+        for nm in (folded,) if first == folded else (folded, first):
+            k = (nm, qlat, qlon)
+            if k not in out:
+                out[k] = entry
+            elif out[k] is not None and wiki_link(out[k]) != wiki_link(entry):
+                out[k] = None
+    return out
+
+
+def feature_wiki(feat, wiki_cross_refs, folded=None):
+    """The wiki cross-ref entry of a search feature other than an admin
+    area (those: admin_wiki), looked up at its point on the lookup's
+    ~11 m grid and at each piece's point of a merged street
+    (merge_streets_in_file keeps them in _pts):
+    - its search name: the first hit, as before own-script names were
+      matched, so whatever matched then keeps its entry;
+    - else its own-script name (wiki_match_names): the entry its hits
+      agree on (wiki_link), none when a street's pieces carry different
+      articles ("Αθήνα - Πάτρα": Olympia Odos on most ways, the Aithra
+      Tunnel's Q-ID on 68 ways OSM mis-tags; a record made only of those
+      still links the tunnel);
+    - else, with `folded` (wiki_folded_index), the entry its names fold
+      to, likewise none when two differ or a key is ambiguous.
+    None when nothing matches."""
+    if not wiki_cross_refs:
+        return None
+    pts = [(feat["lat"], feat["lon"])] + [tuple(p) for p in feat.get("_pts", ())]
+    cells = [(int(round(plat * 1e4)), int(round(plon * 1e4))) for plat, plon in pts]
+    names = wiki_match_names(feat)
+    for nm in names[:1]:
+        for qlat, qlon in cells:
+            wiki = wiki_cross_refs.get((nm, qlat, qlon))
+            if wiki:
+                return wiki
+    hits = [w for nm in names[1:] for qlat, qlon in cells
+            if (w := wiki_cross_refs.get((nm, qlat, qlon)))]
+    if hits:
+        return _one_link(hits)
+    if not folded:
+        return None
+    from cloud.search_shards import norm
+    # norm of an ASCII name is its lower(), at a fraction of the cost.
+    keys = [(nm, qlat, qlon)
+            for nm in dict.fromkeys(n.lower() if n.isascii() else norm(n)
+                                    for n in (feat.get("name"), feat.get("name_native")) if n)
+            for qlat, qlon in cells]
+    hits = [folded[k] for k in keys if k in folded]
+    if any(h is None for h in hits):
+        return None
+    return _one_link(hits)
+
+
 def admin_record_fields(feat):
     """The search-record keys an administrative area adds
     (docs/search-records.md): al, bb, alt, osm. Empty for other types."""
@@ -2334,6 +2442,9 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
         return s[:40] or "_"
 
     _bucket_t0 = time.time()
+    # The cross-refs by folded name, for features whose names match none
+    # as they are (feature_wiki).
+    _wiki_folded = wiki_folded_index(wiki_cross_refs)
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
         with open(search_features_path) as sf:
@@ -2360,18 +2471,10 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     if wiki:
                         wiki_fields_added += 1
                 elif wiki_cross_refs:
-                    # A merged street keeps every piece's point in
-                    # _pts (merge_streets_in_file); the OSM tag may
-                    # match any of them.
-                    for plat, plon in ([(feat["lat"], feat["lon"])]
-                                       + [tuple(p) for p in feat.get("_pts", ())]):
-                        wiki = wiki_cross_refs.get((
-                            feat["name"].lower(),
-                            int(round(plat * 1e4)),
-                            int(round(plon * 1e4)),
-                        ))
-                        if wiki:
-                            break
+                    # By its search or own-script name, at its point or
+                    # a merged street's pieces', else by a folded name
+                    # (feature_wiki).
+                    wiki = feature_wiki(feat, wiki_cross_refs, _wiki_folded)
                     if wiki:
                         wiki_fields_added += 1
 
@@ -2390,9 +2493,14 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                         # Only index titles whose article was actually
                         # bundled (enwiki had a page) — else the viewer
                         # would list places that 404 on "Read full article".
-                        if (_gt and _gt not in wiki_geo
-                                and _bundled_set is not None
-                                and _gt in _bundled_set):
+                        # The first feature places it, but any other kind
+                        # takes it from a street: a merged street's point is
+                        # one of its pieces', kilometres from the subject.
+                        if (_gt and _bundled_set is not None
+                                and _gt in _bundled_set
+                                and (_gt not in wiki_geo
+                                     or (wiki_geo[_gt][2] == "street"
+                                         and t != "street"))):
                             # [lat, lon, type, qid, desc]. The short
                             # description is baked in so the viewer's
                             # nearby-Wikipedia list needs NO

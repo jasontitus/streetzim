@@ -37,6 +37,18 @@ Optional keys (absent when empty):
 | `alt` | other names: `name`/`name:en` (whichever is not `n`), `official_name`, `alt_name`, `short_name`, `loc_name`; at most 6 (`admin` records) |
 | `osm` | the OSM object, `r<id>` or `w<id>` (`admin` records) |
 
+`w`, `wsrc` and `q` come from the OSM object tagged `wikipedia` /
+`wikidata` whose own `name` is the place's name (`n` of an English build),
+ignoring case, at the same point on a ~11 m grid (a merged street: the
+first piece that has one); else whose `name` is its own-script name
+(`nn`), where every piece of a merged street that has such an object
+must link the same article; else, likewise, an object whose name equals
+either once folded (accents off; the first of a `;` list), as for `n`
+"Poznan" and OSM's `name` "Poznań" (`feature_wiki` in
+`streetzim/zim_writer.py`). An administrative area's are its relation's
+own (below). Records written by `_add_search_in_memory` (small builds and
+tests) get no `w`/`q` except an administrative area's.
+
 Readers must ignore keys they don't know.
 
 ### `t` values
