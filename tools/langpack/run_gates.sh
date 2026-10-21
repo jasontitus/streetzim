@@ -12,10 +12,16 @@
 #            the city's displayed label, a bilingual label), popup -> pack
 #            article -> images -> back-to-map, the map's search (native, English)
 #   smoke    cloud/zim_viewer_smoke.mjs (map, chips, Find, page errors)
-# plus the base alone (smoke, viewer, ui). kiwix-serve batches: the base, then
-# at most 3 merged files per server. compose_verdicts.py writes one verdict per
-# entry ($LANGPACK_WORK/verdicts/<base>/<L>.json), keyed to the recipe's md5
-# and uuid. docs/language-pack-pipeline.md has the whole pipeline.
+# plus the base alone (smoke, viewer, ui). One language at a time: its merged
+# file is made, checked (served alone by kiwix-serve) and deleted before the
+# next one is made (KEEP_MERGED=1 keeps them), so the disk holds at most one
+# merged file and its recipe copy: the run refuses to start, and stops before
+# the next language, while the merged folder's disk has less than twice the
+# base plus LANGPACK_DISK_MARGIN_GB free. compose_verdicts.py writes one
+# verdict per entry ($LANGPACK_WORK/verdicts/<base>/<L>.json), keyed to the
+# recipe's md5 and uuid. RESUME=1 keeps the last run's logs and skips an entry
+# whose verdict passes for the very recipe this run makes (and the base's
+# checks when they passed). docs/language-pack-pipeline.md has the pipeline.
 # Usage: run_gates.sh BASE PACKS_DIR LANGS REGION_LANGS REGION REGION_JSON PORT
 # Env: LANGUAGE_META (list|map), TITLES (JSON {L: title}),
 #   LANGPACK_WORK (default ./langpack-work: recipes, merged files, verdicts, gates/),
@@ -23,7 +29,9 @@
 #   zimcheck on PATH; anything else is refused), KIWIX_SERVE (kiwix-serve), NODE (node), PLAYWRIGHT_CORE
 #   (path to playwright-core's index.mjs; else the playwright-core package),
 #   CHROME_PATH (a Chromium for it), BROWSER_LIBS (extra LD_LIBRARY_PATH for it),
-#   LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it; default 0).
+#   LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it; default 0),
+#   LANGPACK_DISK_MARGIN_GB (free disk asked beyond 2 x the base; default 20),
+#   KEEP_MERGED (1: keep every merged file), RESUME (1: see above).
 set -uo pipefail
 TL=$(cd "$(dirname "$0")" && pwd)
 LP_ROOT=$(cd "$TL/../.." && pwd); export LP_ROOT
@@ -52,8 +60,20 @@ wait_mem() { while [ "$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminf
 BASE=$1; PACKS=$2; LANGS=$3; RL=$4; REGION=$5; RJ=$6; PORT=$7
 LANGUAGE_META=${LANGUAGE_META:-map}; TITLES=${TITLES:-'{}'}
 TAG=$(basename "$BASE" .zim)
-OUT=$W/gates/$TAG; rm -rf "$OUT"; mkdir -p "$OUT" "$W/merged"
+OUT=$W/gates/$TAG
+RESUME=${RESUME:-0}; KEEP=${KEEP_MERGED:-0}
+[ "$RESUME" = 1 ] || rm -rf "$OUT"
+mkdir -p "$OUT" "$W/merged"
 printf '%s\n' "$ZV" > "$OUT/zimcheck.version"   # compose_verdicts.py records it
+# Disk: one merged file (about the base plus its packs) and, during the
+# recipe = merge check, its copy from the recipe.
+NEED_KB=$(( $(stat -L -c %s "$BASE") / 1024 * 2 + ${LANGPACK_DISK_MARGIN_GB:-20} * 1048576 ))
+disk_ok() { [ "$(df -Pk "$W/merged" | awk 'NR == 2 {print $4}')" -ge "$NEED_KB" ]; }
+if ! disk_ok; then
+  echo "$(basename "$0"): $W/merged has $(df -Pk "$W/merged" | awk 'NR == 2 {print int($4/1048576)}') GB free;" \
+       "a merged file needs $(( NEED_KB / 1048576 )) GB (2 x the base + LANGPACK_DISK_MARGIN_GB)" >&2
+  exit 1
+fi
 # Chromium's profile sockets must fit a unix socket path (~107 bytes): a short TMPDIR
 CT=$(mktemp -d /tmp/lpgates.XXXXXX); trap 'rm -rf "$CT"' EXIT
 [ -n "${BROWSER_LIBS:-}" ] && export LD_LIBRARY_PATH=$BROWSER_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
@@ -68,49 +88,40 @@ wait_mem
 $N $PY "$TL/recipe2.py" menu "$BASE" --packs-dir "$PACKS" --langs "$LANGS" --region-langs "$RL" --region "$REGION" \
    --titles "$TITLES" --language-meta "$LANGUAGE_META" --out-dir "$W/recipes/$TAG" > "$OUT/menu.jsonl" 2> "$OUT/menu.err" \
    || { echo "menu failed"; cat "$OUT/menu.err"; exit 1; }
-files=()
-while read -r line; do
-  L=$($PY -c 'import json,sys; print(json.loads(sys.argv[1])["L"])' "$line")
-  mapfile -t P < <($PY -c 'import json,sys; [print(f) for f in json.loads(sys.argv[1])["pack_files"]]' "$line")
-  M="$W/merged/m-$TAG-$L.zim"
-  T=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TITLES" "$L"); TA=(); [ -n "$T" ] && TA=(--title "$T")
-  wait_mem
-  $N $PY "$TL/merge_zim.py" "$BASE" "${P[@]}" -o "$M" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
-     --language-meta "$LANGUAGE_META" > "$OUT/$L.merge.json" 2>&1
-  $N $PY - "$W/recipes/$TAG/$L.json" "$BASE" "$M" "${P[@]}" > "$OUT/$L.same" 2>&1 <<'PY'
-import json, sys, os
-sys.path.insert(0, os.environ["LP_ROOT"])
-from tools.langpack.recipe2 import materialize
-from tools.langpack.merge_zim import open_pack
-r = json.load(open(sys.argv[1])); base, merged = sys.argv[2], sys.argv[3]
-packs = {open_pack(p).lang: p for p in sys.argv[4:]}
-tmp = merged + ".fromrecipe"
-materialize(r, base, packs, tmp)
-same = os.system(f"cmp -s '{tmp}' '{merged}'") == 0
-os.remove(tmp); print("PASS" if same else "FAIL")
-PY
-  wait_mem
-  $N $PY "$TL/verify_merge.py" "$M" "$BASE" "${P[@]}" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
-     --language-meta "$LANGUAGE_META" --queries "$SEARCH" > "$OUT/$L.verify.log" 2>&1
-  wait_mem
-  $N $ZC -A --threads=4 "$M" > "$OUT/$L.zimcheck.log" 2>&1
-  $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
-  files+=("$M")
-done < "$OUT/menu.jsonl"
+# zimcheck -A; a run that ends without its verdict line (killed or crashed,
+# not a finding) is run once more, single-threaded. A Fail is never retried.
+zimcheck_merged() {
+  $N $ZC -A --threads=4 "$1" > "$2" 2>&1
+  grep -q 'Overall Test Status:' "$2" && return
+  mv -f "$2" "$2.first"
+  echo "zimcheck: no verdict line, run again with --threads=1 ($2.first)" >&2
+  $N $ZC -A --threads=1 "$1" > "$2" 2>&1
+}
 
 B=http://localhost:$PORT
-check_batch() {
+SRV=
+serve() {     # kiwix-serve on $PORT with these books
   wait_mem
   setsid nohup "${LIM[@]}" timeout 7200 "$KS" --port "$PORT" "$@" > "$OUT/kiwix-serve.log" 2>&1 < /dev/null &
-  local SRV=$!
+  SRV=$!
   for _ in $(seq 1 90); do curl -s -m 2 -o /dev/null "$B/catalog/v2/entries" && break; sleep 1; done
   curl -s -m 30 "$B/catalog/v2/entries" > "$OUT/catalog.xml"
-  for M in "$@"; do
-    book=$(basename "$M" .zim | tr 'A-Z' 'a-z')
-    if [ "$M" = "$BASE" ]; then L=base; LL=en; MODE=base; PF=-; else
-      L=${M##*-}; L=${L%.zim}; LL=$L; MODE=merged
-      PF=$($PY -c 'import json,sys,os; r=json.load(open(sys.argv[1])); p=r["packs"].get(sys.argv[2]); print(os.path.join(sys.argv[3], p["file"]) if p else "-")' "$W/recipes/$TAG/$L.json" "$L" "$PACKS")
-      # kiwix-serve: suggest, search, an article + pack.json per pack, catalog Title/Language
+}
+unserve() {
+  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null
+  SRV=
+  for _ in $(seq 1 30); do ss -ltn | grep -q ":$PORT " || break; sleep 1; done
+}
+trap 'unserve; rm -rf "$CT"' EXIT
+
+# The browser checks (and, merged, the kiwix-serve ones) of one served book.
+browser_checks() {   # M L(base|lang)
+  local M=$1 L=$2 LL MODE PF EP COMMON book
+  book=$(basename "$M" .zim | tr 'A-Z' 'a-z')
+  if [ "$L" = base ]; then LL=en; MODE=base; PF=-; else
+    LL=$L; MODE=merged
+    PF=$($PY -c 'import json,sys,os; r=json.load(open(sys.argv[1])); p=r["packs"].get(sys.argv[2]); print(os.path.join(sys.argv[3], p["file"]) if p else "-")' "$W/recipes/$TAG/$L.json" "$L" "$PACKS")
+    # kiwix-serve: suggest, search, an article + pack.json per pack, catalog Title/Language
       $PY - "$B" "$book" "$W/recipes/$TAG/$L.json" "$PACKS" "$OUT/catalog.xml" "$SEARCH" > "$OUT/$L.kiwix.json" 2>&1 <<'PY'
 import json, os, re, sys, urllib.parse, urllib.request
 sys.path.insert(0, os.environ["LP_ROOT"])
@@ -146,20 +157,96 @@ res["checks"]["catalog"] = html.unescape(title or "") == r["title"] and lang == 
 res["pass"] = all(res["checks"].values())
 print(json.dumps(res, ensure_ascii=False))
 PY
-    fi
-    COMMON=$($N $PY "$TL/viewer_qids.py" "$BASE" "$PF" "$NAMED")
-    wait_mem
-    EP=$([ $MODE = merged ] && $PY -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["packs"]))' "$W/recipes/$TAG/$L.json" || echo 0)
-    EXPECT_PACKS=$EP TMPDIR=$CT $NB "$NODE" "$TL/viewer_gate.mjs" "$B/content/$book" "$LL" "$NAMED" "$COMMON" $([ $MODE = base ] && echo base) > "$OUT/$L.viewer.json" 2>&1
-    wait_mem
-    TMPDIR=$CT $NB "$NODE" "$TL/ui_gate.mjs" "$B/content/$book" "$LL" "$RJ" $([ $MODE = base ] && echo base) > "$OUT/$L.ui.json" 2>&1
-    wait_mem
-    TMPDIR=$CT ZIM_ORIGIN="$B/content/$book" SMOKE_SEARCH="$SEARCH" $NB "$NODE" \
-      "$LP_ROOT/cloud/zim_viewer_smoke.mjs" > "$OUT/$L.smoke.log" 2>&1
-  done
-  kill "$SRV" 2>/dev/null
-  for _ in $(seq 1 30); do ss -ltn | grep -q ":$PORT " || break; sleep 1; done
+  fi
+  COMMON=$($N $PY "$TL/viewer_qids.py" "$BASE" "$PF" "$NAMED")
+  wait_mem
+  EP=$([ $MODE = merged ] && $PY -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["packs"]))' "$W/recipes/$TAG/$L.json" || echo 0)
+  EXPECT_PACKS=$EP TMPDIR=$CT $NB "$NODE" "$TL/viewer_gate.mjs" "$B/content/$book" "$LL" "$NAMED" "$COMMON" $([ $MODE = base ] && echo base) > "$OUT/$L.viewer.json" 2>&1
+  wait_mem
+  TMPDIR=$CT $NB "$NODE" "$TL/ui_gate.mjs" "$B/content/$book" "$LL" "$RJ" $([ $MODE = base ] && echo base) > "$OUT/$L.ui.json" 2>&1
+  wait_mem
+  TMPDIR=$CT ZIM_ORIGIN="$B/content/$book" SMOKE_SEARCH="$SEARCH" $NB "$NODE" \
+    "$LP_ROOT/cloud/zim_viewer_smoke.mjs" > "$OUT/$L.smoke.log" 2>&1
 }
-check_batch "$BASE"
-for ((i = 0; i < ${#files[@]}; i += 3)); do check_batch "${files[@]:i:3}"; done
+
+# A check log that passed: the browser JSON lines and the smoke's tally.
+passed() {   # L
+  $PY - "$OUT" "$1" <<'PY'
+import json, re, sys
+out, L = sys.argv[1:3]
+def j(p):
+    try:
+        lines = [x for x in open(p, encoding="utf-8", errors="replace") if x.startswith("{")]
+        return json.loads(lines[-1]).get("pass") is True
+    except (OSError, ValueError, IndexError):
+        return False
+try:
+    sm = re.search(r"^(\d+) passed, (\d+) failed", open(f"{out}/{L}.smoke.log", errors="replace").read(), re.M)
+except OSError:
+    sm = None
+sys.exit(0 if j(f"{out}/{L}.viewer.json") and j(f"{out}/{L}.ui.json") and sm and sm.group(2) == "0" and int(sm.group(1)) > 0 else 1)
+PY
+}
+
+# Is L's verdict all-PASS for the recipe this run just wrote (RESUME=1)?
+verdict_current() {   # L
+  [ -f "$OUT/$1.ui.json" ] || return 1
+  $PY - "$BASE" "$1" "$W/recipes/$TAG/$1.json" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.gatelib import entry_verdict_ok
+ok, _ = entry_verdict_ok(sys.argv[1], sys.argv[2], json.load(open(sys.argv[3])))
+sys.exit(0 if ok else 1)
+PY
+}
+
+# The base alone first. (A base patched in place keeps its name: RESUME
+# trusts the last run's base checks only for the same size and mtime.)
+BID=$(stat -L -c '%s %Y' "$BASE")
+if [ "$RESUME" = 1 ] && [ "$(cat "$OUT/base.identity" 2>/dev/null)" = "$BID" ] && passed base; then
+  echo "base: its checks passed in the last run (RESUME=1); not run again"
+else
+  rm -f "$OUT"/base.*
+  serve "$BASE"; browser_checks "$BASE" base; unserve
+  printf '%s\n' "$BID" > "$OUT/base.identity"
+fi
+
+# (the menu on fd 3: nothing in the loop may eat it from stdin)
+while read -r line <&3; do
+  L=$($PY -c 'import json,sys; print(json.loads(sys.argv[1])["L"])' "$line")
+  if [ "$RESUME" = 1 ] && verdict_current "$L"; then
+    echo "$L: its verdict passes for this recipe (RESUME=1); not run again"; continue
+  fi
+  if ! disk_ok; then
+    echo "$L: not run, and neither is any later language: $W/merged has under $(( NEED_KB / 1048576 )) GB free" >&2
+    break
+  fi
+  rm -f "$OUT/$L".*
+  mapfile -t P < <($PY -c 'import json,sys; [print(f) for f in json.loads(sys.argv[1])["pack_files"]]' "$line")
+  M="$W/merged/m-$TAG-$L.zim"
+  T=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TITLES" "$L"); TA=(); [ -n "$T" ] && TA=(--title "$T")
+  wait_mem
+  $N $PY "$TL/merge_zim.py" "$BASE" "${P[@]}" -o "$M" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
+     --language-meta "$LANGUAGE_META" > "$OUT/$L.merge.json" 2>&1
+  $N $PY - "$W/recipes/$TAG/$L.json" "$BASE" "$M" "${P[@]}" > "$OUT/$L.same" 2>&1 <<'PY'
+import json, sys, os
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.recipe2 import materialize
+from tools.langpack.merge_zim import open_pack
+r = json.load(open(sys.argv[1])); base, merged = sys.argv[2], sys.argv[3]
+packs = {open_pack(p).lang: p for p in sys.argv[4:]}
+tmp = merged + ".fromrecipe"
+materialize(r, base, packs, tmp)
+same = os.system(f"cmp -s '{tmp}' '{merged}'") == 0
+os.remove(tmp); print("PASS" if same else "FAIL")
+PY
+  wait_mem
+  $N $PY "$TL/verify_merge.py" "$M" "$BASE" "${P[@]}" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
+     --language-meta "$LANGUAGE_META" --queries "$SEARCH" > "$OUT/$L.verify.log" 2>&1
+  wait_mem
+  zimcheck_merged "$M" "$OUT/$L.zimcheck.log"
+  $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
+  if [ -s "$M" ]; then serve "$M"; browser_checks "$M" "$L"; unserve; fi
+  [ "$KEEP" = 1 ] || rm -f "$M" "$M.fromrecipe"
+done 3< "$OUT/menu.jsonl"
 $PY "$TL/compose_verdicts.py" "$OUT" "$BASE" "$LANGS" | tee "$OUT/summary.txt"

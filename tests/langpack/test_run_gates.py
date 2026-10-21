@@ -25,9 +25,16 @@ for _cmd in ("bash", "curl", "ss", "setsid"):
         pytest.skip(f"run_gates.sh needs {_cmd}", allow_module_level=True)
 
 KIWIX_STUB = r'''
-import http.server, sys
+import http.server, json, os, sys
 port = int(sys.argv[sys.argv.index("--port") + 1])
 books = [a for a in sys.argv[1:] if a.endswith(".zim")]
+# what the disk held when this server started (the gates must stream: one merged file at a time)
+log = os.environ.get("KIWIX_STUB_LOG")
+if log:
+    merged = os.path.join(os.environ["LANGPACK_WORK"], "merged")
+    with open(log, "a") as fh:
+        fh.write(json.dumps({"books": [os.path.basename(b) for b in books],
+                             "merged_dir": sorted(os.listdir(merged))}) + "\n")
 xml = "<feed>" + "".join(f"<entry><title>x</title><link href=\"/content/{b.rsplit('/', 1)[-1][:-4].lower()}\"/></entry>"
                          for b in books) + "</feed>"
 class H(http.server.BaseHTTPRequestHandler):
@@ -82,10 +89,14 @@ def gates(lp: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory) -> Simp
     work = d / "work"
     env = {**os.environ, "LANGPACK_WORK": str(work), "PYTHON": sys.executable, "KIWIX_SERVE": str(ks),
            "NODE": str(node), "PACK_GATE_ZIMCHECK": zc, "LANGUAGE_META": "map",
-           "TITLES": json.dumps({"de": "Testland DE", "th": "Testland TH"}), "PYTHONDONTWRITEBYTECODE": "1"}
+           "TITLES": json.dumps({"de": "Testland DE", "th": "Testland TH"}), "PYTHONDONTWRITEBYTECODE": "1",
+           "LANGPACK_DISK_MARGIN_GB": "0"}
+    served = d / "served.jsonl"
     r = subprocess.run([str(TOOLS / "run_gates.sh"), str(lp.base), str(packs), "de,th,en", "en", "testland",
-                        str(region), str(_free_port())], capture_output=True, text=True, timeout=1200, env=env)
-    return SimpleNamespace(r=r, work=work, tag=lp.base.name[:-4], env=env, packs=packs, region=region, base=lp.base)
+                        str(region), str(_free_port())], capture_output=True, text=True, timeout=1200,
+                       env={**env, "KIWIX_STUB_LOG": str(served)})
+    return SimpleNamespace(r=r, work=work, tag=lp.base.name[:-4], env=env, packs=packs, region=region, base=lp.base,
+                           served=served, stubs=stubs, d=d)
 
 
 @pytest.mark.parametrize("lang", ["de", "th", "en"])
@@ -103,7 +114,8 @@ def test_every_step_ran(lang: str, gates: SimpleNamespace) -> None:
     title = {"de": "Testland DE", "th": "Testland TH"}.get(lang)
     merged = json.loads((out / f"{lang}.merge.json").read_text())
     assert merged["metadata"]["Title"] == (title or "OSM - Testland")
-    assert (gates.work / "merged" / f"m-{gates.tag}-{lang}.zim").exists()
+    # streamed: the merged file is gone once its checks ran
+    assert not (gates.work / "merged" / f"m-{gates.tag}-{lang}.zim").exists()
     # the region file's search.english.q is what the checks search for
     assert "INFO  suggest 'Alpha Town'" in (out / f"{lang}.verify.log").read_text()
 
@@ -119,3 +131,99 @@ def test_refuses_a_zimcheck_that_is_not_the_official_one(gates: SimpleNamespace,
                        env={**gates.env, "PACK_GATE_ZIMCHECK": zimru, "LANGPACK_WORK": str(work)})
     assert r.returncode == 1 and "not the official zimcheck" in r.stderr, r.stderr
     assert not (work / "verdicts").exists()
+
+
+def test_one_merged_file_at_a_time(gates: SimpleNamespace) -> None:
+    """kiwix-serve serves the base alone, then each merged file alone, and the
+    merged folder holds only the file being checked (and none for the base)."""
+    rows = [json.loads(x) for x in gates.served.read_text().splitlines()]
+    assert [r["books"] for r in rows] == [[gates.base.name]] + [[f"m-{gates.tag}-{L}.zim"] for L in ("de", "th", "en")], rows
+    assert rows[0]["merged_dir"] == []
+    for r in rows[1:]:
+        assert r["merged_dir"] == r["books"], r
+    assert sorted(os.listdir(gates.work / "merged")) == []
+
+
+def test_keep_merged(gates: SimpleNamespace, tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "KEEP_MERGED": "1"})
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert (work / "merged" / f"m-{gates.tag}-de.zim").exists()
+
+
+def test_refuses_without_room_for_a_merged_file(gates: SimpleNamespace, tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=120,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "LANGPACK_DISK_MARGIN_GB": "1000000000"})
+    assert r.returncode == 1 and "a merged file needs" in r.stderr, r.stderr
+    assert not (work / "verdicts").exists() and not (work / "recipes").exists()
+
+
+def _flaky_zimcheck(d: Path, first: str, then: str) -> str:
+    """A zimcheck whose first -A run prints `first` and every later one `then`."""
+    d.mkdir(parents=True, exist_ok=True)
+    n = d / "runs"
+    script = d / "zc.py"
+    script.write_text("\n".join([
+        f"#!{sys.executable}", "import sys, os",
+        "if '--version' in sys.argv: print('zim-tools 3.8.0'); sys.exit(0)",
+        f"p = {str(n)!r}", "k = int(open(p).read()) if os.path.exists(p) else 0", "open(p, 'w').write(str(k + 1))",
+        "with open(p + '.args', 'a') as fh: fh.write(' '.join(sys.argv[1:-1]) + '\\n')",
+        f"sys.stdout.write({first!r} if k == 0 else {then!r})", "sys.exit(0)"]) + "\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+@pytest.mark.parametrize("first,then,runs,ok", [
+    ("[INFO] Verifying...\n", "[INFO] Overall Test Status: Pass\n", 2, True),       # killed: run again
+    ("[INFO] Overall Test Status: Fail\n", "[INFO] Overall Test Status: Pass\n", 1, False),  # a Fail stays
+])
+def test_zimcheck_without_a_verdict_runs_once_more(gates: SimpleNamespace, tmp_path: Path,
+                                                   first: str, then: str, runs: int, ok: bool) -> None:
+    zc = _flaky_zimcheck(tmp_path / "zc", first, then)
+    work = tmp_path / "work"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "PACK_GATE_ZIMCHECK": zc})
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert int((tmp_path / "zc" / "runs").read_text()) == runs
+    args = (tmp_path / "zc" / "runs.args").read_text().splitlines()
+    assert args[0] == "-A --threads=4" and (runs == 1 or args[1] == "-A --threads=1"), args
+    v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
+    assert v["checks"]["zimcheck"] is ok
+
+
+def test_resume_skips_what_passed_for_the_same_recipe(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """RESUME=1: an entry whose verdict passes for this recipe, and the base when
+    its checks passed, are not run again; the stand-ins' route/kiwix FAIL makes
+    every verdict fail, so a passing verdict is written by hand here."""
+    work = tmp_path / "work"
+    env = {**gates.env, "LANGPACK_WORK": str(work)}
+    args = [str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th", "en", "testland",
+            str(gates.region), str(_free_port())]
+    r1 = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env)
+    assert r1.returncode == 0, r1.stderr[-2000:]
+    vp = work / "verdicts" / gates.tag / "de.json"
+    v = json.loads(vp.read_text())
+    v["all_pass"] = True
+    vp.write_text(json.dumps(v))
+    served = tmp_path / "served.jsonl"
+    r2 = subprocess.run(args, capture_output=True, text=True, timeout=600,
+                        env={**env, "RESUME": "1", "KIWIX_STUB_LOG": str(served)})
+    assert r2.returncode == 0, r2.stderr[-2000:]
+    assert "de: its verdict passes for this recipe (RESUME=1)" in r2.stdout
+    assert "base: its checks passed in the last run (RESUME=1)" in r2.stdout
+    rows = [json.loads(x)["books"] for x in served.read_text().splitlines()]
+    assert rows == [[f"m-{gates.tag}-th.zim"]], rows        # th failed (route/kiwix stand-ins): run again
+    # th's verdict was composed again, de's logs were kept and composed the same way
+    assert json.loads(vp.read_text())["checks"] == v["checks"]
+    # a base patched in place (same name, new mtime) has its checks run again
+    os.utime(gates.base, None)
+    served.unlink()
+    r3 = subprocess.run(args, capture_output=True, text=True, timeout=600,
+                        env={**env, "RESUME": "1", "KIWIX_STUB_LOG": str(served)})
+    assert r3.returncode == 0
+    assert [json.loads(x)["books"] for x in served.read_text().splitlines()][0] == [gates.base.name]
