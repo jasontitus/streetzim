@@ -4,7 +4,7 @@ Status: design, 2026-10-13. Not built yet. The measurements behind it are in
 `/storage/experiments/langpack/{inventory,merge,multiling}/REPORT.md` on the
 build host, with their scripts.
 
-On `main` (2026-10-14): the viewer side is here (Wikipedia packs, bilingual labels, your language first, the UI tables). The pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger and recipes, and the builder page (`web/lab/build/`) are on the `language-packs` branch.
+On `main` (2026-10-22): all of it is here. The viewer side (Wikipedia packs, bilingual labels, your language first, the UI tables), the pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger, recipes and gates (`tools/langpack/`), the builder page (`web/build/`, served at `/build/`) and the post-ship step for every published map (`ops/langpack/ship_packs.sh`). [language-pack-pipeline.md](language-pack-pipeline.md) is the operator's guide.
 
 ## The goal
 

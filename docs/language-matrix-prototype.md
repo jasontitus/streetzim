@@ -1,6 +1,6 @@
 # Language matrix prototype: interfaces
 
-Status: prototype spec, 2026-10-13, for the plan of record in `docs/language-matrix.md`. On `main` (2026-10-14): the viewer side is here (Wikipedia packs, bilingual labels, your language first, the UI tables). The pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger and recipes, and the builder page (`web/lab/build/`) are on the `language-packs` branch. The regions are California and Greece. The workstreams share these interfaces:
+Status: prototype spec, 2026-10-13, for the plan of record in `docs/language-matrix.md`. On `main` (2026-10-22): all of it is here. The viewer side (Wikipedia packs, bilingual labels, your language first, the UI tables), the pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger, recipes and gates (`tools/langpack/`), the builder page (`web/build/`, served at `/build/`) and the post-ship step for every published map (`ops/langpack/ship_packs.sh`). [language-pack-pipeline.md](language-pack-pipeline.md) is the operator's guide. The regions are California and Greece. The workstreams share these interfaces:
 - pack builder
 - viewer
 - PWA reader
@@ -92,7 +92,7 @@ There is one per menu entry (region, map language L, packs = the region's own âˆ
 - It writes the segments in order, computing the MD5 as it goes.
 - Then it compares the MD5 with the recipe's. That MD5 comes from the gated merge on the build host for that menu entry, or, for unsampled entries, from the planner run that wrote the recipe, which computes it exactly.
 
-**Where things live:** recipes are published on the site at `/lab/build/recipes/<region>/<L>.json`. Packs go in the archive.org item `streetzim-<region>-lang`.
+**Where things live:** recipes are published on the site at `/build/recipes/<region>/<L>.json` (the prototype's `/lab/build/` now redirects there). Packs go in the archive.org item `streetzim-<region>-lang`.
 
 ## Required showcase entries
 
@@ -118,7 +118,7 @@ For each menu entry (all, or a sample):
 - the PWA opening the merged file
 - `kiwix_viewer_gate.sh`
 
-## Builder page (/lab/build/, outside /drive/)
+## Builder page (/build/, outside /drive/; the prototype's /lab/build/)
 
 - **Inputs:** pick a region and map language; choose the local base file; the page shows which packs the menu adds, with their sizes.
 - **Output:** "Save asâ€¦" (File System Access), or a service-worker streamed download.

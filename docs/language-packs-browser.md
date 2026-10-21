@@ -2,7 +2,7 @@
 
 Status: design, 2026-10-13, an alternative delivery for `docs/language-packs.md`. It replaces the on-demand assembly server with the site's own web app. It is not built.
 
-On `main` (2026-10-14): the viewer side is here (Wikipedia packs, bilingual labels, your language first, the UI tables). The pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger and recipes, and the builder page (`web/lab/build/`) are on the `language-packs` branch.
+On `main` (2026-10-22): all of it is here. The viewer side (Wikipedia packs, bilingual labels, your language first, the UI tables), the pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger, recipes and gates (`tools/langpack/`), the builder page (`web/build/`, served at `/build/`) and the post-ship step for every published map (`ops/langpack/ship_packs.sh`). [language-pack-pipeline.md](language-pack-pipeline.md) is the operator's guide.
 
 ## The idea
 

@@ -16,7 +16,7 @@ Everything is set by arguments and environment variables.
 
 | variable | used by | meaning |
 |---|---|---|
-| `LANGPACK_WORK` | all | Working directory; default `./langpack-work`. It holds `recipes/<base>/` (gated recipes), `verdicts/<base>/`, `merged/` (one full-size ZIM per gated entry), `gates/<base>/` (gate logs), `sha-cache/`, `locks/` and `tmp/`. **Production:** a disk with room for the merged files, and the same directory for every step of a round, since make_site reads the verdicts and gated recipes run_gates wrote. On StreetZim's build host that is `/storage/streetzim/langpack-work` (on `/storage`, never `/home`); `ops/langpack/host-env.sh` sets it. |
+| `LANGPACK_WORK` | all | Working directory; default `./langpack-work`. It holds `recipes/<base>/` (gated recipes), `verdicts/<base>/`, `merged/` (the merged file being checked: one at a time), `gates/<base>/` (gate logs), `sha-cache/`, `locks/` and `tmp/`; ship_packs.sh adds `packs/<base>/`, `site/<region>/`, `regions/`, `wpcache/`, `ia-cache/` and `logs/`. **Production:** a disk with room for twice the base, and the same directory for every step of a round, since make_site reads the verdicts and gated recipes run_gates wrote. On StreetZim's build host that is `/storage/streetzim/langpack-work` (on `/storage`, never `/home`); `ops/langpack/host-env.sh` sets it. |
 | `PACK_GATE_ZIMCHECK` | pack_gate, build_packs, run_gates, mutation_test | The **official** zimcheck (zim-tools, e.g. 3.8.0). The default is `zimcheck` on PATH. Any other zimcheck is refused: zimru's misreads hrefs that contain `&amp;` or `&#39;`, and it prints the same "Overall Test Status" line. build_packs.sh and run_gates.sh refuse to start, and pack_gate.py fails the pack. build_packs.sh also passes it to the builder as `ZIMCHECK_BIN`, so the builder's own check uses it too. |
 | `PYTHON` | shell scripts | Default `python3`. |
 | `WIKI_SRC` | build_packs.sh | The Kiwix Wikipedia ZIMs, passed as `--source`. Required. |
@@ -24,6 +24,7 @@ Everything is set by arguments and environment variables.
 | `KIWIX_SERVE`, `NODE` | run_gates.sh | Defaults `kiwix-serve` and `node`. |
 | `PLAYWRIGHT_CORE`, `CHROME_PATH`, `BROWSER_LIBS` | the browser gates | Path to playwright-core's `index.mjs` (default: the installed package); the Chromium to drive; extra `LD_LIBRARY_PATH` for that Chromium. |
 | `LANGPACK_MIN_FREE_GB` | shell scripts | Pause while MemAvailable is below this; default 0. On the shared build host it is 40 (`ops/langpack/host-env.sh`). |
+| `LANGPACK_DISK_MARGIN_GB`, `KEEP_MERGED`, `RESUME` | run_gates.sh | Free disk asked beyond twice the base (default 20); 1 keeps every merged file; 1 skips what already passed (see §2). |
 
 On StreetZim's build host, source `ops/langpack/host-env.sh` first. It sets these variables for that host; values already set win.
 
@@ -73,8 +74,24 @@ which uses only packs with a passing gate. It writes
 | ui | `ui_gate.mjs`: html lang, labels, popup → pack article → images → back to the map, the map's search |
 | smoke | `cloud/zim_viewer_smoke.mjs` |
 
-The viewer, UI and smoke gates also run on the base alone. kiwix-serve
-serves at most 3 merged files at a time.
+The viewer, UI and smoke gates also run on the base alone, first. Then one
+language at a time: its merged file is made, checked with kiwix-serve
+serving it alone, and deleted (`KEEP_MERGED=1` keeps it), so the disk holds
+one merged file and, during the recipe = merge check, its copy. The run
+refuses to start, and stops before the next language, while the merged
+folder's disk has less than twice the base plus `LANGPACK_DISK_MARGIN_GB`
+free. `RESUME=1` keeps the last run's logs and skips an entry whose verdict
+already passes for the recipe this run makes, and the base's checks when
+they passed for a base of the same size and mtime. A zimcheck that ends
+without its verdict line (killed, not a finding) runs once more with
+`--threads=1`; a Fail is never retried.
+
+The region file (`REGION_JSON`) names the city the UI gate clicks, the
+searches and the route. `tools/langpack/regions/<region>.json` holds the
+hand-written ones; `region_json.py BASE` writes one for any base (a city or
+town near map-config's center whose article the base offers, inside its
+outline). The UI gate looks for the city's label at the file's zoom, then
+at 7, 8, 6, 9, 10 and 5, and clicks it at the zoom that showed it.
 
 `compose_verdicts.py` then writes `$LANGPACK_WORK/verdicts/<base>/<L>.json`.
 Each verdict records the zimcheck version (`zimcheck_version`). The zimcheck
@@ -170,3 +187,106 @@ Tests that need more skip themselves and say why:
 - the full browser gate run (`LANGPACK_TEST_GATES`).
 
 `tests/langpack/test_real_data.py` lists those variables.
+
+## In production
+
+Every published map gets packs for the **core languages**, the tiles'
+languages plus English: ar de el en es fa fr he hi id it ja ko nl pl pt ru
+th tr uk vi zh (`CORE_LANGS` in `tools/langpack/region_meta.py`), and for
+the map's own `regionLanguages` (hy, sv, ...) that have a Kiwix Wikipedia
+ZIM in `WIKI_SRC`. A language without one is skipped and logged; a region
+language without one is left out of the region's languages, since every
+menu entry would need its pack. For the same reason a region keeps its
+`REGION_PACKS_MAX` (3) most spoken languages with a Wikipedia ZIM, the
+base's own not counted (`cloud/region-languages.tsv` lists them by
+speakers: Europe 38, Africa 31); the others stay on the menu when they are
+core languages. Greece: el.
+
+### Host setup (once)
+
+`ops/langpack/host-env.sh` sets the paths; `langpack_env_check` says what is
+missing. It needs zim-tools 3.8.0 in
+`/storage/streetzim/tools/zim-tools_linux-x86_64-3.8.0/` (the zimcheck on
+PATH there is zimru's), playwright-core in `ops/langpack/node_modules`
+(`cd ops/langpack && npm ci`; never npm at the repository root),
+puppeteer in the repository's own `node_modules` (the smoke), Chromium 1217
+in `~/.cache/ms-playwright` with `.browser-libs`, and the Kiwix Wikipedia
+ZIMs in `/storage/streetzim/wiki-src`.
+
+### After a map ships
+
+```bash
+. ops/langpack/host-env.sh
+ops/langpack/ship_packs.sh greece /storage/streetzim/osm-greece-2026-10-15.zim
+ops/langpack/publish_site.sh greece          # once ship_packs.sh exited 0
+python3 web/generate.py --deploy             # the usual site deploy
+```
+
+`ship_packs.sh REGION BASE` (the base exactly as `streetzim-<REGION>` lists
+it on archive.org) logs each step in PDT to
+`$LANGPACK_WORK/logs/ship-<REGION>-<base>.log`:
+
+1. `region_meta.py`: the menu (core + region languages, the base's own), the
+   packs it needs, and each merged file's Title (the region's name in that
+   language from the Wikidata cache, else the base's Title).
+2. `prefetch.py`: the SQL dumps, title maps and Wikidata text those packs
+   read (network, no timeout of its own; the builds then run `--offline`).
+3. `build_packs.sh` for each pack language without a gated pack for this
+   base in `$LANGPACK_WORK/packs/<base>/`.
+4. `run_gates.sh` with `RESUME=1`, streamed. The region file is
+   `tools/langpack/regions/<REGION>.json`, else `region_json.py`'s.
+5. archive.org: the packs the passing entries use go to
+   `streetzim-<REGION>-lang` (made on the first upload: mediatype data,
+   collection opensource, title, languages). A pack listed with its MD5 is
+   not sent again; a name the item holds with another MD5 stops the run
+   (a published recipe may use that file: set `PACK_DATE` and rebuild).
+   Until archive.org lists every pack with its MD5: exit 6, run it again
+   later; nothing is redone.
+6. `make_site.py` into `$LANGPACK_WORK/site/<REGION>/recipes/<REGION>/`, URLs
+   `{proxy}/<item>/<file>`, then `site_check.py --recipes-dir` (archive.org
+   listings, the served bytes through the proxy).
+
+Exits: 0 ready to publish; 6 listing pending; 2 another run holds the
+region's lock; 1 anything else. `SHIP_SKIP_UPLOAD=1` stops after the gates.
+
+`publish_site.sh REGION` copies the checked files to
+`web/build/recipes/<REGION>/` in one rename and rewrites
+`web/build/recipes/index.json` (`site_index.py`). The recipes are site data,
+not source (gitignored). `web/generate.py` gives a map card its "Build in
+another language" link (`/build/?region=<id>`) only when the card's ZIM is
+the recipes' base: the builder downloads that base, and archive.org's
+keep-2 cleanup deletes older ones.
+
+### The builder page
+
+`/build/` (`web/build/`; the prototype's `/lab/build/` redirects there)
+lists every region in `recipes/index.json`. The language picker shows each
+language's own name and its name in the visitor's language ("Ελληνικά
+(Griechisch)" in a German browser). Recipes name files on the range proxy
+as `{proxy}/<archive.org item>/<file>`; the page puts in the proxy the
+`/drive/` viewer uses, set in one place: `web/drive/preview-config.js`.
+`site_check.py --proxy` (default: that file) probes through the same one.
+
+`tools/langpack/builder_e2e.mjs` runs the page in headless Chromium against
+local files (a stand-in for the site and one for the proxy) and checks that
+each saved file is byte-identical to the gated merge (the recipe's
+`file_md5`).
+
+### Sizes
+
+A recipe is the generated bytes (the packs' dirents and pointers, the merged
+v1 listing's pack rows) plus the base's chunk hashes. They grow with the
+packs' entries, not the base's.
+
+Greece end to end on the build host (2026-10-21, production base
+osm-greece-2026-10-15.zim, 1.05 GB, all 22 core languages):
+
+| step | time | result |
+|---|---|---|
+| prefetch.py, 21 pack languages (13 new to the cache: 3.2 GB of dumps) | 15 min | complete |
+| build_packs.sh, 21 packs | 19 min | all gated; 0.4 MB (hi, 34 articles) to 55 MB (el, 12,769) |
+| run_gates.sh, 22 entries + the base, streamed | 1 h 23 min | 22/22 every gate PASS; merged folder peak 3.2 GB |
+| make_site.py + site_check.py | 2 min | 722/722 checks (archive.org listings synthetic: nothing uploaded) |
+| builder_e2e.mjs: el, ar, ja one-click, de from a local copy | 17-23 s each (local servers) | each file byte-identical to its gated merge |
+
+Recipes: 2.7-3.8 MB each, 63 MB for the region's 22.

@@ -134,6 +134,7 @@ for (const L of LANGS) {
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });
   if (MODE === 'file') {
+    await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
     await pg.waitForFunction(() => !document.querySelector('#go').disabled, null, { timeout: 30 * 60000, polling: 1000 });
     await pg.click('#go');
