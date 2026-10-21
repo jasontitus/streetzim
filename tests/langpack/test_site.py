@@ -6,6 +6,7 @@ doctored copy of the site or of the verdicts."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +24,7 @@ DL, PX = "https://dl.example", "https://proxy.example"
 
 
 def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, str] | None = None,
-                  zimcheck_version: str | None = "zim-tools 3.8.0") -> None:
+                  zimcheck_version: str | None = "zim-tools 3.8.0", base: Path | None = None) -> None:
     """What run_gates.sh leaves for compose_verdicts.py, every check passing
     unless `fail` names one (lang -> check)."""
     out.mkdir(parents=True, exist_ok=True)
@@ -35,11 +36,17 @@ def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, 
              "kiwix.json": '{"pass": true}\n', "search.json": '{"pass": true}\n',
              "viewer.json": '{"pass": true}\n', "ui.json": '{"pass": true}\n',
              "smoke.log": "12 passed, 0 failed\n"}
+    recipes = {m["L"]: json.load(open(m["recipe"])) for m in map(json.loads, menu_jsonl.splitlines()) if "recipe" in m}
     for L in langs:
         for k, v in files.items():
             (out / f"{L}.{k}").write_text(v)
+        if L in recipes:            # run_gates.sh's stamp: these logs are for this recipe
+            (out / f"{L}.stamp").write_text(f"{recipes[L]['md5']} {recipes[L]['uuid']}\n")
     for k in ("smoke.log", "viewer.json", "ui.json"):
         (out / f"base.{k}").write_text(files[k])
+    if base is not None:
+        st = os.stat(base)
+        (out / "base.identity").write_text(f"{st.st_size} {int(st.st_mtime)}\n")
     bad = {"same": "FAIL\n", "verify.log": "SUMMARY 21/22 PASS\n", "zimcheck.log": "Overall Test Status: Fail\n",
            "route.log": "no route\n", "kiwix.json": '{"pass": false}\n', "search.json": '{"pass": false}\n',
            "viewer.json": '{"pass": false}\n',
@@ -66,7 +73,7 @@ def site(lp: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory) -> Simpl
              "--out-dir", work / "recipes" / tag, env=env)
     assert r.returncode == 0, r.stderr
     gates = d / "gates"
-    _gate_outputs(gates, r.stdout, LANGS.split(","))
+    _gate_outputs(gates, r.stdout, LANGS.split(","), base=lp.base)
     r = tool("compose_verdicts.py", gates, lp.base, LANGS, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     out = d / "site"
@@ -118,7 +125,7 @@ def test_site_check_passes(site: SimpleNamespace) -> None:
 
 def test_failed_check_means_no_verdict_pass(site: SimpleNamespace, lp: SimpleNamespace, tmp_path: Path) -> None:
     gates = tmp_path / "gates"
-    _gate_outputs(gates, (site.gates / "menu.jsonl").read_text(), LANGS.split(","), fail={"th": "ui.json"})
+    _gate_outputs(gates, (site.gates / "menu.jsonl").read_text(), LANGS.split(","), fail={"th": "ui.json"}, base=lp.base)
     env = {"LANGPACK_WORK": str(tmp_path / "work")}
     shutil.copytree(site.work / "recipes", tmp_path / "work" / "recipes")
     r = tool("compose_verdicts.py", gates, lp.base, LANGS, env=env)
@@ -215,11 +222,11 @@ def test_zimcheck_must_pass_and_be_official(case: str, site: SimpleNamespace, lp
     gates = tmp_path / "gates"
     menu = (site.gates / "menu.jsonl").read_text()
     if case == "log_fail":
-        _gate_outputs(gates, menu, LANGS.split(","), fail={"de": "zimcheck.log"})
+        _gate_outputs(gates, menu, LANGS.split(","), fail={"de": "zimcheck.log"}, base=lp.base)
     elif case == "zimru":
-        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version="zimcheck (zimru) 0.1.0")
+        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version="zimcheck (zimru) 0.1.0", base=lp.base)
     else:
-        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version=None)
+        _gate_outputs(gates, menu, LANGS.split(","), zimcheck_version=None, base=lp.base)
     env = {"LANGPACK_WORK": str(tmp_path / "work")}
     shutil.copytree(site.work / "recipes", tmp_path / "work" / "recipes")
     assert tool("compose_verdicts.py", gates, lp.base, LANGS, env=env).returncode == 0
@@ -264,7 +271,7 @@ def test_kiwix_search_is_required_unless_reported(site: SimpleNamespace, lp: Sim
     """search_gate.py's FAIL (Kiwix's search cannot find the pack articles)
     fails the entry; LANGPACK_SEARCH_GATE=report records it as advisory."""
     gates = tmp_path / "gates"
-    _gate_outputs(gates, (site.gates / "menu.jsonl").read_text(), LANGS.split(","), fail={"th": "search.json"})
+    _gate_outputs(gates, (site.gates / "menu.jsonl").read_text(), LANGS.split(","), fail={"th": "search.json"}, base=lp.base)
     env = {"LANGPACK_WORK": str(tmp_path / "work"), **({"LANGPACK_SEARCH_GATE": mode} if mode else {})}
     shutil.copytree(site.work / "recipes", tmp_path / "work" / "recipes")
     assert tool("compose_verdicts.py", gates, lp.base, LANGS, env=env).returncode == 0

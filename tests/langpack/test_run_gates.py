@@ -234,3 +234,67 @@ def test_resume_skips_what_passed_for_the_same_recipe(gates: SimpleNamespace, tm
                         env={**env, "RESUME": "1", "KIWIX_STUB_LOG": str(served)})
     assert r3.returncode == 0
     assert [json.loads(x)["books"] for x in served.read_text().splitlines()][0] == [gates.base.name]
+
+
+DF_STUB = r'''#!/bin/bash
+# plenty of room on the first call (run_gates' start check), none afterwards
+n=$(cat "$DF_COUNT" 2>/dev/null || echo 0); echo $((n + 1)) > "$DF_COUNT"
+echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+if [ "$n" = 0 ]; then echo "x 999999999999 0 999999999999 0% /"; else echo "x 999999999999 0 0 100% /"; fi
+'''
+
+
+def test_a_disk_break_never_passes_old_logs_for_a_new_recipe(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """Review r3 H-1: a resumed run whose recipe changed (a new title) and that
+    stops for disk space must not compose an all-PASS verdict for the new
+    recipe out of the last run's logs."""
+    work = tmp_path / "work"
+    tag = gates.tag
+    env = {**gates.env, "LANGPACK_WORK": str(work), "RESUME": "1", "TITLES": json.dumps({"de": "Testland DE"})}
+    args = [str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th", "en", "testland",
+            str(gates.region), str(_free_port())]
+    assert subprocess.run(args, capture_output=True, text=True, timeout=600, env=env).returncode == 0
+    out = work / "gates" / tag
+    for L in ("de", "th"):                   # the stand-ins cannot route or answer kiwix: make the logs pass
+        (out / f"{L}.route.log").write_text("route OK\n")
+        (out / f"{L}.kiwix.json").write_text(json.dumps({"pass": True, "checks": {}}) + "\n")
+        (out / f"{L}.search.json").write_text(json.dumps({"pass": True}) + "\n")
+    old = json.loads((work / "recipes" / tag / "de.json").read_text())
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "df").write_text(DF_STUB)
+    (stubs / "df").chmod(0o755)
+    served = tmp_path / "served.jsonl"
+    env2 = {**env, "TITLES": json.dumps({"de": "Testlandien"}), "PATH": f"{stubs}:{os.environ['PATH']}",
+            "DF_COUNT": str(tmp_path / "df.count"), "KIWIX_STUB_LOG": str(served)}
+    r2 = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env2)
+    assert r2.returncode == 0 and "de: not run" in r2.stderr, r2.stderr[-2000:]
+    new = json.loads((work / "recipes" / tag / "de.json").read_text())
+    assert new["md5"] != old["md5"]
+    v = json.loads((work / "verdicts" / tag / "de.json").read_text())
+    assert v["recipe_md5"] == new["md5"] and v["all_pass"] is False and v["checks"]["logs_for_recipe"] is False
+    assert not list(out.glob("de.*")) and not list(out.glob("th.*"))    # languages not reached: no logs
+    sys.path.insert(0, str(TOOLS.parent.parent))
+    from tools.langpack import gatelib
+    os.environ["LANGPACK_WORK"] = str(work)
+    try:
+        assert gatelib.entry_verdict_ok(str(gates.base), "de", new)[0] is False
+    finally:
+        os.environ.pop("LANGPACK_WORK", None)
+
+
+def test_logs_with_another_stamp_fail(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """compose_verdicts.py: logs stamped for another recipe (or not stamped) fail."""
+    work = tmp_path / "work"
+    env = {**gates.env, "LANGPACK_WORK": str(work)}
+    args = [str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+            str(gates.region), str(_free_port())]
+    assert subprocess.run(args, capture_output=True, text=True, timeout=600, env=env).returncode == 0
+    out = work / "gates" / gates.tag
+    v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
+    assert v["checks"]["logs_for_recipe"] is True and v["checks"]["base_logs_current"] is True
+    (out / "de.stamp").write_text("0" * 32 + " 00000000-0000-0000-0000-000000000000\n")
+    r = subprocess.run([sys.executable, str(TOOLS / "compose_verdicts.py"), str(out), str(gates.base), "de"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0
+    assert json.loads((work / "verdicts" / gates.tag / "de.json").read_text())["checks"]["logs_for_recipe"] is False

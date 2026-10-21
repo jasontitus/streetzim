@@ -214,17 +214,25 @@ else
   printf '%s\n' "$BID" > "$OUT/base.identity"
 fi
 
+# Each language's logs are stamped with the recipe they were made for (its
+# md5 and uuid); compose_verdicts.py fails logs without this run's stamp, so
+# logs a resumed run did not redo can never pass for a new recipe.
+stamp() { $PY -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["md5"], r["uuid"])' "$W/recipes/$TAG/$1.json"; }
 # (the menu on fd 3: nothing in the loop may eat it from stdin)
+SHORT=0
 while read -r line <&3; do
   L=$($PY -c 'import json,sys; print(json.loads(sys.argv[1])["L"])' "$line")
   if [ "$RESUME" = 1 ] && verdict_current "$L"; then
     echo "$L: its verdict passes for this recipe (RESUME=1); not run again"; continue
   fi
-  if ! disk_ok; then
-    echo "$L: not run, and neither is any later language: $W/merged has under $(( NEED_KB / 1048576 )) GB free" >&2
-    break
+  if [ $SHORT = 1 ] || ! disk_ok; then
+    [ $SHORT = 1 ] || echo "$L: not run, and neither is any later language: $W/merged has under $(( NEED_KB / 1048576 )) GB free" >&2
+    SHORT=1
+    rm -f "$OUT/$L".*          # no logs: its verdict FAILS
+    continue
   fi
   rm -f "$OUT/$L".*
+  stamp "$L" > "$OUT/$L.stamp"
   mapfile -t P < <($PY -c 'import json,sys; [print(f) for f in json.loads(sys.argv[1])["pack_files"]]' "$line")
   M="$W/merged/m-$TAG-$L.zim"
   T=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TITLES" "$L"); TA=(); [ -n "$T" ] && TA=(--title "$T")

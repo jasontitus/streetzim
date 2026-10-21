@@ -6,8 +6,9 @@
 Reads the gated recipes in $LANGPACK_WORK/recipes/<base>/ and writes
 $LANGPACK_WORK/verdicts/<base>/<L>.json:
   {"lang", "recipe_md5", "recipe_uuid", "recipe_size", "packs": {lang: md5},
-   "zimcheck_version", "checks": {recipe_eq_merge, verify, zimcheck, route, kiwix,
-   search, viewer, ui, smoke, base_smoke, base_viewer, base_ui}, "all_pass",
+   "zimcheck_version", "checks": {logs_for_recipe, recipe_eq_merge, verify, zimcheck,
+   route, kiwix, search, viewer, ui, smoke, base_logs_current, base_smoke,
+   base_viewer, base_ui}, "all_pass",
    "advisory": [checks recorded but not required], "evidence": {...}}
 search (search_gate.py: Kiwix's search finds pack-only titles) is required
 unless LANGPACK_SEARCH_GATE=report, which records it as advisory.
@@ -59,7 +60,9 @@ def mark(b):
 def main():
     out, base, langs = sys.argv[1], sys.argv[2], sys.argv[3].split(",")
     tag = os.path.basename(os.path.realpath(base))[:-4]
-    base_checks = {"base_smoke": smoke_ok(f"{out}/base.smoke.log")[0],
+    st = os.stat(base)
+    base_checks = {"base_logs_current": read(f"{out}/base.identity").strip() == f"{st.st_size} {int(st.st_mtime)}",
+                   "base_smoke": smoke_ok(f"{out}/base.smoke.log")[0],
                    "base_viewer": bool(jline(f"{out}/base.viewer.json").get("pass")),
                    "base_ui": bool(jline(f"{out}/base.ui.json").get("pass"))}
     zver = read(f"{out}/zimcheck.version").strip()      # run_gates.sh: `zimcheck --version`
@@ -81,6 +84,8 @@ def main():
         kj, vj, uj = jline(f"{out}/{L}.kiwix.json"), jline(f"{out}/{L}.viewer.json"), jline(f"{out}/{L}.ui.json")
         sj = jline(f"{out}/{L}.search.json")
         checks = {
+            # run_gates.sh stamps a language's logs with the recipe it checked
+            "logs_for_recipe": read(f"{out}/{L}.stamp").split() == [r["md5"], r["uuid"]],
             "recipe_eq_merge": read(f"{out}/{L}.same").strip().endswith("PASS"),
             "verify": bool(vm and vm.group(1) == vm.group(2)),
             "zimcheck": official and "Overall Test Status: Pass" in read(f"{out}/{L}.zimcheck.log"),
