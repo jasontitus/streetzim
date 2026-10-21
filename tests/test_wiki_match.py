@@ -120,6 +120,27 @@ def test_own_script_pieces_that_link_one_article_match():
     assert W.feature_wiki(STREET, refs) is refs[("αθήνα - πάτρα",) + PIECES[0]]
 
 
+def test_own_script_pieces_with_two_titles_and_no_item_match_none():
+    refs = {("αθήνα - πάτρα",) + PIECES[0]: {"wikipedia": "el:A"},
+            ("αθήνα - πάτρα",) + PIECES[1]: {"wikipedia": "el:B"}}
+    assert W.feature_wiki(STREET, refs) is None
+
+
+def test_pieces_link_one_item_whatever_its_titles():
+    # One item, its OSM tags in two languages (no English article to
+    # resolve to); one title written with spaces and with underscores.
+    one_item = {("αθήνα - πάτρα",) + PIECES[0]: {"wikipedia": "el:Φαράγγι Σαμαριάς", "wikidata": "Q1128366"},
+                ("αθήνα - πάτρα",) + PIECES[1]: {"wikipedia": "de:Samaria-Schlucht", "wikidata": "Q1128366"}}
+    assert W.feature_wiki(STREET, one_item) is one_item[("αθήνα - πάτρα",) + PIECES[0]]
+    one_title = {("αθήνα - πάτρα",) + PIECES[0]: {"wikipedia": "el:Ολυμπία Οδός"},
+                 ("αθήνα - πάτρα",) + PIECES[1]: {"wikipedia": "el:Ολυμπία_Οδός"}}
+    assert W.feature_wiki(STREET, one_title) is one_title[("αθήνα - πάτρα",) + PIECES[0]]
+    # A title with a Q-ID beside the same title without one: not known to agree.
+    unsure = {("αθήνα - πάτρα",) + PIECES[0]: {"wikipedia": "el:Ολυμπία Οδός", "wikidata": "Q389418"},
+              ("αθήνα - πάτρα",) + PIECES[1]: {"wikipedia": "el:Ολυμπία Οδός"}}
+    assert W.feature_wiki(STREET, unsure) is None
+
+
 def test_search_name_pieces_keep_the_first_hit():
     # As before own-script names were matched: the first piece's entry.
     refs = {("athens - patras",) + PIECES[0]: TUNNEL, ("athens - patras",) + PIECES[1]: MOTORWAY}
@@ -269,9 +290,10 @@ def test_records_and_geo_index(tmp_path):
 
 
 def test_a_point_feature_takes_a_streets_geo_row(tmp_path):
-    """A street links the tunnel first (its ways carry the tunnel's tags);
-    the tunnel's own record places the row, and a later street does not
-    take it back."""
+    """A street links an article first (its ways carry the tunnel's tags);
+    a point record of it places the row, and a later street does not take
+    it back. Made up: Greece's Aithra Tunnel has no search record of its
+    own, so its row stays on a motorway record."""
     tunnel = {"name": "Aithra Tunnel", "name_native": "Σήραγγα Αίθρα", "type": "poi",
               "lat": 37.9791, "lon": 23.2431}
     street = {k: v for k, v in STREET.items() if k != "_pts"}
@@ -288,6 +310,28 @@ def test_a_point_feature_takes_a_streets_geo_row(tmp_path):
                          chunk_tmp=str(tmp_path / "chunks"))
     assert b.wiki_geo == {"Aithra_Tunnel": [37.9791, 23.2431, "poi", "Q24039585", ""]}
     assert b.wiki_fields_added == 3
+
+
+def test_the_first_point_feature_keeps_the_geo_row(tmp_path):
+    """street -> poi -> place: the poi took the row from the street; the
+    place, though not a street either, does not take it from the poi."""
+    poi = {"name": "Aithra Tunnel", "name_native": "Σήραγγα Αίθρα", "type": "poi",
+           "lat": 37.9791, "lon": 23.2431}
+    place = {"name": "Aithra", "name_native": "Αίθρα", "type": "place",
+             "lat": 37.98, "lon": 23.25}
+    street = {k: v for k, v in STREET.items() if k != "_pts"}
+    path = tmp_path / "search.jsonl"
+    path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in (street, poi, place)),
+                    encoding="utf-8")
+    (tmp_path / "chunks").mkdir()
+    b = W._search_bucket(search_features_path=str(path), wikidata_data=None,
+                         wiki_cross_refs={("αθήνα - πάτρα",) + PIECES[0]: TUNNEL,
+                                          ("σήραγγα αίθρα", 379791, 232431): TUNNEL,
+                                          ("αίθρα", 379800, 232500): TUNNEL},
+                         loc_lookup=None, _bundled_set={"Aithra_Tunnel"},
+                         chunk_tmp=str(tmp_path / "chunks"))
+    assert b.wiki_fields_added == 3
+    assert b.wiki_geo == {"Aithra_Tunnel": [37.9791, 23.2431, "poi", "Q24039585", ""]}
 
 
 def test_the_first_street_keeps_a_streets_geo_row(tmp_path):

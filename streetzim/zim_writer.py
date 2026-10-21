@@ -98,10 +98,16 @@ def wiki_match_names(feat):
 
 
 def wiki_link(entry):
-    """What a cross-ref entry links to: (wikipedia, wikidata). Entries
-    that differ only in provenance (wikipedia_src, wikipedia_osm: one
-    OSM-tagged, one resolved from the Q-ID) link to the same article."""
-    return entry.get("wikipedia"), entry.get("wikidata")
+    """What a cross-ref entry links to: its Wikidata item, else its
+    Wikipedia title (spaces as underscores). Entries that differ only in
+    provenance (wikipedia_src, wikipedia_osm: one OSM-tagged, one
+    resolved from the Q-ID), or tag one item with titles in two languages
+    (an item with no English article keeps its OSM tags), link to the same
+    one; an entry with a Q-ID and one without never do."""
+    q = entry.get("wikidata")
+    if q:
+        return ("q", q)
+    return ("w", (entry.get("wikipedia") or "").replace(" ", "_"))
 
 
 def _one_link(hits):
@@ -149,8 +155,9 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
       matched, so whatever matched then keeps its entry;
     - else its own-script name (wiki_match_names): the entry its hits
       agree on (wiki_link), none when a street's pieces carry different
-      articles ("Αθήνα - Πάτρα": Olympia Odos, and the Aithra Tunnel on
-      the tunnel's ways);
+      articles ("Αθήνα - Πάτρα": Olympia Odos on most ways, the Aithra
+      Tunnel's Q-ID on 68 ways OSM mis-tags; a record made only of those
+      still links the tunnel);
     - else, with `folded` (wiki_folded_index), the entry its names fold
       to, likewise none when two differ or a key is ambiguous.
     None when nothing matches."""
