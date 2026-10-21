@@ -166,7 +166,8 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     assert len(ups) == 1 and ups[0]["item"] == "streetzim-testland-lang"
     sent = sorted(a for a in ups[0]["args"] if a.endswith(".zim"))
     assert sent == [f"osm_testland_wiki-{x}_2026-10-21.zim" for x in ("de", "fr", "th")]
-    for m in ("--metadata=mediatype:data", "--metadata=collection:opensource", "--metadata=language:deu;fra;tha"):
+    for m in ("--metadata=mediatype:data", "--metadata=collection:opensource", "--metadata=language:deu",
+              "--metadata=language:fra", "--metadata=language:tha"):
         assert m in ups[0]["args"], ups[0]["args"]
     # the site files: proxy-relative URLs, the base on its own item, recipes under recipes/testland/
     out = ship.work / "site" / "testland" / "recipes" / "testland"

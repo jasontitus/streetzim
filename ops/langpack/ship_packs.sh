@@ -178,7 +178,8 @@ fs = m.get("files") if isinstance(m, dict) else None
 f = next((x for x in fs or [] if isinstance(x, dict) and x.get("name") == sys.argv[1]), None)
 sys.exit(0 if f and str(f.get("md5", "")).lower() != sys.argv[2] else 1)' "$1" "$2"
 }
-LANG_META=$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import iso639_3; print(";".join(iso639_3(x) for x in sys.argv[1].split(",") if x))' "$PACK_LANGS" "$ROOT")
+# one --metadata=language:<ISO 639-3> per pack language (archive.org keeps a list)
+mapfile -t LANG_META < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import iso639_3; [print("--metadata=language:" + iso639_3(x)) for x in sys.argv[1].split(",") if x]' "$PACK_LANGS" "$ROOT")
 SEND=()
 for f in "${FILES[@]}"; do
   [ -n "$f" ] || continue
@@ -195,7 +196,7 @@ if [ ${#SEND[@]} -gt 0 ]; then
   ( cd "$PACKS" && "${LOW[@]}" "$IA" upload "$ITEM" "${SEND[@]##*/}" --retries 5 --checksum \
       --metadata="mediatype:data" --metadata="collection:opensource" \
       --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
-      --metadata="language:$LANG_META" \
+      "${LANG_META[@]}" \
       --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
       >> "$LOG" 2>&1 ) || { say "ia upload failed"; exit 1; }
 fi
