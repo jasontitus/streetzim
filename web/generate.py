@@ -922,37 +922,75 @@ def preview_proxy_url(path=PREVIEW_CONFIG_PATH):
     return m.group(2).strip() if m else ""
 
 
-BUILD_INDEX_PATH = os.path.join(SCRIPT_DIR, "build", "recipes", "index.json")
+def build_recipes_dir():
+    """web/build/recipes/ (where ops/langpack/publish_site.sh puts recipes)."""
+    return os.path.join(SCRIPT_DIR, "build", "recipes")
 
 
-def build_page_regions(path=BUILD_INDEX_PATH):
-    """{region id: base file name} of every region the builder page
-    (/build/) offers, from its recipes/index.json; {} when there is none.
+def build_page_regions(recipes_dir=None):
+    """{region id: {"file", "md5"}} of the base of every region published
+    for the builder page (/build/): web/build/recipes/<id>/region.json, as
+    ops/langpack/publish_site.sh leaves it; {} when there is none.
 
-    A card links to the builder only when the map file it offers is the
-    base the recipes were made from: the builder downloads that base, and
-    archive.org's keep-2 cleanup deletes older ones.
+    A region is offered only while archive.org's live ZIM is that very file
+    (name and MD5): the builder downloads the base, archive.org's keep-2
+    cleanup deletes older ones, and an in-place re-upload keeps the name.
     """
-    try:
-        with open(path, encoding="utf-8") as f:
-            idx = json.load(f)
-    except (OSError, ValueError):
-        return {}
     out = {}
-    regions = idx.get("regions") if isinstance(idx, dict) else None
-    for r in regions if isinstance(regions, list) else []:
+    recipes_dir = recipes_dir or build_recipes_dir()
+    try:
+        names = sorted(os.listdir(recipes_dir))
+    except OSError:
+        return out
+    for rid in names:
         try:
-            if r["menu"]:
-                out[str(r["id"])] = str(r["base"]["file"])
-        except (KeyError, TypeError):
+            with open(os.path.join(recipes_dir, rid, "region.json"), encoding="utf-8") as f:
+                r = json.load(f)
+            if r["id"] == rid and r["menu"]:
+                out[rid] = {"file": str(r["base"]["file"]), "md5": str(r["base"].get("md5") or "")}
+        except (OSError, ValueError, KeyError, TypeError):
             continue
     return out
 
 
-def builder_link(builder, region_id, zim_filename):
-    """Whether a live card links to the builder page: the region has
-    published recipes (build_page_regions) made from this very ZIM."""
-    return bool(zim_filename) and builder.get(region_id) == zim_filename
+def builder_link(builder, region_id, zim_filename, zim_md5):
+    """Whether a live card links to the builder page: the region's recipes
+    (build_page_regions) were made from this very ZIM, by name and MD5."""
+    b = builder.get(region_id)
+    return bool(b and zim_filename and zim_md5 and b["file"] == zim_filename
+                and b["md5"] == str(zim_md5).lower())
+
+
+# region id -> True when the builder may offer it (filled while the pages are
+# rendered; write_build_index writes the page's region list from it)
+BUILDER_LIVE = {}
+
+
+def write_build_index(live, recipes_dir=None):
+    """web/build/recipes/index.json: the published regions whose base is
+    archive.org's live ZIM (`live`: {region id: True}), by title. Written at
+    every site build, so a pruned or re-uploaded base leaves the builder
+    page with the next deploy. Returns the region ids listed."""
+    recipes_dir = recipes_dir or build_recipes_dir()
+    if not os.path.isdir(recipes_dir):
+        return []
+    regions = []
+    for rid in sorted(os.listdir(recipes_dir)):
+        try:
+            with open(os.path.join(recipes_dir, rid, "region.json"), encoding="utf-8") as f:
+                r = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(r, dict) and r.get("id") == rid and r.get("menu") and live.get(rid):
+            regions.append(r)
+    regions.sort(key=lambda r: (str(r.get("title", "")).casefold(), r["id"]))
+    idx = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
+           "regions": regions}
+    tmp = os.path.join(recipes_dir, "index.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(idx, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, os.path.join(recipes_dir, "index.json"))
+    return [r["id"] for r in regions]
 
 
 def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
@@ -1101,6 +1139,9 @@ def build_page():
 
     for lang, _name, sub in LANGUAGES:
         _write_page(archive_items, lang, sub)
+    if os.path.isdir(build_recipes_dir()):
+        listed = write_build_index(BUILDER_LIVE)
+        print(f"Builder page lists {len(listed)} regions whose base is live: {listed}")
 
 
 def render_lang_picker(lang):
@@ -1143,7 +1184,7 @@ def _write_page(archive_items, lang, sub):
           else "off (no proxy in web/drive/preview-config.js)"))
     # The builder page streams through the same proxy.
     builder = build_page_regions() if preview else {}
-    print(f"Builder links: {len(builder)} regions in web/build/recipes/index.json"
+    print(f"Builder links: {len(builder)} regions published in web/build/recipes/"
           + ("" if preview else " (off: no proxy)"))
     # Track items where archive.org's metadata fetch failed even
     # after retries. We KNOW these items exist (they showed up in
@@ -1276,10 +1317,14 @@ def _write_page(archive_items, lang, sub):
                 torrent_ok=torrent_ok,
                 build_date=zim_build_date(zim_filename, zim_file_meta),
                 preview=preview, lang=lang,
-                build_page=builder_link(builder, region["id"], zim_filename)))
-            if region["id"] in builder and not builder_link(builder, region["id"], zim_filename):
-                print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]!r}, "
-                      f"the live ZIM is {zim_filename!r} — no builder link (run ops/langpack/ship_packs.sh)")
+                build_page=builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"))))
+            if region["id"] in builder:
+                ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"))
+                BUILDER_LIVE[region["id"]] = BUILDER_LIVE.get(region["id"], False) or ok
+                if not ok:
+                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, the live ZIM is "
+                          f"{zim_filename!r} md5 {(zim_file_meta or {}).get('md5')} — off the builder page "
+                          f"(run ops/langpack/ship_packs.sh)")
             live_count += 1
         else:
             cards.append(render_upcoming_card(region, lang))

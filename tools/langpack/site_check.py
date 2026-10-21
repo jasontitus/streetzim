@@ -15,7 +15,7 @@ archive.org metadata JSON into --ia-cache (a plain GET of
 https://archive.org/metadata/<item>). Exit 0 only when every check passes.
 
 Per region (index.json; region.json must equal it):
-  * base.file/size == the local base; base.download and base.url end in
+  * base.file/size/md5 == the local base; base.download and base.url end in
     /<item>/<base.file>; the item lists that file with the local size + file md5.
   * probe.url names a local pack of probe.size bytes, listed on archive.org.
   * region-base-url.json (if present) == base.url.
@@ -165,6 +165,7 @@ def main():
     buuid = bz.header.uuid.hex()
     bsize = os.path.getsize(a.base)
     need(b["file"] == os.path.basename(a.base) and b["size"] == bsize, f"index base {b['file']} {b['size']} != local")
+    need(b.get("md5") == gatelib.md5_file(a.base), f"index base md5 {b.get('md5')} != the local file's")
     for k in ("download", "url"):
         if k in b:
             ia_listed(b[k], a.base, f"base.{k}")

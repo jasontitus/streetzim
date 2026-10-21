@@ -12,7 +12,7 @@ Writes OUT/<L>.json (streetzim-recipe/2, absolute pack URLs) for every map
 language and OUT/index.json:
 
   {"regions": [{"id", "title",
-                "base": {"file", "size", "download"},
+                "base": {"file", "size", "md5" (the whole file's, as archive.org lists it), "download"},
                 "probe": {"url", "size"},
                 "menu": [{"lang", "label", "recipe": "recipes/<L>.json", "size",
                           "download_bytes", "name", "file_name", "md5",
@@ -138,7 +138,8 @@ def main():
     index = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
              "regions": [{"id": a.region, "title": a.region_title,
                           "base": {"file": os.path.basename(os.path.realpath(a.base)),
-                                   "size": os.path.getsize(a.base), "download": a.base_download},
+                                   "size": os.path.getsize(a.base), "md5": gatelib.md5_file(a.base),
+                                   "download": a.base_download},
                           "probe": {"url": (overrides.get(biggest.lang) or a.url_template).format(
                                         file=os.path.basename(biggest.path), proxy="{proxy}"),
                                     "size": os.path.getsize(biggest.path)},
