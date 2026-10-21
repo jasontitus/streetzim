@@ -615,3 +615,29 @@ def test_read_base_on_a_real_streetzim(tmp_path: Path) -> None:
     assert all(wiki_pack._QID_RE.fullmatch(q) for q in base.qids)
     again = wiki_pack.read_base(zim, tmp_path, log=lambda m: None)   # from the cache
     assert again.places == base.places and again.kinds == base.kinds
+
+
+def test_pick_source_finds_kiwixs_bokmal_zim_for_no(tmp_path: Path) -> None:
+    """cloud/region-languages.tsv says "no" (Norway); Kiwix names Norwegian
+    Bokmål's Wikipedia ZIM wikipedia_nb_*.zim, while its dumps stay nowiki."""
+    (tmp_path / "wikipedia_nb_all_maxi_2026-09.zim").write_bytes(b"")
+    (tmp_path / "wikipedia_nn_all_maxi_2026-09.zim").write_bytes(b"")      # Nynorsk: not this one
+    for lang in ("no", "nb"):
+        assert wiki_pack.pick_source(str(tmp_path), lang).endswith("wikipedia_nb_all_maxi_2026-09.zim")
+        assert wiki_pack.site_of(lang) == "nowiki"
+    with pytest.raises(FileNotFoundError):
+        wiki_pack.pick_source(str(tmp_path), "sv")
+
+
+def test_region_languages_have_iso639_3_codes() -> None:
+    """Every region language can label a pack (Language metadata): Romansh for
+    Switzerland, Armenian, three-letter codes as they are."""
+    from streetzim.languages import iso639_3
+    assert (iso639_3("rm"), iso639_3("hy"), iso639_3("ceb"), iso639_3("no")) == ("roh", "hye", "ceb", "nor")
+    import csv
+    rows = [r for r in csv.reader(open(Path(__file__).resolve().parent.parent / "cloud" / "region-languages.tsv"),
+                                  delimiter="\t") if r and not r[0].startswith("#")]
+    for _rid, langs in rows:
+        for lg in langs.split(","):
+            assert len(iso639_3(lg)) == 3, lg
+    assert dict(rows)["switzerland"] == "de,fr,it,rm"

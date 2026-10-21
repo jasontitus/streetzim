@@ -27,6 +27,24 @@ ISO639_3 = {
     "ar": "ara", "fa": "fas", "he": "heb", "sw": "swa", "am": "amh",
 }
 
+# The other two-letter codes of cloud/region-languages.tsv: a region's own
+# languages get Wikipedia packs (tools/langpack/), whose metadata needs the
+# ISO 639-3 code. A three-letter code is ISO 639-3 already (iso639_3).
+REGION_ISO639_3 = {
+    "aa": "aar", "af": "afr", "ak": "aka", "as": "asm", "av": "ava", "ay": "aym", "az": "aze",
+    "bi": "bis", "bm": "bam", "bo": "bod", "bs": "bos", "ce": "che", "dv": "div", "dz": "dzo",
+    "ee": "ewe", "ff": "ful", "fj": "fij", "fy": "fry", "gn": "grn", "gu": "guj", "ha": "hau",
+    "ht": "hat", "hy": "hye", "ig": "ibo", "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik",
+    "kk": "kaz", "km": "khm", "kn": "kan", "kr": "kau", "ks": "kas", "ku": "kur", "ky": "kir",
+    "lb": "ltz", "lg": "lug", "ln": "lin", "lo": "lao", "mg": "mlg", "mh": "mah", "mk": "mkd",
+    "ml": "mal", "mn": "mon", "mt": "mlt", "my": "mya", "na": "nau", "nd": "nde", "nr": "nbl",
+    "ny": "nya", "om": "orm", "or": "ori", "os": "oss", "pa": "pan", "ps": "pus", "qu": "que",
+    "rm": "roh", "rn": "run", "rw": "kin", "sc": "srd", "sd": "snd", "sg": "sag", "si": "sin",
+    "sn": "sna", "so": "som", "sq": "sqi", "ss": "ssw", "st": "sot", "su": "sun", "tg": "tgk",
+    "ti": "tir", "tk": "tuk", "tn": "tsn", "ts": "tso", "tt": "tat", "ty": "tah", "uz": "uzb",
+    "ve": "ven", "wo": "wol", "xh": "xho", "yo": "yor", "za": "zha", "zu": "zul",
+}
+
 # Right-to-left scripts: the viewer's layout is left-to-right; labels and
 # search results still render correctly (MapLibre's RTL plugin).
 RTL = frozenset({"ar", "fa", "he", "ur"})
@@ -34,11 +52,20 @@ RTL = frozenset({"ar", "fa", "he", "ur"})
 
 # Wikipedia editions whose code is not the language's ISO 639-1 code.
 WIKI_CODE = {"nb": "no"}
+# Kiwix names a Wikipedia ZIM by another code than the edition's in one
+# case: Norwegian Bokmål is no.wikipedia.org (dumps: nowiki), but its ZIM is
+# wikipedia_nb_*.zim (cloud/region-languages.tsv says "no").
+KIWIX_ZIM_CODE = {"no": "nb", "nb": "nb"}
 
 
 def wiki_code(lang: str) -> str:
     """The Wikipedia edition of ``lang``: xx.wikipedia.org, site xxwiki."""
     return WIKI_CODE.get(lang, lang)
+
+
+def kiwix_zim_code(lang: str) -> str:
+    """The code in a Kiwix Wikipedia ZIM's file name (wikipedia_<code>_...)."""
+    return KIWIX_ZIM_CODE.get(lang, wiki_code(lang))
 
 
 # ISO 639-3 codes a Kiwix Wikipedia ZIM in the language may declare.
@@ -54,6 +81,12 @@ def zim_matches(lang: str, zim_language: str) -> bool:
 
 
 def iso639_3(lang: str) -> str:
+    if lang in ISO639_3:
+        return ISO639_3[lang]
+    if lang in REGION_ISO639_3:
+        return REGION_ISO639_3[lang]
+    if re.fullmatch(r"[a-z]{3}", lang):     # ISO 639-3 already (ceb, hil, ...)
+        return lang
     try:
         return ISO639_3[lang]
     except KeyError:

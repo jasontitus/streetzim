@@ -74,7 +74,7 @@ from cloud.wiki_articles import (
     article_url,
     clean_article_html,
 )
-from streetzim.languages import iso639_3, wiki_code, zim_matches
+from streetzim.languages import iso639_3, kiwix_zim_code, wiki_code, zim_matches
 
 PREFIX = "~w/{lang}/"
 TITLE_MAX_UTF16 = 30        # docs/language-matrix.md: Title <= 30 UTF-16 units
@@ -1420,10 +1420,11 @@ def pick_source(source: str, lang: str) -> str:
     """A Wikipedia ZIM, or the newest wikipedia_<xx>_all_maxi_*.zim in a folder
     (else the newest wikipedia_<xx>_*.zim; files still downloading end .part)."""
     if os.path.isdir(source):
-        found = (sorted(Path(source).glob(f"wikipedia_{wiki_code(lang)}_all_maxi_*.zim"))
-                 or sorted(Path(source).glob(f"wikipedia_{wiki_code(lang)}_*.zim")))
+        code = kiwix_zim_code(lang)          # Kiwix's file code: no -> nb
+        found = (sorted(Path(source).glob(f"wikipedia_{code}_all_maxi_*.zim"))
+                 or sorted(Path(source).glob(f"wikipedia_{code}_*.zim")))
         if not found:
-            raise FileNotFoundError(f"no wikipedia_{wiki_code(lang)}_*.zim in {source}")
+            raise FileNotFoundError(f"no wikipedia_{code}_*.zim in {source}")
         return str(max(found, key=lambda p: (p.name.rsplit("_", 1)[-1], p.name)))
     return source
 
