@@ -95,6 +95,46 @@ def test_the_search_name_wins_at_every_point():
     assert W.feature_wiki(feat, refs) is by_name
 
 
+# A merged street of two pieces, one per ~11 m cell.
+STREET = {"name": "Athens - Patras", "name_native": "Αθήνα - Πάτρα", "type": "street",
+          "lat": 37.92, "lon": 22.95, "_pts": [[37.92, 22.95], [37.92, 23.1]]}
+PIECES = ((379200, 229500), (379200, 231000))
+TUNNEL = {"wikipedia": "en:Aithra_Tunnel", "wikidata": "Q24039585"}
+MOTORWAY = {"wikipedia": "en:Olympia_Odos", "wikidata": "Q389418"}
+
+
+def test_own_script_pieces_that_link_two_articles_match_none():
+    # 68 ways of "Αθήνα - Πάτρα" carry the Aithra Tunnel's tags, the others
+    # Olympia Odos': a street merged from both is neither.
+    refs = {("αθήνα - πάτρα",) + PIECES[0]: TUNNEL, ("αθήνα - πάτρα",) + PIECES[1]: MOTORWAY}
+    assert W.feature_wiki(STREET, refs) is None
+    assert W.feature_wiki(STREET, refs, W.wiki_folded_index(refs)) is None
+
+
+def test_own_script_pieces_that_link_one_article_match():
+    # Two entries, equal but not the same object; and one resolved from the
+    # Q-ID beside one OSM-tagged: the same article.
+    refs = {("αθήνα - πάτρα",) + PIECES[0]: dict(MOTORWAY),
+            ("αθήνα - πάτρα",) + PIECES[1]: dict(MOTORWAY, wikipedia_src="wd",
+                                                 wikipedia_osm="el:Ολυμπία Οδός")}
+    assert W.feature_wiki(STREET, refs) is refs[("αθήνα - πάτρα",) + PIECES[0]]
+
+
+def test_search_name_pieces_keep_the_first_hit():
+    # As before own-script names were matched: the first piece's entry.
+    refs = {("athens - patras",) + PIECES[0]: TUNNEL, ("athens - patras",) + PIECES[1]: MOTORWAY}
+    assert W.feature_wiki(STREET, refs) is TUNNEL
+
+
+def test_a_final_sigma_is_lowercased_as_the_lookup_lowercases_it():
+    # extract_wiki_tags_pbf keys on str.lower(), which keeps a final ς
+    # (casefold() makes it σ).
+    feat = from_tile("place", {"class": "town", "name:latin": "Agios Nikolaos",
+                               "name_int": "Άγιος Νικόλαος"})
+    refs = {("άγιος νικόλαος",) + CELL: {"wikidata": "Q207808"}}
+    assert W.feature_wiki(feat, refs) == {"wikidata": "Q207808"}
+
+
 def test_no_lookup():
     assert W.feature_wiki(athens(), None) is None
     assert W.feature_wiki(athens(), {}) is None
@@ -139,6 +179,34 @@ def test_a_merged_street_folding_to_two_objects_matches_neither():
     assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) is None
 
 
+def test_folded_pieces_that_link_one_article_match():
+    feat = {"name": "Poznanska", "type": "street", "lat": 52.0, "lon": 17.0,
+            "_pts": [[52.0, 17.0], [52.01, 17.0]]}
+    refs = {("poznańska", 520000, 170000): {"wikidata": "Q1"},
+            ("poznańska", 520100, 170000): {"wikidata": "Q1", "wikipedia_src": "wd"}}
+    assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) == {"wikidata": "Q1"}
+
+
+def test_entries_that_differ_in_provenance_fold_to_one():
+    # One OSM-tagged, one resolved from the Q-ID: not ambiguous.
+    refs = {("café central",) + CELL: {"wikipedia": "en:Café_Central", "wikidata": "Q1"},
+            ("cafè central",) + CELL: {"wikipedia": "en:Café_Central", "wikidata": "Q1",
+                                       "wikipedia_src": "wd", "wikipedia_osm": "de:Café Central"}}
+    folded = W.wiki_folded_index(refs)
+    assert folded[("cafe central",) + CELL] is refs[("café central",) + CELL]
+    feat = {"name": "Cafe Central", "type": "poi", "lat": LAT, "lon": LON}
+    assert W.feature_wiki(feat, refs, folded) is refs[("café central",) + CELL]
+
+
+def test_a_name_already_folded_is_in_the_folded_index():
+    # "cafe central" folds to itself and must still make "café central"'s
+    # folded key ambiguous for a third spelling.
+    refs = {("cafe central",) + CELL: {"wikidata": "Q1"},
+            ("café central",) + CELL: {"wikidata": "Q2"}}
+    feat = {"name": "Cafè Central", "type": "poi", "lat": LAT, "lon": LON}
+    assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) is None
+
+
 def test_a_name_as_it_is_wins_over_a_folded_one():
     refs = {("cafe central",) + CELL: {"wikidata": "Q1"},
             ("café central",) + CELL: {"wikidata": "Q2"}}
@@ -153,6 +221,21 @@ def test_the_first_name_of_an_osm_list():
     assert feat["name_native"] == "Κάστρο Κοσκινά"
     refs = {("κάστρο κοσκινά;castle of lepides",) + CELL: {"wikidata": "Q16214282"}}
     assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) == {"wikidata": "Q16214282"}
+
+
+def test_the_first_name_of_a_spaced_osm_list():
+    feat = from_tile("poi", {"class": "castle", "name:latin": "Kastro Koskina",
+                             "name_int": "Κάστρο Κοσκινά"})
+    refs = {("κάστρο κοσκινά ; castle of lepides",) + CELL: {"wikidata": "Q16214282"}}
+    assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) == {"wikidata": "Q16214282"}
+
+
+def test_only_the_first_name_of_an_osm_list():
+    # native_name never keeps a later name of the list.
+    feat = from_tile("poi", {"class": "castle", "name:latin": "Kastro Koskina",
+                             "name_int": "Κάστρο Κοσκινά"})
+    refs = {("castle of lepides;κάστρο κοσκινά",) + CELL: {"wikidata": "Q16214282"}}
+    assert W.feature_wiki(feat, refs, W.wiki_folded_index(refs)) is None
 
 
 def test_the_folded_index_leaves_admin_areas_out():
@@ -183,6 +266,43 @@ def test_records_and_geo_index(tmp_path):
             json.loads, (tmp_path / "chunks" / f"{prefix}.jsonl").read_text(encoding="utf-8").splitlines())]
     assert recs("at") == [("Athens", "Αθήνα", "en:Athens", "Q1524")]
     assert recs("po") == [("Poznan", None, "en:Poznań", "Q268")]
+
+
+def test_a_point_feature_takes_a_streets_geo_row(tmp_path):
+    """A street links the tunnel first (its ways carry the tunnel's tags);
+    the tunnel's own record places the row, and a later street does not
+    take it back."""
+    tunnel = {"name": "Aithra Tunnel", "name_native": "Σήραγγα Αίθρα", "type": "poi",
+              "lat": 37.9791, "lon": 23.2431}
+    street = {k: v for k, v in STREET.items() if k != "_pts"}
+    feats = [street, tunnel, dict(street, lat=37.92, lon=23.1)]
+    path = tmp_path / "search.jsonl"
+    path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in feats),
+                    encoding="utf-8")
+    (tmp_path / "chunks").mkdir()
+    b = W._search_bucket(search_features_path=str(path), wikidata_data=None,
+                         wiki_cross_refs={("αθήνα - πάτρα",) + PIECES[0]: TUNNEL,
+                                          ("αθήνα - πάτρα",) + PIECES[1]: TUNNEL,
+                                          ("σήραγγα αίθρα", 379791, 232431): TUNNEL},
+                         loc_lookup=None, _bundled_set={"Aithra_Tunnel"},
+                         chunk_tmp=str(tmp_path / "chunks"))
+    assert b.wiki_geo == {"Aithra_Tunnel": [37.9791, 23.2431, "poi", "Q24039585", ""]}
+    assert b.wiki_fields_added == 3
+
+
+def test_the_first_street_keeps_a_streets_geo_row(tmp_path):
+    street = {k: v for k, v in STREET.items() if k != "_pts"}
+    feats = [street, dict(street, lat=37.92, lon=23.1)]
+    path = tmp_path / "search.jsonl"
+    path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in feats),
+                    encoding="utf-8")
+    (tmp_path / "chunks").mkdir()
+    b = W._search_bucket(search_features_path=str(path), wikidata_data=None,
+                         wiki_cross_refs={("αθήνα - πάτρα",) + PIECES[0]: MOTORWAY,
+                                          ("αθήνα - πάτρα",) + PIECES[1]: MOTORWAY},
+                         loc_lookup=None, _bundled_set={"Olympia_Odos"},
+                         chunk_tmp=str(tmp_path / "chunks"))
+    assert b.wiki_geo == {"Olympia_Odos": [37.92, 22.95, "street", "Q389418", ""]}
 
 
 @pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
