@@ -828,7 +828,7 @@ await ok('switch: places.html takes the same choice (?theme= > saved > OS)', () 
 // ========================================================================
 // 2. POI icons
 // ========================================================================
-await ok('labels: a country beats a city, a city a region, a town, a village; every place beats a POI; rank orders a layer', () => {
+await ok('labels: country > city > town > region > POI > village > suburb; rank orders a layer', () => {
   // MapLibre places symbols from the top layer down, so a later layer wins a
   // collision; inside one, a lower symbol-sort-key is placed first. Before
   // 2026-10-21 the order was the reverse and Athens could lose to a village.
@@ -836,10 +836,12 @@ await ok('labels: a country beats a city, a city a region, a town, a village; ev
     const ids = load().makeStyle(cfg).layers.map((l) => l.id);
     const at = (id) => { const i = ids.indexOf(id); assert.ok(i >= 0, id); return i; };
     // A region (state) label under the cities: "Attica" hid Athens at z6.
-    const order = ['poi-label', 'place-suburb', 'place-state', 'place-village', 'place-town', 'place-city', 'place-country'];
+    // POIs over villages and neighbourhoods (place-suburb): a neighbourhood
+    // label hid Saint Francis Memorial Hospital (review of 6e12a1a).
+    const order = ['place-suburb', 'place-village', 'poi-label', 'place-state', 'place-town', 'place-city', 'place-country'];
     for (let i = 1; i < order.length; i++) assert.ok(at(order[i - 1]) < at(order[i]), order[i - 1] + ' below ' + order[i]);
     // Labels stay above every base layer and line label.
-    for (const id of ['road-label', 'water-label']) assert.ok(at(id) < at('poi-label'), id);
+    for (const id of ['road-label', 'water-label']) assert.ok(at(id) < at('place-suburb'), id);
     const L = layerMap(load().makeStyle(cfg));
     for (const id of order) {
       assert.deepStrictEqual(L[id].layout['symbol-sort-key'], ['coalesce', ['get', 'rank'], 99], id);

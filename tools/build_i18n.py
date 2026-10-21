@@ -60,8 +60,10 @@ PLURAL_CATEGORIES = ("zero", "one", "two", "few", "many", "other")
 #                     common.machine_translated note (data-i18n-machine)
 #   _lang: "zh-Hans"  the BCP 47 tag for <html lang>, when the code alone
 #                     does not say which script or glyphs to use
-#   _compact: "intl"  large numbers in ten thousands (ja 万, ko 만, zh 万):
-#                     runtime.js szCompactIntl, Intl's compact notation
+#   _compact: "intl"  large numbers in ten thousands (ja 万, ko 만, zh 万) or
+#                     lakh and crore (hi):
+#                     runtime.js szCompactIntl, Intl's compact notation;
+#                     "intl-long" its long form (hi "1.2 करोड़", not "1.2 क॰")
 #   _nu: "latn"       the digits numbers and dates are written in (Intl's
 #                     -u-nu-), where the language's default would mix
 #                     with the digits code writes directly (ar, fa)
@@ -326,8 +328,8 @@ def _check_meta(lang: str, table: dict[str, Any], origin: Path) -> None:
             raise I18nError(f"{origin}: {k} must be a {want.__name__}, not {v!r}")
         if k == "_lang" and not re.fullmatch(re.escape(lang) + r"(-[A-Za-z0-9]{2,8})+", v):
             raise I18nError(f"{origin}: _lang {v!r} must be {lang}-<subtag> (zh-Hans)")
-        if k == "_compact" and v != "intl":
-            raise I18nError(f"{origin}: _compact {v!r} must be \"intl\"")
+        if k == "_compact" and v not in ("intl", "intl-long"):
+            raise I18nError(f"{origin}: _compact {v!r} must be \"intl\" or \"intl-long\"")
         if k == "_nu" and v != "latn":
             raise I18nError(f"{origin}: _nu {v!r} must be \"latn\"")
 

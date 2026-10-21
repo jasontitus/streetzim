@@ -176,15 +176,6 @@ function szTableFrom(block, lang) {
   if (types) t.type = types;
   return t;
 }
-// The UI languages this page has a table for (besides English).
-function szUiLanguages() {
-  try {
-    var el = document.getElementById('sz-i18n');
-    var block = el ? JSON.parse(el.textContent) : null;
-    return block && block.t ? Object.keys(block.t).sort() : [];
-  } catch (e) { return []; }
-}
-
 // Pick the UI language once map-config.json has loaded: its `language`
 // (create_osm_zim --language; a merged map's language), unless the page
 // URL says ?uilang=xx. A language without a table is English.
@@ -212,8 +203,21 @@ function szSetUiLanguage(lang, search) {
     if (SZ_I18N || SZ_I18N_PSEUDO) root.lang = tag;
     if (SZ_UI_RTL) root.dir = 'rtl';
     else if (root.dir === 'rtl') root.dir = 'ltr';
+    if (SZ_UI_RTL && !szAutoDir.on && document.addEventListener) {
+      document.addEventListener('input', szAutoDir, true);
+      szAutoDir.on = true;
+    }
   } catch (e) {}
   return SZ_UI_LANG;
+}
+// In a right-to-left UI a text field takes the direction of what is typed
+// into it (dir="auto": "Athens" from the left), and the page's again once
+// it is empty, so an Arabic placeholder stays on the right.
+function szAutoDir(e) {
+  var t = e && e.target;
+  if (!SZ_UI_RTL || !t || t.tagName !== 'INPUT' || !/^(text|search)$/.test(t.type || 'text')) return;
+  if (t.value) t.setAttribute('dir', 'auto');
+  else t.removeAttribute('dir');
 }
 
 // A number, distance, coordinate or phone number set in right-to-left
@@ -359,16 +363,19 @@ function szFirstName(s) {
 }
 
 // Japanese, Korean and Chinese count large numbers in ten thousands (万 / 億,
-// 만 / 억, 万 / 亿), which num.* (thousands, millions) cannot say. Their
-// tables set "_compact": "intl": 10,000 and up then go through Intl's
-// compact notation in the UI language ("1.2万", "560만", "11亿"); smaller
-// numbers are written out ("1,234"), and so is any number where Intl has no
+// 만 / 억, 万 / 亿), Hindi in lakh and crore, which num.* (thousands,
+// millions) cannot say. Their tables set "_compact": "intl" (or
+// "intl-long": Intl's long form, "1.2 करोड़" rather than the abbreviation
+// "1.2 क॰" few readers know): 10,000 and up then go through Intl's compact
+// notation in the UI language ("1.2万", "560만", "11亿"); smaller numbers
+// are written out ("1,234"), and so is any number where Intl has no
 // compact notation. '' for every other table: the caller's own form.
 function szCompactIntl(n) {
-  if (!SZ_I18N || SZ_I18N._compact !== 'intl') return '';
+  if (!SZ_I18N || (SZ_I18N._compact !== 'intl' && SZ_I18N._compact !== 'intl-long')) return '';
   if (n >= 1e4) {
     try {
-      var f = new Intl.NumberFormat(SZ_NUM_LANG, { notation: 'compact', maximumFractionDigits: 1 });
+      var f = new Intl.NumberFormat(SZ_NUM_LANG, { notation: 'compact', maximumFractionDigits: 1,
+        compactDisplay: SZ_I18N._compact === 'intl-long' ? 'long' : 'short' });
       if (f.resolvedOptions().notation === 'compact') return f.format(n);
     } catch (e) {}
   }
@@ -416,13 +423,21 @@ function szChipInSentence(id, label) {
 
 // A place type (OSM/Overture key such as fast_food, the record's s / cat)
 // for display: the table's "type.<key>" (inlined as type: { key: text })
-// when it has one, else the key with spaces for underscores (all English
-// ever showed).
+// when it has one, else the English below, else the key with spaces for
+// underscores.
+//
+// A search record's type is the tile's OpenMapTiles class where it has one
+// (search_extract.feature_subtype), and some classes lump OSM values
+// together (resources/tilemaker/process-openmaptiles.lua): "beer" is pubs
+// and beer gardens, "car" dealers, garages and taxi stands, "college"
+// colleges and universities. Their keys alone read wrong in English.
+var SZ_TYPE_EN = { beer: 'pub', car: 'car services', college: 'college or university' };
 function szPlaceType(kind) {
   var k = String(kind == null ? '' : kind);
   var types = SZ_I18N && SZ_I18N.type;
   var s = types && Object.prototype.hasOwnProperty.call(types, k) && typeof types[k] === 'string'
-        ? types[k] : k.replace(/_/g, ' ');
+        ? types[k]
+        : Object.prototype.hasOwnProperty.call(SZ_TYPE_EN, k) ? SZ_TYPE_EN[k] : k.replace(/_/g, ' ');
   return SZ_I18N_PSEUDO ? '[' + s + ']' : s;
 }
 // END sz-i18n-runtime

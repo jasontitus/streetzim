@@ -242,6 +242,15 @@ if (!window.__szUnsupported) fetchConfig(1)
         document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
       }).observe(attrib);
     })();
+    // #info keeps clear of the About button beside it, whose width follows
+    // the UI language: published as --sz-attr-w for #info's max-width (010).
+    (function () {
+      var about = document.getElementById('attr-btn');
+      if (!about || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');
+      }).observe(about);
+    })();
 
     // Satellite layer toggle
     if (config.hasSatellite) {

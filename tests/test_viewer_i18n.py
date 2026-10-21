@@ -117,15 +117,95 @@ def test_the_pages_carry_the_right_to_left_rules() -> None:
     plc = PLACES.read_text(encoding="utf-8")
     for rule in ('html[dir="rtl"] #search-clear { right: auto; left: 10px; }',
                  'html[dir="rtl"] #search-input { padding: 10px 14px 10px 36px; }',
+                 'html[dir="rtl"] .search-result-native { margin-left: 0; margin-right: 4px; }',
+                 'html[dir="rtl"] .search-result-type { margin-left: 0; margin-right: 6px; }',
+                 # each part of a result row its own run ("Acropolisarts and entertainment")
+                 'html[dir="rtl"] .search-result-name, html[dir="rtl"] .search-result-native,\n'
+                 'html[dir="rtl"] .search-result-type { unicode-bidi: isolate; }',
+                 'html[dir="rtl"] #controls button { text-align: right; }',
+                 'html[dir="rtl"] .wiki-item { border-left: none; border-right: 3px solid transparent; }',
+                 'html[dir="rtl"] .wiki-item:hover { border-right-color: var(--accent); }',
+                 'html[dir="rtl"] #wiki-panel-close { margin-left: 0; margin-right: 8px; }',
+                 'border-left: none; padding-left: 0; border-right: 3px solid var(--accent); padding-right: 8px;',
+                 'html[dir="rtl"] #attr-close { right: auto; left: 14px; }',
+                 'html[dir="rtl"] #routing-panel.minimized #routing-expand-hint { margin-left: 0; margin-right: 8px; }',
+                 'html[dir="rtl"] .routing-results { left: 0; right: 18px; }',
                  'html[dir="rtl"] .maplibregl-ctrl-scale { direction: ltr; }',
-                 'html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }'):
+                 'html[dir="rtl"] #controls button + button { border-left: none; border-right: 1px solid var(--border); }',
+                 'html[dir="rtl"] .sz-home-group button + button { border-left: none; border-right: 1px solid #ddd; }',
+                 'html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }',
+                 'html[dir="rtl"] #wiki-panel-close { margin: -14px 0 -12px -12px; }',
+                 'html[dir="rtl"] #search-clear { right: auto; left: 0; }',
+                 'html[dir="rtl"] #attr-dialog #about-mt { border-left: none; padding-left: 0; border-right: 3px solid var(--border); padding-right: 8px; }',
+                 'html[dir="rtl"] #sz-fatal ul { padding-left: 0; padding-right: 20px; }',
+                 # not RTL: About fits a 390 px phone; #info keeps clear of the About button
+                 'max-width: 536px; width: calc(100% - 40px); box-sizing: border-box;',
+                 'max-width: min(250px, calc(100vw - 74px - var(--sz-attr-w, 71px)));',
+                 # the HUD reroute button leaves the status beside it half the row
+                 'flex: 0 0 auto; max-width: 50%;'):
         assert rule in idx, rule
+    # every html[dir="rtl"] selector in the parts is in the list above
+    css = "".join(p.read_text(encoding="utf-8") for p in sorted(PARTS.glob("0*.html"))
+                  if p.name != build_i18n.PART_OUT.name)
+    assert css.count('html[dir="rtl"]') == 23, css.count('html[dir="rtl"]')
     for rule in ('html[dir="rtl"] #near-clear { right:auto; left:6px; }',
                  'html[dir="rtl"] #near-input { padding:8px 12px 8px 28px; }'):
         assert rule in plc, rule
     for page, src in (("index.html", idx), ("places.html", plc)):
         for token in ("SZ_RTL_LANGS", "function szLtr", "\\u2068", "root.dir = 'rtl'"):
             assert token in src, (page, token)
+
+
+def test_numbers_reach_a_sentence_as_one_isolated_value() -> None:
+    # A unit or a second number outside the placeholder ("({m} m)",
+    # "({lat}, {lon})") is laid out right to left with the sentence:
+    # "(m 120)", the pair swapped. The code passes one szLtr value instead,
+    # so no table can get it wrong (review of 6e12a1a).
+    drive = (PARTS / "600-driving-mode.js").read_text(encoding="utf-8")
+    assert "{ dist: szLtr(Math.round(proj.offMeters) + ' m') }" in drive
+    plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
+    assert "{ coords: szLtr(lat.toFixed(3) + ', ' + lon.toFixed(3)) }" in plc
+    banner = (PARTS / "020-body-markup.html").read_text(encoding="utf-8")
+    assert "szLtr(szFixed(mb / 1024, 1) + ' GB')" in banner and "szLtr(Math.round(mb) + ' MB')" in banner
+    for lang, table in lang_tables().items():
+        for key in ("drive.off_route", "places.near_coords"):
+            assert not re.search(r"\{(m|lat|lon)\}", table[key]), (lang, key)
+
+
+def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
+    # CLDR puts 0 in "one" for Portuguese ("0 resultado"): both count
+    # paths of the Find page go through _szMatchCount, which has no count
+    # for 0.
+    plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
+    assert plc.count("_szMatchCount(") == 3, "the function and both count paths"
+    assert "szTn('places.n_matches'" in plc.split("function _szMatchCount", 1)[1].split("\n}", 1)[0]
+    assert plc.count("szTn('places.n_matches'") == 1
+
+
+@pytest.mark.parametrize("part, code", [
+    # the arrival clock's digits follow the table's _nu (Latin in ar / fa)
+    ("600-driving-mode.js", "new Intl.DateTimeFormat(SZ_I18N ? SZ_NUM_LANG : undefined,"),
+    # an edited coordinate label is searched without its bidi isolates
+    ("550-routing-pickers.js", "var q = inputEl.value.replace(/[\\u200e\\u200f\\u2066-\\u2069]/g, '').trim();"),
+    # a picked point's coordinates keep their order
+    ("540-routing-worker-bridge.js", "return szLtr(lat.toFixed(4) + ', ' + lon.toFixed(4));"),
+    # the place sheet's button icon sits before the label on either side
+    ("210-place-detail-sheet.js", "leadIcon.style.cssText = SZ_UI_RTL ? 'margin-left:6px;' : 'margin-right:6px;';"),
+    # nearby rows align with the text
+    ("240-on-map-find-ui.js", "'text-align:' + (SZ_UI_RTL ? 'right' : 'left') + '; font:inherit;'"),
+    # arrow keys follow the reading direction (carousel, travel modes)
+    ("200-find-results-view.js", "var next = SZ_UI_RTL ? 'ArrowLeft' : 'ArrowRight', prev = SZ_UI_RTL ? 'ArrowRight' : 'ArrowLeft';"),
+    ("500-routing-panel.js", "var fwd = SZ_UI_RTL ? 'ArrowLeft' : 'ArrowRight', back = SZ_UI_RTL ? 'ArrowRight' : 'ArrowLeft';"),
+    # the About button's width, published for #info's max-width
+    ("120-map-init-and-style.js", "document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');"),
+])
+def test_right_to_left_code_paths(part: str, code: str) -> None:
+    assert code in (PARTS / part).read_text(encoding="utf-8"), part
+
+
+def test_the_find_page_searches_an_edited_label_without_isolates() -> None:
+    plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
+    assert "const q = els.near.value.replace(/[\\u200e\\u200f\\u2066-\\u2069]/g, '').trim();" in plc
 
 
 def test_there_are_thai_and_chinese_tables() -> None:
@@ -292,6 +372,7 @@ def test_machine_note_is_in_both_pages_hidden_until_the_runtime_shows_it() -> No
     ({"_reviewed": True}, "unknown table setting"),
     ({"_compact": True}, "must be a str"),
     ({"_compact": "myriad"}, 'must be "intl"'),
+    ({"_compact": "intl-short"}, 'must be "intl" or "intl-long"'),
 ])
 def test_table_settings_are_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                     bad: dict[str, Any], why: str) -> None:

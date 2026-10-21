@@ -78,7 +78,7 @@ function load(tables, els = []) {
   const api = new Function('document', 'window', RUNTIME + `
     return { szSetUiLanguage, szUseLanguage, szT, szTn, szFixed, szLocaleNum, szMonthYear,
              szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szCompactIntl, szMachineTranslated,
-             szInflate, szTableFrom, szUiLanguages,
+             szInflate, szTableFrom,
              get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; },
              get rtl() { return SZ_UI_RTL; }, get table() { return SZ_I18N; } };`)(document, window);
   return { api, docEl, events };
@@ -351,7 +351,7 @@ await ok('the core languages: a table each, <html lang>, the note, a translated 
   // A merged map's language with a region subtag (pt-BR) or another case: the table.
   const r = load(INDEX_TABLES);
   assert.strictEqual(r.api.szSetUiLanguage('pt-BR', ''), 'pt');
-  assert.deepStrictEqual(load(INDEX_TABLES).api.szUiLanguages(), ALL);
+  assert.deepStrictEqual(Object.keys(decoded('index.html')).sort(), ALL);
 });
 
 await ok('right to left: ar, fa, he set <html dir="rtl">; other languages leave it', () => {
@@ -500,6 +500,116 @@ await ok('szInflate: stored, fixed and dynamic blocks, against node zlib', () =>
   // Truncated: a dynamic block cut short.
   const dyn = Array.from(zlib.deflateRawSync(Buffer.from('abcabcabd'.repeat(500)), { level: 9 }));
   assert.throws(() => api.szInflate(dyn.slice(0, dyn.length >> 1)), /truncated|bad/);
+});
+
+await ok('place types: lumped OpenMapTiles classes read right in English; a table wins', () => {
+  let r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('en', '');
+  // "beer" is pubs and beer gardens, "car" dealers, garages and taxi stands,
+  // "college" colleges and universities (process-openmaptiles.lua).
+  assert.strictEqual(r.api.szPlaceType('beer'), 'pub');
+  assert.strictEqual(r.api.szPlaceType('car'), 'car services');
+  assert.strictEqual(r.api.szPlaceType('college'), 'college or university');
+  assert.strictEqual(r.api.szPlaceType('fast_food'), 'fast food');      // the rest as before
+  assert.strictEqual(r.api.szPlaceType('hasOwnProperty'), 'hasOwnProperty');
+  r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('de', '');
+  assert.strictEqual(r.api.szPlaceType('beer'), DE['type.beer']);
+  r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('en', '?uilang=qps');
+  assert.strictEqual(r.api.szPlaceType('beer'), '[pub]');
+  // No table labels a pub a beer shop any more.
+  for (const lang of ALL) assert.doesNotMatch(TABLES[lang]['type.beer'], /shop|toko|negozio|winkel|sklep|loja|магазин|крамниц|butik|dükkân|cửa hàng|متجر|فروشگاه|חנות|दुकान/i, lang);
+});
+
+await ok('Hindi: lakh and crore in their long form ("_compact": "intl-long")', () => {
+  assert.strictEqual(TABLES.hi._compact, 'intl-long');
+  const r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('hi', '');
+  assert.match(r.api.szCompactNum(123456), /^1\.2\s+लाख$/);
+  assert.match(r.api.szCompactNum(12345678), /^1\.2\s+करोड़$/);
+  assert.match(r.api.szCompactNum(1234567890), /^1\.2\s+अरब$/);
+  assert.strictEqual(r.api.szCompactNum(1234), '1,234');
+  // Japanese keeps the short form.
+  const ja = load(INDEX_TABLES);
+  ja.api.szSetUiLanguage('ja', '');
+  assert.strictEqual(ja.api.szCompactNum(12000), '1.2万');
+});
+
+await ok('the Find page has no count for an empty list (pt: CLDR puts 0 in "one")', () => {
+  const html = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  const m = /\nfunction _szMatchCount\(n\) \{[\s\S]*?\n\}/.exec(html);
+  assert.ok(m, '_szMatchCount not found');
+  for (const lang of ['pt', 'en', 'ru']) {
+    const docEl = {};
+    const f = new Function('document', 'window', RUNTIME + m[0] + '; return { szSetUiLanguage, _szMatchCount };')(
+      { documentElement: docEl, getElementById: () => ({ textContent: pageTables('places.html').json }) }, {});
+    f.szSetUiLanguage(lang, '');
+    const zero = lang === 'en' ? 'No matches' : TABLES[lang]['places.zero_matches'];
+    assert.strictEqual(f._szMatchCount(0), zero, lang);
+    assert.doesNotMatch(f._szMatchCount(0), /0/, lang);
+    if (lang === 'pt') assert.strictEqual(f._szMatchCount(1), '1 resultado');
+    if (lang === 'en') assert.strictEqual(f._szMatchCount(2), '2 matches');
+  }
+});
+
+await ok('right to left: an off-route distance and a coordinate pair keep their order', () => {
+  const FSI = '\u2068', LRI = '\u2066', PDI = '\u2069';
+  const r = new Function('document', 'window', RUNTIME + '; return { szSetUiLanguage, szT, szLtr };')(
+    { documentElement: {}, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
+  r.szSetUiLanguage('he', '');
+  const off = r.szT('drive.off_route', 'Off route ({dist})', { dist: r.szLtr('120 m') });
+  assert.ok(off.includes(FSI + LRI + '120 m' + PDI + PDI), JSON.stringify(off));
+  const near = r.szT('places.near_coords', 'Near ({coords})', { coords: r.szLtr('47.377, 8.542') });
+  assert.ok(near.includes(LRI + '47.377, 8.542' + PDI), JSON.stringify(near));
+});
+
+await ok('right to left: a text field follows what is typed, the page again when empty', () => {
+  for (const [lang, on] of [['he', true], ['de', false]]) {
+    const listeners = [];
+    const document = { documentElement: {}, getElementById: () => ({ textContent: INDEX_TABLES }),
+                       addEventListener: (t, f, c) => listeners.push([t, f, c]) };
+    const api = new Function('document', 'window', RUNTIME + '; return { szSetUiLanguage };')(document, {});
+    api.szSetUiLanguage(lang, '');
+    api.szSetUiLanguage(lang, '');            // chosen twice: one listener
+    assert.strictEqual(listeners.length, on ? 1 : 0, lang);
+    if (!on) continue;
+    assert.strictEqual(listeners[0][0], 'input');
+    const input = { tagName: 'INPUT', type: 'search', value: 'Athens', attrs: {},
+                    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } };
+    listeners[0][1]({ target: input });
+    assert.strictEqual(input.attrs.dir, 'auto');
+    input.value = '';
+    listeners[0][1]({ target: input });
+    assert.ok(!('dir' in input.attrs));
+    const box = { tagName: 'INPUT', type: 'checkbox', value: 'on', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+    listeners[0][1]({ target: box });
+    assert.ok(!('dir' in box.attrs));
+  }
+});
+
+await ok('szInflate refuses a distance past the output; UTF-8 of every length decodes', () => {
+  const api = new Function(RUNTIME + '; return { szInflate, szUnpack };')();
+  // A fixed-Huffman block by hand: literal "a", then length 3 at distance
+  // 1 (valid: "aaaa") or distance 2 (only one byte so far: must throw).
+  const block = (distSym) => {
+    const out = []; let acc = 0, n = 0;
+    const bit = (b) => { acc |= b << n; if (++n === 8) { out.push(acc); acc = 0; n = 0; } };
+    const huff = (code, len) => { for (let i = len - 1; i >= 0; i--) bit((code >> i) & 1); };
+    bit(1); bit(1); bit(0);                 // BFINAL, BTYPE = 01 (fixed)
+    huff(0x30 + 97, 8);                      // literal "a"
+    huff(1, 7);                              // length symbol 257: 3
+    huff(distSym, 5);                        // distance symbol: 0 -> 1, 1 -> 2
+    huff(0, 7);                              // end of block
+    if (n) out.push(acc);
+    return out;
+  };
+  assert.strictEqual(Buffer.from(api.szInflate(block(0))).toString(), 'aaaa');
+  assert.throws(() => api.szInflate(block(1)), /distance/);
+  // 1-, 2-, 3- and 4-byte UTF-8, a surrogate pair among them.
+  const text = ['a', 'é', 'ß', 'Ж', 'ש', '€', 'ก', '中', '𝄞', '😀', 'x😀y', '\u{10FFFD}'];   // the last: lead byte F4
+  const packed = zlib.deflateRawSync(Buffer.from(JSON.stringify(text))).toString('base64');
+  assert.deepStrictEqual(api.szUnpack(packed), text);
 });
 
 console.log(`${pass} passed`);

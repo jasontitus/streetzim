@@ -670,6 +670,57 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
+      // Labels - Places, and the POIs among them. Symbol collision places
+      // the layers from the last one down, so this order is the priority:
+      //   country > city > town > region > POI > village > suburb
+      // (place-suburb also holds quarters and neighbourhoods). Cities and
+      // towns win over everything below them: until 2026-10-21 the order
+      // was the reverse, and a POI, a village or the "Attica" region label
+      // hid Athens and Thessaloniki from z6 to z8. POIs win over villages
+      // and neighbourhoods, as they did before: under them, a neighbourhood
+      // label hid Saint Francis Memorial Hospital in San Francisco, and
+      // Athens lost a fifth of its POIs at z14. Within a layer the OMT rank
+      // (population, capital, POI importance) orders them: _SZ_PLACE_SORT.
+      {
+        "id": "place-suburb",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
+        "minzoom": 12,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansRegular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
+          "text-transform": "uppercase",
+          "text-letter-spacing": 0.05
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#4a6fa5", "#666"],
+          "text-halo-color": "rgba(255,255,255,0.7)",
+          "text-halo-width": 1
+        }
+      },
+      {
+        "id": "place-village",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["==", "class", "village"],
+        "minzoom": 10,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansRegular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14, 18, 22]
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#555"],
+          "text-halo-color": "rgba(255,255,255,0.8)",
+          "text-halo-width": 1
+        }
+      },
       // POI Labels — show more POIs as zoom increases. Icons (136-poi-icons.js)
       // share the label's symbol, so icon and name collide as one unit and a
       // POI shows both or neither; the label sits under the disc. A POI with
@@ -701,35 +752,6 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // Labels - Places. Symbol collision places the layers from the last
-      // one down, so the order is the priority: a country label wins over
-      // a city, a city over a town, a town over a village, and every
-      // place over the POIs above. A region (state) label goes under the
-      // cities: "Attica" hid Athens at z6. Until 2026-10-21 the order was
-      // the reverse, and Athens and Thessaloniki were unlabelled from z6
-      // to z8. Within a layer the OMT rank (population, capital) orders
-      // them: _SZ_PLACE_SORT.
-      {
-        "id": "place-suburb",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
-        "minzoom": 12,
-        "layout": {
-          "text-field": szLabelField(),
-          "symbol-sort-key": _SZ_PLACE_SORT,
-          "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
-          "text-transform": "uppercase",
-          "text-letter-spacing": 0.05
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#4a6fa5", "#666"],
-          "text-halo-color": "rgba(255,255,255,0.7)",
-          "text-halo-width": 1
-        }
-      },
       {
         "id": "place-state",
         "type": "symbol",
@@ -750,25 +772,6 @@ function makeStyle(config) {
           "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#555"],
           "text-halo-color": "rgba(255,255,255,0.7)",
           "text-halo-width": 1.2
-        }
-      },
-      {
-        "id": "place-village",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["==", "class", "village"],
-        "minzoom": 10,
-        "layout": {
-          "text-field": szLabelField(),
-          "symbol-sort-key": _SZ_PLACE_SORT,
-          "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14, 18, 22]
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#555"],
-          "text-halo-color": "rgba(255,255,255,0.8)",
-          "text-halo-width": 1
         }
       },
       {

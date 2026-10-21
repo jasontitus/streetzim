@@ -530,7 +530,9 @@
       if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
         if (Date.now() - state.offRouteSince > preset.offMs) {
-          setStatus(szT('drive.off_route', 'Off route ({m} m)', { m: Math.round(proj.offMeters) }),
+          // One value with its unit, so "120 m" stays in that order in a
+          // right-to-left table (szLtr); metres whatever the unit choice.
+          setStatus(szT('drive.off_route', 'Off route ({dist})', { dist: szLtr(Math.round(proj.offMeters) + ' m') }),
                     { showReroute: true });
         }
       } else {

@@ -114,8 +114,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
         document.getElementById('preview-banner-host').textContent = host;
         var mb = r.sizeBytes ? r.sizeBytes / 1048576 : 0;
         dl.textContent = szT('preview.download', 'Download') +
-          (mb >= 1024 ? ' (' + szFixed(mb / 1024, 1) + ' GB)' :
-           mb ? ' (' + Math.round(mb) + ' MB)' : '');
+          (mb >= 1024 ? ' (' + szLtr(szFixed(mb / 1024, 1) + ' GB') + ')' :
+           mb ? ' (' + szLtr(Math.round(mb) + ' MB') + ')' : '');
       }
       var dl = document.getElementById('preview-banner-download');
       dl.href = r.url;
