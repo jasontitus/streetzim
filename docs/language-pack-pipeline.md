@@ -71,7 +71,8 @@ which uses only packs with a passing gate. It writes
 | route | `cloud/route_cli.py` |
 | kiwix | kiwix-serve suggest/search, one article and `pack.json` per pack, and the catalog Title and Language |
 | viewer | `viewer_gate.mjs`: `WIKI_PACKS`, source order, the article offered |
-| ui | `ui_gate.mjs`: html lang, labels, popup → pack article → images → back to the map, the map's search |
+| ui | `ui_gate.mjs`: the UI in the map language (a language with no UI table FAILS; read through the viewer's runtime, any table format; RTL needs `dir="rtl"`), labels, popup → pack article → images → back to the map, the map's search |
+| search | `search_gate.py`: Kiwix's search (libzim suggestions, full text) finds 8 pack-only article titles; required unless `LANGPACK_SEARCH_GATE=report` (then advisory) |
 | smoke | `cloud/zim_viewer_smoke.mjs` |
 
 The viewer, UI and smoke gates also run on the base alone, first. Then one
@@ -82,7 +83,12 @@ refuses to start, and stops before the next language, while the merged
 folder's disk has less than twice the base plus `LANGPACK_DISK_MARGIN_GB`
 free. `RESUME=1` keeps the last run's logs and skips an entry whose verdict
 already passes for the recipe this run makes, and the base's checks when
-they passed for a base of the same size and mtime. A zimcheck that ends
+they passed for a base of the same size and mtime. Every language's logs
+are stamped with its recipe's md5 and uuid (`<L>.stamp`); a verdict needs
+this run's stamp (`logs_for_recipe`) and base logs for this base
+(`base_logs_current`), and after a disk break the languages not reached
+lose their logs, so a resumed run can never pass old logs for a new
+recipe. A zimcheck that ends
 without its verdict line (killed, not a finding) runs once more with
 `--threads=1`; a Fail is never retried.
 
@@ -232,30 +238,41 @@ it on archive.org) logs each step in PDT to
 2. `prefetch.py`: the SQL dumps, title maps and Wikidata text those packs
    read (network, no timeout of its own; the builds then run `--offline`).
 3. `build_packs.sh` for each pack language without a gated pack for this
-   base in `$LANGPACK_WORK/packs/<base>/`.
+   base in `$LANGPACK_WORK/packs/<base>/`. Packs are named
+   `osm_<region>_wiki-<L>_<date>_<first 8 hex of the base's UUID>.zim`, so two
+   bases of a region never share a pack name.
 4. `run_gates.sh` with `RESUME=1`, streamed. The region file is
    `tools/langpack/regions/<REGION>.json`, else `region_json.py`'s.
 5. archive.org: the packs the passing entries use go to
    `streetzim-<REGION>-lang` (made on the first upload: mediatype data,
-   collection opensource, title, languages). A pack listed with its MD5 is
-   not sent again; a name the item holds with another MD5 stops the run
-   (a published recipe may use that file: set `PACK_DATE` and rebuild).
-   Until archive.org lists every pack with its MD5: exit 6, run it again
-   later; nothing is redone.
-6. `make_site.py` into `$LANGPACK_WORK/site/<REGION>/recipes/<REGION>/`, URLs
-   `{proxy}/<item>/<file>`, then `site_check.py --recipes-dir` (archive.org
-   listings, the served bytes through the proxy).
+   collection opensource, title, languages), under the host's upload lock.
+   A pack listed with its MD5 is not sent again, and neither is one sent
+   before and not listed yet (`$LANGPACK_WORK/uploads/<item>.tsv`; after 72
+   hours unlisted the run stops and says so); a name the item holds with
+   another MD5 stops the run. Until archive.org lists every pack with its
+   MD5: exit 6, run it again later; nothing is redone.
+6. `make_site.py` into a staging folder, URLs `{proxy}/<item>/<file>`, the
+   base's MD5 in region.json; `site_check.py --recipes-dir` there
+   (archive.org listings, the served bytes through the proxy: a 206 answer
+   for every range). Only when it passes is the folder sealed
+   (`checked.py write`: checked.json with every file's SHA-256) and swapped
+   in as `$LANGPACK_WORK/site/<REGION>/recipes/<REGION>/`; a failed check
+   leaves the previous files.
 
 Exits: 0 ready to publish; 6 listing pending; 2 another run holds the
-region's lock; 1 anything else. `SHIP_SKIP_UPLOAD=1` stops after the gates.
+region's lock or a pack build lock; 3 `SHIP_SKIP_UPLOAD=1` stopped after the
+gates (nothing published); 1 anything else. Light and ultralight maps are
+refused (no Wikipedia in them).
 
-`publish_site.sh REGION` copies the checked files to
-`web/build/recipes/<REGION>/` in one rename and rewrites
-`web/build/recipes/index.json` (`site_index.py`). The recipes are site data,
-not source (gitignored). `web/generate.py` gives a map card its "Build in
-another language" link (`/build/?region=<id>`) only when the card's ZIM is
-the recipes' base: the builder downloads that base, and archive.org's
-keep-2 cleanup deletes older ones.
+`publish_site.sh REGION` refuses a folder that is not exactly the sealed
+one, puts it at `web/build/recipes/<REGION>/` with one atomic exchange and
+rewrites `web/build/recipes/index.json` (`site_index.py`), putting the
+previous folder back if that fails. The recipes are site data, not source
+(gitignored). Every site build (`web/generate.py`) rewrites the page's
+index with only the regions whose base is archive.org's live ZIM (name and
+MD5), and gives exactly those cards their "Build in another language"
+link (`/build/?region=<id>`): a pruned or re-uploaded base leaves the page
+with the next deploy.
 
 ### The builder page
 
