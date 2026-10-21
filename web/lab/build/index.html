@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetZim: maps in other languages (prototype)</title>
+<meta name="robots" content="noindex">
+<style>
+  /* Contrast >= 4.5:1 in both schemes: links/secondary text --accent on
+     --card, white on --btn, --bad/--ok/--lab-fg on their backgrounds. */
+  :root { --bg: #0b1220; --card: #131c2e; --text: #e6edf7; --dim: #94a3b8; --accent: #60a5fa; --btn: #2563eb;
+          --bad: #f87171; --ok: #22c55e; --lab-fg: #f59e0b; --lab-bg: #f59e0b33; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f8fb; --card: #fff; --text: #0f172a; --dim: #475569; --accent: #1d4ed8; --btn: #1d4ed8;
+          --bad: #b91c1c; --ok: #15803d; --lab-fg: #92400e; --lab-bg: #fef3c7; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .lab { display: inline-block; font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--lab-bg); color: var(--lab-fg); }
+  section { background: var(--card); border-radius: 12px; padding: 16px; margin: 16px 0; }
+  label { display: block; font-weight: 600; margin: 8px 0 4px; }
+  select, input[type=file] { font: inherit; max-width: 100%; }
+  button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 0; background: var(--btn); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  a.button { display: inline-block; font: inherit; padding: 10px 18px; border-radius: 8px; background: var(--btn); color: #fff; text-decoration: none; margin: 4px 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 6px 12px; }
+  progress { width: 100%; height: 14px; }
+  .dim { color: var(--dim); font-size: .9rem; }
+  a { color: var(--accent); }
+  .bad { color: var(--bad); }
+  .ok { color: var(--ok); font-weight: 600; }
+  label.check { display: flex; gap: 8px; align-items: center; font-weight: normal; }
+  h2 { font-size: 1.1rem; margin: 16px 0 4px; }
+  ul.downloads { list-style: none; padding: 0; margin: 0; }
+  ul.downloads li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent); }
+  ul.downloads li:first-child { border-top: 0; }
+  ul.downloads a { font-weight: 600; }
+  button.big { display: block; width: 100%; font-size: 1.1rem; padding: 14px 18px; margin: 12px 0 4px; }
+  button.big.attention { box-shadow: 0 0 0 4px var(--card), 0 0 0 7px var(--ok); }
+  summary { cursor: pointer; color: var(--accent); }
+  details[open] summary { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Maps in other languages <span class="lab">prototype</span></h1>
+  <p class="dim">A StreetZim map with Wikipedia in another language (as well as English), and its labels in that language. Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</p>
+
+  <p id="notice" role="alert"></p>
+
+  <section>
+    <label for="region">Region</label>
+    <select id="region"></select>
+    <h2 id="dlHead">Downloads</h2>
+    <ul id="downloads" class="downloads"></ul>
+  </section>
+
+  <section>
+    <label for="lang">Map language</label>
+    <select id="lang"></select>
+    <p id="total" class="dim"></p>
+    <ul id="packs" class="dim"></ul>
+    <p id="goHint" class="ok" hidden>Ready: press Download to start.</p>
+    <button id="oneclick" class="big" disabled>Download</button>
+    <p id="estimate" class="dim"></p>
+    <p class="dim">Keep this tab open and the device awake until it finishes. Pausing the download for more than a minute, closing the tab or letting the device sleep stops it, and it starts over. On iPhone and iPad, keep Safari in front with the screen on.</p>
+    <p id="packStatus"></p>
+    <button id="packRetry" class="secondary" hidden>Try again</button>
+    <button id="startDl" hidden>Start download</button>
+    <p><progress id="prog" value="0" max="1" aria-label="Build progress"></progress></p>
+    <p id="status" class="dim"></p>
+    <div id="save" hidden></div>
+    <p id="milestone" class="sr-only" aria-live="polite"></p>
+    <div id="after" hidden>
+      <p class="dim">Open the new file in Kiwix, or in the <a href="/drive/">StreetZim web app</a>.</p>
+    </div>
+  </section>
+
+  <section>
+    <details id="haveBase">
+      <summary id="haveBaseSummary">Already have the map? Use it and download only Wikipedia</summary>
+      <p id="baseInfo" class="dim"></p>
+      <label for="baseFile">Your copy of the map file</label>
+      <input id="baseFile" type="file" accept=".zim">
+      <p id="baseCheck" role="status" aria-live="polite"></p>
+      <button id="go" disabled>Build from my copy and save</button>
+    </details>
+  </section>
+
+  <section>
+    <button id="probe" class="secondary">Test my download speed</button>
+    <p id="probeOut" class="dim"></p>
+    <p id="trackNote" class="dim"></p>
+    <label class="check dim" id="noReportsLabel"><input type="checkbox" id="noReports"> Don't send speed reports</label>
+  </section>
+</main>
+<script src="fetcher.js?v=3"></script>
+<script src="builder.js?v=3"></script>
+</body>
+</html>

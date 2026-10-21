@@ -115,6 +115,7 @@ include = [
   "tools/check_openzim_output.py",
   "tools/check_wheel_install.py",
   "tools/golden_diff.py",
+  "tools/langpack",
   "tools/measure_build.py",
   "tools/offliner_definition.py",
   "tools/pin_viewer_assets.py",
