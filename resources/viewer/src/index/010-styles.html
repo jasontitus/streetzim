@@ -478,7 +478,7 @@
   #attr-dialog {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     background: #fff; border-radius: var(--radius); padding: 24px 28px;
-    max-width: 480px; width: calc(100% - 40px);
+    max-width: 536px; width: calc(100% - 40px); box-sizing: border-box;
     max-height: calc(var(--app-height, 100vh) * 0.8); overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     font-family: var(--ui-font);
@@ -1081,6 +1081,37 @@
     html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
     html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
     html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #333; }
+  }
+  /* --- Right-to-left UI (ar, fa, he: runtime.js gives <html dir="rtl">) ---
+     Text, flex rows and scroll rails follow dir by themselves; these rules
+     mirror what is placed with left/right. The map controls keep their
+     corners (MapLibre's columns, #controls, About, the panels at the left):
+     right-to-left map apps keep them too, and moved they would collide.
+     Numbers, distances and coordinates are isolated LTR runs (szLtr). */
+  html[dir="rtl"] #search-input { padding: 10px 14px 10px 36px; }
+  html[dir="rtl"] #search-clear { right: auto; left: 10px; }
+  html[dir="rtl"] .search-result-native { margin-left: 0; margin-right: 4px; }
+  html[dir="rtl"] .search-result-type { margin-left: 0; margin-right: 6px; }
+  html[dir="rtl"] #controls button { text-align: right; }
+  html[dir="rtl"] .wiki-item { border-left: none; border-right: 3px solid transparent; }
+  html[dir="rtl"] .wiki-item:hover { border-right-color: var(--accent); }
+  html[dir="rtl"] #wiki-panel-close { margin-left: 0; margin-right: 8px; }
+  html[dir="rtl"] #attr-dialog #about-notice {
+    border-left: none; padding-left: 0; border-right: 3px solid var(--accent); padding-right: 8px;
+  }
+  html[dir="rtl"] #attr-close { right: auto; left: 14px; }
+  html[dir="rtl"] #routing-panel.minimized #routing-expand-hint { margin-left: 0; margin-right: 8px; }
+  html[dir="rtl"] .routing-results { left: 0; right: 18px; }
+  /* The scale bar is "3000 ft" whatever the language. */
+  html[dir="rtl"] .maplibregl-ctrl-scale { direction: ltr; }
+  @media (max-height: 500px) {
+    html[dir="rtl"] #controls button + button { border-left: none; border-right: 1px solid var(--border); }
+    html[dir="rtl"] .sz-home-group button + button { border-left: none; border-right: 1px solid #ddd; }
+  }
+  @media (pointer: coarse) {
+    html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }
+    html[dir="rtl"] #wiki-panel-close { margin: -14px 0 -12px -12px; }
+    html[dir="rtl"] #search-clear { right: auto; left: 0; }
   }
 </style>
 </head>

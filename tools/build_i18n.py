@@ -15,7 +15,8 @@ static markup -- so code and English cannot drift. This tool:
 
 The tables are inlined, not shipped as files: a published ZIM can never
 gain a file, and in-place patches rewrite only the viewer slots
-(docs/viewer-slots.md).
+(docs/viewer-slots.md). They are inlined compressed (encode_tables): as
+plain JSON, 22 tables do not fit the slots.
 
     python tools/build_i18n.py          # rewrite en.json + the inlined blocks
     python tools/build_i18n.py --check  # fail if anything is out of date
@@ -26,9 +27,11 @@ tools/build_viewer.py runs this first, so the usual
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import sys
+import zlib
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -59,7 +62,10 @@ PLURAL_CATEGORIES = ("zero", "one", "two", "few", "many", "other")
 #                     does not say which script or glyphs to use
 #   _compact: "intl"  large numbers in ten thousands (ja 万, ko 만, zh 万):
 #                     runtime.js szCompactIntl, Intl's compact notation
-META_KEYS: dict[str, type] = {"_machine": bool, "_lang": str, "_compact": str}
+#   _nu: "latn"       the digits numbers and dates are written in (Intl's
+#                     -u-nu-), where the language's default would mix
+#                     with the digits code writes directly (ar, fa)
+META_KEYS: dict[str, type] = {"_machine": bool, "_lang": str, "_compact": str, "_nu": str}
 
 class I18nError(Exception):
     pass
@@ -322,6 +328,8 @@ def _check_meta(lang: str, table: dict[str, Any], origin: Path) -> None:
             raise I18nError(f"{origin}: _lang {v!r} must be {lang}-<subtag> (zh-Hans)")
         if k == "_compact" and v != "intl":
             raise I18nError(f"{origin}: _compact {v!r} must be \"intl\"")
+        if k == "_nu" and v != "latn":
+            raise I18nError(f"{origin}: _nu {v!r} must be \"latn\"")
 
 
 def languages() -> dict[str, dict[str, Any]]:
@@ -341,6 +349,85 @@ def languages() -> dict[str, dict[str, Any]]:
 def _json(obj: Any) -> str:
     # </script> can't appear inside the inline block.
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).replace("</", "<\\/")
+
+
+# How the tables are inlined (docs/i18n.md, "How the tables are stored"):
+#   {"v": 2, "k": KEYS, "t": {lang: TEXTS}, "m": {lang: {settings}}}
+# KEYS is the page's keys (page_keys: sorted, then every place type as
+# "type.<key>"), TEXTS one language's texts in that order (0 where its
+# table lacks the key); each is a JSON array, raw DEFLATE (RFC 1951), then
+# base64. runtime.js (szInflate, szUnpack) decodes only the language the
+# page shows. Keys stored once and compression take the 22 core tables
+# below what nine plain ones took (docs/viewer-slots.md).
+FORMAT = 2
+
+
+def _pack(obj: Any) -> str:
+    raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 9)
+    return base64.b64encode(c.compress(raw) + c.flush()).decode("ascii")
+
+
+def unpack(s: str) -> Any:
+    """One packed array (KEYS or TEXTS) back to JSON."""
+    return json.loads(zlib.decompress(base64.b64decode(s, validate=True), -15).decode("utf-8"))
+
+
+def page_keys(keys: set[str], langs: dict[str, dict[str, Any]]) -> list[str]:
+    """The page's keys in the order TEXTS follow: its UI keys sorted, then
+    every place type any table has (both pages get them all)."""
+    types = sorted({k for t in langs.values() for k in t if is_dynamic(k)})
+    return sorted(k for k in keys if not is_dynamic(k) and not is_meta(k)) + types
+
+
+def encode_tables(keys: set[str], langs: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    order = page_keys(keys, langs)
+    return {"v": FORMAT, "k": _pack(order),
+            "t": {lang: _pack([t.get(k, 0) for k in order]) for lang, t in sorted(langs.items())},
+            "m": {lang: {k: v for k, v in sorted(t.items()) if is_meta(k)}
+                  for lang, t in sorted(langs.items())}}
+
+
+def decode_tables(block: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """encode_tables' output back to each language's table as runtime.js
+    rebuilds it (tables_for's shape: place types nested under "type")."""
+    if block.get("v") != FORMAT:
+        raise I18nError(f"sz-i18n block: format {block.get('v')!r}, want {FORMAT}")
+    order = unpack(block["k"])
+    out: dict[str, dict[str, Any]] = {}
+    for lang, packed in block["t"].items():
+        texts = unpack(packed)
+        if len(texts) != len(order):
+            raise I18nError(f"sz-i18n block: {lang} has {len(texts)} texts for {len(order)} keys")
+        t: dict[str, Any] = dict(block["m"].get(lang, {}))
+        types: dict[str, Any] = {}
+        for k, v in zip(order, texts):
+            if v == 0:
+                continue
+            if is_dynamic(k):
+                types[k[len("type."):]] = v
+            else:
+                t[k] = v
+        if types:
+            t["type"] = types
+        out[lang] = t
+    return out
+
+
+_BLOCK = re.compile(r'(<script type="application/json" id="sz-i18n">)(.*?)(</script>)', re.S)
+
+
+def _canonical(src: str) -> str:
+    """A generated file with its sz-i18n block decoded, so two zlib builds
+    that compress the same tables differently compare equal (--check, and
+    no rewrite that would only churn the bytes)."""
+    def dec(m: re.Match[str]) -> str:
+        try:
+            tables = decode_tables(json.loads(m.group(2)))
+        except (ValueError, KeyError, TypeError, I18nError, zlib.error):
+            return m.group(0)
+        return m.group(1) + json.dumps(tables, ensure_ascii=False, sort_keys=True) + m.group(3)
+    return _BLOCK.sub(dec, src)
 
 
 def tables_for(keys: set[str], langs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -371,7 +458,7 @@ def inline_block(keys: set[str], langs: dict[str, dict[str, Any]]) -> str:
     runtime = _runtime_for_page()
     return ("<script>\n" + runtime + "\n</script>\n"
             '<script type="application/json" id="sz-i18n">'
-            + _json(tables_for(keys, langs)) + "</script>\n")
+            + _json(encode_tables(keys, langs)) + "</script>\n")
 
 
 def build() -> dict[Path, str]:
@@ -406,7 +493,8 @@ def main(argv: list[str] | None = None) -> int:
     except I18nError as e:
         print(f"build_i18n: {e}", file=sys.stderr)
         return 1
-    stale = [p for p, s in want.items() if not p.exists() or p.read_text(encoding="utf-8") != s]
+    stale = [p for p, s in want.items() if not p.exists()
+             or _canonical(p.read_text(encoding="utf-8")) != _canonical(s)]
     if args.check:
         for p in stale:
             print(f"{p.relative_to(ROOT)} is stale: run python tools/build_viewer.py", file=sys.stderr)

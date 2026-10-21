@@ -7,6 +7,7 @@
 //   node tests/viewer_i18n_js.test.mjs
 import assert from 'node:assert';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const RUNTIME = fs.readFileSync(`${REPO}/resources/viewer/i18n/runtime.js`, 'utf8');
@@ -16,7 +17,15 @@ const EN = table('en');
 const TH = table('th');
 const ZH = table('zh');
 const NEW_MACHINE = ['el', 'es', 'fr', 'ja', 'ko'];
-const TABLES = { de: DE, th: TH, zh: ZH, ...Object.fromEntries(NEW_MACHINE.map((l) => [l, table(l)])) };
+// The core languages' tables added 2026-10-21 (docs/i18n.md), and Swedish.
+const CORE_NEW = ['ar', 'fa', 'he', 'hi', 'id', 'it', 'nl', 'pl', 'pt', 'ru', 'sv', 'tr', 'uk', 'vi'];
+const RTL = ['ar', 'fa', 'he'];
+// Every table in resources/viewer/i18n but English.
+const ALL = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
+  .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
+const TABLES = Object.fromEntries(ALL.map((l) => [l, table(l)]));
+// A language with no table (falls back to English).
+const NO_TABLE = 'sw';
 
 let pass = 0;
 async function ok(name, fn) {
@@ -30,6 +39,28 @@ function pageTables(file) {
   const m = /<script type="application\/json" id="sz-i18n">([\s\S]*?)<\/script>/.exec(html);
   assert.ok(m, file + ' has no sz-i18n block');
   return { html, json: m[1] };
+}
+// Its tables decoded with node's zlib, not the runtime's szInflate (a
+// broken decoder must not check itself): { lang: table as the lookups
+// read it, place types nested under "type" }.
+function decoded(file) {
+  const block = JSON.parse(pageTables(file).json);
+  assert.strictEqual(block.v, 2, file);
+  const unpack = (s) => JSON.parse(zlib.inflateRawSync(Buffer.from(s, 'base64')).toString('utf8'));
+  const keys = unpack(block.k);
+  const out = {};
+  for (const [lang, packed] of Object.entries(block.t)) {
+    const texts = unpack(packed);
+    assert.strictEqual(texts.length, keys.length, file + ' ' + lang);
+    const t = Object.assign({}, block.m[lang]);
+    keys.forEach((k, i) => {
+      if (texts[i] === 0) return;
+      if (k.startsWith('type.')) (t.type = t.type || {})[k.slice(5)] = texts[i];
+      else t[k] = texts[i];
+    });
+    out[lang] = t;
+  }
+  return out;
 }
 
 // A fresh runtime with a fake document: `tables` is the inline JSON text,
@@ -47,7 +78,9 @@ function load(tables, els = []) {
   const api = new Function('document', 'window', RUNTIME + `
     return { szSetUiLanguage, szUseLanguage, szT, szTn, szFixed, szLocaleNum, szMonthYear,
              szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szCompactIntl, szMachineTranslated,
-             get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; } };`)(document, window);
+             szInflate, szTableFrom, szUiLanguages,
+             get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; },
+             get rtl() { return SZ_UI_RTL; }, get table() { return SZ_I18N; } };`)(document, window);
   return { api, docEl, events };
 }
 function el(attrs, text) {
@@ -79,9 +112,9 @@ await ok('English: no table, the call site text, exactly as before', () => {
   assert.strictEqual(docEl.lang, '');   // an English page is left as it was
 });
 
-await ok('a language without a table (it) falls back to English, string by string', () => {
+await ok('a language without a table (sw) falls back to English, string by string', () => {
   const { api } = load(INDEX_TABLES);
-  assert.strictEqual(api.szSetUiLanguage('it', ''), 'en');
+  assert.strictEqual(api.szSetUiLanguage(NO_TABLE, ''), 'en');
   assert.strictEqual(api.szT('routing.clear', 'Clear route'), 'Clear route');
 });
 
@@ -148,10 +181,10 @@ await ok('Spanish, French, Japanese, Korean, Greek: a table, <html lang> = the m
   }
   // A language without a table: English, <html lang> untouched.
   const r = load(INDEX_TABLES);
-  assert.strictEqual(r.api.szSetUiLanguage('it', ''), 'en');
+  assert.strictEqual(r.api.szSetUiLanguage(NO_TABLE, ''), 'en');
   assert.strictEqual(r.docEl.lang, '');
   // Places.html carries them too.
-  const places = JSON.parse(pageTables('places.html').json);
+  const places = decoded('places.html');
   for (const lang of NEW_MACHINE) assert.ok(places[lang] && places[lang]._machine === true, lang);
 });
 
@@ -199,7 +232,8 @@ await ok('the machine-translation note shows for machine tables only', () => {
                         'Interface translated by machine — corrections welcome');
   const plain = () => el({ 'data-i18n': 'routing.clear' }, 'Clear route');
   for (const [lang, shown] of [['th', true], ['zh', true], ['de', false], ['en', false],
-                               ['it', false], ['qps', false], ...NEW_MACHINE.map((l) => [l, true])]) {
+                               [NO_TABLE, false], ['qps', false], ...NEW_MACHINE.map((l) => [l, true]),
+                               ...CORE_NEW.map((l) => [l, true])]) {
     const els = [note(), plain()];
     const r = load(INDEX_TABLES, els);
     r.api.szUseLanguage(lang, '');
@@ -276,7 +310,7 @@ await ok('static markup: one pass in German, untouched in English', () => {
 
 await ok('each page carries every table, with exactly its own keys', () => {
   for (const file of ['index.html', 'places.html']) {
-    const t = JSON.parse(pageTables(file).json);
+    const t = decoded(file);
     assert.deepStrictEqual(Object.keys(t).sort(), Object.keys(TABLES).sort(), file);
     for (const [lang, src] of Object.entries(TABLES)) {
       for (const [k, v] of Object.entries(t[lang])) {
@@ -290,7 +324,7 @@ await ok('each page carries every table, with exactly its own keys', () => {
       for (const k of ['_machine', '_lang']) assert.strictEqual(t[lang][k], src[k], `${file} ${lang} ${k}`);
     }
   }
-  const idx = JSON.parse(INDEX_TABLES).de, plc = JSON.parse(pageTables('places.html').json).de;
+  const idx = decoded('index.html').de, plc = decoded('places.html').de;
   assert.ok('drive.roundabout' in idx && !('drive.roundabout' in plc));
   assert.ok('places.title' in plc && !('places.title' in idx));
   assert.ok('restaurant' in idx.type && 'restaurant' in plc.type);
@@ -301,6 +335,171 @@ await ok('each page carries every table, with exactly its own keys', () => {
   assert.strictEqual(api.szPlaceType('__proto__'), '  proto  ');   // the raw key, underscores as spaces
   // Every English key is in some page's table.
   for (const k of Object.keys(EN)) assert.ok(k in idx || k in plc, 'not inlined anywhere: ' + k);
+});
+
+await ok('the core languages: a table each, <html lang>, the note, a translated string', () => {
+  for (const lang of CORE_NEW) {
+    const r = load(INDEX_TABLES);
+    assert.strictEqual(r.api.szSetUiLanguage(lang, ''), lang, lang);
+    assert.strictEqual(r.docEl.lang, lang, lang);
+    assert.strictEqual(r.api.szMachineTranslated(), true, lang);
+    assert.strictEqual(r.api.szT('routing.clear', 'Clear route'), TABLES[lang]['routing.clear'], lang);
+    assert.notStrictEqual(TABLES[lang]['routing.clear'], 'Clear route', lang);
+    assert.strictEqual(r.api.szPlaceType('restaurant'), TABLES[lang]['type.restaurant'], lang);
+    assert.strictEqual(r.api.szChipLabel('food', 'Food & Drink'), TABLES[lang]['chip.food'], lang);
+  }
+  // A merged map's language with a region subtag (pt-BR) or another case: the table.
+  const r = load(INDEX_TABLES);
+  assert.strictEqual(r.api.szSetUiLanguage('pt-BR', ''), 'pt');
+  assert.deepStrictEqual(load(INDEX_TABLES).api.szUiLanguages(), ALL);
+});
+
+await ok('right to left: ar, fa, he set <html dir="rtl">; other languages leave it', () => {
+  for (const lang of ALL) {
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    assert.strictEqual(r.api.rtl, RTL.includes(lang), lang);
+    assert.strictEqual(r.docEl.dir, RTL.includes(lang) ? 'rtl' : undefined, lang);
+  }
+  // ?uilang=he on an English map: RTL; English and the pseudo-locale: not.
+  let r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('en', '?uilang=he');
+  assert.strictEqual(r.docEl.dir, 'rtl');
+  for (const [lang, q] of [['en', ''], ['ar', '?uilang=qps'], ['ar', '?uilang=en'], [NO_TABLE, '']]) {
+    r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, q);
+    assert.strictEqual(r.api.rtl, false, lang + q);
+    assert.strictEqual(r.docEl.dir, undefined, lang + q);
+  }
+  // Chosen again (a page that switches): back to ltr.
+  r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('ar', '');
+  r.api.szSetUiLanguage('de', '');
+  assert.strictEqual(r.docEl.dir, 'ltr');
+});
+
+await ok('right to left: values in a sentence are isolated runs; left to right: unchanged', () => {
+  const FSI = '\u2068', PDI = '\u2069', LRI = '\u2066';
+  let r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('he', '');
+  assert.strictEqual(r.api.szT('place.distance_from', '{dist} from {place}', { dist: '3 km', place: '25 de Mayo' }),
+                     TABLES.he['place.distance_from'].replace('{dist}', FSI + '3 km' + PDI).replace('{place}', FSI + '25 de Mayo' + PDI));
+  // An empty value adds nothing; a missing one stays visible as before.
+  assert.strictEqual(r.api.szT('x.y', 'a{v}b{w}', { v: '' }), 'ab{w}');
+  // Counts too ({n}), and szTn's own number.
+  assert.ok(r.api.szTn('place.links', 5, { one: '{n} link', other: '{n} links' }).includes(FSI + '5' + PDI));
+  // English and German: byte for byte as before.
+  for (const lang of ['en', 'de']) {
+    r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    assert.strictEqual(r.api.szT('x.y', '{a} and {b}', { a: '25 de Mayo', b: 3 }), '25 de Mayo and 3');
+  }
+  // szLtr: an LTR isolate in RTL only.
+  const L = new Function('document', 'window', RUNTIME + '; return { szSetUiLanguage, szLtr };')(
+    { documentElement: {}, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
+  assert.strictEqual(L.szLtr('3.2 km'), '3.2 km');
+  L.szSetUiLanguage('ar', '');
+  assert.strictEqual(L.szLtr('3.2 km'), LRI + '3.2 km' + PDI);
+  assert.strictEqual(L.szLtr(''), '');
+});
+
+await ok('Arabic and Persian write numbers and dates in Latin digits (_nu)', () => {
+  for (const lang of ['ar', 'fa']) {
+    assert.strictEqual(TABLES[lang]._nu, 'latn', lang);
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    assert.match(r.api.szLocaleNum(1234567), /^1.234.567$/, lang);
+    assert.match(r.api.szFixed(3.25, 1), /^3.[23]$/, lang);
+    assert.match(r.api.szMonthYear(2026, 6), /\d{4}/, lang);
+    assert.doesNotMatch(r.api.szMonthYear(2026, 6) + r.api.szLocaleNum(1234567), /[\u0660-\u0669\u06F0-\u06F9]/, lang);
+    assert.strictEqual(r.api.szTn('place.links', 21, { one: '{n} link', other: '{n} links' }).replace(/[^0-9]/g, ''),
+                       lang === 'ar' ? '21' : '21', lang);
+  }
+  // Hebrew and Hindi already default to Latin digits; Hindi counts in lakh / crore.
+  const hi = load(INDEX_TABLES);
+  hi.api.szSetUiLanguage('hi', '');
+  assert.match(hi.api.szCompactNum(5600000), /^56\s+लाख$/);   // Intl puts a no-break space
+  assert.strictEqual(hi.api.szCompactNum(1234), '1,234');
+});
+
+await ok('plural categories: Arabic six, Russian / Polish / Ukrainian four, Hebrew dual', () => {
+  const F = { one: '{n} link', other: '{n} links' };
+  const want = {
+    ar: [[0, 'zero'], [1, 'one'], [2, 'two'], [3, 'few'], [11, 'many'], [100, 'other']],
+    ru: [[1, 'one'], [2, 'few'], [5, 'many'], [21, 'one'], [1.5, 'other']],
+    pl: [[1, 'one'], [3, 'few'], [5, 'many'], [22, 'few'], [1.5, 'other']],
+    uk: [[1, 'one'], [4, 'few'], [11, 'many'], [21, 'one']],
+    he: [[1, 'one'], [2, 'two'], [3, 'other']],
+  };
+  for (const [lang, cases] of Object.entries(want)) {
+    const r = load(INDEX_TABLES);
+    r.api.szSetUiLanguage(lang, '');
+    for (const [n, cat] of cases) {
+      const form = TABLES[lang]['place.links'][cat];
+      assert.ok(form, `${lang} place.links.${cat}`);
+      const got = r.api.szTn('place.links', n, F);
+      const num = r.api.szLocaleNum(n);
+      assert.strictEqual(got, form.replace('{n}', RTL.includes(lang) ? '\u2068' + num + '\u2069' : num), `${lang} n=${n}`);
+    }
+  }
+});
+
+await ok('the runtime decodes every table of both pages exactly as zlib does', () => {
+  for (const file of ['index.html', 'places.html']) {
+    const want = decoded(file);
+    const block = JSON.parse(pageTables(file).json);
+    const { api } = load(pageTables(file).json);
+    for (const lang of ALL) {
+      assert.deepStrictEqual(api.szTableFrom(block, lang), want[lang], `${file} ${lang}`);
+    }
+    assert.strictEqual(api.szTableFrom(block, 'en'), null);
+    assert.strictEqual(api.szTableFrom(block, '__proto__'), null);
+  }
+});
+
+await ok('a damaged block is English, not an exception', () => {
+  const block = JSON.parse(INDEX_TABLES);
+  const bad = [
+    Object.assign({}, block, { t: Object.assign({}, block.t, { de: block.t.de.slice(0, 200) }) }),   // truncated
+    Object.assign({}, block, { t: Object.assign({}, block.t, { de: '!!!' + block.t.de.slice(3) }) }), // not base64
+    Object.assign({}, block, { k: block.t.de }),                                                     // keys ≠ texts
+    Object.assign({}, block, { v: 1 }),                                                              // unknown format
+  ];
+  // TEXTS one short of KEYS: the keys would shift onto the wrong texts.
+  const pack = (a) => zlib.deflateRawSync(Buffer.from(JSON.stringify(a))).toString('base64');
+  const unpack = (b64) => JSON.parse(zlib.inflateRawSync(Buffer.from(b64, 'base64')).toString('utf8'));
+  bad.push(Object.assign({}, block, { t: Object.assign({}, block.t, { de: pack(unpack(block.t.de).slice(1)) }) }));
+  for (const b of bad) {
+    const { api, docEl } = load(JSON.stringify(b));
+    assert.strictEqual(api.szSetUiLanguage('de', ''), 'en');
+    assert.strictEqual(api.szT('routing.clear', 'Clear route'), 'Clear route');
+    assert.strictEqual(docEl.lang, '');
+  }
+});
+
+await ok('szInflate: stored, fixed and dynamic blocks, against node zlib', () => {
+  const { api } = load(INDEX_TABLES);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < 60; i++) {
+    const len = Math.floor(rnd() * 40000);
+    const buf = Buffer.alloc(len);
+    for (let j = 0; j < len; j++) buf[j] = i % 3 === 0 ? Math.floor(rnd() * 256) : i % 3 === 1 ? 97 + Math.floor(rnd() * 3) : (j % 251) ^ (j >> 7);
+    for (const o of [{ level: 0 }, { level: 9 }, { level: 6, strategy: zlib.constants.Z_FIXED }, { level: 6, strategy: zlib.constants.Z_HUFFMAN_ONLY }]) {
+      const out = api.szInflate(Array.from(zlib.deflateRawSync(buf, o)));
+      assert.ok(Buffer.from(out).equals(buf), `len ${len} ${JSON.stringify(o)}`);
+    }
+  }
+  assert.throws(() => api.szInflate([0xff, 0xff, 0xff]));       // reserved block type
+  assert.throws(() => api.szInflate([]));                       // empty
+  // A stored block whose length and its complement disagree.
+  const stored = Array.from(zlib.deflateRawSync(Buffer.from('hello'), { level: 0 }));
+  assert.strictEqual(Buffer.from(api.szInflate(stored)).toString(), 'hello');
+  const broken = stored.slice(); broken[3] ^= 1;
+  assert.throws(() => api.szInflate(broken), /stored/);
+  // Truncated: a dynamic block cut short.
+  const dyn = Array.from(zlib.deflateRawSync(Buffer.from('abcabcabd'.repeat(500)), { level: 9 }));
+  assert.throws(() => api.szInflate(dyn.slice(0, dyn.length >> 1)), /truncated|bad/);
 });
 
 console.log(`${pass} passed`);

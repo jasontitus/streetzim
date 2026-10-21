@@ -109,14 +109,14 @@
   function formatDistanceLocalized(meters, unit) {
     if (unit === 'imperial') {
       var feet = meters * 3.28084;
-      if (feet < 1000) return Math.round(feet / 10) * 10 + ' ft';
+      if (feet < 1000) return szLtr(Math.round(feet / 10) * 10 + ' ft');
       var miles = meters / 1609.344;
-      if (miles < 10) return szFixed(miles, 1) + ' mi';
-      return Math.round(miles) + ' mi';
+      if (miles < 10) return szLtr(szFixed(miles, 1) + ' mi');
+      return szLtr(Math.round(miles) + ' mi');
     }
-    if (meters < 1000) return Math.round(meters / 10) * 10 + ' m';
-    if (meters < 10000) return szFixed(meters / 1000, 1) + ' km';
-    return Math.round(meters / 1000) + ' km';
+    if (meters < 1000) return szLtr(Math.round(meters / 10) * 10 + ' m');
+    if (meters < 10000) return szLtr(szFixed(meters / 1000, 1) + ' km');
+    return szLtr(Math.round(meters / 1000) + ' km');
   }
 
   function formatEtaClock(seconds) {
@@ -127,7 +127,7 @@
     try {
       // The device's clock format in English (as before), the UI
       // language's otherwise ("14:05", not "2:05 PM", in German).
-      var fmt = new Intl.DateTimeFormat(SZ_I18N ? SZ_UI_LANG : undefined, { hour: 'numeric', minute: '2-digit' });
+      var fmt = new Intl.DateTimeFormat(SZ_I18N ? SZ_NUM_LANG : undefined, { hour: 'numeric', minute: '2-digit' });
       return fmt.format(d);
     } catch (e) {
       var mm = (m < 10 ? '0' : '') + m;

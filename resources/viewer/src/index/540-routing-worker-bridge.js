@@ -626,7 +626,7 @@
   }
 
   function coordLabel(lat, lon) {
-    return lat.toFixed(4) + ', ' + lon.toFixed(4);
+    return szLtr(lat.toFixed(4) + ', ' + lon.toFixed(4));
   }
 
   function makeMarkerEl(cls) {

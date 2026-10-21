@@ -14,16 +14,16 @@ function _szProximityLabel(miles, unit) {
   if (unit === 'metric') {
     var km = miles * 1.609344;
     if (km < 0.8) return szT('search.nearby', 'nearby');
-    if (km < 8) return Math.round(km) + ' km';
-    if (km < 80) return Math.round(km / 5) * 5 + ' km';
-    if (km < 800) return Math.round(km / 10) * 10 + ' km';
-    return Math.round(km / 100) * 100 + ' km';
+    if (km < 8) return szLtr(Math.round(km) + ' km');
+    if (km < 80) return szLtr(Math.round(km / 5) * 5 + ' km');
+    if (km < 800) return szLtr(Math.round(km / 10) * 10 + ' km');
+    return szLtr(Math.round(km / 100) * 100 + ' km');
   }
   if (miles < 0.5) return szT('search.nearby', 'nearby');
-  if (miles < 5) return Math.round(miles) + ' mi';
-  if (miles < 50) return Math.round(miles / 5) * 5 + ' mi';
-  if (miles < 500) return Math.round(miles / 10) * 10 + ' mi';
-  return Math.round(miles / 100) * 100 + ' mi';
+  if (miles < 5) return szLtr(Math.round(miles) + ' mi');
+  if (miles < 50) return szLtr(Math.round(miles / 5) * 5 + ' mi');
+  if (miles < 500) return szLtr(Math.round(miles / 10) * 10 + ' mi');
+  return szLtr(Math.round(miles / 100) * 100 + ' mi');
 }
 // END proximity-label
 

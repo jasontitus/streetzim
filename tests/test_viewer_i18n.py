@@ -32,10 +32,23 @@ PLACES = ROOT / "resources" / "viewer" / "places.html"
 # Plural categories each language's table must give (Intl.PluralRules).
 PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "other"},
                 "fr": {"one", "other"}, "ja": {"other"}, "ko": {"other"},
-                "th": {"other"}, "zh": {"other"}}
+                "th": {"other"}, "zh": {"other"},
+                "ar": {"zero", "one", "two", "few", "many", "other"}, "fa": {"one", "other"},
+                "he": {"one", "two", "other"}, "hi": {"one", "other"}, "id": {"other"},
+                "it": {"one", "other"}, "nl": {"one", "other"},
+                "pl": {"one", "few", "many", "other"}, "pt": {"one", "other"},
+                "ru": {"one", "few", "many", "other"}, "sv": {"one", "other"},
+                "tr": {"one", "other"}, "uk": {"one", "few", "many", "other"}, "vi": {"other"}}
 # Tables made by machine translation (their "_machine": true shows the note);
 # German is reviewed by a person.
-MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh"}
+MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh",
+           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi"}
+# The core languages (docs/language-packs.md): the viewer has a UI table for
+# each, so a merged map in any of them shows its interface in that language.
+CORE = {"ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl",
+        "pt", "ru", "th", "tr", "uk", "vi", "zh"}
+# Written right to left: runtime.js SZ_RTL_LANGS gives the page dir="rtl".
+RTL = {"ar", "fa", "he"}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -62,6 +75,57 @@ def test_the_language_matrix_menu_has_its_ui_tables() -> None:
     tables = lang_tables()
     assert {"el", "es", "fr", "ja", "ko"} <= set(tables)
     assert set(tables) <= set(PLURAL_FORMS), sorted(set(tables) - set(PLURAL_FORMS))
+
+
+def test_every_core_language_has_a_table() -> None:
+    assert CORE <= set(lang_tables()), sorted(CORE - set(lang_tables()))
+
+
+@pytest.mark.parametrize("lang", sorted(build_i18n.languages()))
+def test_plural_forms_are_what_intl_gives(lang: str) -> None:
+    # PLURAL_FORMS (what each table must give) against the categories the
+    # runtime's Intl.PluralRules returns for the language: a table missing one
+    # would show the English for that count. Node's ICU stands in for the
+    # browsers'; "many" in es/fr/it/pt (millions, compact forms) may fall back
+    # to "other", as runtime.js szTn does.
+    import shutil
+    import subprocess
+    node = shutil.which("node") or "/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node"
+    if not Path(node).exists():
+        pytest.skip("no node")
+    out = subprocess.run([node, "-e", "console.log(JSON.stringify(new Intl.PluralRules(process.argv[1])"
+                          ".resolvedOptions().pluralCategories))", lang],
+                         capture_output=True, text=True, timeout=60, check=True).stdout
+    intl = set(json.loads(out)) - ({"many"} if lang in ("es", "fr", "it", "pt") else set())
+    assert PLURAL_FORMS[lang] == intl, (lang, sorted(intl))
+
+
+def test_rtl_tables_mirror_the_back_arrows() -> None:
+    # "← Map" / "← Back to list" point at the start of the line; in a
+    # right-to-left UI the start is on the right, so the arrow is "→".
+    for lang, table in lang_tables().items():
+        for key in ("places.back_to_map", "wiki.back_to_list"):
+            arrow = "→" if lang in RTL else "←"
+            assert table[key].startswith(arrow), (lang, key, table[key])
+
+
+def test_the_pages_carry_the_right_to_left_rules() -> None:
+    # What runtime.js's dir="rtl" relies on (docs/i18n.md#right-to-left-languages):
+    # the clear buttons move to the start of their inputs' text, the scale bar
+    # stays "3000 ft", and the runtime has the RTL set, szLtr and isolates.
+    idx = (ROOT / "resources" / "viewer" / "index.html").read_text(encoding="utf-8")
+    plc = PLACES.read_text(encoding="utf-8")
+    for rule in ('html[dir="rtl"] #search-clear { right: auto; left: 10px; }',
+                 'html[dir="rtl"] #search-input { padding: 10px 14px 10px 36px; }',
+                 'html[dir="rtl"] .maplibregl-ctrl-scale { direction: ltr; }',
+                 'html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }'):
+        assert rule in idx, rule
+    for rule in ('html[dir="rtl"] #near-clear { right:auto; left:6px; }',
+                 'html[dir="rtl"] #near-input { padding:8px 12px 8px 28px; }'):
+        assert rule in plc, rule
+    for page, src in (("index.html", idx), ("places.html", plc)):
+        for token in ("SZ_RTL_LANGS", "function szLtr", "\\u2068", "root.dir = 'rtl'"):
+            assert token in src, (page, token)
 
 
 def test_there_are_thai_and_chinese_tables() -> None:
@@ -122,20 +186,59 @@ def test_inlined_tables_hold_the_page_keys() -> None:
     for page, src in (("index.html", idx), ("places.html", plc)):
         m = re.search(r'<script type="application/json" id="sz-i18n">(.*?)</script>', src, re.S)
         assert m, page
-        tables = json.loads(m.group(1))
+        tables = build_i18n.decode_tables(json.loads(m.group(1)))
         assert set(tables) == set(lang_tables()), page
         assert "szT" in src and "function szUseLanguage" in src, page
     # The Find page carries only its own keys, not the map viewer's.
-    m = re.search(r'id="sz-i18n">(.*?)</script>', plc, re.S)
-    assert m
-    assert "drive.roundabout" not in json.loads(m.group(1))["de"]
+    assert "drive.roundabout" not in _page_tables("places.html")["de"]
+    assert "drive.roundabout" in _page_tables("index.html")["de"]
 
 
 def _page_tables(page: str) -> dict[str, dict[str, Any]]:
     src = (ROOT / "resources" / "viewer" / page).read_text(encoding="utf-8")
     m = re.search(r'<script type="application/json" id="sz-i18n">(.*?)</script>', src, re.S)
     assert m, page
-    return json.loads(m.group(1))
+    return build_i18n.decode_tables(json.loads(m.group(1)))
+
+
+@pytest.mark.parametrize("page", ["index.html", "places.html"])
+def test_inlined_tables_decode_to_the_sources(page: str) -> None:
+    # Compressed (build_i18n.encode_tables) but the same texts: every key
+    # the page uses, every place type, every setting, in every language.
+    src = (ROOT / "resources" / "viewer" / page).read_text(encoding="utf-8")
+    keys = set(build_i18n.collect_page(build_i18n.index_sources() if page == "index.html"
+                                       else build_i18n.places_source()))
+    want = build_i18n.tables_for(keys, lang_tables())
+    assert _page_tables(page) == want
+    # Stored compressed: no table text appears in the page as it is.
+    assert lang_tables()["de"]["routing.no_route"] not in src
+    block = json.loads(re.search(r'id="sz-i18n">(.*?)</script>', src, re.S).group(1))
+    assert block["v"] == build_i18n.FORMAT and set(block["t"]) == set(block["m"]) == set(lang_tables())
+
+
+def test_check_ignores_how_zlib_compressed_the_same_tables() -> None:
+    # Another zlib (version, level) packs the same tables into other bytes:
+    # --check compares the decoded tables, not the bytes, so CI and the
+    # build host agree; a changed text is still stale.
+    src = (ROOT / "resources" / "viewer" / "places.html").read_text(encoding="utf-8")
+    m = re.search(r'id="sz-i18n">(.*?)</script>', src, re.S)
+    assert m
+    block = json.loads(m.group(1))
+    import base64
+    import zlib
+    def repack(s: str, level: int) -> str:
+        raw = zlib.decompress(base64.b64decode(s), -15)
+        c = zlib.compressobj(level, zlib.DEFLATED, -15)
+        return base64.b64encode(c.compress(raw) + c.flush()).decode()
+    other = dict(block, t={k: repack(v, 1) for k, v in block["t"].items()})
+    assert other["t"]["de"] != block["t"]["de"]
+    alt = src[:m.start(1)] + json.dumps(other) + src[m.end(1):]
+    assert build_i18n._canonical(alt) == build_i18n._canonical(src)
+    texts = build_i18n.unpack(block["t"]["de"])
+    texts[texts.index(lang_tables()["de"]["places.title"])] = "Orte finden!"
+    changed = dict(block, t=dict(block["t"], de=build_i18n._pack(texts)))
+    alt = src[:m.start(1)] + json.dumps(changed) + src[m.end(1):]
+    assert build_i18n._canonical(alt) != build_i18n._canonical(src)
 
 
 def test_type_keys_cover_the_same_types_in_every_table() -> None:

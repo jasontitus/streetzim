@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-3a24c35bb3';
+const SHELL_CACHE = 'streetzim-drive-shell-42b386f458';
 
 const SHELL_URLS = [
   './',
@@ -439,20 +439,39 @@ const OPTIONAL_PROBE_PATHS = new Set([
 // tests/sw_back_bar_js.test.mjs keeps them in step). English, and a
 // language without an entry, keep the words the build writes.
 const BACK_TO_MAP = {
+  ar: 'العودة إلى الخريطة',
   de: 'Zurück zur Karte',
   el: 'Επιστροφή στον χάρτη',
   es: 'Volver al mapa',
+  fa: 'بازگشت به نقشه',
   fr: 'Retour à la carte',
+  he: 'חזרה למפה',
+  hi: 'मानचित्र पर लौटें',
+  id: 'Kembali ke peta',
+  it: 'Torna alla mappa',
   ja: '地図に戻る',
   ko: '지도로 돌아가기',
+  nl: 'Terug naar de kaart',
+  pl: 'Wróć do mapy',
+  pt: 'Voltar ao mapa',
+  ru: 'Назад к карте',
+  sv: 'Tillbaka till kartan',
   th: 'กลับไปที่แผนที่',
+  tr: 'Haritaya dön',
+  uk: 'Назад до карти',
+  vi: 'Quay lại bản đồ',
   zh: '返回地图',
 };
+// Right-to-left: the words in their own direction, the arrow pointing
+// back toward the line's start, which is on the right.
+const BACK_TO_MAP_RTL = { ar: 1, fa: 1, he: 1 };
 const BACK_TO_MAP_EN = '&#8592; Back to map';
 function backToMapText(lang) {
   const l = typeof lang === 'string' ? lang.toLowerCase() : '';
-  const t = BACK_TO_MAP[l] || BACK_TO_MAP[l.split('-')[0]];
-  return t ? '&#8592; ' + t : BACK_TO_MAP_EN;
+  const b = BACK_TO_MAP[l] ? l : l.split('-')[0];
+  const t = BACK_TO_MAP[b];
+  if (!t) return BACK_TO_MAP_EN;
+  return BACK_TO_MAP_RTL[b] ? '<span dir="rtl">&#8594; ' + t + '</span>' : '&#8592; ' + t;
 }
 function backBarHtml(lang) {
   return '<nav class="sz-back"><a href="/drive/viewer/" ' +
