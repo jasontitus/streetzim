@@ -7,7 +7,10 @@ Reads the gated recipes in $LANGPACK_WORK/recipes/<base>/ and writes
 $LANGPACK_WORK/verdicts/<base>/<L>.json:
   {"lang", "recipe_md5", "recipe_uuid", "recipe_size", "packs": {lang: md5},
    "zimcheck_version", "checks": {recipe_eq_merge, verify, zimcheck, route, kiwix,
-   viewer, ui, smoke, base_smoke, base_viewer, base_ui}, "all_pass", "evidence": {...}}
+   search, viewer, ui, smoke, base_smoke, base_viewer, base_ui}, "all_pass",
+   "advisory": [checks recorded but not required], "evidence": {...}}
+search (search_gate.py: Kiwix's search finds pack-only titles) is required
+unless LANGPACK_SEARCH_GATE=report, which records it as advisory.
 zimcheck passes only when its log says "Overall Test Status: Pass" AND the
 zimcheck that wrote it was the official one (zimcheck.version: "zim-tools ...").
 and prints a table. make_site.py publishes an entry only with all_pass and a
@@ -61,11 +64,12 @@ def main():
                    "base_ui": bool(jline(f"{out}/base.ui.json").get("pass"))}
     zver = read(f"{out}/zimcheck.version").strip()      # run_gates.sh: `zimcheck --version`
     official = zver.startswith("zim-tools ")
-    rows = [["L", "packs", "recipe=merge", "verify", "zimcheck", "route", "kiwix", "viewer", "ui", "smoke", "ALL"]]
+    advisory = ["search"] if os.environ.get("LANGPACK_SEARCH_GATE") == "report" else []
+    rows = [["L", "packs", "recipe=merge", "verify", "zimcheck", "route", "kiwix", "search", "viewer", "ui", "smoke", "ALL"]]
     for L in langs:
         rp = os.path.join(work_dir(), "recipes", tag, f"{L}.json")
         if not os.path.exists(rp):
-            rows.append([L, "-", "NO RECIPE"] + [""] * 8)
+            rows.append([L, "-", "NO RECIPE"] + [""] * 9)
             continue
         r = json.load(open(rp))
         menu = [json.loads(x) for x in read(f"{out}/menu.jsonl").splitlines() if x.strip()]
@@ -75,12 +79,14 @@ def main():
         vm = re.search(r"SUMMARY (\d+)/(\d+) PASS", vlog)
         sm = smoke_ok(f"{out}/{L}.smoke.log")
         kj, vj, uj = jline(f"{out}/{L}.kiwix.json"), jline(f"{out}/{L}.viewer.json"), jline(f"{out}/{L}.ui.json")
+        sj = jline(f"{out}/{L}.search.json")
         checks = {
             "recipe_eq_merge": read(f"{out}/{L}.same").strip().endswith("PASS"),
             "verify": bool(vm and vm.group(1) == vm.group(2)),
             "zimcheck": official and "Overall Test Status: Pass" in read(f"{out}/{L}.zimcheck.log"),
             "route": "route OK" in read(f"{out}/{L}.route.log"),
             "kiwix": bool(kj.get("pass")),
+            "search": bool(sj.get("pass")),
             "viewer": bool(vj.get("pass")),
             "ui": bool(uj.get("pass")),
             "smoke": sm[0],
@@ -88,9 +94,11 @@ def main():
         checks.update(base_checks)
         v = {"tag": tag, "lang": L, "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
              "recipe_file_md5": r.get("file_md5"), "packs": pack_md5, "zimcheck_version": zver, "checks": checks,
-             "all_pass": all(checks.values()), "composed": datetime.datetime.now().isoformat(timespec="seconds"),
+             "all_pass": all(ok for k, ok in checks.items() if k not in advisory), "advisory": advisory,
+             "composed": datetime.datetime.now().isoformat(timespec="seconds"),
              "evidence": {"verify": vm.group(0) if vm else None, "smoke": sm[1],
                           "kiwix": kj.get("checks"), "catalog": kj.get("catalog"),
+                          "search": {k: sj.get(k) for k in ("lang", "titles", "suggest_found", "fulltext_found")},
                           "viewer": vj.get("checks"), "viewer_named": (vj.get("named") or {}).get("links", [None])[0],
                           "ui": uj.get("checks"), "ui_labels": (uj.get("labels") or {}).get("cityShown"),
                           "ui_bilingual": (uj.get("labels") or {}).get("bilingualRendered"),
@@ -103,8 +111,9 @@ def main():
         with open(vp, "w") as fh:
             json.dump(v, fh, ensure_ascii=False, indent=1)
         rows.append([L, ",".join(r["packs"]) or "-"] + [mark(checks[k]) for k in
-                    ("recipe_eq_merge", "verify", "zimcheck", "route", "kiwix", "viewer", "ui", "smoke")] + [mark(v["all_pass"])])
-    rows.append(["base", "-"] + [""] * 4 + ["", mark(base_checks["base_viewer"]), mark(base_checks["base_ui"]),
+                    ("recipe_eq_merge", "verify", "zimcheck", "route", "kiwix", "search", "viewer", "ui", "smoke")]
+                    + [mark(v["all_pass"])])
+    rows.append(["base", "-"] + [""] * 5 + ["", mark(base_checks["base_viewer"]), mark(base_checks["base_ui"]),
                                             mark(base_checks["base_smoke"]), ""])
     w = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     for r in rows:

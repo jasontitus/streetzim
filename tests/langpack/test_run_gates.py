@@ -110,6 +110,10 @@ def test_every_step_ran(lang: str, gates: SimpleNamespace) -> None:
     assert all(ok.values()), (ok, (out / f"{lang}.verify.log").read_text()[-2000:])
     # the stand-ins cannot route or answer kiwix-serve's search: those must FAIL, and so the verdict
     assert v["checks"]["route"] is False and v["checks"]["kiwix"] is False and v["all_pass"] is False
+    # Kiwix's search cannot find the pack articles (search_gate.py): required, so FAIL
+    assert v["checks"]["search"] is False and v["advisory"] == []
+    if lang != "en":            # the English entry of an English base carries no pack: nothing to sample
+        assert v["evidence"]["search"]["titles"] >= 1 and v["evidence"]["search"]["suggest_found"] == 0
     assert v["zimcheck_version"] == "zim-tools 3.8.0"
     title = {"de": "Testland DE", "th": "Testland TH"}.get(lang)
     merged = json.loads((out / f"{lang}.merge.json").read_text())
@@ -144,13 +148,16 @@ def test_one_merged_file_at_a_time(gates: SimpleNamespace) -> None:
     assert sorted(os.listdir(gates.work / "merged")) == []
 
 
-def test_keep_merged(gates: SimpleNamespace, tmp_path: Path) -> None:
+def test_keep_merged_and_search_as_advisory(gates: SimpleNamespace, tmp_path: Path) -> None:
     work = tmp_path / "work"
     r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
                         str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
-                       env={**gates.env, "LANGPACK_WORK": str(work), "KEEP_MERGED": "1"})
+                       env={**gates.env, "LANGPACK_WORK": str(work), "KEEP_MERGED": "1",
+                            "LANGPACK_SEARCH_GATE": "report"})
     assert r.returncode == 0, r.stderr[-2000:]
     assert (work / "merged" / f"m-{gates.tag}-de.zim").exists()
+    v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
+    assert v["advisory"] == ["search"] and v["checks"]["search"] is False
 
 
 def test_refuses_without_room_for_a_merged_file(gates: SimpleNamespace, tmp_path: Path) -> None:

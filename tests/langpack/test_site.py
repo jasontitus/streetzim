@@ -32,7 +32,8 @@ def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, 
         (out / "zimcheck.version").write_text(zimcheck_version + "\n")
     files = {"same": "PASS\n", "verify.log": "SUMMARY 22/22 PASS\n",
              "zimcheck.log": "[INFO] Overall Test Status: Pass\n", "route.log": "route OK 1.2 km\n",
-             "kiwix.json": '{"pass": true}\n', "viewer.json": '{"pass": true}\n', "ui.json": '{"pass": true}\n',
+             "kiwix.json": '{"pass": true}\n', "search.json": '{"pass": true}\n',
+             "viewer.json": '{"pass": true}\n', "ui.json": '{"pass": true}\n',
              "smoke.log": "12 passed, 0 failed\n"}
     for L in langs:
         for k, v in files.items():
@@ -40,7 +41,8 @@ def _gate_outputs(out: Path, menu_jsonl: str, langs: list[str], fail: dict[str, 
     for k in ("smoke.log", "viewer.json", "ui.json"):
         (out / f"base.{k}").write_text(files[k])
     bad = {"same": "FAIL\n", "verify.log": "SUMMARY 21/22 PASS\n", "zimcheck.log": "Overall Test Status: Fail\n",
-           "route.log": "no route\n", "kiwix.json": '{"pass": false}\n', "viewer.json": '{"pass": false}\n',
+           "route.log": "no route\n", "kiwix.json": '{"pass": false}\n', "search.json": '{"pass": false}\n',
+           "viewer.json": '{"pass": false}\n',
            "ui.json": '{"pass": false}\n', "smoke.log": "11 passed, 1 failed\n"}
     for L, k in (fail or {}).items():
         (out / f"{L}.{k}").write_text(bad[k])
@@ -254,3 +256,18 @@ def test_the_verdict_must_name_this_recipe(site: SimpleNamespace, lp: SimpleName
     refused = json.loads((out / "recipes" / "refused.json").read_text())
     assert refused == [{"lang": "de", "why": "verdict is for another recipe"}]
     assert [m["lang"] for m in json.loads((out / "recipes" / "index.json").read_text())["regions"][0]["menu"]] == ["th"]
+
+
+@pytest.mark.parametrize("mode,th_passes", [(None, False), ("report", True)])
+def test_kiwix_search_is_required_unless_reported(site: SimpleNamespace, lp: SimpleNamespace, tmp_path: Path,
+                                                 mode: str | None, th_passes: bool) -> None:
+    """search_gate.py's FAIL (Kiwix's search cannot find the pack articles)
+    fails the entry; LANGPACK_SEARCH_GATE=report records it as advisory."""
+    gates = tmp_path / "gates"
+    _gate_outputs(gates, (site.gates / "menu.jsonl").read_text(), LANGS.split(","), fail={"th": "search.json"})
+    env = {"LANGPACK_WORK": str(tmp_path / "work"), **({"LANGPACK_SEARCH_GATE": mode} if mode else {})}
+    shutil.copytree(site.work / "recipes", tmp_path / "work" / "recipes")
+    assert tool("compose_verdicts.py", gates, lp.base, LANGS, env=env).returncode == 0
+    th = json.loads((tmp_path / "work" / "verdicts" / site.tag / "th.json").read_text())
+    assert th["checks"]["search"] is False and th["all_pass"] is th_passes
+    assert th["advisory"] == (["search"] if mode else [])

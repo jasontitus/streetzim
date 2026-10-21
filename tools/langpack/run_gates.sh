@@ -5,6 +5,9 @@
 #   verify   verify_merge.py (entry level, S3 UUID, S4 pack lineage)
 #   zimcheck official zim-tools 3.8.0 -A
 #   route    cloud/route_cli.py on the merged file
+#   search   search_gate.py: Kiwix's search (libzim suggestions) finds pack-only
+#            article titles in the merged file (LANGPACK_SEARCH_GATE=report:
+#            recorded, not required)
 #   kiwix    kiwix-serve: /suggest, /search, an article + pack.json per pack,
 #            /catalog/v2/entries Title and Language == the merged metadata
 #   viewer   viewer_gate.mjs: WIKI_PACKS, source order, the offered articles
@@ -246,6 +249,7 @@ PY
   wait_mem
   zimcheck_merged "$M" "$OUT/$L.zimcheck.log"
   $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
+  $N $PY "$TL/search_gate.py" "$M" "$BASE" --lang "$L" > "$OUT/$L.search.json" 2>&1
   if [ -s "$M" ]; then serve "$M"; browser_checks "$M" "$L"; unserve; fi
   [ "$KEEP" = 1 ] || rm -f "$M" "$M.fromrecipe"
 done 3< "$OUT/menu.jsonl"

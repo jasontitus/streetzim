@@ -6,8 +6,10 @@
 //   {"base_lang": "en", "city": {"qid": "Q65", "lon": -118.24, "lat": 34.05, "zoom": 7},
 //    "search": {"native": "Sacramento", "english": "Los Angeles", "map_lang": {"th": "...", ...}}}
 // Checks (each recorded with its evidence):
-//   html_lang     <html lang> is the UI language, and a translated string is on screen
-//                 (languages without a UI table: English UI, lang stays 'en')
+//   html_lang     the UI is in LANG: the viewer chose LANG's table (SZ_UI_LANG), <html lang>
+//                 says so and a translated string is on screen; a language with no UI
+//                 table FAILS; right-to-left languages need <html dir="rtl"> where the
+//                 viewer knows them (SZ_RTL_LANGS). English (base, en entry): English UI
 //   labels        text-field reads name:<LANG> (merged, LANG != base); the city's label
 //                 as displayed (szDisplayLabelOf) is what the label rule says (with
 //                 regionLanguages: name:<LANG> over the native name), at the first
@@ -48,22 +50,40 @@ try {
   await page.goto(ORIGIN + '/index.html', { timeout: 120000 });
   await ready();
 
+  // The UI must be in the map's language: a map language without a UI table
+  // FAILS (the viewer shows English: a Thai map with an English UI is not a
+  // Thai map). Read through the viewer's own runtime, whatever the table
+  // format inlined in index.html (JSON on main, {v:2,k,t,m} compressed on
+  // viewer-i18n-core): SZ_UI_LANG / SZ_I18N after it chose the language,
+  // szUiLanguages() where the viewer has it. Right-to-left languages
+  // (SZ_RTL_LANGS, where the viewer has it) need <html dir="rtl">.
   await step('html_lang', () => page.evaluate((lang) => {
-    let tables = {};
-    try { tables = JSON.parse(document.getElementById('sz-i18n').textContent) || {}; } catch (e) { /* none */ }
-    const has = Object.prototype.hasOwnProperty.call(tables, lang);
+    const tables = typeof szUiLanguages === 'function' ? szUiLanguages() : null;
+    const table = typeof SZ_I18N !== 'undefined' && SZ_I18N && typeof SZ_I18N === 'object' ? SZ_I18N : null;
+    const uiLang = typeof SZ_UI_LANG !== 'undefined' ? SZ_UI_LANG : null;
     const shown = [];
-    if (has && SZ_I18N) {
+    if (table) {
       for (const el of document.querySelectorAll('[data-i18n]')) {
-        const v = SZ_I18N[el.getAttribute('data-i18n')];
+        const v = table[el.getAttribute('data-i18n')];
         if (typeof v === 'string' && el.textContent.trim() === v.trim() && /[^\s\d.,:;!?()-]/.test(v)) shown.push(v);
         if (shown.length >= 3) break;
       }
     }
-    const htmlLang = document.documentElement.lang;
-    return { htmlLang, uiLang: SZ_UI_LANG, hasTable: has, translatedShown: shown,
-             pass: has ? (htmlLang.split('-')[0] === lang && SZ_UI_LANG === lang && shown.length > 0)
-                       : (SZ_UI_LANG === 'en') };
+    const htmlLang = document.documentElement.lang || '';
+    const dir = document.documentElement.dir || '';
+    const rtl = typeof SZ_RTL_LANGS === 'object' && SZ_RTL_LANGS && !!SZ_RTL_LANGS[lang];
+    const why = [];
+    if (lang === 'en') {
+      if (uiLang !== 'en') why.push(`UI in ${uiLang}, not English`);
+    } else {
+      if (!table || uiLang !== lang) why.push(`no ${lang} UI table: the UI is in ${uiLang || '?'}`);
+      if (htmlLang.split('-')[0] !== lang) why.push(`<html lang="${htmlLang}">`);
+      if (table && !shown.length) why.push('no translated string on screen');
+      if (rtl && dir !== 'rtl') why.push(`<html dir="${dir}"> for a right-to-left language`);
+    }
+    return { htmlLang, dir, uiLang, hasTable: !!table && uiLang === lang,
+             viewerLanguages: Array.isArray(tables) ? tables : null, translatedShown: shown,
+             rtlRequired: rtl, why, pass: why.length === 0 };
   }, LANG));
 
   // The city's label at the first zoom of ZOOMS that renders it (labels

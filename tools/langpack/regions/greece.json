@@ -1,10 +1,10 @@
 {
  "base_lang": "en",
  "city": {
-  "qid": "Q200036",
-  "lon": 22.942,
-  "lat": 39.3622,
-  "zoom": 7
+  "qid": "Q1524",
+  "lon": 23.7348,
+  "lat": 37.9756,
+  "zoom": 9
  },
  "search": {
   "native": {
