@@ -265,7 +265,7 @@ lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.ba
 open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
 """)
     prefetch = tmp_path / "prefetch2.py"      # what the real one leaves in the cache
-    prefetch.write_text(f"""import os, json
+    prefetch.write_text("""import os, json
 d = os.path.join(os.environ["WP_CACHE"], "wikidata-text"); os.makedirs(d, exist_ok=True)
 open(os.path.join(d, "de.jsonl"), "w").write(json.dumps(["Q77", "Testlandien", ""]) + "\\n")
 """)
