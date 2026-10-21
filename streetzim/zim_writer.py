@@ -81,6 +81,88 @@ def admin_wiki(feat, wiki_cross_refs):
     return {k: feat[k] for k in ("wikipedia", "wikidata") if feat.get(k)} or None
 
 
+def wiki_match_names(feat):
+    """The names a search feature's wiki cross-ref may be keyed under,
+    lowercased, each once: its search name, then its name in its own
+    script. The lookup (streetzim/addresses.extract_wiki_tags_pbf) keys
+    on the OSM object's own `name`, and that is the search name only
+    where it is already Latin: Athens' `name` is "Αθήνα", its search name
+    "Athens" (name_native keeps "Αθήνα"). Matching the search name alone
+    left Greece's three largest cities without their article's place in
+    the wiki geo-index (2,056 of the 5,830 bundled articles placed)."""
+    out = []
+    for nm in (feat.get("name"), feat.get("name_native")):
+        if nm and nm.lower() not in out:
+            out.append(nm.lower())
+    return out
+
+
+def wiki_folded_index(wiki_cross_refs):
+    """The cross-ref lookup by folded name (cloud.search_shards.norm:
+    accents off, lowercase), and by the first name of an OSM ";" list
+    (search_extract.native_name keeps only that one): (folded name, lat
+    cell, lon cell) -> entry, None where entries that differ fold to one
+    key. For feature_wiki's last try: a search name that is the OSM name
+    without its accents has no name_native (native_name drops a name
+    equal once folded), so Poznań, Kraków and Gdańsk are "Poznan",
+    "Krakow" and "Gdansk" and matched nothing."""
+    from cloud.search_shards import norm
+    out = {}
+    for key, entry in (wiki_cross_refs or {}).items():
+        if not (isinstance(key, tuple) and len(key) == 3):
+            continue                    # an admin area's ("admin", osm)
+        name, qlat, qlon = key
+        folded = norm(name)
+        if folded == name:
+            folded = name           # the key's own string, not a copy (Europe: 1.9 M)
+        first = norm(name.split(";")[0].strip())
+        for nm in (folded,) if first == folded else (folded, first):
+            k = (nm, qlat, qlon)
+            if k not in out:
+                out[k] = entry
+            elif out[k] is not None and out[k] != entry:
+                out[k] = None
+    return out
+
+
+def feature_wiki(feat, wiki_cross_refs, folded=None):
+    """The wiki cross-ref entry of a search feature other than an admin
+    area (those: admin_wiki): the lookup's entry for one of its names
+    (wiki_match_names, the search name first) at its point on the
+    lookup's ~11 m grid, or at any piece's point of a merged street
+    (merge_streets_in_file keeps them in _pts). Every name is tried at
+    every point before the next name, so a feature the search name
+    matched keeps that entry. Failing that, with `folded`
+    (wiki_folded_index), the one entry its names fold to at those
+    points; none when they fold to two that differ. None when nothing
+    matches."""
+    if not wiki_cross_refs:
+        return None
+    pts = [(feat["lat"], feat["lon"])] + [tuple(p) for p in feat.get("_pts", ())]
+    cells = [(int(round(plat * 1e4)), int(round(plon * 1e4))) for plat, plon in pts]
+    for nm in wiki_match_names(feat):
+        for qlat, qlon in cells:
+            wiki = wiki_cross_refs.get((nm, qlat, qlon))
+            if wiki:
+                return wiki
+    if not folded:
+        return None
+    from cloud.search_shards import norm
+    found = None
+    # norm of an ASCII name is its lower(), at a fraction of the cost (Europe
+    # folds some 200 M names here).
+    for nm in dict.fromkeys(n.lower() if n.isascii() else norm(n)
+                            for n in (feat.get("name"), feat.get("name_native")) if n):
+        for qlat, qlon in cells:
+            k = (nm, qlat, qlon)
+            if k in folded:
+                entry = folded[k]
+                if entry is None or (found is not None and found != entry):
+                    return None
+                found = entry
+    return found or None
+
+
 def admin_record_fields(feat):
     """The search-record keys an administrative area adds
     (docs/search-records.md): al, bb, alt, osm. Empty for other types."""
@@ -2334,6 +2416,9 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
         return s[:40] or "_"
 
     _bucket_t0 = time.time()
+    # The cross-refs by folded name, for features whose names match none
+    # as they are (feature_wiki).
+    _wiki_folded = wiki_folded_index(wiki_cross_refs)
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
         with open(search_features_path) as sf:
@@ -2360,18 +2445,10 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     if wiki:
                         wiki_fields_added += 1
                 elif wiki_cross_refs:
-                    # A merged street keeps every piece's point in
-                    # _pts (merge_streets_in_file); the OSM tag may
-                    # match any of them.
-                    for plat, plon in ([(feat["lat"], feat["lon"])]
-                                       + [tuple(p) for p in feat.get("_pts", ())]):
-                        wiki = wiki_cross_refs.get((
-                            feat["name"].lower(),
-                            int(round(plat * 1e4)),
-                            int(round(plon * 1e4)),
-                        ))
-                        if wiki:
-                            break
+                    # By its search or own-script name, at its point or
+                    # a merged street's pieces', else by a folded name
+                    # (feature_wiki).
+                    wiki = feature_wiki(feat, wiki_cross_refs, _wiki_folded)
                     if wiki:
                         wiki_fields_added += 1
 
