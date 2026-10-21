@@ -63,6 +63,7 @@ for line in menu.splitlines():
     p = verdict_path(base, L); os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump(v, open(p, "w"))
 open(os.path.join(out, "summary.txt"), "w").write("fake gates\n")
+sys.exit(int(os.environ.get("FAKE_GATES_RC", "0")))
 '''
 
 # archive.org's CLI: `metadata ITEM` prints the listing kept in $LANGPACK_WORK/ia-cache/ia-ITEM.json
@@ -250,7 +251,27 @@ def test_one_run_per_region(ship: SimpleNamespace) -> None:
 
 def test_dry_run_stops_before_archive_org(ship: SimpleNamespace) -> None:
     r = _run(ship, SHIP_SKIP_UPLOAD="1")
-    assert r.returncode == 0 and "SHIP_SKIP_UPLOAD=1" in _log(ship)
+    assert r.returncode == 3 and "SHIP_SKIP_UPLOAD=1" in _log(ship)       # not 0: nothing is ready (r3 L-6)
+    assert _lines(ship.logs["ia"]) == []
+
+
+def test_failing_gates_stop_the_run(ship: SimpleNamespace) -> None:
+    """run_gates.sh's exit code counts (review r3 M-5)."""
+    r = _run(ship, FAKE_GATES_RC="1")
+    assert r.returncode == 1 and "run_gates.sh rc=1" in _log(ship)
+    assert _lines(ship.logs["ia"]) == []
+
+
+def test_a_held_pack_build_lock_stops_the_run(ship: SimpleNamespace) -> None:
+    """build_packs.sh's exit 2 (a language's build lock is held) stops the run
+    with exit 2 (review r3 L-6)."""
+    import fcntl
+    lock = ship.work / "locks" / "build-testland-de.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        r = _run(ship)
+    assert r.returncode == 2 and "another run is building some of these packs" in _log(ship)
     assert _lines(ship.logs["ia"]) == []
 
 

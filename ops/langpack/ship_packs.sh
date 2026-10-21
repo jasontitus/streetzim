@@ -32,8 +32,9 @@
 # ops/langpack/publish_site.sh REGION, then the site's deploy.
 #
 # Exit: 0 recipes ready; 6 packs transferred, archive.org listing pending
-# (run again later; nothing is redone); 2 another run holds the region's lock;
-# 1 anything else (the log says what).
+# (run again later; nothing is redone); 2 another run holds the region's lock,
+# or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
+# gates (a dry run: nothing published); 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
@@ -130,7 +131,11 @@ PY
 if [ -n "$TODO" ]; then
   say "build_packs: $TODO"
   "${LOW[@]}" "$TL/build_packs.sh" "$REGION" "$BASE" "$PACKS" "$TODO" >> "$LOG" 2>&1
-  say "build_packs rc=$?"
+  BRC=$?
+  say "build_packs rc=$BRC"
+  # 2: another build_packs.sh holds a language's lock (another ship_packs.sh
+  # of the same base under another region id, or a hand run)
+  [ $BRC = 2 ] && { say "another run is building some of these packs: stopping (run again later)"; exit 2; }
 else
   say "packs: all gated for this base already"
 fi
@@ -166,7 +171,7 @@ PY
 )
 say "gates passed: ${PASSED:-none}"
 [ -n "$PASSED" ] || { say "no entry passed its gates; nothing to publish"; exit 1; }
-if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org"; exit 0; fi
+if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org (exit 3: gated, nothing published)"; exit 3; fi
 
 # 5. archive.org: the packs the passing entries use
 mapfile -t FILES < <("$PY" - "$W/recipes/$TAG" "$PASSED" <<'PY'

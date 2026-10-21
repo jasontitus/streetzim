@@ -131,8 +131,10 @@ class OpfsSink {                     // browser-private storage (folder lab-buil
   // flush() and close() return promises in older Safari (15.2-16.x); await them.
   async close() { await this.h.flush(); await this.h.close(); }
   async abort() {
-    try { await this.h.close(); } catch (e) { /* closed */ }
-    await (await this.dir()).removeEntry(this.name).catch(() => {});
+    // Never throws: storage that cannot even be opened (Firefox private
+    // mode) must not hide the error that stopped the build.
+    try { await this.h.close(); } catch (e) { /* closed, or never opened */ }
+    try { await (await this.dir()).removeEntry(this.name); } catch (e) { /* nothing to delete */ }
   }
 }
 

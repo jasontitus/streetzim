@@ -217,3 +217,13 @@ def test_materialize_refuses_a_tampered_inline_piece(trust_md5: bool, lp: Simple
     with pytest.raises(MergeError, match=r"inline segment at \d+ fails its SHA-256"):
         recipe2.materialize(r, str(lp.base), {p.lang: p.path for p in plan.packs}, str(tmp_path / "out.zim"),
                             trust_md5=trust_md5)
+
+
+def test_materialize_refuses_a_recipe_whose_file_md5_is_wrong(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """The recipe's file_md5 (what md5sum prints, shown to visitors) must be the
+    assembled file's, even when its internal checksum is right (review r3 M-5)."""
+    recipe, plan, _ = recipe2.build_recipe(str(lp.base), _packs(lp), "fr", region_langs=["en"])
+    recipe["file_md5"] = "0" * 32
+    with pytest.raises(merge_zim.MergeError, match="file MD5"):
+        recipe2.materialize(recipe, str(lp.base), {p.lang: p.path for p in plan.packs}, str(tmp_path / "x.zim"),
+                            trust_md5=True)

@@ -228,3 +228,14 @@ def test_prefetch_refuses_an_unknown_language(tmp_path: Path) -> None:
     r = tool("prefetch.py", tmp_path / "missing.zim", "--langs", "de,qq", "--cache", tmp_path)
     assert r.returncode == 2 and "qq" in r.stderr
 
+
+
+def test_titles_are_cut_in_utf16_units(tmp_path: Path) -> None:
+    """Review r3 L-7: a fallback Title is cut to 30 UTF-16 units, not code
+    points: merge_zim.py refuses anything longer."""
+    from tools.langpack.region_meta import cut16, utf16
+    t = "OSM - " + "\U0001F5FA" * 20                    # astral characters count 2 units each
+    assert utf16(cut16(t, 30)) <= 30 and cut16(t, 30) == "OSM - " + "\U0001F5FA" * 12
+    b = _base(tmp_path / "b.zim", PLACES, GEO, {"name": "Testland", "hasWikiArticles": True}, title=t)
+    m = _meta(b, _wiki(tmp_path, ["de", "en"]), "de,en")
+    assert all(utf16(v) <= 30 for v in m["titles"].values()), m["titles"]

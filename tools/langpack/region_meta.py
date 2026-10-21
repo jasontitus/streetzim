@@ -55,6 +55,17 @@ def utf16(s: str) -> int:
     return len(s.encode("utf-16-le")) // 2
 
 
+def cut16(s: str, n: int) -> str:
+    """The longest prefix of s within n UTF-16 units (a character outside the
+    BMP counts 2; merge_zim refuses a Title over 30)."""
+    out = ""
+    for ch in s:
+        if utf16(out + ch) > n:
+            break
+        out += ch
+    return out
+
+
 def has_wiki(src: str, lang: str) -> bool:
     from streetzim.wiki_pack import pick_source
     try:
@@ -136,7 +147,7 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
     titles = {}
     for L in langs:
         t = label_in(cache, L, qid) or fallback
-        titles[L] = t if utf16(t) <= TITLE_MAX_UTF16 else fallback[:TITLE_MAX_UTF16]
+        titles[L] = t if utf16(t) <= TITLE_MAX_UTF16 else cut16(fallback, TITLE_MAX_UTF16)
     return {"region_title": name, "base_lang": base_lang, "base_wiki": base_wiki,
             "region_langs": region_langs, "langs": langs, "pack_langs": sorted(need),
             "region_qid": qid, "titles": titles, "dropped": dropped}

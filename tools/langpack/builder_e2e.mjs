@@ -5,6 +5,7 @@
 //
 //   node builder_e2e.mjs --web WEB_DIR --recipes RECIPES_DIR --item ITEM=DIR [--item ...]
 //        --region R --langs L1,L2 --out OUT_DIR [--mode net|file] [--base BASE.zim]
+//        [--corrupt ITEM/FILE@OFFSET] [--expect pass|fail]
 //
 // Two local servers stand in for the site and the range proxy:
 //   page  http://localhost:P1/  WEB_DIR, with /build/recipes/ = RECIPES_DIR and
@@ -18,7 +19,10 @@
 // input (showSaveFilePicker hidden: a headless browser cannot drive it, so
 // the page streams through its service worker). Writes OUT_DIR/e2e-<L>.json
 // and prints one JSON line per language; exit 0 when every language ends
-// "Done" with the expected MD5.
+// "Done" with the expected MD5. --corrupt flips the byte at OFFSET of that
+// file in every answer the proxy gives that covers it; with --expect fail a
+// language passes when the page stops ("Stopped" / "Not started") and saves
+// nothing. A language that throws is a FAIL; the others still run.
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as the gates (ops/langpack/host-env.sh).
 import http from 'node:http';
 import fs from 'node:fs';
@@ -37,6 +41,12 @@ const LANGS = opt('--langs').split(',');
 const OUT = path.resolve(opt('--out'));
 const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
+const EXPECT = opt('--expect', 'pass');
+const CORRUPT = (() => {
+  const c = opt('--corrupt'); if (!c) return null;
+  const m = /^([^/]+)\/([^@]+)@(\d+)$/.exec(c); if (!m) throw new Error('--corrupt ITEM/FILE@OFFSET');
+  return { item: m[1], file: m[2], at: +m[3] };
+})();
 if (process.env.BROWSER_LIBS) {
   process.env.LD_LIBRARY_PATH = process.env.BROWSER_LIBS + (process.env.LD_LIBRARY_PATH ? ':' + process.env.LD_LIBRARY_PATH : '');
 }
@@ -97,6 +107,13 @@ const proxy = http.createServer((req, res) => {
   stats.proxyRanges++; stats.proxyBytes += b - a + 1; stats.items[m[1]] = (stats.items[m[1]] || 0) + 1;
   res.writeHead(206, { ...CORS, 'Content-Type': 'application/octet-stream', 'Content-Length': b - a + 1,
                        'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes' });
+  if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b) {
+    const buf = Buffer.alloc(b - a + 1);
+    const fd = fs.openSync(f, 'r'); fs.readSync(fd, buf, 0, buf.length, a); fs.closeSync(fd);
+    buf[CORRUPT.at - a] ^= 0xff; stats.corrupted = (stats.corrupted || 0) + 1;
+    res.end(buf);
+    return;
+  }
   fs.createReadStream(f, { start: a, end: b }).pipe(res);
 });
 await new Promise((r) => page.listen(0, 'localhost', r));
@@ -114,7 +131,7 @@ async function md5File(p) {
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, headless: true,
                                         downloadsPath: path.join(OUT, 'dl') });
 let allOk = true;
-for (const L of LANGS) {
+async function runOne(L) {
   const t0 = Date.now();
   const recipe = JSON.parse(fs.readFileSync(path.join(RECIPES, REGION, `${L}.json`), 'utf8'));
   const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L });
@@ -133,6 +150,7 @@ for (const L of LANGS) {
     packs: [...document.querySelectorAll('#packs li')].map((li) => li.textContent),
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });
+  dlP.catch(() => {});                       // no download (an expected failure): closing the context rejects it
   if (MODE === 'file') {
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
@@ -165,12 +183,25 @@ for (const L of LANGS) {
                 refused: stats.proxyRefused - before.proxyRefused,
                 items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])) };
   res.secs = Math.round((Date.now() - t0) / 1000);
-  res.pass = res.md5 === recipe.file_md5 && res.bytes === recipe.size;
-  allOk = allOk && res.pass;
+  res.pass = EXPECT === 'fail'
+    ? /^(Stopped|Not started)/.test(String(status)) && !res.md5
+    : res.md5 === recipe.file_md5 && res.bytes === recipe.size;
+  res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
-  console.log(JSON.stringify({ lang: L, mode: MODE, pass: res.pass, status: String(status).slice(0, 100), bytes: res.bytes,
+  console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
                                md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, langOption: shown.langOption }));
   await ctx.close();
+  return res.pass;
+}
+for (const L of LANGS) {
+  try {
+    allOk = (await runOne(L)) && allOk;
+  } catch (e) {
+    allOk = false;
+    const res = { lang: L, mode: MODE, expect: EXPECT, pass: false, error: String(e && e.stack || e).slice(0, 2000) };
+    fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
+    console.log(JSON.stringify({ lang: L, mode: MODE, pass: false, error: String(e && e.message || e).slice(0, 300) }));
+  }
 }
 await browser.close();
 page.close(); proxy.close();

@@ -182,6 +182,9 @@ def _inline(d: dict) -> None:
 
 MUTANTS = {
     "pack_sha": ("recipes/fr.json", lambda d: d["packs"]["fr"]["sha256"].__setitem__(0, "0" * 64)),
+    "base_sha": ("recipes/de.json", lambda d: d["base"]["sha256"].__setitem__(0, "0" * 64)),
+    "base_md5": ("recipes/index.json+region.json", lambda d: (d["regions"][0] if "regions" in d else d)["base"]
+                 .__setitem__("md5", "0" * 32)),
     "pack_item": ("recipes/de.json", lambda d: d["packs"]["de"].__setitem__(
         "url", d["packs"]["de"]["url"].replace("/testland-packs/", "/testland-fr/"))),
     "index_md5": ("recipes/index.json", lambda d: d["regions"][0]["menu"][1].__setitem__("md5", "0" * 32)),
@@ -214,6 +217,77 @@ def test_site_check_kills(name: str, site: SimpleNamespace, tmp_path: Path) -> N
         _jedit(s / where, fn)
     rc, lines = _check(site, s, v)
     assert rc != 0 and any(ln.startswith("FAIL") for ln in lines), lines
+    # the check meant for it fired (others may too): review r3 M-5
+    want = {"pack_sha": "fr/fr: chunk sha256 != local", "base_sha": "de: base chunk sha256 != local base",
+            "base_md5": "index base md5"}.get(name)
+    if want:
+        assert any(want in ln for ln in lines), (want, lines)
+
+
+def _range_server(root: Path, mode: str):
+    """Files under root at /<item>/<file>: answers single ranges (206), or
+    ignores Range (200, the whole file), or flips one byte of every answer."""
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            p = root / self.path.lstrip("/").split("?")[0]
+            if not p.is_file():
+                self.send_response(404); self.end_headers(); return
+            data = p.read_bytes()
+            rng = self.headers.get("Range", "")
+            if mode == "no_range" or not rng.startswith("bytes="):
+                self.send_response(200); self.send_header("Content-Length", str(len(data))); self.end_headers()
+                self.wfile.write(data); return
+            a, b = rng[6:].split("-")
+            a, b = int(a), min(int(b) if b else len(data) - 1, len(data) - 1)
+            body = bytearray(data[a:b + 1])
+            if mode == "flip" and body:
+                body[len(body) // 2] ^= 0xFF
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {a}-{b}/{len(data)}")
+            self.send_header("Content-Length", str(len(body))); self.end_headers()
+            self.wfile.write(bytes(body))
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+@pytest.mark.parametrize("mode,ok", [("good", True), ("flip", False), ("no_range", False)])
+def test_probes_read_the_served_bytes(mode: str, ok: bool, site: SimpleNamespace, lp: SimpleNamespace,
+                                      tmp_path: Path) -> None:
+    """--probe-urls: the first and last 64 KiB of every URL, through the
+    proxy ({proxy} URLs), must be the local bytes; a server that changes a
+    byte, or answers a range with the whole file, fails (review r3 M-5)."""
+    root = tmp_path / "served"
+    for item, files in {"testland-packs": [site.packs / lp.packs[x].name for x in ("de", "th")],
+                        "testland-fr": [site.packs / lp.packs["fr"].name], "testland-base": [lp.base]}.items():
+        (root / item).mkdir(parents=True)
+        for f in files:
+            shutil.copy(f, root / item / f.name)
+    srv = _range_server(root, mode)
+    try:
+        px = f"http://127.0.0.1:{srv.server_address[1]}"
+        out = tmp_path / "site"
+        r = tool("make_site.py", lp.base, "--packs-dir", site.packs, "--region", "testland", "--region-title",
+                 "Testland", "--region-langs", "en", "--langs", LANGS, "--titles", TITLES, "--language-meta", "map",
+                 "--url-template", "{proxy}/testland-packs/{file}", "--url-override", "fr={proxy}/testland-fr/{file}",
+                 "--base-download", f"{px}/testland-base/{lp.base.name}",
+                 "--base-url", f"{{proxy}}/testland-base/{lp.base.name}", "-o", out / "recipes", env=site.env)
+        assert r.returncode == 0, r.stderr
+        r = tool("site_check.py", out, "--base", lp.base, "--packs-dir", site.packs, "--ia-cache", site.ia,
+                 "--probe-urls", "--proxy", px, env=site.env)
+    finally:
+        srv.shutdown()
+    lines = [ln for ln in r.stdout.splitlines() if ln.startswith(("FAIL", "SUMMARY", "refused"))]
+    assert (r.returncode == 0) is ok, lines
+    assert "urls probed: 5" in r.stdout, r.stdout[-1500:]      # 3 packs, the base twice (download, proxy)
+    if not ok:
+        assert any("served bytes != local" in ln for ln in lines), lines
 
 
 @pytest.mark.parametrize("case", ["log_fail", "zimru", "no_version"])

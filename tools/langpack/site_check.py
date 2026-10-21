@@ -102,10 +102,14 @@ def url_item_file(url: str) -> tuple[str, str]:
 
 
 def range_bytes(url: str, start: int, n: int) -> bytes:
+    """The bytes a range request gets, or b"" unless the server answered it as
+    the builder page needs: 206 with a Content-Range starting at `start` (a
+    200 with the whole file, even a small one, breaks the page's fetcher)."""
     req = urllib.request.Request(url, headers=dict(UA, Range=f"bytes={start}-{start + n - 1}"))
     with urllib.request.urlopen(req, timeout=120) as r:
         body = r.read(n + 1)
-        if r.status == 200 and len(body) > n:  # server ignored Range
+        cr = r.headers.get("Content-Range", "")
+        if r.status != 206 or not cr.startswith(f"bytes {start}-"):
             return b""
         return body
 
