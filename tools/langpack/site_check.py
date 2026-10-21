@@ -3,9 +3,14 @@
 
     site_check.py SITE_DIR --base BASE.zim --packs-dir DIR
         [--verdicts DIR] [--gated DIR] [--ia-cache DIR] [--ia-fetch] [--probe-urls]
+        [--recipes-dir DIR] [--proxy URL]
 
-SITE_DIR holds recipes/{index,region,refused,<L>}.json (and optionally
-region-base-url.json). Read-only: nothing is written except, with --ia-fetch,
+SITE_DIR holds recipes/{index,region,refused,<L>}.json (or, with
+--recipes-dir, that folder: recipes/<region>/ on the production site) and
+optionally region-base-url.json; the entries' "recipe" paths are relative
+to SITE_DIR. URLs may start "{proxy}" (the builder page puts its range
+proxy there): --proxy says which one the probes use (default: the one in
+web/drive/preview-config.js). Read-only: nothing is written except, with --ia-fetch,
 archive.org metadata JSON into --ia-cache (a plain GET of
 https://archive.org/metadata/<item>). Exit 0 only when every check passes.
 
@@ -80,6 +85,17 @@ class IA:
         return self.items[item]
 
 
+def configured_proxy() -> str:
+    """window.STREETZIM_PREVIEW_PROXY in web/drive/preview-config.js, or ""."""
+    import re
+    try:
+        src = open(os.path.join(ROOT, "web", "drive", "preview-config.js"), encoding="utf-8").read()
+    except OSError:
+        return ""
+    m = re.search(r"STREETZIM_PREVIEW_PROXY\s*=\s*(['\"])(.*?)\1", src)
+    return m.group(2).strip() if m else ""
+
+
 def url_item_file(url: str) -> tuple[str, str]:
     parts = url.split("?")[0].rstrip("/").split("/")
     return parts[-2], parts[-1]
@@ -110,11 +126,14 @@ def main():
     ap.add_argument("--ia-cache")
     ap.add_argument("--ia-fetch", action="store_true")
     ap.add_argument("--probe-urls", action="store_true")
+    ap.add_argument("--recipes-dir", help="index/region/refused.json here (default SITE/recipes)")
+    ap.add_argument("--proxy", help="what {proxy} stands for in URLs (default: web/drive/preview-config.js)")
     a = ap.parse_args()
     tag = os.path.basename(os.path.realpath(a.base))[:-4]
     vdir = a.verdicts or os.path.join(gatelib.work_dir(), "verdicts", tag)
     gdir = a.gated or os.path.join(gatelib.work_dir(), "recipes", tag)
-    rdir = os.path.join(a.site, "recipes")
+    rdir = a.recipes_dir or os.path.join(a.site, "recipes")
+    proxy = (a.proxy if a.proxy is not None else configured_proxy()).rstrip("/")
     ia = IA(a.ia_cache, a.ia_fetch)
     fails: list[str] = []
     nchecks = 0
@@ -228,7 +247,9 @@ def main():
             size = os.path.getsize(lp)
             for start in (0, max(0, size - 65536)):
                 try:
-                    got = range_bytes(u, start, 65536)
+                    if u.startswith("{proxy}") and not proxy:
+                        raise ValueError("no range proxy configured for {proxy}")
+                    got = range_bytes(u.replace("{proxy}", proxy, 1) if u.startswith("{proxy}") else u, start, 65536)
                 except Exception as e:  # noqa: BLE001
                     got = repr(e).encode()
                 need(got == local_bytes(lp, start, 65536), f"probe {u} @{start}: served bytes != local")

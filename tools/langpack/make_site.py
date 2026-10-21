@@ -3,7 +3,10 @@
 
     make_site.py BASE.zim --packs-dir DIR --region california --region-title California
         --region-langs en --langs de,th,zh,es,ja,ko,fr,en --titles JSON
-        --url-template 'https://proxy/item/{file}' --base-download URL -o OUT_RECIPES_DIR
+        --url-template '{proxy}/item/{file}' --base-download URL -o OUT_RECIPES_DIR
+
+URLs may start "{proxy}": the builder page puts its range proxy there
+(web/drive/preview-config.js), so the proxy is set in one place.
 
 Writes OUT/<L>.json (streetzim-recipe/2, absolute pack URLs) for every map
 language and OUT/index.json:
@@ -35,9 +38,12 @@ from tools.langpack import gatelib  # noqa: E402
 from tools.langpack.gatelib import entry_verdict_ok, pack_gate_ok  # noqa: E402
 
 
-NATIVE = {"de": "Deutsch", "th": "ไทย", "zh": "中文", "es": "Español", "ja": "日本語", "ko": "한국어",
-          "fr": "Français", "en": "English", "el": "Ελληνικά", "it": "Italiano", "ru": "Русский",
-          "pt": "Português", "nl": "Nederlands", "pl": "Polski", "ar": "العربية", "he": "עברית"}
+# Each language's own name (the builder page adds the visitor's name for it).
+NATIVE = {"ar": "العربية", "de": "Deutsch", "el": "Ελληνικά", "en": "English", "es": "Español",
+          "fa": "فارسی", "fr": "Français", "he": "עברית", "hi": "हिन्दी", "hy": "Հայերեն",
+          "id": "Bahasa Indonesia", "it": "Italiano", "ja": "日本語", "ko": "한국어",
+          "nl": "Nederlands", "pl": "Polski", "pt": "Português", "ru": "Русский", "sv": "Svenska",
+          "th": "ไทย", "tr": "Türkçe", "uk": "Українська", "vi": "Tiếng Việt", "zh": "中文"}
 
 
 def touched_bytes(recipe: dict) -> dict[str, int]:
@@ -125,7 +131,10 @@ def main():
                      "segments": st["segments"], "inline_bytes": st["inline_bytes"],
                      "recipe_json_bytes": os.path.getsize(path), "plan_s": st["plan_s"], "md5": recipe["md5"]})
         print(json.dumps(rows[-1]), flush=True)
-    biggest = max(avail.values(), key=lambda p: os.path.getsize(p.path))
+    # The speed probe reads the biggest pack the menu uses: only those are
+    # uploaded (ship_packs.sh), and a refused entry's pack may not be.
+    used = {x for row in rows for x in row["packs"]} or set(avail)
+    biggest = max((avail[x] for x in used), key=lambda p: os.path.getsize(p.path))
     index = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
              "regions": [{"id": a.region, "title": a.region_title,
                           "base": {"file": os.path.basename(os.path.realpath(a.base)),
