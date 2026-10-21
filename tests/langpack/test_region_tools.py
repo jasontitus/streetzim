@@ -120,6 +120,22 @@ def test_region_meta_languages_and_packs(tmp_path: Path) -> None:
     assert m["pack_langs"] == ["de", "el", "ja", "tr"]
 
 
+def test_region_meta_keeps_a_continents_most_spoken_languages(tmp_path: Path) -> None:
+    """Every entry carries the region's packs: Europe's 38 languages are cut to
+    the first few with a Wikipedia ZIM (the base's own English not counted)."""
+    cfg = {"name": "Europe", "hasWikiArticles": True, "regionLanguages": ["en", "de", "xx", "ru", "fr", "tr", "it"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
+    w = _wiki(tmp_path, ["de", "en", "fr", "it", "ru", "tr"])
+    m = _meta(b, w, "de,fr,it,en")
+    assert m["region_langs"] == ["en", "de", "ru", "fr"]
+    why = {d["lang"]: d["why"] for d in m["dropped"]}
+    assert set(why) == {"xx", "tr", "it"} and why["xx"].startswith("region language with no Wikipedia ZIM")
+    assert why["tr"].startswith("region language beyond the 3 most spoken") and why["it"] == why["tr"]
+    assert "it" in m["langs"]                                    # still on the menu: a core language
+    r = tool("region_meta.py", b, "--wiki-src", w, "--core", "de", "--region-packs-max", "1")
+    assert json.loads(r.stdout)["region_langs"] == ["en", "de"]
+
+
 def test_region_meta_non_english_base_needs_english(tmp_path: Path) -> None:
     cfg = {"name": "Testland", "language": "de", "hasWikiArticles": True}
     b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)

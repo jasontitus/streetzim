@@ -36,7 +36,8 @@
 # 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
-# core languages, comma-separated; default region_meta.py's), IA (the
+# core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
+# (the region's most spoken languages every entry carries; default 3), IA (the
 # archive.org CLI; default venv-linux's ia), SHIP_SKIP_UPLOAD=1 (stop after
 # the gates: a dry run), PACK_DATE (pack file names; default today),
 # GATES_PORT (default a free port). Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
@@ -75,6 +76,7 @@ say "== ship_packs $REGION $BASE"
 
 # 1. languages
 CORE_ARG=(); [ -n "${CORE:-}" ] && CORE_ARG=(--core "$CORE")
+[ -n "${REGION_PACKS_MAX:-}" ] && CORE_ARG+=(--region-packs-max "$REGION_PACKS_MAX")
 META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --cache "$WP_CACHE" "${CORE_ARG[@]}") \
   || { say "region_meta.py failed"; exit 1; }
 printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"

@@ -8,7 +8,8 @@ Prints one JSON object:
   {"region_title": map-config "name",
    "base_lang": the base's language (map-config "language", else en),
    "base_wiki": the language of the base's own Wikipedia articles, or null,
-   "region_langs": map-config regionLanguages that have a Wikipedia ZIM,
+   "region_langs": map-config regionLanguages (most spoken first) that have a
+            Wikipedia ZIM, at most --region-packs-max (3) besides the base's own,
    "langs": the menu: CORE + region_langs (+ the base's language), each with
             a Wikipedia ZIM in --wiki-src or needing none (the base's own),
    "pack_langs": the packs to build: every language a menu entry needs
@@ -44,6 +45,10 @@ from tools.langpack.zimfmt import ZimReader  # noqa: E402
 CORE_LANGS = ("ar", "de", "el", "en", "es", "fa", "fr", "he", "hi", "id", "it", "ja",
               "ko", "nl", "pl", "pt", "ru", "th", "tr", "uk", "vi", "zh")
 TITLE_MAX_UTF16 = 30
+# Every menu entry carries a pack for each of the region's languages, so a
+# continent (Europe lists 38, by speakers) keeps its most spoken few: the
+# first REGION_PACKS_MAX with a Wikipedia ZIM, the base's own not counted.
+REGION_PACKS_MAX = 3
 
 
 def utf16(s: str) -> int:
@@ -92,7 +97,7 @@ def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
     return found
 
 
-def meta(base: str, wiki_src: str, core: list[str], cache: Path | None) -> dict:
+def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_max: int = REGION_PACKS_MAX) -> dict:
     z = ZimReader(base)
     cfg = json.loads(blob_of(z, KEY_MAPCFG) or b"{}")
     name = str(cfg.get("name") or Path(base).stem)
@@ -103,10 +108,13 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None) -> dict:
     for lg in cfg.get("regionLanguages") or []:
         if not isinstance(lg, str):
             continue
-        if lg == base_wiki or has_wiki(wiki_src, lg):
-            region_langs.append(lg)
-        else:
+        if not (lg == base_wiki or has_wiki(wiki_src, lg)):
             dropped.append({"lang": lg, "why": "region language with no Wikipedia ZIM in WIKI_SRC"})
+        elif len([x for x in region_langs if x != base_wiki]) >= region_max and lg != base_wiki:
+            dropped.append({"lang": lg, "why": f"region language beyond the {region_max} most spoken "
+                                               "(every menu entry carries the region's packs)"})
+        else:
+            region_langs.append(lg)
     langs = []
     for lg in list(dict.fromkeys([*core, *region_langs, base_lang])):
         if lg == base_wiki or has_wiki(wiki_src, lg):
@@ -140,9 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wiki-src", required=True)
     ap.add_argument("--core", default=",".join(CORE_LANGS))
     ap.add_argument("--cache", default=None, help="the pack builder's cache (region names in each language)")
+    ap.add_argument("--region-packs-max", type=int, default=REGION_PACKS_MAX,
+                    help=f"keep the region's first N languages with a Wikipedia ZIM (default {REGION_PACKS_MAX})")
     a = ap.parse_args(argv)
     core = [x.strip() for x in a.core.split(",") if x.strip()]
-    print(json.dumps(meta(a.base, a.wiki_src, core, Path(a.cache) if a.cache else None), ensure_ascii=False))
+    print(json.dumps(meta(a.base, a.wiki_src, core, Path(a.cache) if a.cache else None, a.region_packs_max),
+                     ensure_ascii=False))
     return 0
 
 
