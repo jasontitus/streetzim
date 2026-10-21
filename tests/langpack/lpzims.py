@@ -75,8 +75,9 @@ def _page(title: str, depth: int, body: str = "") -> str:
             f"<a href='{back}'>map</a><h1>{title}</h1><p>{body or title}</p></body></html>")
 
 
-def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True) -> str:
-    """The base; returns its UUID (hex)."""
+def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
+               extra: dict[str, Any] | None = None) -> str:
+    """The base; returns its UUID (hex). `extra`: more JSON entries {path: value}."""
     with Creator(str(path)).config_indexing(False, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -99,6 +100,8 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                 geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
             c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: False})
         c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
+        for p, v in (extra or {}).items():
+            c.add_item(_Item(p, "", "application/json", json.dumps(v)))
     return read_uuid(path)
 
 

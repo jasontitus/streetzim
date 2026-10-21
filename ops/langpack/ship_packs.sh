@@ -92,6 +92,12 @@ if [ -n "$PACK_LANGS" ]; then
     >> "$LOG" 2>&1 || say "prefetch incomplete (see above); the packs say what they lack"
 fi
 
+# The region's name in each language is in the Wikidata cache only now.
+META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --cache "$WP_CACHE" "${CORE_ARG[@]}") \
+  || { say "region_meta.py failed"; exit 1; }
+printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
+say "titles: $(mget titles)"
+
 # 3. packs not yet built and gated for this base
 TODO=$("$PY" - "$BASE" "$PACKS" "$REGION" "$PACK_LANGS" <<'PY'
 import glob, json, os, sys
@@ -167,25 +173,30 @@ for L in langs.split(","):
 print("\n".join(sorted(files)))
 PY
 )
-listed() { "$IA" metadata "$ITEM" 2>/dev/null | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$1" "$2"; }
+# The item's listing, fetched once per check; each pack's MD5 computed once.
+declare -A MD5
+for f in "${FILES[@]}"; do [ -n "$f" ] && MD5[$f]=$(md5sum "$PACKS/$f" | cut -d' ' -f1); done
+ITEM_META=
+fetch_meta() { ITEM_META=$("$IA" metadata "$ITEM" 2>/dev/null) || ITEM_META='{}'; }
+listed() { printf '%s' "$ITEM_META" | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$1" "${MD5[$1]}"; }
 name_taken() {   # the item lists this name with another MD5
-  "$IA" metadata "$ITEM" 2>/dev/null | "$PY" -c 'import json,sys
+  printf '%s' "$ITEM_META" | "$PY" -c 'import json,sys
 try:
     m = json.load(sys.stdin)
 except ValueError:
     m = {}
 fs = m.get("files") if isinstance(m, dict) else None
 f = next((x for x in fs or [] if isinstance(x, dict) and x.get("name") == sys.argv[1]), None)
-sys.exit(0 if f and str(f.get("md5", "")).lower() != sys.argv[2] else 1)' "$1" "$2"
+sys.exit(0 if f and str(f.get("md5", "")).lower() != sys.argv[2] else 1)' "$1" "${MD5[$1]}"
 }
 # one --metadata=language:<ISO 639-3> per pack language (archive.org keeps a list)
 mapfile -t LANG_META < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import iso639_3; [print("--metadata=language:" + iso639_3(x)) for x in sys.argv[1].split(",") if x]' "$PACK_LANGS" "$ROOT")
 SEND=()
+fetch_meta
 for f in "${FILES[@]}"; do
   [ -n "$f" ] || continue
-  m=$(md5sum "$PACKS/$f" | cut -d' ' -f1)
-  if listed "$f" "$m"; then continue; fi
-  if name_taken "$f" "$m"; then
+  if listed "$f"; then continue; fi
+  if name_taken "$f"; then
     say "archive.org $ITEM already holds $f with another MD5: not overwritten (set PACK_DATE and rebuild the packs)"
     exit 1
   fi
@@ -200,18 +211,20 @@ if [ ${#SEND[@]} -gt 0 ]; then
       --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
       >> "$LOG" 2>&1 ) || { say "ia upload failed"; exit 1; }
 fi
-PENDING=0
-for f in "${FILES[@]}"; do
-  [ -n "$f" ] || continue
-  m=$(md5sum "$PACKS/$f" | cut -d' ' -f1)
-  ok=0
-  for _ in $(seq 1 "${SHIP_LISTING_POLLS:-30}"); do
-    listed "$f" "$m" && { ok=1; break; }
-    sleep "${SHIP_LISTING_POLL_SECS:-20}"
-  done
-  [ $ok = 1 ] || { say "PENDING: archive.org does not list $ITEM/$f with md5 $m yet"; PENDING=1; }
+# Every pack listed with its MD5, checked a round at a time.
+LEFT=("${FILES[@]}")
+for round in $(seq 1 "${SHIP_LISTING_POLLS:-30}"); do
+  fetch_meta
+  NOW=()
+  for f in "${LEFT[@]}"; do [ -n "$f" ] && ! listed "$f" && NOW+=("$f"); done
+  LEFT=("${NOW[@]}")
+  [ ${#LEFT[@]} -eq 0 ] && break
+  [ "$round" -lt "${SHIP_LISTING_POLLS:-30}" ] && sleep "${SHIP_LISTING_POLL_SECS:-20}"
 done
-[ $PENDING = 0 ] || { say "packs transferred, listing pending: run ship_packs.sh $REGION again later"; exit 6; }
+if [ ${#LEFT[@]} -gt 0 ]; then
+  for f in "${LEFT[@]}"; do say "PENDING: archive.org does not list $ITEM/$f with md5 ${MD5[$f]} yet"; done
+  say "packs transferred, listing pending: run ship_packs.sh $REGION again later"; exit 6
+fi
 say "archive.org lists every pack"
 
 # 6. site files and their check

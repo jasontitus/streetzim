@@ -248,6 +248,38 @@ def test_dry_run_stops_before_archive_org(ship: SimpleNamespace) -> None:
     assert _lines(ship.logs["ia"]) == []
 
 
+def test_titles_come_after_the_network_step(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """The merged files' titles are the region's name in each language, which
+    the Wikidata cache holds only once prefetch has run."""
+    base = tmp_path / "bases2" / ship.base.name
+    base.parent.mkdir()
+    lpzims.write_base(base, extra={"category-index/admin.json": [{"n": "Testland", "s": "country", "q": "Q77"}]})
+    # packs for THIS base: the stand-in builder writes them
+    builder = tmp_path / "builder2.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    prefetch = tmp_path / "prefetch2.py"      # what the real one leaves in the cache
+    prefetch.write_text(f"""import os, json
+d = os.path.join(os.environ["WP_CACHE"], "wikidata-text"); os.makedirs(d, exist_ok=True)
+open(os.path.join(d, "de.jsonl"), "w").write(json.dumps(["Q77", "Testlandien", ""]) + "\\n")
+""")
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": base.name, "size": str(base.stat().st_size), "md5": _md5(base)}]}))
+    r = subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True, timeout=900,
+                       env={**ship.env, "BUILDER": str(builder), "SHIP_PREFETCH": str(prefetch), "CORE": "de,en"})
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+    titles = json.loads(json.loads(_lines(ship.logs["gates"])[-1])["titles"])
+    assert titles == {"de": "Testlandien", "en": "OSM - Testland"}
+    de = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
+    assert de["title"] == "Testlandien"
+
+
 def test_bad_region_id(ship: SimpleNamespace) -> None:
     r = subprocess.run(["bash", str(SHIP), "Test Land", str(ship.base)], capture_output=True, text=True,
                        timeout=60, env=ship.env)
