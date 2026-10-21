@@ -35,7 +35,7 @@
         ]
       },
       {
-        "source": "/lab/build{,/**}",
+        "source": "/build{,/**}",
         "headers": [
           { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
           { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" },
@@ -57,13 +57,13 @@
         ]
       },
       {
-        "source": "lab/build/sw.js",
+        "source": "build/sw.js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
         ]
       },
       {
-        "source": "lab/build/@(builder|assembler-worker|fetcher).js",
+        "source": "build/@(builder|assembler-worker|fetcher).js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache" }
         ]
@@ -101,6 +101,9 @@
           { "key": "Cache-Control", "value": "public, max-age=86400" }
         ]
       }
+    ],
+    "redirects": [
+      { "source": "/lab/build{,/**}", "destination": "/build/", "type": 301 }
     ],
     "cleanUrls": true,
     "trailingSlash": true

@@ -1,6 +1,13 @@
-// The language builder page (/lab/build/): pick a region and a map language,
-// open your copy of the region's map file, and the page adds Wikipedia in the
-// chosen languages and saves a new ZIM. assembler-worker.js does the work.
+// The language builder page (/build/): pick a region and a map language,
+// and the page downloads the region's map with Wikipedia in the chosen
+// languages, or adds them to your copy of the map, and saves a new ZIM.
+// assembler-worker.js does the work.
+//
+// Recipes (recipes/index.json, recipes/<region>/<L>.json; written by
+// tools/langpack/make_site.py, published by ops/langpack/publish_site.sh)
+// name their files on the range proxy as "{proxy}/<archive.org item>/<file>";
+// the proxy is the one the /drive/ viewer streams through, set in one place:
+// /drive/preview-config.js (window.STREETZIM_PREVIEW_PROXY).
 //
 // Analytics: GA4 (the site's Firebase project) gets packs_start, packs_end,
 // build_start, build_progress (25/50/75%), build_end and build_probe, so we
@@ -116,6 +123,13 @@
   window.addEventListener('beforeunload', (e) => { if (busy()) { e.preventDefault(); e.returnValue = ''; } });
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+  // "{proxy}/item/file" -> the configured range proxy; any other URL as is.
+  const PROXY = String(window.STREETZIM_PREVIEW_PROXY || '').replace(/\/+$/, '');
+  const viaProxy = (u) => {
+    if (typeof u !== 'string' || !u.startsWith('{proxy}')) return u;
+    if (!PROXY) throw new Error('downloads are switched off on this site (no range proxy)');
+    return PROXY + u.slice('{proxy}'.length);
+  };
 
   async function getJSON(url) {
     let r;
@@ -126,6 +140,13 @@
 
   async function load() {
     index = await getJSON('recipes/index.json');
+    for (const reg of index.regions) {
+      try {
+        if (reg.probe) reg.probe.url = viaProxy(reg.probe.url);
+        if (reg.base && reg.base.url) reg.base.url = viaProxy(reg.base.url);
+      } catch (e) { $('notice').textContent = e.message; reg.probe = null; delete reg.base.url; }
+    }
+    index.regions.sort((a, b) => a.title.localeCompare(b.title));
     const sel = $('region');
     sel.innerHTML = '';
     for (const reg of index.regions) sel.add(new Option(reg.title, reg.id));
@@ -175,8 +196,7 @@
       const li = document.createElement('li');
       const a2 = document.createElement('a');
       a2.href = `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(m.lang)}&go=1`;
-      a2.textContent = `${langName(m.lang, m.label)} ${region.title}`;
-      a2.lang = 'en';
+      a2.textContent = `${pickerName(m.lang, m.label)}: ${region.title}`;
       a2.onclick = (ev) => {
         if (running || tooSoon(ev)) { ev.preventDefault(); return; }    // one build at a time
         if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
@@ -193,7 +213,7 @@
     }
     const sel = $('lang');
     sel.innerHTML = '';
-    for (const m of region.menu) sel.add(new Option(m.label, m.lang));
+    for (const m of region.menu) sel.add(new Option(pickerName(m.lang, m.label), m.lang));
     const pref = (navigator.languages || []).map((l) => l.split('-')[0]);
     const want = q.get('lang') || pref.find((l) => region.menu.some((m) => m.lang === l));
     if (want && region.menu.some((m) => m.lang === want)) sel.value = want;
@@ -301,6 +321,22 @@
     let dn = null;
     try { dn = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (e) { /* old browser */ }
     return (code, fallback) => { try { const n = dn && dn.of(code); if (n && n !== code) return n; } catch (e) { /* unknown code */ } return fallback || code; };
+  })();
+  // A language as the language picker and the download list show it: its
+  // own name (the recipe's label, "Ελληνικά") and, when that differs, its
+  // name in the visitor's language ("Griechisch" for a German browser,
+  // "Greek" for an English one): a visitor finds their language whatever
+  // language this page is in.
+  const pickerName = (() => {
+    let dn = null;
+    try { dn = new Intl.DisplayNames([...(navigator.languages || []), 'en'], { type: 'language' }); } catch (e) { /* old browser */ }
+    return (code, own) => {
+      let mine = '';
+      try { mine = (dn && dn.of(code)) || ''; } catch (e) { /* unknown code */ }
+      if (!mine || mine === code) mine = langName(code, own);
+      if (!own || own === code) return mine;
+      return own.toLowerCase() === mine.toLowerCase() ? own : `${own} (${mine})`;
+    };
   })();
   const packName = (id) => {
     const m = entry && entry.packs.find((p) => p.lang === id);
@@ -430,7 +466,10 @@
   const recipes = new Map();
   function recipeFor(e) {
     if (!recipes.has(e.recipe)) {
-      const p = getJSON(e.recipe);
+      const p = getJSON(e.recipe).then((r) => {
+        for (const pk of Object.values(r.packs || {})) pk.url = viaProxy(pk.url);
+        return r;
+      });
       p.catch(() => recipes.delete(e.recipe));     // a later try fetches it again
       recipes.set(e.recipe, p);
     }
@@ -685,7 +724,7 @@
                    sink: sinkInfo ? sinkInfo.sink : 'pending' };
     track('build_start', base);
     if (sinkInfo && sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
-    const worker = new Worker('assembler-worker.js?v=3');
+    const worker = new Worker('assembler-worker.js?v=4');
     running = { worker, base, t0, sent: new Set(), mode };
     checkReady();
     setStatus(mode === 'net' ? `Downloading the ${region.title} map…` : 'Starting…', true);

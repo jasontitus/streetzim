@@ -20,7 +20,7 @@
 //      {type:'progress', written, size, ms, saved, base?}  {type:'note', text}
 //      {type:'done', result}
 /* global hashwasm, SZFetch */
-importScripts('vendor/md5.umd.min.js', 'fetcher.js?v=3');
+importScripts('vendor/md5.umd.min.js', 'fetcher.js?v=4');
 
 const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 const b64dec = (s) => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };

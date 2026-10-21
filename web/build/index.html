@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StreetZim: maps in other languages (prototype)</title>
-<meta name="robots" content="noindex">
+<title>StreetZim: maps in other languages</title>
+<meta name="description" content="Download a StreetZim offline map with its labels and Wikipedia in your language, assembled in your browser.">
 <style>
   /* Contrast >= 4.5:1 in both schemes: links/secondary text --accent on
      --card, white on --btn, --bad/--ok/--lab-fg on their backgrounds. */
@@ -43,8 +43,9 @@
 </head>
 <body>
 <main>
-  <h1>Maps in other languages <span class="lab">prototype</span></h1>
-  <p class="dim">A StreetZim map with Wikipedia in another language (as well as English), and its labels in that language. Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</p>
+  <p class="dim"><a href="/">StreetZim</a></p>
+  <h1>Maps in other languages</h1>
+  <p class="dim">A StreetZim map with its labels in your language and Wikipedia in your language and the region's own (as well as English). Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</p>
 
   <p id="notice" role="alert"></p>
 
@@ -94,7 +95,8 @@
     <label class="check dim" id="noReportsLabel"><input type="checkbox" id="noReports"> Don't send speed reports</label>
   </section>
 </main>
-<script src="fetcher.js?v=3"></script>
-<script src="builder.js?v=3"></script>
+<script src="/drive/preview-config.js"></script>
+<script src="fetcher.js?v=4"></script>
+<script src="builder.js?v=4"></script>
 </body>
 </html>

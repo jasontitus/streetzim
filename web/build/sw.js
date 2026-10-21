@@ -1,4 +1,4 @@
-// Service worker of the language builder (/lab/build/ only): a streamed
+// Service worker of the language builder (/build/ only): a streamed
 // download. The page registers {id, filename, size} with a MessagePort and
 // opens <scope>__dl/<id> in a hidden iframe; this answers with a
 // ReadableStream fed from the port (one 'ack' per chunk it has room for),
