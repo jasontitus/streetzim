@@ -21,7 +21,6 @@ import pytest
 
 pytest.importorskip("libzim")
 
-from tests.langpack import lpzims  # noqa: E402
 from tests.langpack.conftest import ROOT  # noqa: E402
 from tests.langpack.test_ship_packs import _run, ship  # noqa: E402,F401
 
