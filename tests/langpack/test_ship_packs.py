@@ -440,3 +440,16 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     u8 = lpzims.read_uuid(base_b)[:8]
     assert {f"osm_testland_wiki-{x}_2026-10-21_{u8}.zim" for x in ("de", "fr", "th")} <= names
     assert {_pk(ship, x) for x in ("de", "fr", "th")} <= names          # the first base's are still there
+
+
+@pytest.mark.parametrize("rid,refused", [("switzerland-light", True), ("switzerland-border-de-ultralight", True),
+                                         ("switzerland", False), ("switzerland-de", False),
+                                         ("switzerland-nosat", False)])
+def test_light_maps_get_no_packs(rid: str, refused: bool, ship: SimpleNamespace) -> None:
+    """Light and ultralight maps carry no Wikipedia; Switzerland itself, its
+    no-satellite builds and the German Swiss maps are never refused here."""
+    r = subprocess.run(["bash", str(SHIP), rid, str(ship.base)], capture_output=True, text=True, timeout=900,
+                       env={**ship.env, "SHIP_SKIP_UPLOAD": "1"})
+    assert ("is a light map" in r.stderr) is refused, r.stderr[-500:]
+    if refused:
+        assert r.returncode == 1

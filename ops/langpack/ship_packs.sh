@@ -60,6 +60,11 @@ IA=${IA:-/storage/streetzim/venv-linux/bin/ia}
 UPLOAD_LOCK=${UPLOAD_LOCK:-/storage/streetzim/.retrofit-upload.lock}
 export PYTHONDONTWRITEBYTECODE=1
 case "$REGION" in *[!a-z0-9-]*|"") echo "ship_packs: region id '$REGION': a-z 0-9 - only" >&2; exit 1 ;; esac
+# Light and ultralight maps carry no Wikipedia: no packs for them (the
+# German Swiss maps, switzerland-de*, are not excluded: their base is German).
+case "$REGION" in *-light|*-light-*|*ultralight*)
+  [ "${SHIP_ALLOW_LIGHT:-0}" = 1 ] || { echo "ship_packs: $REGION is a light map: no language packs (SHIP_ALLOW_LIGHT=1 to force)" >&2; exit 1; } ;;
+esac
 [ -s "$BASE" ] || { echo "ship_packs: no base $BASE" >&2; exit 1; }
 if [ "${SHIP_SKIP_ENV_CHECK:-0}" != 1 ]; then
   langpack_env_check || { echo "ship_packs: fix the host setup first (ops/langpack/host-env.sh)" >&2; exit 1; }
