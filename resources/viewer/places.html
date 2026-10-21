@@ -1940,6 +1940,9 @@ function matchesName(rec, q) {
   // The name in its own script (cloud/search_shards.record_names).
   if (typeof rec.nn === 'string' && rec.nn && foldText(rec.nn).includes(ql)) return true;
   if (typeof rec.nl === 'string' && rec.nl && foldText(rec.nl).includes(ql)) return true;
+  // Its names in other languages (`ln`: "Genf" for Geneva).
+  if (rec.ln && typeof rec.ln === 'object'
+      && Object.values(rec.ln).some((v) => typeof v === 'string' && v && foldText(v).includes(ql))) return true;
   // An administrative area (t: 'admin') also answers to its other names
   // and to "<name> <type>" / "<type> of <name>" ("City of Alexandria"),
   // as in the map's search box (index.html, admin-search).

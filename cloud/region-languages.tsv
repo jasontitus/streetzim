@@ -102,10 +102,10 @@ austria-czech	de,cs,sk,hu
 balkans	sr,hr,sq,bs,sl,mk,cnr
 greece	el
 carpathians	ro,hu,bg
-switzerland	de,fr,it
-switzerland-nosat	de,fr,it
-switzerland-nosat-z13	de,fr,it
-switzerland-light	de,fr,it
+switzerland	de,fr,it,rm
+switzerland-nosat	de,fr,it,rm
+switzerland-nosat-z13	de,fr,it,rm
+switzerland-light	de,fr,it,rm
 north-africa	ar,fr,zgh,kab
 central-africa	fr,ln,sw,pt,en,ar,kg,bem,lua,umb,sg,ff,kmb,ny,es
 horn-of-africa	am,om,so,en,ti,sid,ar,din,aa,wal,sw,fr

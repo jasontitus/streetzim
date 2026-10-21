@@ -227,6 +227,64 @@ def _title_text(text):
     return re.sub(r" {2,}", " ", out).strip()
 
 
+# Record types that name places in the visitor's language (`ln`): what a
+# visitor looks up by its name in their own language. Streets and addresses
+# are left out (their names are rarely translated, and they are most of a
+# map's records). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides.
+# TODO(search-ln step 2): caps for continent-size maps (search-data
+# manifest budget, cloud/validate_zim.py SEARCH_MANIFEST_FAIL_MB; leaf
+# sizes): fewer types or languages there, decided from measurements.
+LN_TYPES = frozenset({"place", "admin", "airport", "peak", "park", "water", "poi"})
+# A name longer than this is a description or a tagging error, not a name.
+LN_MAX_CHARS = 100
+
+
+def search_ln_languages(map_config):
+    """The languages a build's search records name places in (`ln`): a
+    language-ready map's tile languages, then its region languages
+    (map-config tileLanguages / regionLanguages; streetzim.languages
+    .search_languages). Empty for any other map, or with
+    STREETZIM_SEARCH_LN=0."""
+    from streetzim.languages import search_languages
+    if os.environ.get("STREETZIM_SEARCH_LN", "1") == "0" or not map_config:
+        return []
+    return search_languages(map_config.get("tileLanguages"),
+                            map_config.get("regionLanguages"))
+
+
+def _ln_types():
+    env = os.environ.get("STREETZIM_SEARCH_LN_TYPES")
+    if env is None:
+        return LN_TYPES
+    return frozenset(t.strip() for t in env.split(",") if t.strip())
+
+
+def localized_names(feat, wiki, languages, types=None):
+    """`ln` of a search record: {lang: name} for ``languages``, from the
+    feature's own name:<lang> (``names``: tiles extracted with those
+    languages, an admin area's relation) else its wiki cross-ref's (the OSM
+    object feature_wiki matched, extract_wiki_tags_pbf(languages=)), in the
+    order of ``languages``. A name the record already shows as ``n`` is left
+    out (the viewer falls back to ``n``); others are kept even when they
+    equal ``nn``, so a French visitor sees "Genève" as such. Only for
+    ``types`` (default LN_TYPES)."""
+    if not languages or feat.get("type") not in (types if types is not None else LN_TYPES):
+        return {}
+    own = feat.get("names") or {}
+    ref = (wiki or {}).get("names") or {}
+    if not own and not ref:
+        return {}
+    shown = shown_names(feat)[0]
+    out = {}
+    for lang in languages:
+        v = own.get(lang) or ref.get(lang)
+        if isinstance(v, str):
+            v = v.strip()
+            if v and v != shown and len(v) <= LN_MAX_CHARS:
+                out[lang] = v
+    return out
+
+
 def shown_names(feat):
     """(n, nn, nl): the names a search record and page show. A build in
     another language (search_extract.localize_feature) has display_*
@@ -1214,7 +1272,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            wikidata_data=wikidata_data,
                            wiki_cross_refs=wiki_cross_refs,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
-                           chunk_tmp=chunk_tmp, page_types=page_types)
+                           chunk_tmp=chunk_tmp, page_types=page_types,
+                           ln_languages=search_ln_languages(map_config))
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -1243,7 +1302,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
                               loc_lookup=loc_lookup, page_types=page_types,
-                              wiki_cross_refs=wiki_cross_refs, corpus=corpus)
+                              wiki_cross_refs=wiki_cross_refs, corpus=corpus,
+                              ln_languages=search_ln_languages(map_config))
 
 
 def _tile_credit(tile_metadata):
@@ -2335,10 +2395,11 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def search_record(feat, wiki=None):
+def search_record(feat, wiki=None, ln_languages=None, ln_types=None):
     """The search record (docs/search-records.md) of search feature `feat`,
     as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
-    admin area, admin_wiki()), or None.
+    admin area, admin_wiki()), or None. `ln_languages` (search_ln_languages):
+    the record's names in those languages, `ln` (localized_names).
 
     Canonical record shape consumed by mcpzim:
       n, t (type), s (subtype), a (lat), o (lon), l (location)
@@ -2366,6 +2427,10 @@ def search_record(feat, wiki=None):
         rec["nn"] = native
     if latin:
         rec["nl"] = latin
+    if ln_languages:
+        ln = localized_names(feat, wiki, ln_languages, ln_types)
+        if ln:
+            rec["ln"] = ln
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
         v = feat.get(ov_key)
         if v:
@@ -2383,9 +2448,12 @@ def search_record(feat, wiki=None):
     return rec
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
-    chunk files in `chunk_tmp`, plus the Xapian candidates file."""
+    chunk files in `chunk_tmp`, plus the Xapian candidates file.
+    `ln_languages`: search_ln_languages() of the build."""
+    _ln_t = _ln_types() if ln_languages else None
+    ln_added = 0
     xapian_types = page_types
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
@@ -2479,7 +2547,9 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                         wiki_fields_added += 1
 
                 # The record shape and its rounding: search_record.
-                rec = search_record(feat, wiki)
+                rec = search_record(feat, wiki, ln_languages, _ln_t)
+                if "ln" in rec:
+                    ln_added += 1
                 if wiki:
                     if wiki.get("wikipedia"):
                         # Geo-index: underscored title -> [lat, lon, type].
@@ -2573,6 +2643,9 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     del cat_chunk_fds
     if wiki_fields_added:
         print(f"    Enriched {wiki_fields_added} entries with wiki cross-refs")
+    if ln_languages:
+        print(f"    {ln_added} entries carry names in other languages (ln: "
+              f"{','.join(ln_languages)})")
 
     # Close all chunk file handles
     for fd in chunk_fds.values():
@@ -3227,10 +3300,13 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapian_path, total_fe
 
 def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                           page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None,
-                          corpus=None):
+                          corpus=None, ln_languages=None):
     """Search for an in-memory feature list (small builds and tests). Its
     Kiwix pages are written in every --xapian mode; `corpus`
-    (--xapian=builder) gets their xapianbuilder documents."""
+    (--xapian=builder) gets their xapianbuilder documents. `ln_languages`:
+    as _search_bucket's, from the features' own names only (this path
+    matches no wiki cross-refs but an admin area's)."""
+    _ln_t = _ln_types() if ln_languages else None
     print(f"    Adding {len(search_features)} search entries...")
 
     # Enrich with location if available
@@ -3265,6 +3341,10 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                     rec["wsrc"] = wiki["wikipedia_src"]
             if wiki.get("wikidata"):
                 rec["q"] = wiki["wikidata"]
+        if ln_languages:
+            _ln = localized_names(f, None, ln_languages, _ln_t)
+            if _ln:
+                rec["ln"] = _ln
         # Under its other names too, as _search_bucket does.
         from cloud.search_shards import record_names as _rn
         for prefix in sorted({_key(n) for n in _rn(rec)}):

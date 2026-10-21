@@ -26,6 +26,7 @@ Optional keys (absent when empty):
 |---|---|
 | `nn` | OSM's own `name` when `n` is another (usually English) name: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); the first of a `;` list; left out when it has under 2 characters, equals `n` once folded, or one contains the other |
 | `nl` | a build in another language (`--language`): the English / Latin name when it differs from `n` and `nn` (`n` is then OSM's `name:<language>`, else the place's own name) |
+| `ln` | names in other languages, `{lang: name}`, on a language-ready map (map-config `tileLanguages`): `{"de": "Genf", "it": "Ginevra", "ru": "Женева"}` for Geneva. [Below](#names-in-other-languages-ln) |
 | `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
 | `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |
 | `q` | Wikidata Q-ID |
@@ -96,7 +97,8 @@ Wikipedia cross-references key on it. The map labels follow the same rule
 
 Every name of a record is indexed and matched the same way
 (`record_names` in `cloud/search_shards.py`, `_szRecordNames` in the
-viewer): `n`, the native-script `nn`, `nl`, and an admin area's `alt`. Kiwix
+viewer): `n`, the native-script `nn`, `nl`, an admin area's `alt`, and
+the names in other languages `ln`. Kiwix
 pages are titled with both names ("Haidian · 海淀区"); libzim's title
 index matches CJK text by n-gram, so Kiwix also finds them by any part
 ("淀区"). The map viewer matches by word prefix: "北京" finds 北京大学,
@@ -105,6 +107,43 @@ index matches CJK text by n-gram, so Kiwix also finds them by any part
 Extraction writes `<features>.schema` (`{"search_schema": 2}`) beside its
 output. A `--search-cache` without it predates `nn`, and the build warns
 that native-script names will be missing.
+
+## Names in other languages (`ln`)
+
+On a language-ready map ([language-ready.md](language-ready.md)), a
+German visitor types "Genf" and finds Geneva, an Italian "Ginevra", a
+Romansh "Cuira" (Chur). The record carries the place's names in the map's
+search languages: its tile languages, then its region languages
+(map-config `tileLanguages`, `regionLanguages`;
+`streetzim.languages.search_languages`), never `en` (`n` is the English /
+Latin name already).
+
+- **Source:** OSM's `name:<lang>` as the tile profile writes it (the first
+  of a `;` list; for `zh`, `name:zh-Hans` when there is one;
+  `streetzim.languages.osm_names`), from the feature's own `names`
+  (search features extracted with `STREETZIM_TILE_LANGUAGES`; an admin
+  area's relation), else from the OSM object its wiki cross-ref matched
+  (`extract_wiki_tags_pbf(languages=…)`, same match as `w`/`q` above). So a
+  place with no `wikipedia`/`wikidata` tag and no tile names has none.
+- **Which records:** `place`, `admin`, `airport`, `peak`, `park`, `water`
+  and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides);
+  not streets or addresses.
+- **Which names:** in the order of the languages; a name equal to `n`
+  is left out (the viewer shows `n` then); one equal to `nn` is kept, so a
+  French visitor sees "Genève". At most 100 characters.
+- **Index:** under every name, like `nn` (more prefix keys per record).
+- **Viewer:** matched by any of them; a result on a map shown in a
+  second language (`SZ_LANG2`, a merged language-pack ZIM) shows `ln[lang]`
+  first, beside `nn` (or `n` when that is the same): "Genf · Genève". The
+  Find page matches them too.
+- **Off:** `STREETZIM_SEARCH_LN=0`, or any map that is not language-ready
+  (no `tileLanguages`): no `ln`, byte for byte as before.
+- **Size** (Switzerland, 2.3 M records, 22 languages): 4,957 of 85,837
+  cross-refs carry names, 3,086 records get `ln` (place 1,308, admin 753,
+  peak 484, poi 407, water 131), search chunk bytes +0.4%, tier-c chunks
+  +2.4%, the place category file +0.9%. Continent maps: see the step-2
+  caps (`LN_TYPES` TODO in `streetzim/zim_writer.py`).
+- **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)
 

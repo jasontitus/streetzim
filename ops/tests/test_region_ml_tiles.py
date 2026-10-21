@@ -212,7 +212,12 @@ def host(tmp_path, monkeypatch):
     docker.write_text(f"#!{sys.executable}\n" + FAKE_DOCKER)
     docker.chmod(0o755)
     co = Checkout(tmp_path / "checkout")
+    # Rows whose languages are all in the matrix: the tiles carry the
+    # matrix (a region's own languages: test_a_short_row_adds_its_languages).
+    table = tmp_path / "region-languages.tsv"
+    table.write_text("# id\tlanguages\nhispaniola\tes,fr\nafrica\tar,fr,es\n", encoding="utf-8")
     env = {"STREETZIM_ROOT": str(root), "DOCKER": str(docker), "FAKE_STATE": str(state),
+           "STREETZIM_REGION_LANGUAGES": str(table),
            "FAKE_REV": co.head(), "STREETZIM_ML_CHECKOUT": str(co.path),
            "STREETZIM_ML_STORE_DIR": str(tmp_path / "store"),
            "STREETZIM_ML_NVME": "0",       # never the host's real NVMe scratch,
@@ -1256,3 +1261,57 @@ def test_a_variant_has_its_parents_languages():
     assert variants
     for row in variants:
         assert langs[row[0]] == langs[row[1]], row[0]
+
+
+# ---- a region's own languages in its tiles ----------------------------------
+
+def _table(host, text):
+    t = host / "region-languages.tsv"
+    t.write_text("# id\tlanguages\n" + text, encoding="utf-8")
+    return t
+
+
+def test_a_short_row_adds_its_languages(host):
+    """Hispaniola's own Haitian Creole joins the matrix: the profile is asked
+    for it, the check accepts it, the sidecar records it."""
+    _table(host, "hispaniola\tht,es,fr\n")
+    out = _load().make("hispaniola", "hispaniola", BOX)
+    want = ",".join(sorted(LANGS.split(",") + ["ht"]))
+    assert Path(out + ".langs").read_text() == want + "\n"
+    [run] = _runs(host)
+    assert f"STREETZIM_TILE_LANGUAGES={want}" in run
+
+
+def test_a_variant_takes_its_extracts_languages(host):
+    """A variant cut from another region's extract carries that region's
+    languages (the tiles are the extract's)."""
+    _table(host, "hispaniola\tht,es,fr\nhispaniola-light\tes\n")
+    out = _load().make("hispaniola-light", "hispaniola", BOX)
+    assert "ht" in Path(out + ".langs").read_text().strip().split(",")
+
+
+def test_a_long_row_adds_none(host):
+    rows = ",".join(["sw", "ha", "yo", "ig", "am", "om", "so", "zu"])     # 8 > the cap
+    _table(host, f"hispaniola\t{rows}\n")
+    out = _load().make("hispaniola", "hispaniola", BOX)
+    assert Path(out + ".langs").read_text() == LANGS + "\n"
+
+
+def test_the_environment_still_decides(host, monkeypatch):
+    _table(host, "hispaniola\tht,es,fr\n")
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "de,fr")
+    out = _load().make("hispaniola", "hispaniola", BOX)
+    assert Path(out + ".langs").read_text() == "de,fr\n"
+
+
+def test_no_row_is_the_matrix(host):
+    _table(host, "elsewhere\tht\n")
+    out = _load().make("hispaniola", "hispaniola", BOX)
+    assert Path(out + ".langs").read_text() == LANGS + "\n"
+
+
+def test_an_unknown_code_in_a_short_row_stops_before_docker(host):
+    _table(host, "hispaniola\tes,qqq\n")
+    with pytest.raises(SystemExit):
+        _load().make("hispaniola", "hispaniola", BOX)
+    assert _calls(host) == []

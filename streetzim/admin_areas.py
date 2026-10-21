@@ -52,6 +52,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any, NamedTuple
 
 from streetzim import area as _area
+from streetzim.languages import osm_names
 
 Point = tuple[float, float]           # (lon, lat)
 Ring = list[Point]
@@ -781,12 +782,14 @@ def _rg_lookup(points: list[Point]) -> list[dict[str, str]]:
 
 def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
                         geonames: GeoNamesPlaces | None | bool = True,
-                        stats: dict[str, int] | None = None) -> list[dict[str, Any]]:
+                        stats: dict[str, int] | None = None,
+                        languages: Sequence[str] | None = None) -> list[dict[str, Any]]:
     """Admin areas of `pbf_path` whose representative point is in `bbox`
     (any when None), as search features (docs/search-records.md, `admin`).
     `geonames`: True loads reverse_geocoder's table when a clipped area
     needs it, False never uses it, or pass a GeoNamesPlaces. Needs the
-    osmium CLI (as the address extraction does)."""
+    osmium CLI (as the address extraction does). `languages`: an area also
+    carries its name:<lang> tags for them as `names` (the record's `ln`)."""
     tmp = tempfile.mkdtemp(prefix="streetzim_admin_")
     try:
         src = _filtered_input(pbf_path, tmp, bbox)
@@ -894,6 +897,10 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
         }
         if alts:
             feat["alt"] = alts
+        if languages:
+            lnames = osm_names(tags, languages)
+            if lnames:
+                feat["names"] = lnames
         if f["bbox"]:
             feat["bbox"] = [round(v, COORD_DP) for v in f["bbox"]]
         if tags.get("wikidata", "").startswith("Q"):
@@ -1043,21 +1050,23 @@ def add_admin_wiki_refs(wiki_cross_refs: dict,
 
 def append_admin_areas(pbf_path: str, search_jsonl: str,
                        bbox: Sequence[float] | None = None,
-                       wiki_refs: dict | None = None) -> int:
+                       wiki_refs: dict | None = None,
+                       languages: Sequence[str] | None = None) -> int:
     """Append the admin areas to a search-feature JSONL, skipping any
     already in it; returns the count added. Skipped, with a message, when
     the osmium CLI is not installed.
 
     wiki_refs: when given, filled with every extracted area's wikipedia/
     wikidata tags (add_admin_wiki_refs), those already in the JSONL too, so
-    the build need not read the whole JSONL again for them."""
+    the build need not read the whole JSONL again for them.
+    languages: the areas carry their names in these (extract_admin_areas)."""
     from streetzim.common import print  # the builder's flushing print
     print("  Extracting administrative areas from OSM data...")
     if not shutil.which("osmium"):
         print("    Skipping: osmium CLI not found on PATH")
         return 0
     stats: dict[str, int] = {}
-    feats = extract_admin_areas(pbf_path, bbox, stats=stats)
+    feats = extract_admin_areas(pbf_path, bbox, stats=stats, languages=languages)
     if wiki_refs is not None:
         add_admin_wiki_refs(wiki_refs, feats)
     have = (_admin_ids_in(search_jsonl)

@@ -1186,7 +1186,7 @@ def _build_search(
                 try:
                     _refs: dict = {}
                     n_admin = append_admin_areas(admin_pbf, search_features, bbox=addr_bbox,
-                                                 wiki_refs=_refs)
+                                                 wiki_refs=_refs, **_ln_kwargs(args))
                     # Nothing collected (osmium missing, or no area has a
                     # tag): the JSONL is read, as for a salvage build.
                     admin_refs = _refs or None
@@ -1201,7 +1201,8 @@ def _build_search(
             # POI records with wikipedia/wikidata for offline cross-ref.
             try:
                 wiki_cross_refs = extract_wiki_tags_pbf(addr_pbf, bbox=addr_bbox,
-                                                        precut=addr_precut)
+                                                        precut=addr_precut,
+                                                        **_ln_kwargs(args))
             except Exception as _e:
                 print(f"    Warning: wiki cross-ref extraction failed: {_e}")
                 wiki_cross_refs = None
@@ -1210,6 +1211,25 @@ def _build_search(
         else:
             _clip_search_features(search_features)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
+
+
+def _search_languages(args):
+    """The languages search records name places in (`ln`): a language-ready
+    build's tile and region languages (streetzim.languages.search_languages);
+    none otherwise, or with STREETZIM_SEARCH_LN=0."""
+    from streetzim import languages as _languages
+    if os.environ.get("STREETZIM_SEARCH_LN", "1") == "0":
+        return []
+    return _languages.search_languages(getattr(args, "tile_languages", None),
+                                       getattr(args, "region_languages", None))
+
+
+def _ln_kwargs(args):
+    """``languages=`` for the admin-area and wiki-tag extraction of a
+    language-ready build; nothing for any other, whose calls stay as they
+    were."""
+    langs = _search_languages(args)
+    return {"languages": langs} if langs else {}
 
 
 def _clip_search_features(path):

@@ -27,7 +27,14 @@ with this profile; the world tiles change only when they are rebuilt.
 `tests/test_tile_profile_names.py` runs the profile's Lua (5.1, through
 `lupa`).
 `streetzim.languages.MATRIX_TILE_LANGUAGES` is the list (21: ar de el es fa
-fr he hi id it ja ko nl pl pt ru th tr uk vi zh).
+fr he hi id it ja ko nl pl pt ru th tr uk vi zh). A map whose row in
+`cloud/region-languages.tsv` lists at most `REGION_TILE_ROW_MAX` (7)
+languages also carries its own languages that the matrix lacks
+(`default_tile_languages`): Switzerland adds Romansh (`rm`), the Baltics
+`et lt lv`, the Balkans `bs cnr hr mk sl sq sr`; a longer row (Europe 38,
+Africa 31, the Indian subcontinent 22) adds none. Their codes are in
+`ISO639_3`, so `--tile-languages` accepts them. Search records name places
+in the tile and region languages (`ln`, [search-records.md](search-records.md)).
 `cloud/region-languages.tsv` holds every registry region's own languages;
 `tests/test_region_languages.py` keeps it complete. Its header has the
 rule: the languages of the countries the region's site card names (and its
@@ -49,7 +56,9 @@ rebuild driver, which runs it) cuts a region's tiles itself when
 `STREETZIM_ML_TILES=1`:
 
 1. `ops/region-ml-tiles.py --src-id <parent> -- <id> <bbox>` runs tilemaker
-   on `world-data/regions/<parent>.osm.pbf` and the registry bbox, and
+   on `world-data/regions/<parent>.osm.pbf` and the registry bbox for the
+   parent's default tile languages (above; `STREETZIM_TILE_LANGUAGES`
+   overrides), and
    writes `world-data/regions/<parent>.ml.mbtiles` with sidecars `.bbox`,
    `.langs`, `.profile` and `.pbf`. `.profile` is what decides the tiles in
    an image: the `resources/tilemaker` tree, the `Dockerfile` blob and its

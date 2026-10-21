@@ -6589,15 +6589,48 @@ var SZ_TYPE_BONUS = { admin: 25, place: 20, airport: 15, peak: 10, park: 10, wat
 var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
                            suburb: 10, village: 8, neighbourhood: 4 };
 
+// A record's names in other languages (`ln`, {lang: name}: "Genf",
+// "Ginevra" for Geneva), each once, in the record's order.
+function _szLnNames(rec) {
+  var out = [];
+  var ln = rec && rec.ln;
+  if (!ln || typeof ln !== 'object') return out;
+  for (var k in ln) {
+    if (Object.prototype.hasOwnProperty.call(ln, k) && typeof ln[k] === 'string'
+        && ln[k] && out.indexOf(ln[k]) < 0) out.push(ln[k]);
+  }
+  return out;
+}
+
 // A record's names (cloud/search_shards.record_names): its name, its name
-// in its own script `nn` ("北京大学" beside "Peking University"), and an
-// admin area's other names.
+// in its own script `nn` ("北京大学" beside "Peking University"), an
+// admin area's other names, and its names in other languages `ln`.
 function _szRecordNames(rec) {
   var names = [rec.n];
   if (typeof rec.nn === 'string' && rec.nn) names.push(rec.nn);
   // A build in another language: the English / Latin name too.
   if (typeof rec.nl === 'string' && rec.nl) names.push(rec.nl);
-  return Array.isArray(rec.alt) ? names.concat(rec.alt) : names;
+  if (Array.isArray(rec.alt)) names = names.concat(rec.alt);
+  var ln = _szLnNames(rec);
+  for (var i = 0; i < ln.length; i++) if (names.indexOf(ln[i]) < 0) names.push(ln[i]);
+  return names;
+}
+
+// The name a result shows first, and the one beside it: in a map shown in
+// another language `lang` (SZ_LANG2), the record's name in it when it has
+// one ("Genf"), beside its own-script name ("Genève"), or its name when
+// that is the same ("Genève · Geneva" in French); otherwise its name and
+// own-script name, as always.
+function _szShownNames(rec, lang) {
+  var mine = lang && rec && rec.ln && typeof rec.ln === 'object'
+    && Object.prototype.hasOwnProperty.call(rec.ln, lang) && typeof rec.ln[lang] === 'string'
+    ? rec.ln[lang] : '';
+  if (mine) {
+    var nat = (typeof rec.nn === 'string' && rec.nn) ? rec.nn : '';
+    var other = nat && nat !== mine ? nat : String(rec.n || '');
+    return [mine, other !== mine ? other : ''];
+  }
+  return [String(rec.n || ''), (typeof rec.nn === 'string' && rec.nn) ? rec.nn : ''];
 }
 
 // The normalized texts a record answers to: its names; for an admin area
@@ -6607,6 +6640,8 @@ function _szSearchForms(rec, norm) {
     var plain = [norm(String(rec.n || ''))];
     if (typeof rec.nn === 'string' && rec.nn) plain.push(norm(rec.nn));
     if (typeof rec.nl === 'string' && rec.nl) plain.push(norm(rec.nl));
+    var lnp = _szLnNames(rec);
+    for (var j = 0; j < lnp.length; j++) plain.push(norm(lnp[j]));
     return plain;
   }
   var names = _szRecordNames(rec);
@@ -7371,11 +7406,12 @@ var rawLabel = m.cat || m.s || m.t;
 var label = rawLabel ? szPlaceType(rawLabel) : '';
 var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
 var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
+var shown = _szShownNames(m, SZ_LANG2);
 html += '<div class="search-result" data-idx="' + j +
 '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
 '" data-name="' + escapeHtml(m.n) + '">' +
-'<span class="search-result-name">' + escapeHtml(szFirstName(m.n)) +
-(m.nn ? ' <span class="search-result-native">' + escapeHtml(szFirstName(m.nn)) + '</span>' : '') +
+'<span class="search-result-name">' + escapeHtml(szFirstName(shown[0])) +
+(shown[1] ? ' <span class="search-result-native">' + escapeHtml(szFirstName(shown[1])) + '</span>' : '') +
 '</span>' +
 '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
 }
@@ -7546,9 +7582,9 @@ var best = null, bestD = 300;
 for (var i = 0; i < recs.length; i++) {
 var r = recs[i];
 if (!r || typeof r.a !== 'number' || typeof r.o !== 'number') continue;
-if (normalizeText(r.n || '') !== want
-&& normalizeText(r.nn || '') !== want
-&& normalizeText(r.nl || '') !== want) continue;
+var rn = [r.n || '', r.nn || '', r.nl || ''].concat(_szLnNames(r)), hit = false;
+for (var k = 0; k < rn.length && !hit; k++) hit = !!rn[k] && normalizeText(String(rn[k])) === want;
+if (!hit) continue;
 var d = _haversineMetersStrip(lat, lon, r.a, r.o);
 if (d < bestD) { bestD = d; best = r; }
 }

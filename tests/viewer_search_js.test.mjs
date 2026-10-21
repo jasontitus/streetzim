@@ -34,7 +34,8 @@ function slice(src, from, to) {
   return src.slice(a, b);
 }
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
-  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM };')();
+  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM,' +
+  ' _szRecordNames, _szLnNames, _szShownNames };')();
 // The viewer's normalizeText (300-search.js, initSearch): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -312,4 +313,41 @@ ok('labels follow the build language', () => {
   assert.strictEqual(LBL.of({ 'name:latin': 'Peking University', name_int: '北京大学' }), '北京大学');
   assert.strictEqual(LBL.of({ name: '東京タワー', name_int: 'Tokyo Tower' }), '東京タワー');   // OpenFreeMap
   LBL.set('en');
+});
+
+// Search in the visitor's language: `ln` names (docs/search-records.md).
+const GENEVA = { n: 'Geneva', nn: 'Genève', t: 'place', s: 'city',
+                 ln: { de: 'Genf', fr: 'Genève', it: 'Ginevra', ru: 'Женева' } };
+const GENF_SHOP = { n: 'Genfer Uhren', t: 'poi', s: 'watches' };
+ok('a record answers to its names in other languages', () => {
+  assert.ok(score(GENEVA, 'Genf') >= 0 && score(GENEVA, 'ginevra') >= 0 && score(GENEVA, 'женева') >= 0);
+  assert.ok(V._szFormsContain(GENEVA, norm('Ginevra'), norm));
+  assert.ok(!V._szFormsContain({ n: 'Geneva', t: 'place' }, norm('Ginevra'), norm));
+  assert.ok(P.matchesName(GENEVA, 'Genf') && P.matchesName(GENEVA, 'Женева'));
+  assert.ok(!P.matchesName({ n: 'Geneva', t: 'place' }, 'Genf'));
+  // The city ranks above a shop whose name starts with the query.
+  assert.deepStrictEqual(rank([GENF_SHOP, GENEVA], 'Genf'), ['Geneva/place', 'Genfer Uhren/poi']);
+});
+ok('an admin area answers to its names in other languages', () => {
+  const CANTON = { n: 'Geneva', t: 'admin', s: 'canton', al: 4, ln: { de: 'Genf' } };
+  assert.ok(score(CANTON, 'Genf') >= 0 && score(CANTON, 'Kanton Genf') < 0);
+  assert.ok(score(CANTON, 'genf canton') >= 0);
+  assert.ok(P.matchesName(CANTON, 'genf'));
+});
+ok('the names in other languages, each once, in order', () => {
+  assert.deepStrictEqual(V._szLnNames(GENEVA), ['Genf', 'Genève', 'Ginevra', 'Женева']);
+  assert.deepStrictEqual(V._szRecordNames(GENEVA), ['Geneva', 'Genève', 'Genf', 'Ginevra', 'Женева']);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x', ln: 'Genf' }), []);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x', ln: { de: 3, fr: '', it: 'a', rm: 'a' } }), ['a']);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x' }), []);
+});
+ok('a result shows the name in the map\'s second language', () => {
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'de'), ['Genf', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'fr'), ['Genève', 'Geneva']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'ja'), ['Geneva', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, ''), ['Geneva', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'Zurich', ln: { de: 'Zürich' } }, 'de'), ['Zürich', 'Zurich']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'Zurich' }, 'de'), ['Zurich', '']);
+  // An inherited key is not a name.
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: {} }, 'constructor'), ['X', '']);
 });

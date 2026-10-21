@@ -15,6 +15,7 @@ from streetzim import area
 from streetzim.common import (
     print,
 )
+from streetzim.languages import osm_names
 from streetzim.overture import duckdb_connect, overture_category, overture_release
 
 
@@ -978,8 +979,18 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     }
 
 
-def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False):
+def _wiki_tag_count(entry):
+    """How many of the two wiki tags a cross-ref entry has."""
+    return ("wikipedia" in entry) + ("wikidata" in entry)
+
+
+def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False, languages=None):
     """Extract {wikipedia, wikidata} tags per OSM object with a name.
+
+    ``languages``: also keep the object's name:<lang> tags for these
+    languages as ``names`` ({lang: name}, streetzim.languages.osm_names),
+    from which the search record's ``ln`` comes (zim_writer
+    .localized_names). Without it the lookup is what it always was.
 
     Used to enrich the search index so offline agents can cross-link
     POI records to the Wikipedia ZIM (per the mcpzim contract doc).
@@ -1064,13 +1075,22 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False):
                     entry["wikipedia"] = wikipedia
                 if wikidata:
                     entry["wikidata"] = wikidata
+                names = osm_names(props, languages) if languages else None
                 # If we already have an entry for this coord+name, prefer the one
                 # with more fields (covers the case where a node and a way share
-                # the same name but only one has both tags).
+                # the same name but only one has both tags). Only the two
+                # wiki tags count, so `languages` never changes which object
+                # wins; its names, else the other object's, go with it.
                 existing = lookup.get(key)
-                if existing is None or len(entry) > len(existing):
+                if existing is None or len(entry) > _wiki_tag_count(existing):
+                    if names:
+                        entry["names"] = names
+                    elif existing is not None and existing.get("names"):
+                        entry["names"] = existing["names"]
                     lookup[key] = entry
                     count += 1
+                elif names and not existing.get("names"):
+                    existing["names"] = names
                 if count % 50000 == 0 and count:
                     print(f"\r    Indexed {count} wiki cross-refs...", end="", flush=True)
         print(f"\r    Indexed {len(lookup)} wiki cross-refs (from {count} raw)")

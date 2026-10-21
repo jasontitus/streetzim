@@ -185,3 +185,26 @@ def test_admin_wiki_tags_reach_the_lookup_without_a_second_read(monkeypatch, tmp
     refs = out[-1]
     assert refs[("admin", "r9")]["wikipedia"] == ("nl:Aalten (cache)" if salvage else "nl:Aalten")
     assert scanned == [salvage]         # the JSONL is read only for a salvage build
+
+
+def test_a_language_ready_build_asks_for_names(monkeypatch, tmp_path):
+    """--tile-languages (and the region's languages): the admin areas and
+    the wiki-tag lookup carry names in them (search records' `ln`)."""
+    got = {}
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    monkeypatch.setattr(c, "extract_addresses_pbf", lambda *a, **k: 0)
+    monkeypatch.setattr(c, "_sample_overture_themes_in_cache", lambda *a: None)
+    monkeypatch.setattr(c, "extract_wiki_tags_pbf",
+                        lambda p, bbox=None, precut=False, languages=None:
+                        got.__setitem__("wiki", languages) or {})
+    monkeypatch.setattr(c, "append_admin_areas",
+                        lambda p, jsonl, bbox=None, wiki_refs=None, languages=None:
+                        got.__setitem__("admin", languages) or 0)
+    cache = tmp_path / "cache.jsonl"
+    cache.write_text(json.dumps({"lat": 43.74, "lon": 7.42, "name": "x"}) + "\n")
+    args = _args(pbf="in.pbf", search_cache=str(cache), tile_languages=["de", "fr"],
+                 region_languages=["fr", "rm"])
+    c._build_search(args=args, bbox_str=None, mbtiles_path=None, pbf_path="in.pbf",
+                    tiles=None, tmpdir=str(tmp_path), total_steps=6,
+                    use_streaming=False, work_pbf=None, work_pbf_cut=False)
+    assert got == {"wiki": ["de", "fr", "rm"], "admin": ["de", "fr", "rm"]}
