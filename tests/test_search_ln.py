@@ -281,3 +281,92 @@ def test_an_admin_relation_carries_its_names(tmp_path):
     assert named["names"] == {"de": "Genf", "it": "Ginevra"}
     rec = W.search_record(named, None, ["de", "it"])
     assert rec["ln"] == {"de": "Genf", "it": "Ginevra"}
+
+
+# --- what the survivors of the first mutation run showed --------------------
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_a_losing_object_gives_its_names_to_the_winner(tmp_path):
+    """A node with both wiki tags first (osmium exports nodes before ways),
+    then a way of the same name and cell with one tag but names: the node
+    stays, and gains the way's names."""
+    from streetzim.addresses import extract_wiki_tags_pbf
+    body = (f" <node id='2' version='1' lat='{GLAT - 0.00001}' lon='{GLON - 0.00001}'/>\n"
+            f" <node id='3' version='1' lat='{GLAT}' lon='{GLON}'/>\n"
+            f" <node id='4' version='1' lat='{GLAT + 0.00001}' lon='{GLON + 0.00001}'/>\n"
+            f" <node id='5' version='1' lat='{GLAT}' lon='{GLON}'>"
+            "<tag k='name' v='Genève'/><tag k='wikipedia' v='fr:Genève'/>"
+            "<tag k='wikidata' v='Q71'/></node>\n"
+            " <way id='10' version='1'><nd ref='2'/><nd ref='3'/><nd ref='4'/>"
+            "<tag k='name' v='Genève'/><tag k='name:it' v='Ginevra'/>"
+            "<tag k='wikidata' v='Q71'/></way>\n")
+    path = _osm(tmp_path, body)
+    named = extract_wiki_tags_pbf(path, precut=True, languages=["it"])
+    [v] = named.values()
+    assert v == {"wikipedia": "fr:Genève", "wikidata": "Q71", "names": {"it": "Ginevra"}}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_appended_admin_areas_carry_their_names(tmp_path):
+    pytest.importorskip("osmium")
+    from streetzim import admin_areas as A
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_admin_areas import Osm, square
+    o = Osm()
+    o.way(1, square(6.0, 46.1, 6.3, 46.4))
+    o.rel(1, [("w", 1, "outer")], {"name": "Genève", "admin_level": "4", "name:de": "Genf"})
+    pbf = o.write(tmp_path / "ge.osm")
+    jsonl = tmp_path / "search.jsonl"
+    assert A.append_admin_areas(pbf, str(jsonl), languages=["de"]) == 1
+    [area] = [json.loads(x) for x in jsonl.read_text(encoding="utf-8").splitlines()]
+    assert area["names"] == {"de": "Genf"}
+
+
+class _Item:
+    def __init__(self, path, title, mime, content, is_front=False):
+        self.path, self.content = path, content
+
+
+class _Creator:
+    def __init__(self):
+        self.items = {}
+
+    def add_item(self, item):
+        self.items[item.path] = item.content
+
+    def add_redirection(self, *a):
+        pass
+
+
+def test_the_in_memory_path_names_places_too(monkeypatch):
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    c = _Creator()
+    W._add_search_in_memory(c, _Item, search_features=[dict(geneva(), names={"it": "Ginevra"})],
+                            loc_lookup=None, ln_languages=["it"])
+    [g] = json.loads(c.items["search-data/gi.json"])
+    assert g["ln"] == {"it": "Ginevra"}
+
+
+def test_the_build_takes_the_languages_from_map_config(tmp_path, monkeypatch):
+    """_add_search hands search pass 1 the map's search languages."""
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    path = tmp_path / "search.jsonl"
+    path.write_text(json.dumps(geneva(), ensure_ascii=False) + "\n", encoding="utf-8")
+    got = {}
+    real = W._search_bucket
+
+    def spy(**kw):
+        got["ln"] = kw.get("ln_languages")
+        raise RuntimeError("stop")
+    monkeypatch.setattr(W, "_search_bucket", spy)
+    for cfg, want in (({"tileLanguages": ["de"], "regionLanguages": ["de", "rm"]}, ["de", "rm"]),
+                      ({}, [])):
+        with pytest.raises(RuntimeError):
+            W._add_search(_Creator(), _Item, mbtiles_path=None, search_features_path=str(path),
+                          search_features=None, wikidata_data=None, wiki_cross_refs={},
+                          _bundled_set=set(), split_hot_search_chunks_mb=0, split_find_chips=False,
+                          no_llm_bundle=True, map_config=cfg, name="T", bbox=None,
+                          routing_graph_path=None, address_count=0, overture_sources=None,
+                          overture_themes=None, xapian_mode="libzim", chunk_tmp=str(tmp_path))
+        assert got["ln"] == want
+    assert real is not None

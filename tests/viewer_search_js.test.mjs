@@ -351,3 +351,27 @@ ok('a result shows the name in the map\'s second language', () => {
   // An inherited key is not a name.
   assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: {} }, 'constructor'), ['X', '']);
 });
+
+// A tapped label in the map's second language ("Genf") finds its record
+// through `ln` (window.__streetzimLookupPlace, 300-search.js).
+{
+  const a = HTML.indexOf('  window.__streetzimLookupPlace = function(name, lat, lon) {');
+  const b = HTML.indexOf('\n  };\n', a);
+  assert.ok(a > 0 && b > a);
+  const make = new Function('manifest', 'getPrefixes', 'streamFilterChunks', 'normalizeText',
+    '_haversineMetersStrip', '_szLnNames', 'window',
+    HTML.slice(a, b + 5) + '\nreturn window.__streetzimLookupPlace;');
+  const win = {};
+  const lookup = make({}, () => Object.assign(['ge'], { targeted: true }),
+    () => Promise.resolve([GENEVA, { n: 'Genf Bar', t: 'poi', a: 46.2, o: 6.15 }]
+      .map((r) => Object.assign({ a: 46.2, o: 6.15 }, r))),
+    norm, () => 10, V._szLnNames, win);
+  const byLn = await lookup('Genf', 46.2, 6.15);
+  const byFr = await lookup('Genève', 46.2, 6.15);
+  const none = await lookup('Ginevra Nord', 46.2, 6.15);
+  ok('a label in another language finds its record by ln', () => {
+    assert.strictEqual(byLn && byLn.n, 'Geneva');
+    assert.strictEqual(byFr && byFr.n, 'Geneva');
+    assert.strictEqual(none, null);
+  });
+}
