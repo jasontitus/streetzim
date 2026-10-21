@@ -284,3 +284,64 @@ def test_bad_region_id(ship: SimpleNamespace) -> None:
     r = subprocess.run(["bash", str(SHIP), "Test Land", str(ship.base)], capture_output=True, text=True,
                        timeout=60, env=ship.env)
     assert r.returncode == 1 and "a-z 0-9 - only" in r.stderr
+
+
+def _publish(ship: SimpleNamespace, web: Path) -> subprocess.CompletedProcess[str]:
+    (web / "build").mkdir(parents=True, exist_ok=True)
+    return subprocess.run(["bash", str(PUBLISH), "testland", str(web)], capture_output=True, text=True, timeout=120,
+                          env=ship.env)
+
+
+def test_a_failed_site_check_replaces_and_publishes_nothing(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """Review r3 H-2: site files are checked where they are built and replace
+    the region's previous ones only when site_check passed; publish_site.sh
+    takes only sealed files."""
+    assert _run(ship).returncode == 0
+    site = ship.work / "site" / "testland" / "recipes" / "testland"
+    good = (site / "de.json").read_bytes()
+    assert json.loads((site / "checked.json").read_text())["site_check"].endswith("-> OK")
+    # archive.org now lists another file under the base's name: the check fails
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": ship.base.name, "size": str(ship.base.stat().st_size), "md5": "0" * 32}]}))
+    r = _run(ship, TITLES_UNUSED="1")
+    assert r.returncode == 1 and "site_check.py FAILED" in _log(ship), r.stdout[-2000:]
+    assert (site / "de.json").read_bytes() == good                 # the previous good files stay
+    # the first run's files publish; a tampered copy does not
+    web = tmp_path / "web"
+    assert _publish(ship, web).returncode == 0
+    (site / "de.json").write_text("{}")
+    p = _publish(ship, tmp_path / "web2")
+    assert p.returncode == 1 and "not what ship_packs.sh checked" in p.stderr
+    assert not (tmp_path / "web2" / "build" / "recipes" / "testland").exists()
+
+
+def test_publish_needs_a_seal(ship: SimpleNamespace, tmp_path: Path) -> None:
+    src = ship.work / "site" / "testland" / "recipes" / "testland"
+    src.mkdir(parents=True)
+    (src / "index.json").write_text("{}")
+    (src / "region.json").write_text("{}")
+    p = _publish(ship, tmp_path / "web")
+    assert p.returncode == 1 and "not what ship_packs.sh checked" in p.stderr
+
+
+def test_publish_replaces_in_one_step_and_rolls_back(ship: SimpleNamespace, tmp_path: Path) -> None:
+    assert _run(ship).returncode == 0
+    web = tmp_path / "web"
+    assert _publish(ship, web).returncode == 0
+    dst = web / "build" / "recipes" / "testland"
+    before = (dst / "de.json").read_bytes()
+    # a broken index step (another region's folder with an unreadable region.json is skipped, so break
+    # site_index itself): the previous folder comes back
+    bad = tmp_path / "py-fail"
+    bad.write_text(f"#!/bin/bash\ncase \"$1\" in *site_index.py) exit 1;; esac\nexec {sys.executable} \"$@\"\n")
+    bad.chmod(0o755)
+    src = ship.work / "site" / "testland" / "recipes" / "testland"
+    (src / "de.json").write_text(json.dumps({"changed": True}))        # a newer, sealed version
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "checked.py"), "write", str(src),
+                           "--summary", "x"]).returncode == 0
+    p = subprocess.run(["bash", str(PUBLISH), "testland", str(web)], capture_output=True, text=True, timeout=120,
+                       env={**ship.env, "PYTHON": str(bad)})
+    assert p.returncode == 1 and "put back" in p.stderr
+    assert (dst / "de.json").read_bytes() == before and not (web / "build" / "recipes" / "testland.new").exists()
+    # and with a working index step it goes live
+    assert _publish(ship, web).returncode == 0 and json.loads((dst / "de.json").read_text()) == {"changed": True}

@@ -229,19 +229,30 @@ if [ ${#LEFT[@]} -gt 0 ]; then
 fi
 say "archive.org lists every pack"
 
-# 6. site files and their check
+# 6. site files, checked where they are built; they replace the region's
+# previous ones only once site_check.py passed (sealed with checked.json,
+# which publish_site.sh requires).
 BF=$(basename "$BASE")
-OUT=$SITE/recipes/$REGION
-rm -rf "$OUT.tmp" && mkdir -p "$OUT.tmp"
+STG=$W/site/.$REGION.tmp
+OUT=$STG/recipes/$REGION
+rm -rf "$STG" && mkdir -p "$OUT"
 "${LOW[@]}" "$PY" "$TL/make_site.py" "$BASE" --packs-dir "$PACKS" --region "$REGION" --region-title "$TITLE" \
   --region-langs "$RL" --langs "$PASSED" --titles "$(mget titles)" --language-meta map \
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
   --base-download "https://archive.org/download/streetzim-$REGION/$BF" --base-url "{proxy}/streetzim-$REGION/$BF" \
-  -o "$OUT.tmp" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
-rm -rf "$OUT" && mv "$OUT.tmp" "$OUT"
-"${LOW[@]}" "$PY" "$TL/site_check.py" "$SITE" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
-  --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} >> "$LOG" 2>&1 \
-  || { say "site_check.py FAILED (the log says which check); do not publish"; exit 1; }
+  -o "$OUT" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
+"${LOW[@]}" "$PY" "$TL/site_check.py" "$STG" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
+  --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
+CRC=$?
+cat "$STG.check" >> "$LOG"
+if [ $CRC != 0 ]; then
+  say "site_check.py FAILED (the log says which check): nothing replaced, nothing to publish ($STG kept)"
+  exit 1
+fi
+"$PY" "$TL/checked.py" write "$OUT" --summary "$(grep '^SUMMARY' "$STG.check" | tail -1)" || { say "could not seal $OUT"; exit 1; }
+rm -f "$STG.check"
+"$PY" "$TL/checked.py" swap "$STG" "$SITE" && rm -rf "$STG" || { say "could not replace $SITE"; exit 1; }
+OUT=$SITE/recipes/$REGION
 say "== ready: $OUT ($("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json"))"
 say "   publish: ops/langpack/publish_site.sh $REGION, then deploy the site"
 exit 0
