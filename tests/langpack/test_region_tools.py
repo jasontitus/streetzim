@@ -40,6 +40,7 @@ PLACES = [
     {"n": "Piraeus", "nn": "Πειραιάς", "s": "city", "a": 37.9420, "o": 23.6465, "q": "Q58976"},
     {"n": "Marousi", "nn": "Μαρούσι", "s": "town", "a": 38.0500, "o": 23.8000, "q": "Q852385"},
     {"n": "Keratsini", "s": "suburb", "a": 37.9622, "o": 23.6197},          # 3 km from Piraeus: the route's end
+    {"n": "Pasalimani", "s": "quarter", "a": 37.9380, "o": 23.6500},        # 0.5 km: too near to be a route
     {"n": "Edirne", "s": "city", "a": 41.6771, "o": 26.5557, "q": "Q43387"},   # far, and outside the outline
     {"n": "Volos", "nn": "Βόλος", "s": "city", "a": 39.3622, "o": 22.9420, "q": "Q200036"},
 ]
@@ -103,7 +104,8 @@ def _meta(base: Path, wiki: Path, core: str, cache: Path | None = None) -> dict:
     return json.loads(r.stdout)
 
 
-ADMIN = [{"n": "Testland", "s": "country", "q": "Q41"}, {"n": "Elsewhere", "s": "region", "q": "Q9"}]
+ADMIN = [{"n": "Testland", "s": "city", "q": "Q5"},        # a city of the same name is not the region
+         {"n": "Testland", "s": "country", "q": "Q41"}, {"n": "Elsewhere", "s": "region", "q": "Q9"}]
 
 
 def test_region_meta_languages_and_packs(tmp_path: Path) -> None:
@@ -121,16 +123,21 @@ def test_region_meta_languages_and_packs(tmp_path: Path) -> None:
 def test_region_meta_non_english_base_needs_english(tmp_path: Path) -> None:
     cfg = {"name": "Testland", "language": "de", "hasWikiArticles": True}
     b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
-    m = _meta(b, _wiki(tmp_path, ["de", "en", "fr"]), "fr,en")
+    w = _wiki(tmp_path, ["de", "en", "fr"])
+    m = _meta(b, w, "fr,en")
     assert m["base_wiki"] == "de" and m["langs"] == ["fr", "en", "de"]
     assert m["pack_langs"] == ["en", "fr"]
+    # English is needed even when it is not on the menu: every entry carries it
+    m2 = _meta(b, w, "fr")
+    assert m2["langs"] == ["fr", "de"] and m2["pack_langs"] == ["en", "fr"]
 
 
 def test_region_meta_titles_from_the_wikidata_cache(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     (cache / "wikidata-text").mkdir(parents=True)
     (cache / "wikidata-text" / "de.jsonl").write_text(
-        json.dumps(["Q9", "Anderswo", ""]) + "\n" + json.dumps(["Q41", "Testlandia", "Staat"]) + "\n")
+        json.dumps(["Q9", "Anderswo", ""]) + "\n" + json.dumps(["Q5", "Teststadt", ""]) + "\n"
+        + json.dumps(["Q41", "Testlandia", "Staat"]) + "\n")
     (cache / "wikidata-text" / "ja.jsonl").write_text(json.dumps(["Q41", "テ" * 31, ""]) + "\n")   # too long
     b = _base(tmp_path / "b.zim", PLACES, GEO, {"name": "Testland", "hasWikiArticles": True}, ADMIN)
     m = _meta(b, _wiki(tmp_path, ["de", "ja", "en"]), "de,ja,en", cache)
@@ -193,11 +200,12 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
     rc = prefetch.main(["base.zim", "--langs", "de,el", "--cache", str(tmp_path), "--text-rounds", "3"])
     assert rc == 0 and calls["text"] == ["de", "el", "el"]
     assert ("de", "redirect") in calls["dump"]
-    calls["text"].clear()
-    # a language whose dumps fail, or whose text never completes: exit 1, the others still done
+    # a language whose dumps fail: exit 1 (its text complete)
+    assert prefetch.main(["base.zim", "--langs", "zz", "--cache", str(tmp_path), "--text-rounds", "1"]) == 1
+    # text that never completes: exit 1 (its dumps fine)
     monkeypatch.setattr(wiki_pack, "wikidata_text", lambda q, lg, c, fetch=None, log=None:
                         ({}, {"qids": 2, "asked": 2, "requests": 1, "missing": 1, "complete": False}))
-    assert prefetch.main(["base.zim", "--langs", "zz,de", "--cache", str(tmp_path), "--text-rounds", "2"]) == 1
+    assert prefetch.main(["base.zim", "--langs", "de", "--cache", str(tmp_path), "--text-rounds", "2"]) == 1
 
 
 def test_prefetch_refuses_an_unknown_language(tmp_path: Path) -> None:
