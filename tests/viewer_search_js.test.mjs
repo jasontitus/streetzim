@@ -264,7 +264,6 @@ ok('Find page and Kiwix pages agree on the fitted zoom', () => {
   assert.strictEqual(js, py);
 });
 
-console.log(`\n${pass} passed`);
 
 ok('an area wins over the place record at its point (same name and point)', () => {
   const place = { n: 'Monaco', t: 'place', s: 'country', a: 43.73235, o: 7.42768 };
@@ -429,20 +428,25 @@ ok('a name in a language the visitor does not read does not outrank a place of t
   assert.ok(scoreAs(GLION, 'Glion', []) === scoreAs(GLION, 'Glion', ['rm']));
   assert.strictEqual(scoreAs(ILANZ, 'Ilanz', ['en']), scoreAs(ILANZ, 'Ilanz', ['it']));
 });
-ok('the visitor reads the map\'s second language and the UI\'s', () => {
-  const VL = new Function('SZ_LANG2', 'SZ_UI_LANG', slice(HTML, 'function _szVisitorLangs()', '\n// The normalized texts') +
-    '\nreturn _szVisitorLangs();');
-  assert.deepStrictEqual(VL('rm', 'de'), ['rm', 'de']);
-  assert.deepStrictEqual(VL('', 'en'), ['en']);
-  assert.deepStrictEqual(VL(undefined, undefined), []);
+ok('the visitor reads the map\'s second language, the UI\'s, the one asked for and the device\'s', () => {
+  const VL = new Function('SZ_LANG2', 'SZ_UI_LANG', 'SZ_UI_ASKED', 'navigator',
+    slice(HTML, 'function _szVisitorLangs()', '\n// The normalized texts') + '\nreturn _szVisitorLangs();');
+  assert.deepStrictEqual(VL('rm', 'de', 'rm', undefined), ['rm', 'de']);
+  assert.deepStrictEqual(VL('', 'en', 'en', { languages: ['fr-CH', 'de', 'fr'] }), ['en', 'fr', 'de']);
+  assert.deepStrictEqual(VL('', 'en', 'en', { language: 'it-IT' }), ['en', 'it']);
+  assert.deepStrictEqual(VL(undefined, undefined, undefined, undefined), []);
+  // A French phone on an English map: "Coire" is Chur, "Morat" Murten.
+  const fr = VL('', 'en', 'en', { languages: ['fr-FR'] });
+  assert.strictEqual(top([CHUR, COIRE_LOC], 'Coire', fr), 'Chur');
+  assert.strictEqual(top([MURTEN, MORAT_LOC], 'Morat', fr), 'Murten');
 });
 ok('forms carry the language of a name that only ln gives', () => {
   const f = V._szSearchForms({ n: 'Ilanz', t: 'place', ln: { rm: 'Glion', it: 'Ilanz', de: 'Glion' } }, norm);
   assert.deepStrictEqual(Array.from(f), ['ilanz', 'glion']);
-  assert.deepStrictEqual(f.lang, [null, 'rm']);
+  assert.deepStrictEqual(f.lang, [null, ['rm', 'de']]);
   const a = V._szSearchForms({ n: 'Geneva', t: 'admin', s: 'canton', ln: { de: 'Genf' } }, norm);
   assert.deepStrictEqual(Array.from(a), ['geneva', 'geneva canton', 'canton of geneva', 'genf', 'genf canton', 'canton of genf']);
-  assert.deepStrictEqual(a.lang, [null, null, null, 'de', 'de', 'de']);
+  assert.deepStrictEqual(a.lang, [null, null, null, ['de'], ['de'], ['de']]);
   // Cached on the record, out of its JSON.
   const r = { n: 'X', t: 'poi', ln: { de: 'Y' } };
   assert.strictEqual(V._szSearchForms(r, norm), V._szSearchForms(r, norm));
@@ -477,3 +481,15 @@ ok('the Find page matches part of a name in another language', () => {
   assert.ok(P.matchesName(GENEVA, 'Ginev') && P.matchesName(GENEVA, 'nevr'));
   assert.ok(!P.matchesName(GENEVA, 'Ginevrax'));
 });
+
+// A spelling several languages share keeps them all: Lucerne's "Lucerna"
+// (es, it, rm) is the city for an Italian or a Romansh visitor.
+ok('a name keeps every language that spells it so', () => {
+  const LUCERNE = { n: 'Lucerne', nn: 'Luzern', t: 'place', s: 'town', ln: { es: 'Lucerna', it: 'Lucerna', rm: 'Lucerna', fr: '' } };
+  const LUCERNA = { n: 'Lucerna', t: 'place', s: 'village' };
+  for (const l of ['es', 'it', 'rm']) assert.strictEqual(top([LUCERNE, LUCERNA], 'Lucerna', [l]), 'Lucerne', l);
+  assert.strictEqual(top([LUCERNE, LUCERNA], 'Lucerna', ['en']), 'Lucerna');
+  assert.deepStrictEqual(V._szLnNames(LUCERNE), ['Lucerna']);
+});
+
+console.log(`\n${pass} passed`);

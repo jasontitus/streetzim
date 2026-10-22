@@ -79,7 +79,8 @@ function load(tables, els = []) {
     return { szSetUiLanguage, szUseLanguage, szT, szTn, szFixed, szLocaleNum, szMonthYear,
              szApplyI18n, szChipLabel, szChipInSentence, szPlaceType, szCompactNum, szCompactIntl, szMachineTranslated,
              szInflate, szTableFrom,
-             get lang() { return SZ_UI_LANG; }, get pseudo() { return SZ_I18N_PSEUDO; },
+             get lang() { return SZ_UI_LANG; }, get asked() { return SZ_UI_ASKED; },
+             get pseudo() { return SZ_I18N_PSEUDO; },
              get rtl() { return SZ_UI_RTL; }, get table() { return SZ_I18N; } };`)(document, window);
   return { api, docEl, events };
 }
@@ -806,6 +807,22 @@ await ok('route engines: segments carry flags and class, roads their classes at 
   const b = fs.readFileSync(`${REPO}/resources/viewer/src/index/540-routing-worker-bridge.js`, 'utf8');
   assert.match(b, /segRev\.push\(szRouteSegment\(nameIdx, distM, graph\.edgeClassAccess\(ei\)\)\);/);
   assert.match(b, /var roads = szRoadsFromSegments\(segRev\);/);
+});
+
+
+// The language the UI was asked in, before any fallback (SZ_UI_ASKED): the
+// search ranks names in it as the visitor's (300-search.js, _szVisitorLangs).
+await ok('the language asked for is kept beside the one shown', () => {
+  let r = load(INDEX_TABLES);
+  assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'de');
+  assert.strictEqual(r.api.asked, 'rm');
+  r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage('en', '?uilang=sw-KE');
+  assert.strictEqual(r.api.lang, 'en');
+  assert.strictEqual(r.api.asked, 'sw');
+  r = load(INDEX_TABLES);
+  r.api.szSetUiLanguage(undefined, '');
+  assert.strictEqual(r.api.asked, 'en');
 });
 
 console.log(`${pass} passed`);

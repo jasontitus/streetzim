@@ -47,16 +47,18 @@ var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
                            suburb: 10, village: 8, neighbourhood: 4 };
 
 // A record's names in other languages (`ln`, {lang: name}: "Genf",
-// "Ginevra" for Geneva) as [name, lang] pairs, each name once (with its
-// first language), in the record's order. "" stands for `nn` and adds no
-// name of its own.
+// "Ginevra" for Geneva) as [name, [langs]] pairs, each name once with every
+// language that spells it so (Lucerne: "Lucerna" es, it, rm), in the
+// record's order. "" stands for `nn` and adds no name of its own.
 function _szLnPairs(rec) {
   var out = [], seen = [];
   var ln = rec && rec.ln;
   if (!ln || typeof ln !== 'object') return out;
   for (var k in ln) {
-    if (Object.prototype.hasOwnProperty.call(ln, k) && typeof ln[k] === 'string'
-        && ln[k] && seen.indexOf(ln[k]) < 0) { seen.push(ln[k]); out.push([ln[k], k]); }
+    if (!Object.prototype.hasOwnProperty.call(ln, k) || typeof ln[k] !== 'string' || !ln[k]) continue;
+    var at = seen.indexOf(ln[k]);
+    if (at < 0) { seen.push(ln[k]); out.push([ln[k], [k]]); }
+    else out[at][1].push(k);
   }
   return out;
 }
@@ -101,20 +103,34 @@ function _szShownNames(rec, lang) {
   return [String(rec.n || ''), (typeof rec.nn === 'string' && rec.nn) ? rec.nn : ''];
 }
 
-// The languages a visitor reads here: the map's second language (SZ_LANG2,
-// a merged language-pack map) and the UI's (SZ_UI_LANG). A name in another
-// language (`ln`) still finds its place, but does not count as typing the
-// place's own name (_szTextScore).
+// The languages a visitor reads here, for ranking only: the map's second
+// language (SZ_LANG2, a merged language-pack map), the UI's (SZ_UI_LANG),
+// the one the UI was asked in before any fallback (SZ_UI_ASKED: rm, shown
+// in German), and the device's (navigator.languages, base codes: a French
+// phone on an English map). A name in another language (`ln`) still finds
+// its place, but does not count as typing the place's own name
+// (_szTextScore). Display stays SZ_LANG2's, the UI map-config's.
 function _szVisitorLangs() {
   var out = [];
-  if (typeof SZ_LANG2 === 'string' && SZ_LANG2) out.push(SZ_LANG2);
-  if (typeof SZ_UI_LANG === 'string' && SZ_UI_LANG) out.push(SZ_UI_LANG);
+  function add(l) {
+    if (typeof l !== 'string' || !l) return;
+    l = l.toLowerCase().split('-')[0];
+    if (l && out.indexOf(l) < 0) out.push(l);
+  }
+  if (typeof SZ_LANG2 === 'string') add(SZ_LANG2);
+  if (typeof SZ_UI_LANG === 'string') add(SZ_UI_LANG);
+  if (typeof SZ_UI_ASKED === 'string') add(SZ_UI_ASKED);
+  try {
+    var nav = typeof navigator !== 'undefined' ? navigator : null;
+    var list = nav && nav.languages && nav.languages.length ? nav.languages : (nav && nav.language ? [nav.language] : []);
+    for (var i = 0; i < list.length; i++) add(list[i]);
+  } catch (e) {}
   return out;
 }
 
 // The normalized texts a record answers to: its names; for an admin area
 // also "<name> <type>" and "<type> of <name>". The list's `lang` gives
-// each form's language when it comes from `ln` only (null for the
+// each form's languages when it comes from `ln` only (null for the
 // record's own names). Kept on the record (not enumerable): a search
 // re-scores the cached chunks' records at every keystroke.
 function _szSearchForms(rec, norm) {
@@ -188,11 +204,16 @@ function _szFormsContain(rec, qNorm, norm) {
 
 // Text score before proximity, or -1 when the record does not match: every
 // query word must appear in the name (an admin area may skip "of", "de", ...).
-// A name in another language than the visitor's (`ln`; visitor:
-// _szVisitorLangs) gets no bonus for an exact match: "Glion" is the
-// village Glion before Ilanz (Romansh Glion), "Vieille Ville" a
+// A name in other languages only, none of them the visitor's (`ln`;
+// visitor: _szVisitorLangs), gets no bonus for an exact match: "Glion" is
+// the village Glion before Ilanz (Romansh Glion), "Vieille Ville" a
 // neighbourhood of that name before an Altstadt, while "Genf" still finds
 // Geneva and a French visitor's "Coire" Chur.
+function _szForeign(langs, mine) {
+  if (!langs) return false;
+  for (var i = 0; i < langs.length; i++) if (mine.indexOf(langs[i]) >= 0) return false;
+  return true;
+}
 function _szTextScore(item, q, words, norm, visitor) {
   var forms = _szSearchForms(item, norm);
   var langs = forms.lang || [];
@@ -203,7 +224,7 @@ function _szTextScore(item, q, words, norm, visitor) {
     var name = forms[f];
     var textScore = _szWordsScore(name, words, admin);
     if (textScore < 0) continue;
-    if (name === q && !(langs[f] && mine.indexOf(langs[f]) < 0)) textScore += 50;
+    if (name === q && !_szForeign(langs[f], mine)) textScore += 50;
     if (name.indexOf(q) === 0) textScore += 25;
     if (textScore > best) best = textScore;
   }

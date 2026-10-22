@@ -68,6 +68,7 @@
 // BEGIN sz-i18n-runtime
 // resources/viewer/i18n/runtime.js (comments there); docs/i18n.md
 var SZ_UI_LANG = 'en';      // the language the UI is shown in
+var SZ_UI_ASKED = 'en';     // the language asked for (map-config, ?uilang=) before any fallback
 var SZ_I18N = null;         // its table, or null for English
 var SZ_I18N_PSEUDO = false; // ?uilang=qps: every string as [text], to find misses
 var SZ_UI_RTL = false;      // the UI language is written right to left
@@ -223,6 +224,7 @@ function szSetUiLanguage(lang, search) {
   var m = /[?&]uilang=([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)?)/.exec(String(search || ''));
   if (m) lang = m[1];
   var base = String(lang || 'en').toLowerCase().split('-')[0];
+  SZ_UI_ASKED = base;
   SZ_I18N_PSEUDO = base === 'qps';
   SZ_I18N = null;
   if (base !== 'en' && !SZ_I18N_PSEUDO) {
