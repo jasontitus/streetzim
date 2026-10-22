@@ -270,7 +270,8 @@ the map's own `regionLanguages` (hy, sv, ...) that have a Kiwix Wikipedia
 ZIM in `WIKI_SRC`. A language without one is skipped and logged; a region
 language without one is left out of the region's languages, since every
 menu entry would need its pack. A continent or multi-country map (its tier
-in `cloud/regions.tsv`) keeps its `REGION_PACKS_MAX` (3) most spoken
+in `cloud/regions.tsv`; any tier but country, local and us-region, and a
+region the registry does not list) keeps its `REGION_PACKS_MAX` (3) most spoken
 languages with a Wikipedia ZIM, the base's own not counted
 (`cloud/region-languages.tsv` lists them by speakers: Europe 38, Africa
 31), so its entries stay within a browser's memory; the others stay on the
