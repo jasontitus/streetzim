@@ -65,6 +65,24 @@ def test_a_corrupt_pack_saves_nothing(page: SimpleNamespace) -> None:
     assert rows[0]["status"].startswith("Not started: Wikipedia could not be downloaded"), rows
 
 
+@pytest.mark.parametrize("throttle", ["20000:5000:20", "750:250:100"])     # 20 Mbit/s; 3G
+def test_every_click_shows_progress_at_once(page: SimpleNamespace, throttle: str, tmp_path: Path) -> None:
+    """User report on the Swiss preview: nothing visible for 20 s after a
+    click (the recipe and the pack checks loaded silently). The button turns
+    busy and the job panel appears within the click; the panel changes at
+    least every 1.5 s until the file is done, at phone width, the network
+    slowed by Chromium's emulation."""
+    shots = tmp_path / "shots"
+    rc, rows = _e2e(page, "de", "net", "--throttle", throttle, "--watch-secs", "120", "--viewport", "390x844",
+                    "--shots", str(shots))
+    assert rc == 0 and rows[0]["pass"], rows
+    fb = rows[0]["feedback"]
+    assert fb["first_change_ms"] is not None and fb["first_change_ms"] < 200, fb
+    assert fb["max_gap_ms"] < 1500 and fb["max_progress_gap_ms"] < 1500, fb
+    assert rows[0]["phases"] and rows[0]["phases"][-1] in ("saving", "verify", "packs", "map"), rows[0]["phases"]
+    assert list(shots.glob("de-390x844-*.png")), list(shots.iterdir())
+
+
 def test_a_dead_browser_fails_fast(page: SimpleNamespace, tmp_path: Path) -> None:
     """A browser that cannot start: the driver says so for every language
     and exits (its two local servers kept it waiting until the caller's
