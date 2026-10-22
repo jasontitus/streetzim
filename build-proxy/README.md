@@ -115,65 +115,116 @@ An archive.org answer with the same ETag and size that ignores the Range
 another ETag or size marks a version out of date, which an isolate
 remembers for 10 minutes.
 
+## Deploy from your laptop
+
+You need Node.js 22 or later (current wrangler 4 requires it), git, and a
+login to the Cloudflare account that already runs `streetzim-preview-proxy`
+(the two share that account's free-plan requests; see Limits).
+
+```sh
+git clone https://github.com/jasontitus/streetzim.git && cd streetzim && git checkout lang-torrents && cd build-proxy
+npx wrangler@4 login      # opens the browser
+npx wrangler@4 deploy     # production: SITE_ORIGIN https://streetzim.web.app, from wrangler.toml
+```
+
+For a site on a Firebase preview channel (the recipes, indexes and blobs
+are published only there), give the worker that channel's origin:
+
+```sh
+npx wrangler@4 deploy --var SITE_ORIGIN:https://<preview channel origin>
+```
+
+A `--var` applies to that deploy only: a later plain `deploy` goes back to
+wrangler.toml's values, so repeat it on every deploy for the channel.
+
+`deploy` prints the upload, the bindings (`env.METER (WebseedMeter)`,
+`SITE_ORIGIN`, `UPSTREAM`, `WEBSEED_DAILY_BUDGET`), and the worker's URL,
+`https://streetzim-build-proxy.<account>.workers.dev` (the preview proxy's
+workers.dev subdomain), with a version ID. The first deploy also applies
+the meter's Durable Object migration (`v1`).
+
+Check it with a published region (the webseed URL of each language is in
+its index on the site):
+
+```sh
+SITE=https://streetzim.web.app            # or the preview channel's origin
+WS=$(curl -s "$SITE/build/recipes/<region>/de.ws.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["webseed"])')
+curl -sI "$WS"                     # 200, Accept-Ranges: bytes, Content-Length = the language version's size
+curl -s -r 0-99 "$WS" | wc -c      # 100
+python3 ../tools/langpack/webseed_smoke.py --site "$SITE" --region <region> \
+    --webseed https://streetzim-build-proxy.<account>.workers.dev
+```
+
+webseed_smoke.py (Python 3, standard library only) checks every language
+of the region: HEAD, the first, last and spread pieces, and a range across
+every part boundary, each against the torrent's piece hashes. It prints a
+JSON line per language and exits 0 when all pass.
+
+Kill switches (a redeploy each, live within seconds; for a preview channel
+add its `--var SITE_ORIGIN:…` too):
+
+```sh
+npx wrangler@4 deploy --var MERGED:0                     # webseed and direct downloads off
+npx wrangler@4 deploy --var OFF:1                        # everything off (503)
+npx wrangler@4 deploy --var WEBSEED_DAILY_BUDGET:10000   # a lower daily cap
+```
+
+Switched-off requests still count against the account's 100,000 a day.
+To stop that, remove the worker:
+
+```sh
+npx wrangler@4 delete     # asks first; removes the worker and its meter
+```
+
+Torrents keep working wherever peers seed them, and clients drop a webseed
+that stops answering. The webseed origin is written into each torrent, so
+moving the worker to another origin means running `lang_torrents.py` again.
+That gives new torrent files with the same infohash, because the infohash
+covers only the file.
+
+### On the build host, after the deploy
+
+`LANGPACK_WEBSEED=https://streetzim-build-proxy.<account>.workers.dev` in
+`ops/langpack/host-env.sh`, or in the ship run's environment. With it,
+`ops/langpack/ship_packs.sh` writes a torrent per language entry beside the
+recipes (`<L>.torrent`, `<L>.ws.json`, `ws-*.bin`). site_check.py checks
+them: every piece, the webseed origin, the ETags and the subrequest bound.
+They are then sealed and published with the recipes
+(`ops/langpack/publish_site.sh`, then the site deploy). If only the torrent
+files fail the check, ship_packs.sh strips them and publishes the recipes
+without. The page shows a "Torrent" link per language. Optionally,
+`web/build/build-config.js` can send the /build/ page's own range requests
+through this worker instead of the preview proxy:
+`window.STREETZIM_BUILD_PROXY = 'https://streetzim-build-proxy.<account>.workers.dev'`.
+
 ## Local test under workerd (no Cloudflare login)
 
 `wrangler dev --local` runs the worker in workerd, the Workers runtime, with
-the METER Durable Object, which exercises what Node cannot (FixedLengthStream,
-the blob copies, HEAD's Content-Length, the meter). Install wrangler in a
-folder with its own package.json (never under /storage/streetzim), start
-the stand-ins and point the worker at them:
+the METER Durable Object. That exercises what Node cannot:
+FixedLengthStream, the blob copies, HEAD's Content-Length and the meter.
+Start the stand-ins and point the worker at them. wrangler writes
+`.wrangler/` next to wrangler.toml, so on the build host use a clone outside
+the production checkout.
 
 ```sh
-npm install --prefix /storage/experiments/wrangler wrangler@4     # that folder has its own package.json
 cd build-proxy
-/storage/experiments/wrangler/node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8799 \
+npx wrangler@4 dev --local --ip 127.0.0.1 --port 8799 --persist-to "$TMPDIR/meter" \
   --var SITE_ORIGIN:http://127.0.0.1:<stand-in> --var UPSTREAM:http://127.0.0.1:<stand-in>/download/
 python3 ../tools/langpack/webseed_smoke.py --site http://127.0.0.1:<stand-in> --region <region> --via http://127.0.0.1:8799
 ```
 
-(`tools/langpack/webseed_e2e.py`'s `ranged_server` is the stand-in for
-archive.org and the site.) Checked 2026-10-22 on Greece: every piece of two
-torrents, their MD5s, a libtorrent webseed-only download, and the meter with
-WEBSEED_DAILY_BUDGET=5 (5 answers, then 503s; a restart with the same
-`--persist-to` keeps the count, the 20 s tail report included). Through a
-fault-injecting proxy in front of the archive.org stand-in: archive.org 500s
-and a 200 with the same ETag answer 503 with Retry-After and leave the
-version usable; another ETag answers 404 "out of date", which that version
-(not the other languages) keeps until the 10 minutes are up.
+`tools/langpack/webseed_e2e.py`'s `ranged_server` is the stand-in for both
+archive.org and the site. Checked 2026-10-22 on Greece:
 
-## Deploy (by hand, once)
+- every piece of two torrents and their MD5s;
+- a libtorrent webseed-only download;
+- the meter with WEBSEED_DAILY_BUDGET=5: 5 answers, then 503s. A restart
+  with the same `--persist-to` keeps the count, the 20 s tail report
+  included.
 
-```sh
-cd build-proxy
-npx wrangler login            # opens a browser; the build host has no Cloudflare login
-npx wrangler deploy           # prints https://streetzim-build-proxy.<account>.workers.dev
-python3 ../tools/langpack/webseed_smoke.py --site https://streetzim.web.app --region <region> \
-    --webseed https://streetzim-build-proxy.<account>.workers.dev
-                              # after the first publish: the live torrents' pieces through the worker
-```
+Through a fault-injecting proxy in front of the archive.org stand-in:
 
-Then:
-
-1. `ops/langpack/host-env.sh` (or the environment of the ship run):
-   `LANGPACK_WEBSEED=https://streetzim-build-proxy.<account>.workers.dev`.
-   `ops/langpack/ship_packs.sh` then writes a torrent per language entry
-   (`<L>.torrent`, `<L>.ws.json`, `ws-*.bin`) beside the recipes;
-   site_check.py checks them (every piece, the webseed origin against
-   `LANGPACK_WEBSEED`, the ETags, the subrequest bound) and they are sealed and
-   published with the recipes (`ops/langpack/publish_site.sh`, then the site
-   deploy). If only the torrent files fail the check, ship_packs.sh strips
-   them and publishes the recipes without. The page shows a "Torrent" link
-   per language.
-2. Optionally `web/build/build-config.js`:
-   `window.STREETZIM_BUILD_PROXY = 'https://streetzim-build-proxy.<account>.workers.dev'`,
-   so the /build/ page's own range requests go through this worker instead
-   of the preview proxy.
-
-Switch off: `MERGED = "0"` (the webseed and direct downloads) or `OFF = "1"`
-(everything) under `[vars]`, then `npx wrangler deploy` — requests are still
-counted; `workers_dev = false` or `npx wrangler delete` stops that. Torrents
-keep working wherever peers seed them.
-
-The webseed origin is written into each torrent: moving the worker to
-another origin means running `lang_torrents.py` again (new torrent files;
-the infohash does not change, it covers only the file).
+- archive.org 500s, and a 200 with the same ETag, answer 503 with
+  Retry-After and leave the version usable;
+- another ETag answers 404 "out of date", and that version (not the other
+  languages) stays out of date until the 10 minutes are up.
