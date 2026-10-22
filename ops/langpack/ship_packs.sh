@@ -7,7 +7,9 @@
 #   ops/langpack/ship_packs.sh REGION BASE.zim
 #
 # BASE is the map as published: archive.org item streetzim-<REGION> lists it
-# with this MD5 (site_check.py checks). Steps, each logged with PDT times to
+# with this MD5 (site_check.py checks). SHIP_BASE_ITEM and SHIP_PACK_ITEM
+# name other items (a preview on test items: streetzim-langtest-<REGION> and
+# streetzim-langtest-<REGION>-lang), SHIP_ITEM_TITLE the packs item's title. Steps, each logged with PDT times to
 # $LANGPACK_WORK/logs/ship-<REGION>-<base>.log:
 #   1. region_meta.py: the languages (core + the map's regionLanguages that
 #      have a Wikipedia ZIM; a language without one is skipped and logged),
@@ -83,7 +85,8 @@ TAG=$(basename "$BASE" .zim)
 W=$LANGPACK_WORK
 PACKS=$W/packs/$TAG
 SITE=$W/site/$REGION
-ITEM=streetzim-$REGION-lang
+ITEM=${SHIP_PACK_ITEM:-streetzim-$REGION-lang}
+BASE_ITEM=${SHIP_BASE_ITEM:-streetzim-$REGION}
 mkdir -p "$W/logs" "$W/locks" "$W/regions" "$PACKS"
 LOG=$W/logs/ship-$REGION-$TAG.log
 exec 9> "$W/locks/ship-$REGION.lock"
@@ -297,7 +300,7 @@ if [ ${#SEND[@]} -gt 0 ]; then
     ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "$f" --retries 5 --checksum \
         --metadata="mediatype:data" --metadata="collection:opensource_media" \
         --metadata="licenseurl:https://creativecommons.org/licenses/by-sa/4.0/" \
-        --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
+        --metadata="title:${SHIP_ITEM_TITLE:-StreetZim $TITLE: Wikipedia language packs}" \
         "${LANG_META[@]}" \
         --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
         >> "$LOG" 2>&1 ) || { say "ia upload of $f failed (the packs sent before it are recorded in $SENT)"; exit 1; }
@@ -330,7 +333,7 @@ rm -rf "$STG" && mkdir -p "$OUT"
 "${LOW[@]}" "$PY" "$TL/make_site.py" "$BASE" --packs-dir "$PACKS" --region "$REGION" --region-title "$TITLE" \
   --region-langs "$RL" --langs "$PASSED" --titles "$(mget titles)" --language-meta map \
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
-  --base-download "https://archive.org/download/streetzim-$REGION/$BF" --base-url "{proxy}/streetzim-$REGION/$BF" \
+  --base-download "https://archive.org/download/$BASE_ITEM/$BF" --base-url "{proxy}/$BASE_ITEM/$BF" \
   -o "$OUT" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
 "$PY" -c 'import json,sys; [print("REFUSED %s: %s" % (r.get("lang") or r.get("pack"), r["why"])) for r in json.load(open(sys.argv[1]))]' \
   "$OUT/refused.json" | while read -r l; do say "$l"; done

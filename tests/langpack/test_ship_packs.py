@@ -360,6 +360,27 @@ def test_a_failed_site_check_replaces_and_publishes_nothing(ship: SimpleNamespac
     assert not (tmp_path / "web2" / "build" / "recipes" / "testland").exists()
 
 
+def test_a_preview_on_test_items(ship: SimpleNamespace) -> None:
+    """A preview ships to test items (the live ones untouched): the base on
+    SHIP_BASE_ITEM, the packs to SHIP_PACK_ITEM with SHIP_ITEM_TITLE, and
+    the recipes point there."""
+    (ship.work / "ia-cache" / "ia-streetzim-langtest-testland.json").write_text(
+        (ship.work / "ia-cache" / "ia-streetzim-testland.json").read_text())
+    title = "PREVIEW (test) StreetZim Testland: Wikipedia packs"
+    r = _run(ship, SHIP_BASE_ITEM="streetzim-langtest-testland", SHIP_PACK_ITEM="streetzim-langtest-testland-lang",
+             SHIP_ITEM_TITLE=title)
+    assert r.returncode == 0, _log(ship)[-2000:]
+    ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
+    assert ups and all(x["item"] == "streetzim-langtest-testland-lang" and f"--metadata=title:{title}" in x["args"]
+                       for x in ups), ups
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    reg = json.loads((out / "index.json").read_text())["regions"][0]
+    assert reg["base"]["url"] == f"{{proxy}}/streetzim-langtest-testland/{ship.base.name}"
+    assert reg["base"]["download"] == f"https://archive.org/download/streetzim-langtest-testland/{ship.base.name}"
+    rde = json.loads((out / "de.json").read_text())
+    assert rde["packs"]["de"]["url"] == "{proxy}/streetzim-langtest-testland-lang/" + _pk(ship, "de")
+
+
 def test_a_continent_or_a_big_base_gets_no_packs(ship: SimpleNamespace) -> None:
     """Re-review: v1 gives no packs to a continent (cloud/regions.tsv) or a
     base over SHIP_MAX_BASE_GB: refused in step 1, exit 4, before any
