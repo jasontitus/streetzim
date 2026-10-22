@@ -5,8 +5,11 @@
 //
 //   node builder_e2e.mjs --web WEB_DIR --recipes RECIPES_DIR --item ITEM=DIR [--item ...]
 //        --region R --langs L1,L2 --out OUT_DIR [--mode net|file] [--base BASE.zim]
-//        [--corrupt ITEM/FILE@OFFSET] [--expect pass|fail]
+//        [--corrupt ITEM/FILE@OFFSET] [--expect pass|fail] [--proxy-url URL]
 //
+// --proxy-url: the page uses that range proxy (the real one in front of
+// archive.org, web/drive/preview-config.js) instead of the local stand-in
+// below; then no --item is needed and the "proxy" counts stay 0.
 // Two local servers stand in for the site and the range proxy:
 //   page  http://localhost:P1/  WEB_DIR, with /build/recipes/ = RECIPES_DIR and
 //         /drive/preview-config.js naming the proxy below (the one place the
@@ -42,6 +45,7 @@ const OUT = path.resolve(opt('--out'));
 const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
 const EXPECT = opt('--expect', 'pass');
+const PROXY_URL = opt('--proxy-url', '');
 const CORRUPT = (() => {
   const c = opt('--corrupt'); if (!c) return null;
   const m = /^([^/]+)\/([^@]+)@(\d+)$/.exec(c); if (!m) throw new Error('--corrupt ITEM/FILE@OFFSET');
@@ -119,7 +123,7 @@ const proxy = http.createServer((req, res) => {
 });
 await new Promise((r) => page.listen(0, 'localhost', r));
 await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
-PROXY = `http://127.0.0.1:${proxy.address().port}`;
+PROXY = PROXY_URL || `http://127.0.0.1:${proxy.address().port}`;
 const PAGE = `http://localhost:${page.address().port}/build/`;
 
 async function md5File(p) {
