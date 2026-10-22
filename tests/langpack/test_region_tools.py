@@ -97,8 +97,8 @@ def _wiki(tmp_path: Path, langs: list[str]) -> Path:
     return w
 
 
-def _meta(base: Path, wiki: Path, core: str, cache: Path | None = None) -> dict:
-    args = [base, "--wiki-src", wiki, "--core", core] + (["--cache", cache] if cache else [])
+def _meta(base: Path, wiki: Path, core: str, cache: Path | None = None, *extra: str) -> dict:
+    args = [base, "--wiki-src", wiki, "--core", core] + (["--cache", cache] if cache else []) + list(extra)
     r = tool("region_meta.py", *args)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
@@ -126,14 +126,30 @@ def test_region_meta_keeps_a_continents_most_spoken_languages(tmp_path: Path) ->
     cfg = {"name": "Europe", "hasWikiArticles": True, "regionLanguages": ["en", "de", "xx", "ru", "fr", "tr", "it"]}
     b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
     w = _wiki(tmp_path, ["de", "en", "fr", "it", "ru", "tr"])
-    m = _meta(b, w, "de,fr,it,en")
+    m = _meta(b, w, "de,fr,it,en", None, "--tier", "continent")
     assert m["region_langs"] == ["en", "de", "ru", "fr"]
     why = {d["lang"]: d["why"] for d in m["dropped"]}
     assert set(why) == {"xx", "tr", "it"} and why["xx"].startswith("region language with no Wikipedia ZIM")
     assert why["tr"].startswith("region language beyond the 3 most spoken") and why["it"] == why["tr"]
     assert "it" in m["langs"]                                    # still on the menu: a core language
-    r = tool("region_meta.py", b, "--wiki-src", w, "--core", "de", "--region-packs-max", "1")
-    assert json.loads(r.stdout)["region_langs"] == ["en", "de"]
+    r = tool("region_meta.py", b, "--wiki-src", w, "--core", "de", "--region-packs-max", "1", "--region", "europe")
+    assert json.loads(r.stdout)["region_langs"] == ["en", "de"] and json.loads(r.stdout)["tier"] == "continent"
+
+
+def test_a_country_map_carries_all_its_languages(tmp_path: Path) -> None:
+    """The cap is for continents and multi-country maps: Switzerland (a
+    country in cloud/regions.tsv) carries de, fr, it and rm in every entry."""
+    cfg = {"name": "Switzerland", "hasWikiArticles": True, "regionLanguages": ["de", "fr", "it", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
+    w = _wiki(tmp_path, ["de", "fr", "it", "rm", "en", "ja"])
+    for extra in (("--region", "switzerland"), ("--tier", "country"), ()):
+        m = _meta(b, w, "ja,en", None, *extra)
+        assert m["region_langs"] == ["de", "fr", "it", "rm"] and not m["dropped"], (extra, m)
+        assert m["pack_langs"] == ["de", "fr", "it", "ja", "rm"]
+    assert _meta(b, w, "ja,en", None, "--tier", "multi-country")["region_langs"] == ["de", "fr", "it"]
+    from tools.langpack.region_meta import registry_tier
+    assert (registry_tier("switzerland"), registry_tier("europe"), registry_tier("balkans"),
+            registry_tier("switzerland-de"), registry_tier(None)) == ("country", "continent", "multi-country", None, None)
 
 
 def test_region_meta_non_english_base_needs_english(tmp_path: Path) -> None:

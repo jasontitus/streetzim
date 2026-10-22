@@ -39,7 +39,8 @@
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
-# (the region's most spoken languages every entry carries; default 3), IA (the
+# (a continent or multi-country map's most spoken languages every entry
+# carries; default 3; a country map carries all its languages), IA (the
 # archive.org CLI; default venv-linux's ia), UPLOAD_LOCK (the host's upload
 # lock, default /storage/streetzim/.retrofit-upload.lock), SHIP_RESEND_AFTER_H
 # (72), SHIP_SKIP_UPLOAD=1 (stop after
@@ -85,7 +86,7 @@ LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=24000000000 --)
 say "== ship_packs $REGION $BASE"
 
 # 1. languages
-CORE_ARG=(); [ -n "${CORE:-}" ] && CORE_ARG=(--core "$CORE")
+CORE_ARG=(--region "$REGION"); [ -n "${CORE:-}" ] && CORE_ARG+=(--core "$CORE")
 [ -n "${REGION_PACKS_MAX:-}" ] && CORE_ARG+=(--region-packs-max "$REGION_PACKS_MAX")
 META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --cache "$WP_CACHE" "${CORE_ARG[@]}") \
   || { say "region_meta.py failed"; exit 1; }
