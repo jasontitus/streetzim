@@ -123,8 +123,14 @@ Latin name already).
   `streetzim.languages.osm_names`), from the feature's own `names`
   (search features extracted with `STREETZIM_TILE_LANGUAGES`; an admin
   area's relation), else from the OSM object its wiki cross-ref matched
-  (`extract_wiki_tags_pbf(languages=…)`, same match as `w`/`q` above). So a
-  place with no `wikipedia`/`wikidata` tag and no tile names has none.
+  (`extract_wiki_tags_pbf(languages=…)`, same match as `w`/`q` above), else
+  from the names lookup: every OSM object with a `name:<lang>` in the
+  languages, roads left out (`extract_name_tags_pbf`), matched the same
+  way by name and ~11 m cell, where objects agree when they carry the
+  same names (`names_link`). That reaches villages, hamlets, peaks,
+  streams, stations and POIs with no wiki tag (Switzerland: +5,509
+  records, Ilanz → Glion). `STREETZIM_SEARCH_LN_NAMES=0` leaves the lookup
+  out.
 - **Which records:** `place`, `admin`, `airport`, `peak`, `park`, `water`
   and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides);
   not streets or addresses.
@@ -151,6 +157,7 @@ Latin name already).
   | | records | with `ln` | chunk bytes | tier-c chunks | place category | new 2-char keys |
   |---|---|---|---|---|---|---|
   | Switzerland (22 languages, with admin) | 2.3 M | 3,086 | +0.4% | +2.4% | +0.9% | +294 |
+  | Switzerland, with the names lookup | 2.3 M | 8,595 | +0.8% | +3.1% | | +356 |
   | Greece (21) | 1.07 M | 10,343 | +1.5% | +9.2% | +9.8% | +227 |
   | Poland (21) | 2.95 M | 26,268 | +1.7% | +9.0% | +4.9% | +289 |
 

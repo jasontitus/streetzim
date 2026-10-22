@@ -200,6 +200,10 @@ def test_a_language_ready_build_asks_for_names(monkeypatch, tmp_path):
     monkeypatch.setattr(c, "append_admin_areas",
                         lambda p, jsonl, bbox=None, wiki_refs=None, languages=None:
                         got.__setitem__("admin", languages) or 0)
+    lookup = {("x", 1, 2): {"names": {"rm": "y"}}}
+    monkeypatch.setattr(c, "extract_name_tags_pbf",
+                        lambda p, languages, bbox=None, precut=False:
+                        got.__setitem__("names", languages) or lookup)
     cache = tmp_path / "cache.jsonl"
     cache.write_text(json.dumps({"lat": 43.74, "lon": 7.42, "name": "x"}) + "\n")
     args = _args(pbf="in.pbf", search_cache=str(cache), tile_languages=["de", "fr"],
@@ -207,4 +211,12 @@ def test_a_language_ready_build_asks_for_names(monkeypatch, tmp_path):
     c._build_search(args=args, bbox_str=None, mbtiles_path=None, pbf_path="in.pbf",
                     tiles=None, tmpdir=str(tmp_path), total_steps=6,
                     use_streaming=False, work_pbf=None, work_pbf_cut=False)
-    assert got == {"wiki": ["de", "fr", "rm"], "admin": ["de", "fr", "rm"]}
+    assert got == {"wiki": ["de", "fr", "rm"], "admin": ["de", "fr", "rm"],
+                   "names": ["de", "fr", "rm"]}
+    assert args._ln_name_refs is lookup        # what create_zim gets (_write_zim)
+    got.clear()
+    monkeypatch.setenv("STREETZIM_SEARCH_LN_NAMES", "0")
+    c._build_search(args=args, bbox_str=None, mbtiles_path=None, pbf_path="in.pbf",
+                    tiles=None, tmpdir=str(tmp_path), total_steps=6,
+                    use_streaming=False, work_pbf=None, work_pbf_cut=False)
+    assert "names" not in got and args._ln_name_refs is None

@@ -154,6 +154,7 @@ from streetzim.addresses import (  # noqa: F401
     _is_url_dead,
     merge_overture_addresses,
     merge_overture_places,
+    extract_name_tags_pbf,
     extract_wiki_tags_pbf,
 )
 from streetzim.overture import overture_release
@@ -1208,6 +1209,17 @@ def _build_search(
                 wiki_cross_refs = None
             wiki_cross_refs = _finish_wiki_cross_refs(args, wiki_cross_refs,
                                                       search_features, admin_refs)
+            # Names in the search languages of every OSM object that has
+            # them (villages, peaks, lakes, stations without a wiki tag),
+            # for the records' `ln`; create_zim gets it from args.
+            args._ln_name_refs = None
+            _ln = _ln_kwargs(args)
+            if _ln and os.environ.get("STREETZIM_SEARCH_LN_NAMES", "1") != "0":
+                try:
+                    args._ln_name_refs = extract_name_tags_pbf(
+                        addr_pbf, _ln["languages"], bbox=addr_bbox, precut=addr_precut)
+                except Exception as _e:
+                    print(f"    Warning: names-in-other-languages extraction failed: {_e}")
         else:
             _clip_search_features(search_features)
     return address_count, overture_sources, overture_themes, search_features, wiki_cross_refs
@@ -1929,6 +1941,7 @@ def _write_zim(
         split_hot_search_chunks_mb=int(getattr(args, 'split_hot_search_chunks_mb', 0) or 0),
         split_find_chips=bool(getattr(args, 'split_find_chips', False)),
         wiki_cross_refs=wiki_cross_refs,
+        ln_name_refs=getattr(args, "_ln_name_refs", None),
         overture_sources=overture_sources,
         overture_themes=overture_themes,
         overture_release=_overture_releases(args, overture_themes),

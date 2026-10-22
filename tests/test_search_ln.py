@@ -389,3 +389,220 @@ def test_the_build_takes_the_languages_from_map_config(tmp_path, monkeypatch):
                           overture_themes=None, xapian_mode="libzim", chunk_tmp=str(tmp_path))
         assert got["ln"] == want
     assert real is not None
+
+
+# --- the names lookup: every OSM object with names in the languages --------
+
+VILLAGE = {"name": "Ilanz", "type": "place", "subtype": "town", "lat": 46.7739, "lon": 9.2051}
+VCELL = (int(round(46.7739 * 1e4)), int(round(9.2051 * 1e4)))
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_the_names_lookup_reads_every_object_with_names(tmp_path):
+    from streetzim.addresses import extract_name_tags_pbf
+    body = (
+        # a town with no wiki tag
+        " <node id='1' version='1' lat='46.7739' lon='9.2051'><tag k='place' v='town'/>"
+        "<tag k='name' v='Ilanz/Glion'/><tag k='name:rm' v='Glion'/><tag k='name:de' v='Ilanz'/></node>\n"
+        " <node id='2' version='1' lat='46.70' lon='9.20'/><node id='3' version='1' lat='46.71' lon='9.21'/>\n"
+        " <node id='4' version='1' lat='46.80' lon='9.30'/><node id='5' version='1' lat='46.80' lon='9.32'/>\n"
+        " <node id='6' version='1' lat='46.82' lon='9.32'/><node id='7' version='1' lat='46.82' lon='9.30'/>\n"
+        # names only in a language not asked for
+        " <node id='8' version='1' lat='46.75' lon='9.25'><tag k='name' v='X'/><tag k='name:sv' v='Y'/></node>\n"
+        # only name:zh-Hans: zh
+        " <node id='9' version='1' lat='46.76' lon='9.26'><tag k='name' v='Z'/><tag k='name:zh-Hans' v='兹'/></node>\n"
+        # a road: left out
+        " <way id='10' version='1'><nd ref='2'/><nd ref='3'/><tag k='highway' v='primary'/>"
+        "<tag k='name' v='Via Principala'/><tag k='name:de' v='Hauptstrasse'/></way>\n"
+        # a lake: its outer ring's mean
+        " <way id='11' version='1'><nd ref='4'/><nd ref='5'/><nd ref='6'/><nd ref='7'/><nd ref='4'/>"
+        "<tag k='natural' v='water'/><tag k='name' v='Lag Grond'/><tag k='name:de' v='Grosser See'/>"
+        "<tag k='name:zh' v='大湖;大湖泊'/><tag k='name:zh-Hans' v='大湖'/></way>\n")
+    path = _osm(tmp_path, body)
+    refs = extract_name_tags_pbf(path, ["de", "rm", "zh"], precut=True)
+    assert refs[("ilanz/glion",) + VCELL] == {"names": {"de": "Ilanz", "rm": "Glion"}}
+    assert not any(k[0] == "via principala" for k in refs)
+    # osmium exports a closed way as a line and as an area: both keys.
+    lake = {k[1:]: v for k, v in refs.items() if k[0] == "lag grond"}
+    assert lake[(int(round(46.808 * 1e4)), int(round(9.308 * 1e4)))] == {
+        "names": {"de": "Grosser See", "zh": "大湖"}}
+    assert all(v == {"names": {"de": "Grosser See", "zh": "大湖"}} for v in lake.values())
+    assert not any(k[0] == "x" for k in refs)
+    assert [v for k, v in refs.items() if k[0] == "z"] == [{"names": {"zh": "兹"}}]
+    assert extract_name_tags_pbf(path, [], precut=True) == {}
+
+
+def test_a_village_gets_names_from_the_lookup(tmp_path):
+    refs = {("ilanz/glion",) + VCELL: {"names": {"de": "Ilanz", "rm": "Glion"}}}
+    feat = dict(VILLAGE, name_native="Ilanz/Glion")
+    b = _search_bucket_with(tmp_path, [feat], {}, ["de", "rm"], refs)
+    [r] = _chunk(tmp_path, "gl")
+    assert r["ln"] == {"rm": "Glion"} and b.total_features == 1   # de "Ilanz" is n
+
+
+def test_the_wiki_objects_names_come_before_the_lookups(tmp_path):
+    feat = dict(geneva())
+    wiki = {("genève",) + GCELL: {"wikidata": "Q71", "names": {"de": "Genf"}}}
+    names = {("genève",) + GCELL: {"names": {"de": "Genf (Ort)", "it": "Ginevra"}}}
+    _search_bucket_with(tmp_path, [feat], wiki, ["de", "it"], names)
+    [g] = _chunk(tmp_path, "gi")
+    assert g["ln"] == {"de": "Genf", "it": "Ginevra"}
+
+
+def test_the_lookup_is_ignored_without_languages_and_for_streets(tmp_path):
+    refs = {("ilanz/glion",) + VCELL: {"names": {"rm": "Glion"}},
+            ("via principala",) + VCELL: {"names": {"de": "Hauptstrasse"}}}
+    street = dict(VILLAGE, name="Via Principala", type="street")
+    _search_bucket_with(tmp_path, [dict(VILLAGE, name_native="Ilanz/Glion"), street], {}, None, refs)
+    assert all("ln" not in r for p in ("il", "vi", "pr") for r in _chunk(tmp_path, p))
+
+
+def test_two_objects_folding_to_one_key_with_other_names_give_none():
+    refs = {("zürich", 473769, 85417): {"names": {"rm": "Turitg"}},
+            ("zurich", 473769, 85417): {"names": {"rm": "Zürich"}}}
+    folded = W.wiki_folded_index(refs, W.names_link)
+    feat = {"name": "Zuerich", "type": "place", "lat": 47.3769, "lon": 8.5417}
+    assert folded[("zurich", 473769, 85417)] is None
+    assert W.feature_wiki(dict(feat, name="Zurích"), refs, folded,
+                          link=W.names_link) is None
+    # Without the names link the two would agree (no wiki tags): a match.
+    assert W.feature_wiki(dict(feat, name="Zurích"), refs, W.wiki_folded_index(refs)) is not None
+    same = {("zürich", 473769, 85417): {"names": {"rm": "Turitg"}},
+            ("zurich", 473769, 85417): {"names": {"rm": "Turitg"}}}
+    assert W.wiki_folded_index(same, W.names_link)[("zurich", 473769, 85417)] == {"names": {"rm": "Turitg"}}
+
+
+def _search_bucket_with(tmp_path, feats, wiki, langs, names):
+    path = tmp_path / "search.jsonl"
+    path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in feats),
+                    encoding="utf-8")
+    (tmp_path / "chunks").mkdir()
+    return W._search_bucket(search_features_path=str(path), wikidata_data=None,
+                            wiki_cross_refs=wiki, loc_lookup=None, _bundled_set=set(),
+                            chunk_tmp=str(tmp_path / "chunks"), ln_languages=langs,
+                            ln_name_refs=names)
+
+
+def test_add_search_hands_the_lookup_on(tmp_path, monkeypatch):
+    path = tmp_path / "search.jsonl"
+    path.write_text(json.dumps(geneva(), ensure_ascii=False) + "\n", encoding="utf-8")
+    got = {}
+
+    def spy(**kw):
+        got.update(kw)
+        raise RuntimeError("stop")
+    monkeypatch.setattr(W, "_search_bucket", spy)
+    refs = {("x", 1, 2): {"names": {"de": "y"}}}
+    with pytest.raises(RuntimeError):
+        W._add_search(_Creator(), _Item, mbtiles_path=None, search_features_path=str(path),
+                      search_features=None, wikidata_data=None, wiki_cross_refs={},
+                      _bundled_set=set(), split_hot_search_chunks_mb=0, split_find_chips=False,
+                      no_llm_bundle=True, map_config={"tileLanguages": ["de"]}, name="T", bbox=None,
+                      routing_graph_path=None, address_count=0, overture_sources=None,
+                      overture_themes=None, xapian_mode="libzim", chunk_tmp=str(tmp_path),
+                      ln_name_refs=refs)
+    assert got["ln_name_refs"] is refs
+
+
+def test_a_zim_names_a_village_in_romansh(tmp_path, monkeypatch):
+    """create_zim end to end: a language-ready map-config (rm among the tile
+    languages) and the names lookup give the published record its ln."""
+    reader = pytest.importorskip("libzim.reader")
+    pytest.importorskip("libzim.writer")
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    monkeypatch.delenv("STREETZIM_SEARCH_LN_LANGUAGES", raising=False)
+    source = tmp_path / "features.jsonl"
+    source.write_text(json.dumps(dict(VILLAGE, name_native="Ilanz/Glion")) + "\n", encoding="utf-8")
+    (tmp_path / "ml.js").write_text("//")
+    (tmp_path / "ml.css").write_text("/**/")
+    target = tmp_path / "ilanz.zim"
+    W.create_zim(
+        str(target), tiles={}, tile_metadata={}, fonts={},
+        maplibre_js_path=str(tmp_path / "ml.js"), maplibre_css_path=str(tmp_path / "ml.css"),
+        viewer_html_path=str(ROOT / "resources/viewer/index.html"),
+        map_config={"name": "Ilanz", "tileLanguages": ["de", "rm"], "regionLanguages": ["de", "rm"]},
+        name="OSM - Ilanz", bbox=(9.1, 46.7, 9.3, 46.8), search_features_path=str(source),
+        ln_name_refs={("ilanz/glion",) + VCELL: {"names": {"de": "Ilanz", "rm": "Glion"}}},
+        xapian_mode="none", zim_workers=1)
+    archive = reader.Archive(str(target))
+    manifest = json.loads(bytes(archive.get_entry_by_path("search-data/manifest.json").get_item().content))
+    assert "gl" in manifest["chunks"]
+    [rec] = json.loads(bytes(archive.get_entry_by_path("search-data/gl.json").get_item().content))
+    assert rec["n"] == "Ilanz" and rec["ln"] == {"rm": "Glion"}
+
+
+def test_write_zim_hands_create_zim_the_lookup(tmp_path, monkeypatch):
+    import create_osm_zim as c
+    seen = {}
+    monkeypatch.setattr(c, "create_zim", lambda **kw: seen.update(kw))
+    args = c.build_parser().parse_args(["--bbox", "9.1,46.7,9.3,46.8"])
+    args._ln_name_refs = {("x", 1, 2): {"names": {"rm": "y"}}}
+    c._write_zim(
+        address_count=0, args=args, bbox_str="9.1,46.7,9.3,46.8", fonts={},
+        map_config={}, maplibre_css="c", maplibre_js="j", mbtiles_path=None, name="M",
+        output_path=str(tmp_path / "t.zim"), overture_sources=None, overture_themes=None,
+        routing_graph_path=None, satellite_dir=None, satellite_format=None,
+        satellite_max_zoom=0, search_features=[], terrain_dir=None, terrain_max_zoom=0,
+        tile_metadata={}, tiles={}, tmpdir=str(tmp_path), total_tile_count=0,
+        use_streaming=False, wiki_cross_refs=None, wikidata_data=None,
+        zim_illustration=None, zim_metadata=None)
+    assert seen["ln_name_refs"] is args._ln_name_refs
+    del args._ln_name_refs
+    c._write_zim(
+        address_count=0, args=args, bbox_str="9.1,46.7,9.3,46.8", fonts={},
+        map_config={}, maplibre_css="c", maplibre_js="j", mbtiles_path=None, name="M",
+        output_path=str(tmp_path / "t.zim"), overture_sources=None, overture_themes=None,
+        routing_graph_path=None, satellite_dir=None, satellite_format=None,
+        satellite_max_zoom=0, search_features=[], terrain_dir=None, terrain_max_zoom=0,
+        tile_metadata={}, tiles={}, tmpdir=str(tmp_path), total_tile_count=0,
+        use_streaming=False, wiki_cross_refs=None, wikidata_data=None,
+        zim_illustration=None, zim_metadata=None)
+    assert seen["ln_name_refs"] is None
+
+
+def test_a_folding_collision_in_the_lookup_gives_the_record_none(tmp_path):
+    refs = {("zürich", 473769, 85417): {"names": {"rm": "Turitg"}},
+            ("zurich", 473769, 85417): {"names": {"rm": "Zuric"}}}
+    feat = {"name": "Zurich", "type": "place", "lat": 47.3769, "lon": 8.5417}
+    _search_bucket_with(tmp_path, [feat], {}, ["rm"], refs)
+    [r] = _chunk(tmp_path, "zu")
+    assert r["ln"] == {"rm": "Zuric"}        # the exact name first: "zurich"
+    feat2 = {"name": "Zurích", "type": "place", "lat": 47.3769, "lon": 8.5417}
+    (tmp_path / "chunks").rename(tmp_path / "chunks-1")
+    _search_bucket_with(tmp_path, [feat2], {}, ["rm"], refs)
+    assert all("ln" not in r for r in _chunk(tmp_path, "zu"))
+
+
+def test_point_of_each_geometry():
+    from streetzim.addresses import _point_of
+    assert _point_of({"type": "Point", "coordinates": [9.2, 46.7]}) == (46.7, 9.2)
+    ring = [[9.0, 46.0], [9.2, 46.0], [9.2, 46.2], [9.0, 46.0]]
+    lat, lon = _point_of({"type": "Polygon", "coordinates": [ring]})
+    assert (round(lat, 3), round(lon, 3)) == (46.05, 9.1)
+    big = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]
+    assert _point_of({"type": "MultiPolygon", "coordinates": [[ring], [big]]}) == (1.6, 1.6)
+    assert _point_of({"type": "LineString", "coordinates": [[1, 2], [3, 4], [5, 6]]}) == (4, 3)
+    assert _point_of({"type": "GeometryCollection"}) is None
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_two_objects_with_one_key_keep_the_one_with_more_names(tmp_path):
+    from streetzim.addresses import extract_name_tags_pbf
+    body = (" <node id='1' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
+            "<tag k='name:de' v='Ilanz'/></node>\n"
+            " <node id='2' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
+            "<tag k='name:de' v='Ilanz'/><tag k='name:it' v='Ilanz'/><tag k='name:ru' v='Иланц'/></node>\n"
+            " <node id='3' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
+            "<tag k='name:fr' v='Ilanz'/></node>\n")
+    refs = extract_name_tags_pbf(_osm(tmp_path, body), ["de", "fr", "it", "ru"], precut=True)
+    assert refs == {("glion",) + VCELL: {"names": {"de": "Ilanz", "it": "Ilanz", "ru": "Иланц"}}}
+
+
+def test_a_record_whose_names_fold_to_two_objects_gets_none(tmp_path):
+    """Its name and own-script name fold to two keys whose objects carry
+    different names: no ln (as two articles give no w/q)."""
+    refs = {("zurich", 473769, 85417): {"names": {"rm": "Turitg"}},
+            ("turigg", 473769, 85417): {"names": {"rm": "Turig"}}}
+    feat = {"name": "Zurích", "name_native": "Turígg", "type": "place", "lat": 47.3769, "lon": 8.5417}
+    _search_bucket_with(tmp_path, [feat], {}, ["rm"], refs)
+    assert all("ln" not in r for p in ("zu", "tu") for r in _chunk(tmp_path, p))

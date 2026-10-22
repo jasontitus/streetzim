@@ -979,6 +979,91 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     }
 
 
+def _point_of(geom):
+    """(lat, lon) for an osmium-exported geometry, as extract_wiki_tags_pbf
+    places an object: a point, a polygon's outer-ring mean, a line's middle
+    vertex; None for anything else."""
+    gtype = geom.get("type")
+    coords = geom.get("coordinates")
+    if gtype == "Point" and coords:
+        return coords[1], coords[0]
+    if gtype == "Polygon" and coords and coords[0]:
+        ring = coords[0]
+        return sum(c[1] for c in ring) / len(ring), sum(c[0] for c in ring) / len(ring)
+    if gtype == "MultiPolygon" and coords and coords[0] and coords[0][0]:
+        ring = max((p[0] for p in coords if p and p[0]), key=len)
+        return sum(c[1] for c in ring) / len(ring), sum(c[0] for c in ring) / len(ring)
+    if gtype == "LineString" and coords:
+        mid = coords[len(coords) // 2]
+        return mid[1], mid[0]
+    return None
+
+
+def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
+    """name:<lang> of every named OSM object that has one in ``languages``
+    (villages, hamlets, peaks, lakes, stations: what has no wikipedia or
+    wikidata tag, so extract_wiki_tags_pbf misses it), keyed like its
+    lookup: (lowercased name, round(lat*1e4), round(lon*1e4)) ->
+    {"names": {lang: name}} (streetzim.languages.osm_names). Roads are left
+    out (search records of streets carry no `ln`). The search records'
+    `ln` takes these after the feature's own and its wiki cross-ref's
+    (zim_writer.localized_names, feature_wiki with names_link). Two
+    objects with one key: the one with more names."""
+    print("  Extracting names in other languages from OSM data...")
+    if not languages:
+        return {}
+    source_pbf = str(pbf_path)
+    tmp = tempfile.mkdtemp(prefix="streetzim_names_")
+    try:
+        if bbox and not precut:
+            bbox_pbf = os.path.join(tmp, "region.osm.pbf")
+            subprocess.run([
+                "osmium", "extract",
+                *area.osmium_extract_args(bbox, tmp),
+                source_pbf, "-o", bbox_pbf, "--overwrite",
+            ], check=True)
+            source_pbf = bbox_pbf
+        keys = [f"name:{lang}" for lang in languages]
+        if "zh" in languages:
+            keys.append("name:zh-Hans")
+        names_pbf = os.path.join(tmp, "names.osm.pbf")
+        subprocess.run(["osmium", "tags-filter", source_pbf, *keys,
+                        "-o", names_pbf, "--overwrite"], check=True)
+        names_geojson = os.path.join(tmp, "names.geojsonseq")
+        subprocess.run(["osmium", "export", names_pbf, "-f", "geojsonseq",
+                        "-o", names_geojson, "--overwrite"], check=True)
+        lookup = {}
+        with open(names_geojson, encoding="utf-8") as fin:
+            for line in fin:
+                line = line.strip().lstrip("\x1e")
+                if not line:
+                    continue
+                try:
+                    feat = json.loads(line)
+                except Exception:
+                    continue
+                props = feat.get("properties") or {}
+                if props.get("highway") and (feat.get("geometry") or {}).get("type") != "Point":
+                    continue                # a road
+                name = (props.get("name") or props.get("name:latin") or "").strip()
+                if not name:
+                    continue
+                names = osm_names(props, languages)
+                if not names:
+                    continue
+                pt = _point_of(feat.get("geometry") or {})
+                if pt is None:
+                    continue
+                key = (name.lower(), int(round(pt[0] * 1e4)), int(round(pt[1] * 1e4)))
+                existing = lookup.get(key)
+                if existing is None or len(names) > len(existing["names"]):
+                    lookup[key] = {"names": names}
+        print(f"    Indexed {len(lookup)} objects with names in other languages")
+        return lookup
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _wiki_tag_count(entry):
     """How many of the two wiki tags a cross-ref entry has."""
     return ("wikipedia" in entry) + ("wikidata" in entry)

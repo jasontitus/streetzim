@@ -110,15 +110,22 @@ def wiki_link(entry):
     return ("w", (entry.get("wikipedia") or "").replace(" ", "_"))
 
 
-def _one_link(hits):
+def names_link(entry):
+    """What a names lookup entry (addresses.extract_name_tags_pbf) stands
+    for, as wiki_link does for a cross-ref: its names, so two objects
+    with the same key agree only when they carry the same names."""
+    return tuple(sorted((entry.get("names") or {}).items()))
+
+
+def _one_link(hits, link=wiki_link):
     """The first of `hits` (cross-ref entries) when they all link to the
-    same article (wiki_link), else None."""
-    if hits and all(wiki_link(h) == wiki_link(hits[0]) for h in hits[1:]):
+    same article (wiki_link; `link` for another lookup), else None."""
+    if hits and all(link(h) == link(hits[0]) for h in hits[1:]):
         return hits[0]
     return None
 
 
-def wiki_folded_index(wiki_cross_refs):
+def wiki_folded_index(wiki_cross_refs, link=wiki_link):
     """The cross-ref lookup by folded name (cloud.search_shards.norm:
     accents off, lowercase), and by the first name of an OSM ";" list
     (search_extract.native_name keeps only that one): (folded name, lat
@@ -141,12 +148,12 @@ def wiki_folded_index(wiki_cross_refs):
             k = (nm, qlat, qlon)
             if k not in out:
                 out[k] = entry
-            elif out[k] is not None and wiki_link(out[k]) != wiki_link(entry):
+            elif out[k] is not None and link(out[k]) != link(entry):
                 out[k] = None
     return out
 
 
-def feature_wiki(feat, wiki_cross_refs, folded=None):
+def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
     """The wiki cross-ref entry of a search feature other than an admin
     area (those: admin_wiki), looked up at its point on the lookup's
     ~11 m grid and at each piece's point of a merged street
@@ -160,7 +167,8 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
       still links the tunnel);
     - else, with `folded` (wiki_folded_index), the entry its names fold
       to, likewise none when two differ or a key is ambiguous.
-    None when nothing matches."""
+    None when nothing matches. `link`: what entries agree on (names_link
+    for the names lookup, extract_name_tags_pbf)."""
     if not wiki_cross_refs:
         return None
     pts = [(feat["lat"], feat["lon"])] + [tuple(p) for p in feat.get("_pts", ())]
@@ -174,7 +182,7 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
     hits = [w for nm in names[1:] for qlat, qlon in cells
             if (w := wiki_cross_refs.get((nm, qlat, qlon)))]
     if hits:
-        return _one_link(hits)
+        return _one_link(hits, link)
     if not folded:
         return None
     from cloud.search_shards import norm
@@ -186,7 +194,7 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
     hits = [folded[k] for k in keys if k in folded]
     if any(h is None for h in hits):
         return None
-    return _one_link(hits)
+    return _one_link(hits, link)
 
 
 def admin_record_fields(feat):
@@ -263,11 +271,12 @@ def _ln_types():
     return frozenset(t.strip() for t in env.split(",") if t.strip())
 
 
-def localized_names(feat, wiki, languages, types=None):
+def localized_names(feat, wiki, languages, types=None, named=None):
     """`ln` of a search record: {lang: name} for ``languages``, from the
     feature's own name:<lang> (``names``: tiles extracted with those
-    languages, an admin area's relation) else its wiki cross-ref's (the OSM
-    object feature_wiki matched, extract_wiki_tags_pbf(languages=)), in the
+    languages, an admin area's relation), else its wiki cross-ref's (the OSM
+    object feature_wiki matched, extract_wiki_tags_pbf(languages=)), else
+    ``named``'s (its names lookup entry, extract_name_tags_pbf), in the
     order of ``languages``. A name the record already shows as ``n`` is left
     out (the viewer falls back to ``n``); one equal to its own-script name
     ``nn`` is written as "" ("the name is nn": a French visitor sees
@@ -277,12 +286,13 @@ def localized_names(feat, wiki, languages, types=None):
         return {}
     own = feat.get("names") or {}
     ref = (wiki or {}).get("names") or {}
-    if not own and not ref:
+    more = (named or {}).get("names") or {}
+    if not own and not ref and not more:
         return {}
     shown, native, _latin = shown_names(feat)
     out = {}
     for lang in languages:
-        v = own.get(lang) or ref.get(lang)
+        v = own.get(lang) or ref.get(lang) or more.get(lang)
         if isinstance(v, str):
             v = v.strip()
             if v and v != shown and len(v) <= LN_MAX_CHARS:
@@ -924,6 +934,7 @@ def _create_zim(
     routing_graph_path=None,
     routing_graph_chunk_mb=0,
     wiki_cross_refs=None,
+    ln_name_refs=None,
     address_count=0,
     overture_sources=None,
     overture_themes=None,
@@ -1179,6 +1190,7 @@ def _create_zim(
                     search_features=search_features,
                     wikidata_data=wikidata_data,
                     wiki_cross_refs=wiki_cross_refs, _bundled_set=_bundled_set,
+                    ln_name_refs=ln_name_refs,
                     split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                     split_find_chips=split_find_chips,
                     no_llm_bundle=no_llm_bundle, map_config=map_config,
@@ -1259,7 +1271,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode, chunk_tmp,
-                overture_release=None, page_types=KIWIX_PAGE_TYPES, corpus=None):
+                overture_release=None, page_types=KIWIX_PAGE_TYPES, corpus=None,
+                ln_name_refs=None):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
     overture-sources.json and the Kiwix pages (with --xapian=builder, their
     xapianbuilder documents go to `corpus`). The chunk files go to
@@ -1278,7 +1291,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            wiki_cross_refs=wiki_cross_refs,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
                            chunk_tmp=chunk_tmp, page_types=page_types,
-                           ln_languages=search_ln_languages(map_config))
+                           ln_languages=search_ln_languages(map_config),
+                           ln_name_refs=ln_name_refs)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -2400,11 +2414,12 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def search_record(feat, wiki=None, ln_languages=None, ln_types=None):
+def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None):
     """The search record (docs/search-records.md) of search feature `feat`,
     as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
     admin area, admin_wiki()), or None. `ln_languages` (search_ln_languages):
-    the record's names in those languages, `ln` (localized_names).
+    the record's names in those languages, `ln` (localized_names; `named`:
+    its names lookup entry).
 
     Canonical record shape consumed by mcpzim:
       n, t (type), s (subtype), a (lat), o (lon), l (location)
@@ -2433,7 +2448,7 @@ def search_record(feat, wiki=None, ln_languages=None, ln_types=None):
     if latin:
         rec["nl"] = latin
     if ln_languages:
-        ln = localized_names(feat, wiki, ln_languages, ln_types)
+        ln = localized_names(feat, wiki, ln_languages, ln_types, named)
         if ln:
             rec["ln"] = ln
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
@@ -2453,11 +2468,15 @@ def search_record(feat, wiki=None, ln_languages=None, ln_types=None):
     return rec
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None, ln_name_refs=None):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file.
-    `ln_languages`: search_ln_languages() of the build."""
+    `ln_languages`: search_ln_languages() of the build; `ln_name_refs`: the
+    names lookup (addresses.extract_name_tags_pbf), matched as the wiki
+    cross-refs are (feature_wiki, names_link)."""
     _ln_t = _ln_types() if ln_languages else None
+    _name_refs = ln_name_refs if ln_languages else None
+    _name_folded = wiki_folded_index(_name_refs, names_link) if _name_refs else None
     ln_added = 0
     xapian_types = page_types
 
@@ -2551,8 +2570,13 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     if wiki:
                         wiki_fields_added += 1
 
+                # Names in other languages of an object without a wiki
+                # tag (a village, a peak, a lake): the names lookup.
+                named = None
+                if _name_refs and t != "admin" and t in _ln_t:
+                    named = feature_wiki(feat, _name_refs, _name_folded, link=names_link)
                 # The record shape and its rounding: search_record.
-                rec = search_record(feat, wiki, ln_languages, _ln_t)
+                rec = search_record(feat, wiki, ln_languages, _ln_t, named)
                 if "ln" in rec:
                     ln_added += 1
                 if wiki:
