@@ -374,7 +374,18 @@ def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path
                                             "carried": ["zimcheck", "route", "kiwix", "search"]}
     assert v2["checks"]["recipe_eq_merge"] and v2["checks"]["verify"]
     # another title: another fingerprint, the full gate again
-    r = subprocess.run(args, capture_output=True, text=True, timeout=600,
-                       env={**env, "TITLES": json.dumps({"de": "Testland neu"})})
+    env_t = {**env, "TITLES": json.dumps({"de": "Testland neu"})}
+    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
     assert r.returncode == 0 and "light gate" not in r.stdout
     assert int(runs.read_text()) == 2
+    # the pack rebuilt with other bytes (same name, same articles): its chunk hashes are in the
+    # fingerprint, so the full gate again, though the last verdict passed
+    v3 = json.loads(vp.read_text())
+    v3["checks"].update(route=True, kiwix=True, search=True)
+    v3["all_pass"] = all(v3["checks"].values())
+    vp.write_text(json.dumps(v3))
+    lpzims.write_pack(de, "de", uuid, title="Testland Wiki (de) 2")
+    assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
+    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
+    assert r.returncode == 0 and "light gate" not in r.stdout, r.stdout
+    assert int(runs.read_text()) == 3

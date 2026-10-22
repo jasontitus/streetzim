@@ -212,6 +212,16 @@ def test_the_gates_require_full_text(sr: SimpleNamespace, tmp_path: Path, monkey
     assert r.returncode == 1 and not g["pass"], g
 
 
+def test_full_text_finds_a_title_alone(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
+    """The index data's title is folded too, as libzim's own indexer folds
+    it: with no page text at all, full text still finds the Thai article by
+    its title."""
+    monkeypatch.setattr(index_pack, "page_text", lambda raw: "")
+    out = tmp_path / "osm_testland_search-th_2026-10-13_t.zim"
+    index_pack.build(str(sr.base), [str(sr.packs["th"])], "th", "testland", str(out), None, log=lambda m: None)
+    assert "~w/th/wiki-article/อัลฟา" in _fulltext(out, "อัลฟา")
+
+
 def test_pages_stream_into_the_writer(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
     """Review S-3: rows go to libzim's writer as they are read; nothing holds
     every page's text (Greece: 497 MB peak before). Each add_item comes

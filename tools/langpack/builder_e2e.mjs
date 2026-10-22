@@ -159,7 +159,13 @@ async function runOne(L) {
   if (MODE === 'file') {
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
-    await pg.waitForFunction(() => !document.querySelector('#go').disabled, null, { timeout: 30 * 60000, polling: 1000 });
+    // Build enabled, or the page turned the file (or a pack) down: say so now, not after 30 min
+    const ready = await (await pg.waitForFunction(() => {
+      if (!document.querySelector('#go').disabled) return 'ready';
+      const bad = document.querySelector('#baseCheck.bad, #packStatus.bad');
+      return bad ? bad.textContent : null;
+    }, null, { timeout: 30 * 60000, polling: 1000 })).jsonValue();
+    if (ready !== 'ready') throw new Error(`Build never enabled: ${ready}`);
     beforeBuild = snap();
     await pg.click('#go');
   } else {
