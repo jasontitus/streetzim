@@ -500,7 +500,9 @@
     }
     inputEl.addEventListener('input', function() {
       clearTimeout(timer);
-      var q = inputEl.value.trim();
+      // Without the bidi isolates a right-to-left UI wraps a picked point's
+      // coordinates in (coordLabel, szLtr), should the reader edit them.
+      var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
       if (q.length < 2) { resultsEl.style.display = 'none'; return; }
       if (!map._queryPlaces) return;
       timer = setTimeout(function() {

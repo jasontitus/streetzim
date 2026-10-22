@@ -694,10 +694,12 @@ function _findResultsKeydown(e) {
     }
     return;
   }
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+  // Right to left, the first card is on the right (szArrowStep).
+  var step = szArrowStep(e.key);
+  if (step > 0) {
     e.preventDefault();
     _scrollCarouselTo(Math.min(n - 1, (active < 0 ? 0 : active) + 1));
-  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+  } else if (step < 0) {
     e.preventDefault();
     _scrollCarouselTo(Math.max(0, (active < 0 ? 0 : active) - 1));
   } else if (e.key === 'Enter') {

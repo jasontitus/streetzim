@@ -21,11 +21,57 @@
     return (Math.atan2(y, x) * toDeg + 360) % 360;
   }
 
+  // Which way a link road goes, from the road classes around it
+  // (class_access ordinals, docs/formats.md: motorway 1, trunk 3, primary
+  // 5, secondary 7, tertiary 9, residential 11, …, track 15; lower is
+  // bigger). Only a link with a motorway or trunk on one side is an exit
+  // or an on-ramp: 'on' when it joins the bigger road (onto a motorway,
+  // from a trunk road too), 'exit' when it leaves one for a road of the
+  // same size or smaller (an interchange, a slip road off a trunk road);
+  // with no class after it (the route ends on the link) one that leaves a
+  // motorway is an exit. '' for a slip road in town (primary_link between
+  // primaries, a tertiary_link): the HUD gives it the ordinary turn cue,
+  // which is what a driver expects there. fromCls: the road before the
+  // link, toCls: the first road after it that is not a link.
+  function szLinkKind(fromCls, toCls) {
+    var a = fromCls & 0x1F, b = toCls & 0x1F;
+    var big = function(c) { return c === 1 || c === 3; };   // motorway, trunk
+    if (!big(a) && !big(b)) return '';
+    if (!a) return 'on';
+    if (!b) return 'exit';
+    return b < a ? 'on' : 'exit';
+  }
+
+  // The HUD line for the link road entered at nextTurn ("take exit toward
+  // A8", "take ramp onto E75"), or '' when it is no exit or on-ramp
+  // (szLinkKind): the caller then shows the ordinary turn cue. turns: the
+  // route's turns (augmentRouteForDriving); name: the road's name, or ''.
+  function szLinkCue(nextTurn, turns, name) {
+    var afterCls = 0;
+    for (var t = 0; t < turns.length; t++) {
+      var tt = turns[t];
+      if (tt.distM <= nextTurn.distM) continue;
+      if (!(tt.flags & 2)) { afterCls = tt.toCls || 0; break; }
+    }
+    var kind = szLinkKind(nextTurn.fromCls || 0, afterCls);
+    if (kind === 'exit') {
+      return name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })
+                  : szT('drive.exit_ramp', 'take exit');
+    }
+    if (kind === 'on') {
+      return name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })
+                  : szT('drive.on_ramp', 'take ramp');
+    }
+    return '';
+  }
+
   // Augment a route with data the HUD needs:
   //   cumM[i]  — distance from start to coords[i] (meters)
-  //   turns[]  — { distM, coordIdx, nameIdx, flags, fromFlags } for each
-  //              road-name-or-flags change. flags = road you're entering,
-  //              fromFlags = road you're leaving (bit 0 roundabout, bit 1 link).
+  //   turns[]  — { distM, coordIdx, nameIdx, flags, fromFlags, toCls, fromCls }
+  //              for each road-name-or-flags change. flags = road you're
+  //              entering, fromFlags = road you're leaving (bit 0 roundabout,
+  //              bit 1 link); toCls / fromCls their road classes (where the
+  //              road entered starts, where the one left ends).
   function augmentRouteForDriving(route) {
     var coords = route.coords;
     var cumM = new Float64Array(coords.length);
@@ -53,7 +99,9 @@
         coordIdx: ci,
         nameIdx: roads[r + 1].nameIdx,
         flags: roads[r + 1].flags || 0,
-        fromFlags: roads[r].flags || 0
+        fromFlags: roads[r].flags || 0,
+        toCls: roads[r + 1].cls0 || 0,
+        fromCls: roads[r].cls1 || 0
       });
     }
     return {
@@ -109,14 +157,14 @@
   function formatDistanceLocalized(meters, unit) {
     if (unit === 'imperial') {
       var feet = meters * 3.28084;
-      if (feet < 1000) return Math.round(feet / 10) * 10 + ' ft';
+      if (feet < 1000) return szLtr(Math.round(feet / 10) * 10 + ' ft');
       var miles = meters / 1609.344;
-      if (miles < 10) return szFixed(miles, 1) + ' mi';
-      return Math.round(miles) + ' mi';
+      if (miles < 10) return szLtr(szFixed(miles, 1) + ' mi');
+      return szLtr(Math.round(miles) + ' mi');
     }
-    if (meters < 1000) return Math.round(meters / 10) * 10 + ' m';
-    if (meters < 10000) return szFixed(meters / 1000, 1) + ' km';
-    return Math.round(meters / 1000) + ' km';
+    if (meters < 1000) return szLtr(Math.round(meters / 10) * 10 + ' m');
+    if (meters < 10000) return szLtr(szFixed(meters / 1000, 1) + ' km');
+    return szLtr(Math.round(meters / 1000) + ' km');
   }
 
   function formatEtaClock(seconds) {
@@ -127,7 +175,7 @@
     try {
       // The device's clock format in English (as before), the UI
       // language's otherwise ("14:05", not "2:05 PM", in German).
-      var fmt = new Intl.DateTimeFormat(SZ_I18N ? SZ_UI_LANG : undefined, { hour: 'numeric', minute: '2-digit' });
+      var fmt = new Intl.DateTimeFormat(SZ_I18N ? SZ_NUM_LANG : undefined, { hour: 'numeric', minute: '2-digit' });
       return fmt.format(d);
     } catch (e) {
       var mm = (m < 10 ? '0' : '') + m;
@@ -479,6 +527,7 @@
         var enteringRound = (nextFlags & 1) && !(prevFlags & 1);
         var exitingRound  = !(nextFlags & 1) && (prevFlags & 1);
         var enteringLink  = (nextFlags & 2) && !(prevFlags & 2);
+        var linkCue = '';
         if (enteringRound) {
           // Hunt forward for the first named non-roundabout road — that's
           // the actual destination the driver cares about.
@@ -498,9 +547,10 @@
           streetEl.textContent = name ? szT('drive.exit_onto', 'exit onto {road}', { road: name })
                                       : szT('drive.exit_roundabout', 'exit roundabout');
           arrowEl.textContent = '↱';
-        } else if (enteringLink) {
-          streetEl.textContent = name ? szT('drive.ramp_onto', 'take ramp onto {road}', { road: name })
-                                      : szT('drive.ramp', 'take ramp');
+        } else if (enteringLink && (linkCue = szLinkCue(nextTurn, state.route.turns, name))) {
+          // An exit or an on-ramp (a motorway or trunk on one side of the
+          // link); a slip road in town takes the ordinary cue below.
+          streetEl.textContent = linkCue;
           arrowEl.textContent = '↗';
         } else {
           streetEl.textContent = name ? szT('drive.onto', 'onto {road}', { road: name })
@@ -530,7 +580,10 @@
       if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
         if (Date.now() - state.offRouteSince > preset.offMs) {
-          setStatus(szT('drive.off_route', 'Off route ({m} m)', { m: Math.round(proj.offMeters) }),
+          // One value with its unit, in the reader's units, so "120 m" stays
+          // in that order in a right-to-left table (formatDistanceLocalized
+          // returns an szLtr run).
+          setStatus(szT('drive.off_route', 'Off route ({dist})', { dist: formatDistanceLocalized(proj.offMeters, unit) }),
                     { showReroute: true });
         }
       } else {
