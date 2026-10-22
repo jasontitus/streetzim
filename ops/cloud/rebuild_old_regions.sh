@@ -306,6 +306,7 @@ for ID in $ORDER; do
   case $RC in
     0) log "  SHIPPED $OUT ($MIN min)"; row "$ID" uploaded "$OUT" ;;
     6) log "  uploaded, listing pending ($MIN min)"; row "$ID" upload-pending "$OUT" ;;
+    7) log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; row "$ID" frozen-published "$OUT" ;;
     *) log "  UPLOAD FAILED rc=$RC"; row "$ID" upload-failed "$OUT" ;;
   esac
 done

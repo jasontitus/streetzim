@@ -1,0 +1,38 @@
+{
+ "base_lang": "en",
+ "city": {
+  "qid": "Q1524",
+  "lon": 23.7348,
+  "lat": 37.9756,
+  "zoom": 9
+ },
+ "search": {
+  "native": {
+   "q": "Θεσσαλονίκη",
+   "expect": "Thessaloniki"
+  },
+  "english": {
+   "q": "Athens",
+   "expect": "Athens"
+  },
+  "map_lang": {
+   "el": {
+    "q": "Αθήνα",
+    "expect": "Athens"
+   },
+   "de": {
+    "q": "Athen",
+    "expect": "Athens"
+   },
+   "th": {
+    "q": "เอเธนส์",
+    "expect": "Athens"
+   }
+  }
+ },
+ "route": {
+  "src": "37.9756,23.7348",
+  "dst": "37.9838,23.7275"
+ },
+ "named_qids": "Q1524,Q17151"
+}

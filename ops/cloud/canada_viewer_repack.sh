@@ -160,5 +160,6 @@ RC=$?; MIN=$(( ($(date +%s)-T0)/60 ))
 case $RC in
   0) log "=== SHIPPED $DST ($MIN min)" ;;
   6) log "=== uploaded, listing pending ($MIN min)" ;;
+  7) log "=== NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)" ;;
   *) log "=== UPLOAD FAILED rc=$RC" ;;
 esac

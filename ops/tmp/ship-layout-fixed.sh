@@ -88,5 +88,6 @@ flock /storage/streetzim/.retrofit-upload.lock env PROJECT_DIR=/storage/streetzi
 rc=$?
 case $rc in
   0|6) log "SHIPPED https://archive.org/download/streetzim-$ID/$OUT" ;;
+  7)   log "NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)" ;;
   *)   log "UPLOAD FAILED rc=$rc" ;;
 esac

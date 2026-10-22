@@ -54,9 +54,15 @@ PARSE_API = "https://en.wikipedia.org/w/api.php"
 _LANG = "en"
 
 
-def _wiki_host() -> str:
+def _wiki_host(lang: str | None = None) -> str:
+    """xx.wikipedia.org for `lang`, else the bundle in progress (_LANG)."""
     from streetzim.languages import wiki_code
-    return f"{wiki_code(_LANG)}.wikipedia.org"
+    return f"{wiki_code(lang or _LANG)}.wikipedia.org"
+
+
+def article_url(title_us: str, lang: str | None = None) -> str:
+    """The article's page on Wikipedia, for the source footer."""
+    return f"https://{_wiki_host(lang)}/wiki/" + urllib.parse.quote(title_us)
 
 
 def _parse_api() -> str:
@@ -275,13 +281,15 @@ BACK_BAR_CSS = (
 )
 
 
-def back_to_map_bar(title: str) -> str:
+def back_to_map_bar(title: str, prefix_depth: int = 0) -> str:
     """The "Back to map" bar for an article stored at wiki-article/<title>.
 
     A title with slashes is stored that many levels deeper (its images are
     linked ../../wiki-image/…), so the map link climbs the same depth.
+    `prefix_depth`: folders above wiki-article/ (2 for a Wikipedia pack's
+    ~w/<xx>/wiki-article/<title>, whose map is ../../../index.html).
     """
-    up = "../" * (1 + title.count("/"))
+    up = "../" * (1 + prefix_depth + title.count("/"))
     return (
         f'<nav class="sz-back"><a href="{up}index.html" '
         'onclick="if(history.length>1){history.back();return false}">'
@@ -289,16 +297,85 @@ def back_to_map_bar(title: str) -> str:
     )
 
 
+# Kept links (clean_article_html's link_href) cross the tag whitelist and the
+# whitespace tidying as private-use characters: an opening mark carrying the
+# link's number, and a closing mark. They are turned back into <a> at the end.
+_LINK_OPEN, _LINK_NUM_END, _LINK_CLOSE = "", "", ""
+_LINK_MARKS_RE = re.compile(f"[{_LINK_OPEN}{_LINK_NUM_END}{_LINK_CLOSE}]")
+_HREF_RE = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+
+
+def _mark_links(h: str, link_href: Callable[[str], str | None]) -> tuple[str, list[str]]:
+    """Each `<a>` whose href link_href maps to a URL becomes a pair of marks;
+    every other `<a>` is unwrapped to its text. Returns the text and the URLs."""
+    import html as _html
+    kept: list[str] = []
+    out: list[str] = []
+    pos = 0
+    open_kept = False
+    for m in re.finditer(r"<(/?)a\b([^>]*)>", h, re.I):
+        out.append(h[pos:m.start()])
+        pos = m.end()
+        if m.group(1):
+            if open_kept:
+                out.append(_LINK_CLOSE)
+            open_kept = False
+            continue
+        if open_kept:              # an <a> left open: close it first
+            out.append(_LINK_CLOSE)
+        mh = _HREF_RE.search(m.group(2))
+        url = link_href(_html.unescape(mh.group(1) or mh.group(2) or "")) if mh else None
+        open_kept = bool(url)
+        if url:
+            out.append(f"{_LINK_OPEN}{len(kept)}{_LINK_NUM_END}")
+            kept.append(url)
+    out.append(h[pos:])
+    if open_kept:
+        out.append(_LINK_CLOSE)
+    return "".join(out), kept
+
+
+def _restore_links(h: str, kept: list[str]) -> str:
+    """The marks back to `<a href>`; an unpaired mark (its partner cut with
+    escaped markup) is dropped, so the page never holds an unclosed link."""
+    import html as _html
+    out: list[str] = []
+    pos = 0
+    pending: tuple[int, str] | None = None   # index in out, url of an open link
+    for m in re.finditer(f"{_LINK_OPEN}(\\d+){_LINK_NUM_END}|{_LINK_CLOSE}", h):
+        out.append(h[pos:m.start()])
+        pos = m.end()
+        if m.group(1) is not None:
+            url = kept[int(m.group(1))]
+            pending = (len(out), url)
+            out.append("")                    # filled when its close is seen
+        elif pending is not None:
+            i, url = pending
+            out[i] = f'<a href="{_html.escape(url, quote=True)}">'
+            out.append("</a>")
+            pending = None
+    out.append(h[pos:])
+    return "".join(out)
+
+
 def clean_article_html(html: str, title: str, source_url: str,
                        lead_html: str = "", gallery_html: str = "",
-                       path_title: str | None = None) -> str:
+                       path_title: str | None = None, *, lang: str | None = None,
+                       link_href: Callable[[str], str | None] | None = None,
+                       prefix_depth: int = 0) -> str:
     """Trim raw article HTML (Kiwix or Parsoid) to a compact, self-
     contained reader page: drop scripts/styles/tables/figures/nav/refs/
     edit-links and the IPA/coord clutter, unwrap links to text, whitelist
     structural tags, strip attributes, and add a CC BY-SA source footer.
     `path_title`: the title the page is stored under, when not `title` (a
-    redirect's copy of its article), for the depth of the back link."""
+    redirect's copy of its article), for the depth of the back link.
+    `lang`: the page's language (default: the bundle in progress, _LANG).
+    `link_href(href)`: the URL a link keeps (the raw href, entities
+    decoded), or None to unwrap it to text; without it every link is
+    unwrapped. `prefix_depth`: see back_to_map_bar."""
     h = html
+    if link_href is not None:
+        h = _LINK_MARKS_RE.sub("", h)
     # Narrow to the article body when a full document is given.
     mbody = re.search(r"<body\b[^>]*>(.*)</body>", h, re.S | re.I)
     if mbody:
@@ -321,8 +398,12 @@ def clean_article_html(html: str, title: str, source_url: str,
     # nests <div>s, and cutting at its first </div> left its text behind.
     h = _remove_by_class(h, "div", _boilerplate)
     h = _remove_by_class(h, "span", _boilerplate)
-    # Unwrap links → keep their text.
-    h = re.sub(r"</?a\b[^>]*>", "", h, flags=re.I)
+    # Unwrap links → keep their text (or mark the ones link_href keeps).
+    kept: list[str] = []
+    if link_href is None:
+        h = re.sub(r"</?a\b[^>]*>", "", h, flags=re.I)
+    else:
+        h, kept = _mark_links(h, link_href)
     # Some articles contain ESCAPED markup as literal text — an editor typed
     # `<a href="example.org">` into the wikitext, so Kiwix serves
     # `&lt;a href="example.org"&lt;/a&gt`. The unwrap above cannot see it, it
@@ -338,6 +419,9 @@ def clean_article_html(html: str, title: str, source_url: str,
         closing, name = m.group(1), m.group(2).lower()
         return f"<{closing}{name}>" if name in _KEEP_TAGS else ""
     h = re.sub(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", keep, h)
+    if kept:
+        # A link left with no text (it held only an image): unwrapped.
+        h = re.sub(f"{_LINK_OPEN}\\d+{_LINK_NUM_END}(\\s*){_LINK_CLOSE}", r"\1", h)
     # Collapse whitespace (HTML ignores it anyway) + drop empty tags +
     # tidy the parentheticals the IPA removal empties out.
     h = re.sub(r"\s+", " ", h)
@@ -352,11 +436,13 @@ def clean_article_html(html: str, title: str, source_url: str,
     h = re.sub(r"\s+([.,;:!?)])", r"\1", h)
     h = re.sub(r"\(\s+", "(", h)
     h = h.strip()
+    if kept:
+        h = _restore_links(h, kept)
 
     safe_title = (title.replace("&", "&amp;").replace("<", "&lt;")
                   .replace(">", "&gt;"))
     return (
-        f"<!DOCTYPE html><html lang=\"{_LANG}\"><head><meta charset=\"utf-8\">"
+        f"<!DOCTYPE html><html lang=\"{lang or _LANG}\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<link rel=\"icon\" href=\"data:,\">"
         f"<title>{safe_title}</title>"
@@ -370,7 +456,7 @@ def clean_article_html(html: str, title: str, source_url: str,
         ".gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8em}"
         + BACK_BAR_CSS +
         "</style></head><body>"
-        + back_to_map_bar(title if path_title is None else path_title) +
+        + back_to_map_bar(title if path_title is None else path_title, prefix_depth) +
         f"<h1>{safe_title}</h1>\n{lead_html}{h}\n{gallery_html}"
         f"<footer>From <a href=\"{source_url}\">Wikipedia</a> — text under "
         "<a href=\"https://creativecommons.org/licenses/by-sa/4.0/\">"
@@ -378,6 +464,47 @@ def clean_article_html(html: str, title: str, source_url: str,
         + (" Images: their own licences on Wikimedia Commons." if (lead_html or gallery_html) else "")
         + "</footer></body></html>"
     )
+
+
+def article_figures(raw: str, src: Any, *, up: str, images: str, image_max_kb: int,
+                    max_images: int,
+                    store_image: Callable[[str, str, bytes], None]) -> tuple[str, str]:
+    """(lead_html, gallery_html) for an article's pictures (image_candidates),
+    read from `src` (an offline Wikipedia ZIM: _OfflineZim.image). Each
+    picture is named wiki-image/<sha1[:20]>.<ext> by its bytes and passed to
+    `store_image(name, mimetype, bytes)` (the caller stores each name once);
+    the page links it as `up` + wiki-image/<name>. `images`: "lead" keeps
+    the first picture, "all" up to `max_images`."""
+    figs: list[tuple[str, str]] = []
+    for isrc, caption in image_candidates(raw):
+        if len(figs) >= max_images:
+            break
+        got = src.image(isrc, image_max_kb * 1024)
+        if not got:
+            continue
+        b, mt = got
+        ext = _EXT_FOR_MIME.get((mt or "").split(";")[0].strip())
+        if not ext or len(b) < _MIN_IMAGE_BYTES or len(b) > image_max_kb * 1024:
+            continue
+        name = hashlib.sha1(b).hexdigest()[:20] + "." + ext
+        store_image(name, mt.split(";")[0].strip(), b)
+        figs.append((name, caption))
+        if images == "lead":
+            break
+    if not figs:
+        return "", ""
+    name, caption = figs[0]
+    cap = f"<figcaption>{caption}</figcaption>" if caption else ""
+    lead_html = (f'<figure class="lead"><img src="{up}wiki-image/{name}" '
+                 f'alt="{caption}" loading="lazy">{cap}</figure>\n')
+    gallery_html = ""
+    if len(figs) > 1:
+        cells = "".join(
+            f'<figure><img src="{up}wiki-image/{n}" alt="{c}" loading="lazy">'
+            + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
+            for n, c in figs[1:])
+        gallery_html = f'<section class="gallery">{cells}</section>\n'
+    return lead_html, gallery_html
 
 
 # ---- fetching -------------------------------------------------------------
@@ -847,49 +974,29 @@ def _bundle_wiki_articles(
     def store(title_us: str, article_us: str, raw: str) -> int:
         """Store the page for `title_us` (the text of `article_us`, the
         article itself or the one it redirects to); returns its size."""
-        nonlocal images_stored, image_bytes
         disp = article_us.replace("_", " ")
-        url = f"https://{_wiki_host()}/wiki/" + urllib.parse.quote(article_us)
-        lead_html = gallery_html = ""
+        url = article_url(article_us)
         # The page lives at wiki-article/<Title>; a title with N
         # slashes is N levels deeper, so the image link must climb
         # N+1 (108 of California's 11,613 titles are like
         # "Expo_Park/USC_station" — a fixed "../" left every one of
         # them with dangling links and a failed validate gate).
         up = "../" * (title_us.count("/") + 1)
+
+        def store_image(name: str, mimetype: str, b: bytes) -> None:
+            nonlocal images_stored, image_bytes
+            ipath = "wiki-image/" + name
+            if ipath not in image_paths:
+                add_item(ipath, "", mimetype, b)
+                image_paths.add(ipath)
+                images_stored += 1
+                image_bytes += len(b)
+
+        lead_html = gallery_html = ""
         if images != "none" and src is not None:  # src is set when images are on
-            figs = []
-            for isrc, caption in image_candidates(raw):
-                if len(figs) >= max_images_per_article:
-                    break
-                got = src.image(isrc, image_max_kb * 1024)
-                if not got:
-                    continue
-                b, mt = got
-                ext = _EXT_FOR_MIME.get((mt or "").split(";")[0].strip())
-                if not ext or len(b) < _MIN_IMAGE_BYTES or len(b) > image_max_kb * 1024:
-                    continue
-                name = hashlib.sha1(b).hexdigest()[:20] + "." + ext
-                ipath = "wiki-image/" + name
-                if ipath not in image_paths:
-                    add_item(ipath, "", mt.split(";")[0].strip(), b)
-                    image_paths.add(ipath)
-                    images_stored += 1
-                    image_bytes += len(b)
-                figs.append((name, caption))
-                if images == "lead":
-                    break
-            if figs:
-                name, caption = figs[0]
-                cap = f"<figcaption>{caption}</figcaption>" if caption else ""
-                lead_html = (f'<figure class="lead"><img src="{up}wiki-image/{name}" '
-                             f'alt="{caption}" loading="lazy">{cap}</figure>\n')
-                if len(figs) > 1:
-                    cells = "".join(
-                        f'<figure><img src="{up}wiki-image/{n}" alt="{c}" loading="lazy">'
-                        + (f"<figcaption>{c}</figcaption>" if c else "") + "</figure>"
-                        for n, c in figs[1:])
-                    gallery_html = f'<section class="gallery">{cells}</section>\n'
+            lead_html, gallery_html = article_figures(
+                raw, src, up=up, images=images, image_max_kb=image_max_kb,
+                max_images=max_images_per_article, store_image=store_image)
         page = clean_article_html(raw, disp, url, lead_html, gallery_html,
                                   path_title=title_us).encode("utf-8")
         add_item(f"wiki-article/{title_us}", disp, "text/html", page)

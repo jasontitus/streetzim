@@ -1,0 +1,9 @@
+{
+  "name": "streetzim-langpack-gates",
+  "version": "1.0.0",
+  "private": true,
+  "description": "playwright-core for the language-pack browser gates (tools/langpack/viewer_gate.mjs, ui_gate.mjs); install here with npm ci, never at the repository root",
+  "dependencies": {
+    "playwright-core": "1.59.1"
+  }
+}

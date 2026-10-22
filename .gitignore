@@ -86,3 +86,9 @@ coverage.xml
 htmlcov/
 !tests/fixtures/monaco-full/monaco.osm.pbf
 !tests/fixtures/monaco-full/dl/cache/wikidata_cache/
+
+# Language-pack pipeline working directory (tools/langpack/, $LANGPACK_WORK's default)
+/langpack-work/
+/ops/langpack/node_modules/
+# The builder page's recipes: site data written by ops/langpack/publish_site.sh, not source
+/web/build/recipes/

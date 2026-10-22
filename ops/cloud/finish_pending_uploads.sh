@@ -115,7 +115,9 @@ while IFS=$'\t' read -r id zim when md5; do
        bash cloud/upload_validated.sh "$id" "$zim" >> "$LOG" 2>&1; then
     echo "  $id done" | tee -a "$LOG"
   else
-    rc=$?; echo "  $id rc=$rc — keeping it pending" | tee -a "$LOG"
+    rc=$?
+    if [ "$rc" -eq 7 ]; then echo "  $id rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh); keeping it pending" | tee -a "$LOG"
+    else echo "  $id rc=$rc — keeping it pending" | tee -a "$LOG"; fi
     # upload_validated exit 6 has already appended its own (newer) row.
     [ "$rc" -eq 6 ] || printf '%s\t%s\t%s\t%s\n' "$id" "$zim" "$when" "$md5" >> "$still"
   fi

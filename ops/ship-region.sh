@@ -230,7 +230,9 @@ log "uploading to archive.org/details/streetzim-$ID"
 PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
   bash cloud/upload_validated.sh "$ID" "$ZIM" >> "$LOG" 2>&1
 UP_RC=$?
-if [ "$UP_RC" -eq 6 ]; then
+if [ "$UP_RC" -eq 7 ]; then
+  log "=== NOT UPLOADED $ZIM rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"
+elif [ "$UP_RC" -eq 6 ]; then
   # Transferred fine; archive.org just has not listed it yet. Not a
   # failure — cloud/finish_pending_uploads.sh finishes the prune/deploy.
   log "=== UPLOADED $ZIM (archive.org listing pending; prune/deploy deferred)"

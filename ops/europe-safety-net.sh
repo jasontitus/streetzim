@@ -115,4 +115,5 @@ log "all gates passed"
 if [ "$UPLOAD" != 1 ]; then log "UPLOAD=0 — stopping before upload (rerun with UPLOAD=1)"; exit 0; fi
 flock "$LOCK" env PROJECT_DIR=/storage/streetzim TERRAIN_STRIPE_TOLERATE=10 \
   bash cloud/upload_validated.sh "$ID" "$ZIM" >> "$LOG" 2>&1
-log "upload rc=$?"
+URC=$?
+if [ "$URC" = 7 ]; then log "upload rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; else log "upload rc=$URC"; fi

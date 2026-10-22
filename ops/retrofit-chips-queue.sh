@@ -341,6 +341,7 @@ except Exception: print('err')" "$SRC")
   case $URC in
     0) log "  uploaded → https://archive.org/details/streetzim-$ID"; row "$ID" uploaded "$OUT_BASE" "$(( ($(date +%s) - T0) / 60 )) min" ;;
     6) log "  upload transferred but not yet listed — pending (cloud/finish_pending_uploads.sh)"; row "$ID" upload-pending "$OUT_BASE" "rc=6" ;;
+    7) log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; row "$ID" frozen-published "$OUT_BASE" "rc=7" ;;
     *) log "  UPLOAD FAILED rc=$URC — kept $OUT_BASE"; row "$ID" upload-failed "$OUT_BASE" "rc=$URC" ;;
   esac
 done

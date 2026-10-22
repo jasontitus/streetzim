@@ -2,7 +2,7 @@
 
 Status: design, 2026-10-13, revised after review (see the next section). It builds on `docs/language-packs.md` (multilingual base, packs, merge) and `docs/language-packs-browser.md` (assembly in the browser). Not built yet.
 
-On `main` (2026-10-14): the viewer side is here (Wikipedia packs, bilingual labels, your language first, the UI tables). The pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger and recipes, and the builder page (`web/lab/build/`) are on the `language-packs` branch.
+On `main` (2026-10-22): all of it is here. The viewer side (Wikipedia packs, bilingual labels, your language first, the UI tables), the pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger, recipes and gates (`tools/langpack/`), the builder page (`web/build/`, served at `/build/`) and the post-ship step for every published map (`ops/langpack/ship_packs.sh`). [language-pack-pipeline.md](language-pack-pipeline.md) is the operator's guide.
 
 ## Revised after review (2026-10-13): the plan of record
 

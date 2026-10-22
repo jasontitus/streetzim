@@ -46,6 +46,24 @@ REGION_ISO639_3 = {
     "ty": "tah", "rar": "rar",
 }
 
+# Language packs only (tools/langpack/, streetzim/wiki_pack.py): the other
+# two-letter codes of cloud/region-languages.tsv, whose Wikipedia packs need
+# an ISO 639-3 code in their metadata. Not tile or build languages: only
+# pack_iso639_3() reads this table, so check(), iso639_3() and
+# tile_languages() keep the contract above.
+PACK_ISO639_3 = {
+    "aa": "aar", "af": "afr", "ak": "aka", "as": "asm", "av": "ava", "bi": "bis", "bm": "bam",
+    "bo": "bod", "dv": "div", "dz": "dzo", "ee": "ewe", "ff": "ful", "fj": "fij", "gu": "guj",
+    "ha": "hau", "hy": "hye", "ig": "ibo", "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik",
+    "kk": "kaz", "km": "khm", "kn": "kan", "kr": "kau", "ks": "kas", "ky": "kir", "lg": "lug",
+    "ln": "lin", "lo": "lao", "mg": "mlg", "mh": "mah", "ml": "mal", "mt": "mlt", "my": "mya",
+    "na": "nau", "nd": "nde", "nr": "nbl", "ny": "nya", "om": "orm", "or": "ori", "os": "oss",
+    "pa": "pan", "ps": "pus", "rn": "run", "rw": "kin", "sd": "snd", "sg": "sag", "si": "sin",
+    "sn": "sna", "so": "som", "ss": "ssw", "st": "sot", "su": "sun", "tg": "tgk", "ti": "tir",
+    "tk": "tuk", "tn": "tsn", "ts": "tso", "uz": "uzb", "ve": "ven", "wo": "wol", "xh": "xho",
+    "yo": "yor", "zu": "zul",
+}
+
 # Right-to-left scripts: the viewer's layout is left-to-right; labels and
 # search results still render correctly (MapLibre's RTL plugin). Gilaki
 # and Mazandarani (Iran's tiles) are written in Arabic script too.
@@ -54,11 +72,20 @@ RTL = frozenset({"ar", "fa", "he", "ur", "glk", "mzn"})
 
 # Wikipedia editions whose code is not the language's ISO 639-1 code.
 WIKI_CODE = {"nb": "no"}
+# Kiwix names a Wikipedia ZIM by another code than the edition's in one
+# case: Norwegian Bokmål is no.wikipedia.org (dumps: nowiki), but its ZIM is
+# wikipedia_nb_*.zim (cloud/region-languages.tsv says "no").
+KIWIX_ZIM_CODE = {"no": "nb", "nb": "nb"}
 
 
 def wiki_code(lang: str) -> str:
     """The Wikipedia edition of ``lang``: xx.wikipedia.org, site xxwiki."""
     return WIKI_CODE.get(lang, lang)
+
+
+def kiwix_zim_code(lang: str) -> str:
+    """The code in a Kiwix Wikipedia ZIM's file name (wikipedia_<code>_...)."""
+    return KIWIX_ZIM_CODE.get(lang, wiki_code(lang))
 
 
 # ISO 639-3 codes a Kiwix Wikipedia ZIM in the language may declare.
@@ -69,7 +96,7 @@ ZIM_LANGUAGE_ALIASES = {"nb": {"nob", "nor"}, "no": {"nob", "nor"}, "ms": {"msa"
 def zim_matches(lang: str, zim_language: str) -> bool:
     """Whether a ZIM's Language metadata ("fra", "eng,fra") includes
     ``lang``."""
-    want = ZIM_LANGUAGE_ALIASES.get(lang, set()) | {iso639_3(lang)}
+    want = ZIM_LANGUAGE_ALIASES.get(lang, set()) | {pack_iso639_3(lang)}
     return bool(want & {x.strip() for x in zim_language.split(",") if x.strip()})
 
 
@@ -82,6 +109,20 @@ def iso639_3(lang: str) -> str:
             f"unsupported language {lang!r}: one of "
             f"{', '.join(sorted(set(ISO639_3) | set(REGION_ISO639_3)))}")
     return code
+
+
+def pack_iso639_3(lang: str) -> str:
+    """The ISO 639-3 code of a Wikipedia pack's language: iso639_3(), else
+    PACK_ISO639_3, else a three-letter code as it is (ceb, hil: ISO 639-3
+    already). Language packs only; builds and tiles use iso639_3()."""
+    try:
+        return iso639_3(lang)
+    except ValueError:
+        if lang in PACK_ISO639_3:
+            return PACK_ISO639_3[lang]
+        if re.fullmatch(r"[a-z]{3}", lang):
+            return lang
+        raise
 
 
 def check(lang: str | None) -> str:

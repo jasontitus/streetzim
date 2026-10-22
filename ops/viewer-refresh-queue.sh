@@ -179,6 +179,7 @@ PYEOF
   case $RC in
     0) log "  SHIPPED $OUT"; row "$ID" uploaded "$OUT" "$MIN min" ;;
     6) log "  uploaded, listing pending"; row "$ID" upload-pending "$OUT" "rc=6" ;;
+    7) log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; row "$ID" frozen-published "$OUT" "rc=7" ;;
     *) log "  UPLOAD FAILED rc=$RC"; row "$ID" upload-failed "$OUT" "rc=$RC" ;;
   esac
 done
