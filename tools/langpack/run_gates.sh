@@ -185,7 +185,8 @@ PY
   fi
   COMMON=$($N $PY "$TL/viewer_qids.py" "$BASE" "$PF" "$NAMED")
   wait_mem
-  EP=$([ $MODE = merged ] && $PY -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["packs"]))' "$W/recipes/$TAG/$L.json" || echo 0)
+  # the Wikipedia packs the viewer must load (a search pack is not one)
+  EP=$([ $MODE = merged ] && $PY -c 'import json,sys; print(sum(1 for p in json.load(open(sys.argv[1]))["packs"].values() if p.get("kind") != "search"))' "$W/recipes/$TAG/$L.json" || echo 0)
   EXPECT_PACKS=$EP TMPDIR=$CT $NB "$NODE" "$TL/viewer_gate.mjs" "$B/content/$book" "$LL" "$NAMED" "$COMMON" $([ $MODE = base ] && echo base) > "$OUT/$L.viewer.json" 2>&1
   wait_mem
   TMPDIR=$CT $NB "$NODE" "$TL/ui_gate.mjs" "$B/content/$book" "$LL" "$RJ" $([ $MODE = base ] && echo base) > "$OUT/$L.ui.json" 2>&1

@@ -50,6 +50,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
 NODE_STUB = r'''#!/bin/bash
 # stand-in for node: the gate scripts must exist where run_gates.sh says
 [ -f "$1" ] || { echo "no such script: $1" >&2; exit 1; }
+case "$1" in *viewer_gate.mjs) [ -n "$NODE_STUB_LOG" ] && echo "EXPECT_PACKS=$EXPECT_PACKS $2" >> "$NODE_STUB_LOG" ;; esac
 case "$1" in
   *viewer_gate.mjs|*ui_gate.mjs) echo '{"pass": true}' ;;
   *zim_viewer_smoke.mjs) echo "1 passed, 0 failed" ;;
@@ -300,3 +301,26 @@ def test_logs_with_another_stamp_fail(gates: SimpleNamespace, tmp_path: Path) ->
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0
     assert json.loads((work / "verdicts" / gates.tag / "de.json").read_text())["checks"]["logs_for_recipe"] is False
+
+
+def test_a_search_pack_makes_kiwix_find_the_pack(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """With the entry's search pack in the packs folder (index_pack.py), the
+    merge carries it, Kiwix's search finds the pack articles (search PASS),
+    and the viewer is still told to expect one Wikipedia pack, not two."""
+    from tools.langpack import index_pack
+    packs = tmp_path / "packs"
+    shutil.copytree(gates.packs, packs)
+    de = next(packs.glob("osm_testland_wiki-de_*.zim"))
+    side = index_pack.build(str(gates.base), [str(de)], "de", "testland",
+                            str(packs / "osm_testland_search-de_2026-10-13_x.zim"), tmp_path / "cache", log=lambda m: None)
+    assert side["gate"]["ok"]
+    work = tmp_path / "work"
+    log = tmp_path / "node.log"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "NODE_STUB_LOG": str(log)})
+    assert r.returncode == 0, r.stderr[-2000:]
+    v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
+    assert v["checks"]["search"] is True and v["checks"]["verify"] is True and v["checks"]["recipe_eq_merge"] is True, v
+    assert set(v["packs"]) == {de.name, "osm_testland_search-de_2026-10-13_x.zim"}
+    assert any(x.startswith("EXPECT_PACKS=1 ") and "m-" in x for x in log.read_text().splitlines()), log.read_text()

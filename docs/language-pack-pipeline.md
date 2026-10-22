@@ -72,7 +72,7 @@ which uses only packs with a passing gate. It writes
 | kiwix | kiwix-serve suggest/search, one article and `pack.json` per pack, and the catalog Title and Language |
 | viewer | `viewer_gate.mjs`: `WIKI_PACKS`, source order, the article offered |
 | ui | `ui_gate.mjs`: the UI in the map language (a language with no UI table FAILS; read through the viewer's runtime, any table format; RTL needs `dir="rtl"`), labels, popup → pack article → images → back to the map, the map's search |
-| search | `search_gate.py`: Kiwix's search (libzim suggestions, full text) finds 8 pack-only article titles; required unless `LANGPACK_SEARCH_GATE=report` (then advisory) |
+| search | `search_gate.py`: Kiwix's search (libzim suggestions, full text) finds 8 pack-only article titles; the kiwix-serve check asks `/suggest` and `/search` for three of them too. Required (v1 does not launch without it) |
 | smoke | `cloud/zim_viewer_smoke.mjs` |
 
 The viewer, UI and smoke gates also run on the base alone, first. Then one
@@ -194,6 +194,38 @@ Tests that need more skip themselves and say why:
 
 `tests/langpack/test_real_data.py` lists those variables.
 
+## Kiwix search: search packs
+
+Kiwix searches a ZIM through libzim: title suggestions from
+`X/title/xapian` (without one, a case-sensitive prefix walk of the title
+listing) and full text from `X/fulltext/xapian`. Every Kiwix app (desktop,
+Android, iOS, kiwix-serve, the PWA) goes through these two. A merged file
+that kept the base's indexes found none of its pack articles.
+
+A **search pack** (`tools/langpack/index_pack.py`) is a small ZIM written by
+libzim itself: one empty item per page of the merged file, at the merged
+path, with the page's title and its text (accents folded: libzim's reader
+folds every query, python-libzim's writer keeps accents in index data) as
+index data. `merge_zim.py --index` puts its two indexes in place of the
+base's; its clusters are copied verbatim like a pack's, and the recipe
+names it as one more source (`packs.search`, `"kind": "search"`), so the
+browser streams it and builds nothing. Kiwix then finds the base's pages
+and the pack articles alike, with libzim's own matching (case, accents,
+words inside titles), by suggestion and by full text. The base's own index
+bytes stay in the file, unused.
+
+`tools/langpack/search_packs.py` builds one per distinct pack set of the
+menu (entries with the same packs share one: Greece's el and en entries),
+named `osm_<region>_search-<langs>_<date>_<base uuid8>.zim`, with a sidecar
+(the base UUID, the packs' files and MD5s) and a gate (both indexes; a page
+of the base and of each pack found by suggestion). `recipe2.find_search_pack`
+takes one only for exactly the entry's packs and base and with a passing
+gate. The index's stemmer is the visitor's language, else the base's.
+
+Greece (1.05 GB base, 64,457 pages): 57–60 MB per search pack (the base's
+own indexes are 28 MB; a pack's full text adds most of the rest), 67–76 s
+each once the base's text is cached (21 s to read it the first time).
+
 ## In production
 
 Every published map gets packs for the **core languages**, the tiles'
@@ -202,13 +234,18 @@ th tr uk vi zh (`CORE_LANGS` in `tools/langpack/region_meta.py`), and for
 the map's own `regionLanguages` (hy, sv, ...) that have a Kiwix Wikipedia
 ZIM in `WIKI_SRC`. A language without one is skipped and logged; a region
 language without one is left out of the region's languages, since every
-menu entry would need its pack. For the same reason a region keeps its
-`REGION_PACKS_MAX` (3) most spoken languages with a Wikipedia ZIM, the
-base's own not counted (`cloud/region-languages.tsv` lists them by
-speakers: Europe 38, Africa 31); the others stay on the menu when they are
-core languages. Greece: el.
+menu entry would need its pack. A continent or multi-country map (its tier
+in `cloud/regions.tsv`) keeps its `REGION_PACKS_MAX` (3) most spoken
+languages with a Wikipedia ZIM, the base's own not counted
+(`cloud/region-languages.tsv` lists them by speakers: Europe 38, Africa
+31), so its entries stay within a browser's memory; the others stay on the
+menu when they are core languages. A country map keeps all of them:
+Switzerland carries de, fr, it and rm in every entry; Greece el.
 
 ### Host setup (once)
+
+`ops/langpack/install.sh` (dry run; `--apply` does it) and
+[ops/langpack/INSTALL.md](../ops/langpack/INSTALL.md).
 
 `ops/langpack/host-env.sh` sets the paths; `langpack_env_check` says what is
 missing. It needs zim-tools 3.8.0 in
@@ -240,7 +277,8 @@ it on archive.org) logs each step in PDT to
 3. `build_packs.sh` for each pack language without a gated pack for this
    base in `$LANGPACK_WORK/packs/<base>/`. Packs are named
    `osm_<region>_wiki-<L>_<date>_<first 8 hex of the base's UUID>.zim`, so two
-   bases of a region never share a pack name.
+   bases of a region never share a pack name. Then `search_packs.py`: the
+   search packs the menu needs (above).
 4. `run_gates.sh` with `RESUME=1`, streamed. The region file is
    `tools/langpack/regions/<REGION>.json`, else `region_json.py`'s.
 5. archive.org: the packs the passing entries use go to
