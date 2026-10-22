@@ -27,3 +27,28 @@ export function uiVerdict(f) {
   }
   return { ui, fallbackUsed: ui !== f.lang ? ui : null, why, pass: why.length === 0 };
 }
+
+// The labels verdict (ui_gate.mjs). On the base or an en entry: one name,
+// the local one. On a map in another language: the style reads name:<LANG>,
+// the viewer's second language is LANG, the city's label is what the label
+// rule says, no rendered label breaks the rule, and some rendered label
+// shows two names, unless that cannot happen: the map language is one of the
+// region's own (its places' names are the native ones), or no rendered place
+// names itself differently in LANG while the tiles do carry LANG (map-config
+// tileLanguages): Vietnamese on Switzerland, where Zurich is "Zürich" in
+// both and the city's views hold no other name (the gate failed it).
+//
+// facts: {second, usesKey, lang2, lang, cityRendered, cityShown, cityWant,
+//         cityLocal, bilingual (count), bilingualWrong (count), ownLang,
+//         tileLanguages}
+export function labelsVerdict(f) {
+  if (!f.second) {
+    const pass = f.lang2 === '' && f.cityRendered && f.cityShown === f.cityLocal;
+    return { pass, vacuous: false };
+  }
+  const tiles = Array.isArray(f.tileLanguages) && f.tileLanguages.includes(f.lang);
+  const vacuous = !f.ownLang && f.bilingual === 0 && tiles;
+  const pass = f.usesKey && f.lang2 === f.lang && f.cityRendered && f.cityShown === f.cityWant
+    && (f.ownLang || f.bilingual > 0 || vacuous) && f.bilingualWrong === 0;
+  return { pass, vacuous };
+}

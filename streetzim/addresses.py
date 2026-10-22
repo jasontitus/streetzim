@@ -15,6 +15,7 @@ from streetzim import area
 from streetzim.common import (
     print,
 )
+from streetzim.languages import osm_names
 from streetzim.overture import duckdb_connect, overture_category, overture_release
 
 
@@ -978,8 +979,167 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     }
 
 
-def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False):
+def osm_kind(props, gtype):
+    """What sort of thing an OSM object is, from its tags and geometry
+    type, for matching it to a search record of the same sort in a
+    neighbouring cell (zim_writer.feature_wiki, NEIGHBOUR_KINDS): "water"
+    (waterway, water, natural=water|bay|strait, place=sea|ocean, a
+    reservoir), "peak" (natural=peak, volcano, hill, saddle, ridge...),
+    "place" (any other place=*), "information" (tourism=information: a
+    board, a guidepost), "station" (a railway station, halt or tram stop),
+    "stop" (any other stop or platform, a bus station), "street" (a road,
+    rail or lift line) or "other"."""
+    nat = props.get("natural")
+    if (props.get("waterway") or props.get("water") or nat in ("water", "bay", "strait")
+            or props.get("place") in ("sea", "ocean")
+            or props.get("landuse") in ("reservoir", "basin")):
+        return "water"
+    if nat in ("peak", "volcano", "hill", "saddle", "ridge", "mountain_range", "arete"):
+        return "peak"
+    if props.get("place"):
+        return "place"
+    if props.get("tourism") == "information":
+        return "information"
+    # A station first: a tram stop is also its stop position.
+    if props.get("railway") in ("station", "halt", "stop", "tram_stop"):
+        return "station"
+    if (props.get("highway") == "bus_stop" or props.get("amenity") == "bus_station"
+            or props.get("public_transport") in ("platform", "stop_position")):
+        return "stop"
+    if gtype != "Point" and (props.get("highway") or props.get("railway")
+                             or props.get("aerialway")):
+        return "street"
+    return "other"
+
+
+class OsmRef(dict):
+    """A lookup entry (extract_wiki_tags_pbf, extract_name_tags_pbf) that
+    knows its OSM object's sort (`kind`, osm_kind). The kind is an
+    attribute, not an item: entries compare, count their tags and go into
+    records as plain dicts do."""
+    __slots__ = ("kind",)
+
+    def __init__(self, kind, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kind = kind
+
+
+def _point_of(geom):
+    """(lat, lon) for an osmium-exported geometry, as extract_wiki_tags_pbf
+    places an object: a point, a polygon's outer-ring mean, a line's middle
+    vertex; None for anything else."""
+    gtype = geom.get("type")
+    coords = geom.get("coordinates")
+    if gtype == "Point" and coords:
+        return coords[1], coords[0]
+    if gtype == "Polygon" and coords and coords[0]:
+        ring = coords[0]
+        return sum(c[1] for c in ring) / len(ring), sum(c[0] for c in ring) / len(ring)
+    if gtype == "MultiPolygon" and coords and coords[0] and coords[0][0]:
+        ring = max((p[0] for p in coords if p and p[0]), key=len)
+        return sum(c[1] for c in ring) / len(ring), sum(c[0] for c in ring) / len(ring)
+    if gtype == "LineString" and coords:
+        mid = coords[len(coords) // 2]
+        return mid[1], mid[0]
+    return None
+
+
+def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
+    """name:<lang> of every named OSM object that has one in ``languages``
+    (villages, hamlets, peaks, lakes, stations: what has no wikipedia or
+    wikidata tag, so extract_wiki_tags_pbf misses it), keyed like its
+    lookup: (lowercased name, round(lat*1e4), round(lon*1e4)) ->
+    {"names": {lang: name}} (streetzim.languages.osm_names). Roads are left
+    out (search records of streets carry no `ln`). The search records'
+    `ln` takes these after the feature's own and its wiki cross-ref's
+    (zim_writer.localized_names, feature_wiki with names_link). Two
+    objects with one key: the first in osmium's export order (nodes, ways,
+    areas)."""
+    print("  Extracting names in other languages from OSM data...")
+    if not languages:
+        return {}
+    source_pbf = str(pbf_path)
+    tmp = tempfile.mkdtemp(prefix="streetzim_names_")
+    try:
+        if bbox and not precut:
+            bbox_pbf = os.path.join(tmp, "region.osm.pbf")
+            subprocess.run([
+                "osmium", "extract",
+                *area.osmium_extract_args(bbox, tmp),
+                source_pbf, "-o", bbox_pbf, "--overwrite",
+            ], check=True)
+            source_pbf = bbox_pbf
+        keys = [f"name:{lang}" for lang in languages]
+        if "zh" in languages:
+            keys.append("name:zh-Hans")
+        names_pbf = os.path.join(tmp, "names.osm.pbf")
+        subprocess.run(["osmium", "tags-filter", source_pbf, *keys,
+                        "-o", names_pbf, "--overwrite"], check=True)
+        # Roads and boundary relations out before the export: their
+        # geometries are most of it (the Balkans' 860 MB) and no search
+        # record takes their names (admin areas carry their own). A bus
+        # stop is a node (highway=bus_stop) and stays.
+        kept_pbf = os.path.join(tmp, "names-kept.osm.pbf")
+        subprocess.run(["osmium", "tags-filter", "-i", names_pbf, "w/highway", "r/boundary",
+                        "-o", kept_pbf, "--overwrite"], check=True)
+        names_geojson = os.path.join(tmp, "names.geojsonseq")
+        subprocess.run(["osmium", "export", kept_pbf, "-f", "geojsonseq",
+                        "-o", names_geojson, "--overwrite"], check=True)
+        lookup = {}
+        with open(names_geojson, encoding="utf-8") as fin:
+            for line in fin:
+                line = line.strip().lstrip("\x1e")
+                if not line:
+                    continue
+                try:
+                    feat = json.loads(line)
+                except Exception:
+                    continue
+                props = feat.get("properties") or {}
+                if props.get("highway") and (feat.get("geometry") or {}).get("type") != "Point":
+                    continue                # a road
+                name = (props.get("name") or props.get("name:latin") or "").strip()
+                if not name:
+                    continue
+                names = osm_names(props, languages)
+                if not names:
+                    continue
+                pt = _point_of(feat.get("geometry") or {})
+                if pt is None:
+                    continue
+                key = (name.lower(), int(round(pt[0] * 1e4)), int(round(pt[1] * 1e4)))
+                # One key, two objects: the first in the export's order,
+                # nodes before ways before areas, so the node a place, peak,
+                # stop or POI is in OSM (what its tile feature sits on) over
+                # a building or an area of its name.
+                if key not in lookup:
+                    lookup[key] = OsmRef(osm_kind(props, feat["geometry"].get("type")), names=names)
+        print(f"    Indexed {len(lookup)} objects with names in other languages")
+        return lookup
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _wiki_tag_count(entry):
+    """How many of the two wiki tags a cross-ref entry has."""
+    return ("wikipedia" in entry) + ("wikidata" in entry)
+
+
+def _same_item(a, b):
+    """Whether two cross-ref entries link the same item: the same Q-ID,
+    else (neither has one) the same Wikipedia title."""
+    if a.get("wikidata") or b.get("wikidata"):
+        return a.get("wikidata") == b.get("wikidata")
+    return a.get("wikipedia") == b.get("wikipedia")
+
+
+def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False, languages=None):
     """Extract {wikipedia, wikidata} tags per OSM object with a name.
+
+    ``languages``: also keep the object's name:<lang> tags for these
+    languages as ``names`` ({lang: name}, streetzim.languages.osm_names),
+    from which the search record's ``ln`` comes (zim_writer
+    .localized_names). Without it the lookup is what it always was.
 
     Used to enrich the search index so offline agents can cross-link
     POI records to the Wikipedia ZIM (per the mcpzim contract doc).
@@ -1059,18 +1219,30 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False):
                     continue
 
                 key = (name.lower(), int(round(lat * 1e4)), int(round(lon * 1e4)))
-                entry = {}
+                entry = OsmRef(osm_kind(props, gtype))
                 if wikipedia:
                     entry["wikipedia"] = wikipedia
                 if wikidata:
                     entry["wikidata"] = wikidata
+                names = osm_names(props, languages) if languages else None
                 # If we already have an entry for this coord+name, prefer the one
                 # with more fields (covers the case where a node and a way share
-                # the same name but only one has both tags).
+                # the same name but only one has both tags). Only the two
+                # wiki tags count, so `languages` never changes which object
+                # wins; its names, else the other object's, go with it.
+                # Names go to the other object only when both link the same
+                # item (_same_item): a tunnel's names never name the road.
                 existing = lookup.get(key)
-                if existing is None or len(entry) > len(existing):
+                if existing is None or len(entry) > _wiki_tag_count(existing):
+                    if names:
+                        entry["names"] = names
+                    elif (existing is not None and existing.get("names")
+                          and _same_item(existing, entry)):
+                        entry["names"] = existing["names"]
                     lookup[key] = entry
                     count += 1
+                elif names and not existing.get("names") and _same_item(existing, entry):
+                    existing["names"] = names
                 if count % 50000 == 0 and count:
                     print(f"\r    Indexed {count} wiki cross-refs...", end="", flush=True)
         print(f"\r    Indexed {len(lookup)} wiki cross-refs (from {count} raw)")

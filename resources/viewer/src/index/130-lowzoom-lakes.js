@@ -226,6 +226,11 @@ function szSatelliteHiddenIds(config) {
   ].concat(szClipContextIds(config));
 }
 
+// Symbol placement order inside a label layer: the OMT rank, low first
+// (cities by population and capital level, POIs by importance); a feature
+// with no rank goes last. MapLibre places a lower symbol-sort-key first, so
+// it wins a collision.
+var _SZ_PLACE_SORT = ["coalesce", ["get", "rank"], 99];
 function makeStyle(config) {
   var _szLangs = szLabelLanguages(config);
   SZ_LANG = _szLangs[0];
@@ -665,81 +670,36 @@ function makeStyle(config) {
           "text-halo-width": 1
         }
       },
-      // Labels - Places
+      // Labels - Places, and the POIs among them. Symbol collision places
+      // the layers from the last one down, so this order is the priority:
+      //   country > city > town > region > POI > village > suburb
+      // (place-suburb also holds quarters and neighbourhoods). Cities and
+      // towns win over everything below them: until 2026-10-21 the order
+      // was the reverse, and a POI, a village or the "Attica" region label
+      // hid Athens and Thessaloniki from z6 to z8. POIs win over villages
+      // and neighbourhoods, as they did before: under them, a neighbourhood
+      // label hid Saint Francis Memorial Hospital in San Francisco, and
+      // Athens lost a fifth of its POIs at z14. Within a layer the OMT rank
+      // (population, capital, POI importance) orders them: _SZ_PLACE_SORT.
       {
-        "id": "place-country",
+        "id": "place-suburb",
         "type": "symbol",
         "source": "openmaptiles",
         "source-layer": "place",
-        "filter": ["==", "class", "country"],
-        "maxzoom": 6,
+        "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
+        "minzoom": 12,
         "layout": {
           "text-field": szLabelField(),
-          "text-font": ["OpenSansBold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
-          "text-transform": "uppercase"
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#334"],
-          "text-halo-color": "rgba(255,255,255,0.8)",
-          "text-halo-width": 1.5
-        }
-      },
-      {
-        "id": "place-state",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["==", "class", "state"],
-        "minzoom": 4,
-        "maxzoom": 8,
-        "layout": {
-          "text-field": szLabelField(),
-          "text-font": ["OpenSansBold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 8, 14],
-          "text-transform": "uppercase",
-          "text-letter-spacing": 0.1
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#555"],
-          "text-halo-color": "rgba(255,255,255,0.7)",
-          "text-halo-width": 1.2
-        }
-      },
-      {
-        "id": "place-city",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["==", "class", "city"],
-        "minzoom": 5,
-        "layout": {
-          "text-field": szLabelField(),
-          "text-font": ["OpenSansBold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18, 18, 26]
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#333"],
-          "text-halo-color": "rgba(255,255,255,0.8)",
-          "text-halo-width": 1.5
-        }
-      },
-      {
-        "id": "place-town",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["==", "class", "town"],
-        "minzoom": 8,
-        "layout": {
-          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
           "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16, 18, 24]
+          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
+          "text-transform": "uppercase",
+          "text-letter-spacing": 0.05
         },
         "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#444"],
-          "text-halo-color": "rgba(255,255,255,0.8)",
-          "text-halo-width": 1.2
+          "text-color": ["case", ["has", "wikidata"], "#4a6fa5", "#666"],
+          "text-halo-color": "rgba(255,255,255,0.7)",
+          "text-halo-width": 1
         }
       },
       {
@@ -751,32 +711,13 @@ function makeStyle(config) {
         "minzoom": 10,
         "layout": {
           "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 14, 14, 18, 22]
         },
         "paint": {
           "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#555"],
           "text-halo-color": "rgba(255,255,255,0.8)",
-          "text-halo-width": 1
-        }
-      },
-      {
-        "id": "place-suburb",
-        "type": "symbol",
-        "source": "openmaptiles",
-        "source-layer": "place",
-        "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
-        "minzoom": 12,
-        "layout": {
-          "text-field": szLabelField(),
-          "text-font": ["OpenSansRegular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 12, 12, 18, 20],
-          "text-transform": "uppercase",
-          "text-letter-spacing": 0.05
-        },
-        "paint": {
-          "text-color": ["case", ["has", "wikidata"], "#4a6fa5", "#666"],
-          "text-halo-color": "rgba(255,255,255,0.7)",
           "text-halo-width": 1
         }
       },
@@ -796,6 +737,7 @@ function makeStyle(config) {
         ],
         "layout": {
           "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
           "text-font": ["OpenSansRegular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 18, 18],
           "icon-image": _szPoiIconExpr(),
@@ -808,6 +750,86 @@ function makeStyle(config) {
           "text-color": ["case", ["has", "wikidata"], "#4a6fa5", "#666"],
           "text-halo-color": "rgba(255,255,255,0.7)",
           "text-halo-width": 1
+        }
+      },
+      {
+        "id": "place-state",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["==", "class", "state"],
+        "minzoom": 4,
+        "maxzoom": 8,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansBold"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 8, 14],
+          "text-transform": "uppercase",
+          "text-letter-spacing": 0.1
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#555"],
+          "text-halo-color": "rgba(255,255,255,0.7)",
+          "text-halo-width": 1.2
+        }
+      },
+      {
+        "id": "place-town",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["==", "class", "town"],
+        "minzoom": 8,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansRegular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 16, 18, 24]
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#3a5a8a", "#444"],
+          "text-halo-color": "rgba(255,255,255,0.8)",
+          "text-halo-width": 1.2
+        }
+      },
+      {
+        "id": "place-city",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["==", "class", "city"],
+        "minzoom": 5,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansBold"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 14, 18, 18, 26]
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#333"],
+          "text-halo-color": "rgba(255,255,255,0.8)",
+          "text-halo-width": 1.5
+        }
+      },
+      {
+        "id": "place-country",
+        "type": "symbol",
+        "source": "openmaptiles",
+        "source-layer": "place",
+        "filter": ["==", "class", "country"],
+        "maxzoom": 6,
+        "layout": {
+          "text-field": szLabelField(),
+          "symbol-sort-key": _SZ_PLACE_SORT,
+          "text-font": ["OpenSansBold"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 1, 10, 6, 16],
+          "text-transform": "uppercase"
+        },
+        "paint": {
+          "text-color": ["case", ["has", "wikidata"], "#2a4a7a", "#334"],
+          "text-halo-color": "rgba(255,255,255,0.8)",
+          "text-halo-width": 1.5
         }
       }
     ]

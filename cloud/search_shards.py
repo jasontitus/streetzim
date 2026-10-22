@@ -289,8 +289,9 @@ def record_names(record: Record) -> list[str]:
     """Every name a record is indexed and matched under: ``n``, the name in
     its own script ``nn`` (when it differs: "北京大学" beside "Peking
     University"), the English / Latin name ``nl`` of a build in another
-    language, and an administrative area's other names ``alt``. The
-    viewers' recordNames is the same list (docs/search-records.md)."""
+    language, an administrative area's other names ``alt``, and its names
+    in other languages ``ln`` ("Genf", "Ginevra" for Geneva), each once.
+    The viewers' recordNames is the same list (docs/search-records.md)."""
     names = [record.get("n") or ""]
     for k in ("nn", "nl"):
         v = record.get(k)
@@ -299,6 +300,11 @@ def record_names(record: Record) -> list[str]:
     alt = record.get("alt")
     if isinstance(alt, list):
         names += [a for a in alt if isinstance(a, str)]  # pyright: ignore[reportUnknownVariableType]
+    ln = record.get("ln")
+    if isinstance(ln, dict):
+        for v in ln.values():  # pyright: ignore[reportUnknownVariableType]
+            if isinstance(v, str) and v and v not in names:
+                names.append(v)
     return names
 
 

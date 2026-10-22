@@ -265,7 +265,7 @@ f = next((x for x in fs or [] if isinstance(x, dict) and x.get("name") == sys.ar
 sys.exit(0 if f and str(f.get("md5", "")).lower() != sys.argv[2] else 1)' "$1" "${MD5[$1]}"
 }
 # one --metadata=language:<ISO 639-3> per pack language (archive.org keeps a list)
-mapfile -t LANG_META < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import iso639_3; [print("--metadata=language:" + iso639_3(x)) for x in sys.argv[1].split(",") if x]' "$PACK_LANGS" "$ROOT")
+mapfile -t LANG_META < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); from streetzim.languages import pack_iso639_3; [print("--metadata=language:" + pack_iso639_3(x)) for x in sys.argv[1].split(",") if x]' "$PACK_LANGS" "$ROOT")
 # A pack sent before (its name and MD5 in $LANGPACK_WORK/uploads/<item>.tsv)
 # is never sent again while archive.org has not listed it yet: `ia upload
 # --checksum` does not skip a file while the item has a pending task, and a

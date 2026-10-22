@@ -99,8 +99,8 @@ function initRouting(map, config) {
     syncTravelButtons();
     // Radio-group keys: arrows move the choice (and focus) along the row.
     travelRow.addEventListener('keydown', function(e) {
-      var step = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1
-               : (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? -1 : 0;
+      // Right to left, the row runs from the right (szArrowStep).
+      var step = szArrowStep(e.key);
       if (!step) return;
       e.preventDefault();
       var i = routingModes.indexOf(travelMode);

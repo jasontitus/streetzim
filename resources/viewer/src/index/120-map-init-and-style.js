@@ -242,6 +242,15 @@ if (!window.__szUnsupported) fetchConfig(1)
         document.documentElement.style.setProperty('--sz-attrib-h', attrib.offsetHeight + 'px');
       }).observe(attrib);
     })();
+    // #info keeps clear of the About button beside it, whose width follows
+    // the UI language: published as --sz-attr-w for #info's max-width (010).
+    (function () {
+      var about = document.getElementById('attr-btn');
+      if (!about || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');
+      }).observe(about);
+    })();
 
     // Satellite layer toggle
     if (config.hasSatellite) {
@@ -492,7 +501,10 @@ if (!window.__szUnsupported) fetchConfig(1)
       document.querySelector('#info h3').textContent = config.name;
     }
     if (config.buildDate) {
-      document.querySelector('#info p').textContent = szT('info.map_data', 'Map data: {date}', { date: config.buildDate });
+      // A translated UI writes the month as About does (_szMonth: Intl, so
+      // Persian in its own calendar); English keeps the build's "2026/10".
+      document.querySelector('#info p').textContent = szT('info.map_data', 'Map data: {date}',
+        { date: SZ_I18N ? _szMonth(config.buildDate) : config.buildDate });
     }
     // PWA only: a way back to the picker from an installed app, whose
     // standalone launch skips it (docs/mobile-browser-review.md §B5).

@@ -70,9 +70,9 @@ def iso3(lang: str) -> str:
     """A pack language's ISO 639-3 code (streetzim.languages: the core
     languages and the regions' own, rm -> roh); a fixed table of the core
     ones failed Switzerland's Romansh pack and merge."""
-    from streetzim.languages import iso639_3
+    from streetzim.languages import pack_iso639_3
     try:
-        return iso639_3(lang)
+        return pack_iso639_3(lang)
     except ValueError:
         raise MergeError(f"no ISO 639-3 code for {lang!r}") from None
 

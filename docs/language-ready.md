@@ -27,7 +27,19 @@ with this profile; the world tiles change only when they are rebuilt.
 `tests/test_tile_profile_names.py` runs the profile's Lua (5.1, through
 `lupa`).
 `streetzim.languages.MATRIX_TILE_LANGUAGES` is the list (21: ar de el es fa
-fr he hi id it ja ko nl pl pt ru th tr uk vi zh).
+fr he hi id it ja ko nl pl pt ru th tr uk vi zh). A map whose row in
+`cloud/region-languages.tsv` lists at most `REGION_TILE_ROW_MAX` (7)
+languages also carries its own languages that the matrix lacks
+(`default_tile_languages`): Switzerland adds Romansh (`rm`), the Baltics
+`et lt lv`, the Balkans `bs cnr hr mk sl sq sr`; a longer row (Europe 38,
+Africa 31, the Indian subcontinent 22) adds none. Romansh is a build
+language (`ISO639_3`, "roh"); the other region codes are in
+`REGION_ISO639_3`. The contract (`streetzim/languages.py`):
+`check()` (`--language`, the CLI's choices, the offliner definition)
+accepts `ISO639_3` only; `iso639_3()` (ZIM metadata) and
+`tile_languages()` (`--tile-languages`, the `.langs` sidecar) accept both.
+Search records name places in the tile and region languages (`ln`,
+[search-records.md](search-records.md)).
 `cloud/region-languages.tsv` holds every registry region's own languages;
 `tests/test_region_languages.py` keeps it complete. Its header has the
 rule: the languages of the countries the region's site card names (and its
@@ -49,7 +61,9 @@ rebuild driver, which runs it) cuts a region's tiles itself when
 `STREETZIM_ML_TILES=1`:
 
 1. `ops/region-ml-tiles.py --src-id <parent> -- <id> <bbox>` runs tilemaker
-   on `world-data/regions/<parent>.osm.pbf` and the registry bbox, and
+   on `world-data/regions/<parent>.osm.pbf` and the registry bbox for the
+   parent's default tile languages (above; `STREETZIM_TILE_LANGUAGES`
+   overrides), and
    writes `world-data/regions/<parent>.ml.mbtiles` with sidecars `.bbox`,
    `.langs`, `.profile` and `.pbf`. `.profile` is what decides the tiles in
    an image: the `resources/tilemaker` tree, the `Dockerfile` blob and its
@@ -110,6 +124,13 @@ tiles reach past the box, where a region's extract has nothing: at zoom
 8-10 landcover has 6-15% fewer features and water 12% fewer at zoom 8
 (the same with the world tiles' own tilemaker build), and below zoom 8 the
 neighbours are missing altogether. The viewer never shows beyond the box.
+A search cache extracted from a region's tiles differs more than the tiles
+do: Switzerland's had 7.8% more POIs than the world-tile cache (bus 53,039
+-> 82,846: a station's bays and stop positions, each a POI of the same
+name metres apart); the search pass merges same-name stops and water
+features within 100 m (`zim_writer.near_duplicate_plan`, after the
+Wikipedia matching, so no link is lost): bus stops about 54,000, POIs about
++2.6%.
 
 With 3.0 the content changed too: a polygon's label (`LayerAsCentroid`)
 was copied into every tile under the polygon (the island name

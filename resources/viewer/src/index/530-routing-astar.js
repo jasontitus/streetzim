@@ -247,6 +247,35 @@
     return concatenateLegs([legA, legB, legC]);
   }
 
+  // A route segment from its edge: the maneuver flags driving mode reads
+  // (bit 0 roundabout, bit 1 link road) and the road class (class_access bits
+  // 0..4, docs/formats.md), by which it tells an exit from an on-ramp
+  // (600 szLinkKind). A graph without class_access gives 0: no cue.
+  // The worker has the same two (routing-worker.js); 540 uses these.
+  function szRouteSegment(nameIdx, distM, classAccess) {
+    var cls = classAccess & 0x1F;
+    var isRound = ((classAccess >>> 8) & 1) !== 0;
+    var isLink = cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10;
+    return { nameIdx: nameIdx, distM: distM, flags: (isRound ? 1 : 0) | (isLink ? 2 : 0), cls: cls };
+  }
+  // Segments (collected end to start) to roads: consecutive segments with
+  // the same name and flags are one road; cls0 / cls1 its class where it
+  // starts / ends.
+  function szRoadsFromSegments(segRev) {
+    var roads = [];
+    for (var si = segRev.length - 1; si >= 0; si--) {
+      var s = segRev[si];
+      var last = roads.length ? roads[roads.length - 1] : null;
+      if (last && last.nameIdx === s.nameIdx && last.flags === s.flags) {
+        last.distM += s.distM;
+        last.cls1 = s.cls;
+      } else {
+        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags, cls0: s.cls, cls1: s.cls });
+      }
+    }
+    return roads;
+  }
+
   function concatenateLegs(legs) {
     var coords = [];
     var roads = [];
@@ -534,12 +563,8 @@
       var nameIdx = pe[4];
       var classAccess = pe[5];
       var distM = (speedDist & 0xFFFFFF) / 10;
-      var isRound = ((classAccess >>> 8) & 1) !== 0;
-      var cls = classAccess & 0x1F;
-      var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
-      var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
       totalDist += distM;
-      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
+      segRev.push(szRouteSegment(nameIdx, distM, classAccess));
 
       var fromCoords = await graph.nodeCoordsE7(sourceNode);
       var toCoords = await graph.nodeCoordsE7(n);
@@ -561,17 +586,7 @@
     // O(n²) on long routes (tens of thousands of segments).
     path.reverse();
 
-    var roads = [];
-    for (var si = segRev.length - 1; si >= 0; si--) {
-      var s = segRev[si];
-      if (roads.length > 0
-          && roads[roads.length - 1].nameIdx === s.nameIdx
-          && roads[roads.length - 1].flags === s.flags) {
-        roads[roads.length - 1].distM += s.distM;
-      } else {
-        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags });
-      }
-    }
+    var roads = szRoadsFromSegments(segRev);
 
     var coords = [];
     for (var sp = 0; sp < path.length; sp++) {

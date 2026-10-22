@@ -82,6 +82,14 @@ checks = {
     # keyboard up (300-search.js _szFitAdminBox). Without it a run started
     # from an unmerged viewer would ship every region unchanged.
     "search fit":      b"_szFitAdminBox" in idx,
+    # The 2026-10-21 core-language viewer: UI tables for every core language,
+    # inlined compressed (runtime.js szTableFrom), right-to-left UI
+    # (SZ_RTL_LANGS) and place labels by rank (_SZ_PLACE_SORT).
+    "core ui tables":  b"function szTableFrom" in idx and b"function szTableFrom" in plc,
+    "rtl ui":          b"SZ_RTL_LANGS" in idx and b"SZ_RTL_LANGS" in plc,
+    "label priority":  b"_SZ_PLACE_SORT" in idx,
+    # 2026-10-22: exits and on-ramps told apart by the road classes (600 szLinkKind)
+    "ramp cues":       b"szLinkKind" in idx,
     "slot marker idx": b"SZVSLOT1:index.html" in idx,
     "slot marker plc": b"SZVSLOT1:places.html" in plc,
     "archive check":   a.check(),

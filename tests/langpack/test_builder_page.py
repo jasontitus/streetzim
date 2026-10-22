@@ -40,12 +40,13 @@ def page(ship: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:  # noqa: F81
     return SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
 
 
-def _e2e(p: SimpleNamespace, langs: str, mode: str = "net", *extra: str) -> tuple[int, list[dict]]:
+def _e2e(p: SimpleNamespace, langs: str, mode: str = "net", *extra: str, env: dict | None = None,
+         timeout: int = 1800) -> tuple[int, list[dict]]:
     cmd = [os.environ["NODE"], str(ROOT / "tools" / "langpack" / "builder_e2e.mjs"), "--web", str(ROOT / "web"),
            "--recipes", str(p.rec), "--item", f"streetzim-testland={p.ship.base.parent}",
            "--item", f"streetzim-testland-lang={p.packs}", "--region", "testland", "--langs", langs,
            "--out", str(p.out), "--mode", mode, "--base", str(p.ship.base), *extra]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env={**os.environ, **(env or {})})
     rows = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
     return r.returncode, rows
 
@@ -62,6 +63,37 @@ def test_a_corrupt_pack_saves_nothing(page: SimpleNamespace) -> None:
     rc, rows = _e2e(page, "de", "net", "--corrupt", f"streetzim-testland-lang/{pack}@2000", "--expect", "fail")
     assert rc == 0 and rows[0]["pass"], rows
     assert rows[0]["status"].startswith("Not started: Wikipedia could not be downloaded"), rows
+
+
+def test_a_dead_browser_fails_fast(page: SimpleNamespace, tmp_path: Path) -> None:
+    """A browser that cannot start: the driver says so for every language
+    and exits (its two local servers kept it waiting until the caller's
+    1800 s timeout)."""
+    dead = tmp_path / "chrome"
+    dead.write_text("#!/bin/sh\necho 'no browser here' >&2\nexit 1\n")
+    dead.chmod(0o755)
+    import time
+    t0 = time.time()
+    rc, rows = _e2e(page, "de,th", "net", env={"CHROME_PATH": str(dead)}, timeout=300)
+    assert rc == 1 and [x["lang"] for x in rows] == ["de", "th"], rows
+    assert all(not x["pass"] and x["error"].startswith("browser: ") for x in rows), rows
+    assert time.time() - t0 < 200, time.time() - t0
+
+
+def test_a_browser_that_never_closes_does_not_hang(page: SimpleNamespace, tmp_path: Path) -> None:
+    """A browser whose close never answers (one that died under the driver):
+    the driver reports and exits within its 15 s grace instead of waiting
+    for the caller's timeout."""
+    hang = tmp_path / "hang.mjs"
+    hang.write_text(
+        "const pw = await import(process.env.PLAYWRIGHT_CORE);\n"
+        "const launch = pw.chromium.launch.bind(pw.chromium);\n"
+        "pw.chromium.launch = async (...a) => { const b = await launch(...a); b.close = () => new Promise(() => {}); return b; };\n")
+    import time
+    t0 = time.time()
+    rc, rows = _e2e(page, "de", "net", env={"NODE_OPTIONS": f"--import={hang.as_uri()}"}, timeout=240)
+    assert rc == 0 and rows[0]["pass"], rows
+    assert time.time() - t0 < 180, time.time() - t0
 
 
 def test_a_corrupt_base_chunk_stops_the_build(page: SimpleNamespace) -> None:

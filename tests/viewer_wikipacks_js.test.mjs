@@ -916,8 +916,11 @@ await ok('names with several values: the first in the sheet, Find cards, nearby 
 await ok('names with several values: a search row shows the first; data-name and the record keep it all', () => {
   // renderResults and escapeHtml as initSearch has them (300-search.js).
   const src = (from, to) => { const a = HTML.indexOf(from); return HTML.slice(a, HTML.indexOf(to, a)) + '\n'; };
+  // The shown names come from _szShownNames (admin-search block), in the
+  // map's second language SZ_LANG2 (none here).
   const R = new Function('szPlaceType', 'szT',
-    'var activeIdx = -1, lastSearchMatches = [], resultsEl = { style: {}, innerHTML: "" };\n' +
+    'var activeIdx = -1, lastSearchMatches = [], resultsEl = { style: {}, innerHTML: "" }, SZ_LANG2 = "";\n' +
+    src('function _szShownNames(rec, lang) {', '\n// The normalized texts') +
     src('  function renderResults(matches) {', '\n  function doSearch(') +
     src('  function escapeHtml(s) {', '\n  function selectResult(') +
     '\nreturn { renderResults, el: resultsEl, last: function() { return lastSearchMatches; } };')(szPlaceType, szT);
@@ -977,12 +980,17 @@ await ok('names with several values: route steps and the navigation HUD show the
 await ok('names with several values: search rows and the Find page show the first, lookups keep it all', () => {
   const search = fs.readFileSync(`${PARTS_DIR}/300-search.js`, 'utf8');
   assert.match(search, /'" data-name="' \+ escapeHtml\(m\.n\) \+ '">'/);                 // the lookup's value
-  assert.match(search, /'<span class="search-result-name">' \+ escapeHtml\(szFirstName\(m\.n\)\)/);
-  assert.match(search, /escapeHtml\(szFirstName\(m\.nn\)\)/);
+  // The row's names: _szShownNames (the record's n and nn, or its name in
+  // the map's second language), each cut at a ";".
+  assert.match(search, /'<span class="search-result-name">' \+ escapeHtml\(szFirstName\(shown\[0\]\)\)/);
+  assert.match(search, /escapeHtml\(szFirstName\(shown\[1\]\)\)/);
+  assert.match(search, /var shown = _szShownNames\(m, SZ_LANG2\);/);
   assert.match(search, /function _szPlacePopupDOM\(lat, lon, name, enrich\) \{\s*enrich = enrich \|\| \{\};\s*name = szFirstName\(name\);/);
   const pickers = fs.readFileSync(`${PARTS_DIR}/550-routing-pickers.js`, 'utf8');
-  assert.match(pickers, /var label = szFirstName\(m\.item\.n\);/);
-  assert.match(pickers, /nameSpan\.textContent = szFirstName\(m\.item\.n\);/);
+  // The routing fields show the row's name (_szShownNames: its name in the
+  // map's second language when it has one), cut at a ";".
+  assert.match(pickers, /var label = szFirstName\(_szShownNames\(m\.item, SZ_LANG2\)\[0\]\);/);
+  assert.match(pickers, /nameSpan\.textContent = szFirstName\(_szShownNames\(m\.item, SZ_LANG2\)\[0\]\);/);
   const sheet = fs.readFileSync(`${PARTS_DIR}/210-place-detail-sheet.js`, 'utf8');
   assert.match(sheet, /setDest\(r\.a, r\.o, szFirstName\(r\.n\) \|\| ''\)/);
   const places = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');

@@ -99,3 +99,15 @@ def test_single_names_and_english_builds_are_as_before(profile):
     rt = profile("de")
     assert names(rt, {"name": "Genève", "name:en": "Geneva", "name:de": "Genf"}) == {
         "name:latin": "Geneva", "name_int": "Genève", "name:de": "Genf"}
+
+
+def test_a_regions_own_language_outside_the_matrix(profile):
+    """Romansh (Switzerland's tiles: the matrix plus rm, languages
+    .default_tile_languages): name:rm where OSM has one that differs."""
+    rt = profile("ar,de,fr,it,rm,zh")
+    assert names(rt, {"name": "Chur", "name:rm": "Cuira", "name:it": "Coira"}) == {
+        "name:latin": "Chur", "name:rm": "Cuira", "name:it": "Coira"}
+    assert names(rt, {"name": "Disentis/Mustér", "name:rm": "Mustér", "name:de": "Disentis"}) == {
+        "name:latin": "Disentis/Mustér", "name:rm": "Mustér", "name:de": "Disentis"}
+    # Not asked for: not written.
+    assert "name:rm" not in names(profile("de,fr,it"), {"name": "Chur", "name:rm": "Cuira"})

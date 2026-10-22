@@ -85,8 +85,8 @@ function initWikidataPopups(map, config) {
     // Info grid
     var facts = [];
     if (wd.p) facts.push([szT('wd.population', 'Population'), formatNumber(wd.p)]);
-    if (wd.a) facts.push([szT('wd.area', 'Area'), szLocaleNum(wd.a) + ' km\u00B2']);
-    if (wd.e) facts.push([szT('wd.elevation', 'Elevation'), szLocaleNum(wd.e) + ' m']);
+    if (wd.a) facts.push([szT('wd.area', 'Area'), szLtr(szLocaleNum(wd.a) + ' km\u00B2')]);
+    if (wd.e) facts.push([szT('wd.elevation', 'Elevation'), szLtr(szLocaleNum(wd.e) + ' m')]);
     if (wd.c) facts.push([szT('wd.country', 'Country'), wd.c]);
     if (wd.cap) facts.push([szT('wd.capital', 'Capital'), wd.cap]);
     if (wd.tz) facts.push([szT('wd.timezone', 'Timezone'), wd.tz]);

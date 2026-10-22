@@ -34,7 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from streetzim import wiki_pack  # noqa: E402
-from streetzim.languages import iso639_3  # noqa: E402
+from streetzim.languages import pack_iso639_3  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     langs = [x.strip().lower() for x in a.langs.split(",") if x.strip()]
     try:
         for lg in langs:
-            iso639_3(lg)
+            pack_iso639_3(lg)
     except ValueError as e:
         print(f"prefetch: {e}", file=sys.stderr)
         return 2
