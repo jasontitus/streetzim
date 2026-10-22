@@ -29,6 +29,9 @@ export LANGPACK_WORK=${LANGPACK_WORK:-/storage/streetzim/langpack-work}
 export WP_CACHE=${WP_CACHE:-$LANGPACK_WORK/wpcache}
 # The host is shared with other builds: pause the heavy steps below 40 GB.
 export LANGPACK_MIN_FREE_GB=${LANGPACK_MIN_FREE_GB:-40}
+# The build worker's origin (build-proxy/, deployed by hand): set, and ship_packs.sh
+# writes a webseeded torrent per language entry. Empty: no torrents.
+export LANGPACK_WEBSEED=${LANGPACK_WEBSEED:-}
 export PYTHON=${PYTHON:-/storage/streetzim/venv-linux/bin/python3}
 export WIKI_SRC=${WIKI_SRC:-/storage/streetzim/wiki-src}
 export PACK_GATE_ZIMCHECK=${PACK_GATE_ZIMCHECK:-/storage/streetzim/tools/zim-tools_linux-x86_64-3.8.0/zimcheck}

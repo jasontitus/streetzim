@@ -148,6 +148,7 @@ async function runOne(L) {
     regionOptions: [...document.querySelectorAll('#region option')].map((o) => o.textContent),
     langOption: document.querySelector('#lang').selectedOptions[0].textContent,
     downloads: [...document.querySelectorAll('#downloads li a')].map((a) => a.textContent).slice(0, 25),
+    torrents: [...document.querySelectorAll('#downloads li a.torrent')].map((a) => a.getAttribute('href')),
     packs: [...document.querySelectorAll('#packs li')].map((li) => li.textContent),
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });

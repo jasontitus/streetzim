@@ -30,7 +30,13 @@
 #      that file). Not all listed yet: exit 6, run again later.
 #   6. make_site.py into $LANGPACK_WORK/site/<REGION>/recipes/<REGION>/
 #      (URLs "{proxy}/<item>/<file>": the page's proxy, web/drive/preview-config.js),
-#      then site_check.py (archive.org listings, the served bytes).
+#      then, with LANGPACK_WEBSEED set (the build worker's origin, build-proxy/),
+#      lang_torrents.py: a torrent per entry, webseeded by the worker, its
+#      segment index and blobs, beside the recipes (the region's base
+#      torrent, web/torrents/<REGION>.torrent, lends its piece hashes); an
+#      entry whose torrent fails just has none, and if the tool itself fails
+#      every torrent file is stripped; then site_check.py (archive.org
+#      listings, the served bytes, the torrent files).
 # Publishing those recipes on the site is a separate step:
 # ops/langpack/publish_site.sh REGION, then the site's deploy.
 #
@@ -288,6 +294,19 @@ rm -rf "$STG" && mkdir -p "$OUT"
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
   --base-download "https://archive.org/download/streetzim-$REGION/$BF" --base-url "{proxy}/streetzim-$REGION/$BF" \
   -o "$OUT" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
+if [ -n "${LANGPACK_WEBSEED:-}" ]; then
+  BT=$ROOT/web/torrents/$REGION.torrent
+  BTA=(); [ -f "$BT" ] && BTA=(--base-torrent "$BT")
+  "${LOW[@]}" "$PY" "$TL/lang_torrents.py" "$OUT" --base "$BASE" --packs-dir "$PACKS" \
+    --webseed "$LANGPACK_WEBSEED" "${BTA[@]}" >> "$LOG" 2>&1
+  TRC=$?
+  case $TRC in
+    0) say "language torrents: $(ls "$OUT" | grep -c '\.torrent$') (webseed $LANGPACK_WEBSEED)" ;;
+    3) say "language torrents: some entries failed (the log says which); they have none" ;;
+    *) say "lang_torrents.py failed (rc $TRC): publishing without torrents"
+       "$PY" "$TL/lang_torrents.py" "$OUT" --strip >> "$LOG" 2>&1 || { say "could not strip the torrent files"; exit 1; } ;;
+  esac
+fi
 "${LOW[@]}" "$PY" "$TL/site_check.py" "$STG" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
   --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
 CRC=$?

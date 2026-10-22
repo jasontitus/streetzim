@@ -507,3 +507,38 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     assert r2["base"]["sha256"] == r1["base"]["sha256"] and r2["fingerprint"] == r1["fingerprint"]
     assert r2["uuid"] != r1["uuid"] and r2["md5"] != r1["md5"]
     assert reg2["base"]["md5"] == _md5(base) != reg1["base"]["md5"]
+
+
+def test_language_torrents_ship_and_publish(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """LANGPACK_WEBSEED set: a webseeded torrent per entry beside the recipes,
+    checked by site_check.py, sealed and published with them."""
+    ws = "https://streetzim-build-proxy.example.workers.dev"
+    r = _run(ship, LANGPACK_WEBSEED=ws)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    log = _log(ship)
+    assert "language torrents: 4 (webseed " in log and "-> OK" in log
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    reg = json.loads((out / "region.json").read_text())
+    for m in reg["menu"]:
+        assert m["torrent"] == f"recipes/testland/{m['lang']}.torrent" and len(m["infohash"]) == 40
+        ix = json.loads((out / f"{m['lang']}.ws.json").read_text())
+        assert ix["webseed"].startswith(f"{ws}/merged/testland/{m['lang']}/")
+    seal = json.loads((out / "checked.json").read_text())
+    assert any(f.endswith(".torrent") for f in seal["files"]) and any(f.startswith("ws-") for f in seal["files"])
+    web = tmp_path / "web"
+    (web / "build").mkdir(parents=True)
+    p = subprocess.run(["bash", str(PUBLISH), "testland", str(web)], capture_output=True, text=True, timeout=120,
+                       env=ship.env)
+    assert p.returncode == 0, p.stderr
+    pub = web / "build" / "recipes" / "testland"
+    assert (pub / "de.torrent").read_bytes() == (out / "de.torrent").read_bytes()
+    assert sorted(x.name for x in pub.glob("ws-*.bin")) == sorted(x.name for x in out.glob("ws-*.bin"))
+
+
+def test_a_failing_torrent_step_publishes_without_torrents(ship: SimpleNamespace) -> None:
+    r = _run(ship, LANGPACK_WEBSEED="https://example.invalid/not-an-origin")     # refused: the tool exits 1
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert "publishing without torrents" in _log(ship)
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    assert not list(out.glob("*.torrent")) and not list(out.glob("ws-*.bin"))
+    assert all("torrent" not in m for m in json.loads((out / "region.json").read_text())["menu"])

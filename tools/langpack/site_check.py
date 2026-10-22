@@ -34,6 +34,11 @@ Per menu entry:
     the file with the same size and md5.
   * with --probe-urls: a Range GET of the first and last 64 KiB of every
     distinct URL equals the local bytes.
+  * an entry with a language torrent (lang_torrents.py): its <L>.ws.json is
+    the index rebuilt from the recipe, every blob it names is there with its
+    SHA-256, <L>.torrent describes the recipe's file with that webseed and the
+    entry's infohash, and sampled pieces hash as the torrent says; no torrent,
+    index or blob is left that no entry names.
 """
 from __future__ import annotations
 
@@ -261,8 +266,17 @@ def main():
             need(v.get("packs", {}).get(p["file"]) == gatelib.md5_file(lp), f"{L}/{pl}: verdict pack md5 != local")
             ia_listed(p["url"], lp, f"{L}/{pl}")
             urls[p["url"]] = lp
+        # language torrent (lang_torrents.py): index, blobs, torrent, sampled pieces
+        if m.get("torrent") or os.path.exists(os.path.join(rdir, f"{L}.torrent")):
+            from tools.langpack.lang_torrents import verify_entry
+            tf = verify_entry(rdir, region, m, r, a.base,
+                              {k: os.path.join(a.packs_dir, p["file"]) for k, p in r["packs"].items()})
+            need(not tf, "; ".join(tf))
         rows.append((L, r["md5"], r.get("file_md5"), {pl: url_item_file(p["url"])[0] for pl, p in r["packs"].items()},
                      "OK" if len(fails) == before else "FAIL"))
+    from tools.langpack.lang_torrents import stray_files
+    strays = stray_files(rdir, region)
+    need(not strays, f"torrent files no menu entry names: {strays}")
     if a.probe_urls:
         for u, lp in sorted(urls.items()):
             size = os.path.getsize(lp)

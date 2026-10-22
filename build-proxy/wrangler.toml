@@ -1,0 +1,14 @@
+# Cloudflare Workers config for the StreetZim build worker: the /build/ page's
+# range proxy and the language versions' webseed (README.md). Separate from
+# preview-proxy/ (streetzim-preview-proxy) so each has its own kill switch
+# and request budget.
+name = "streetzim-build-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# where /build/recipes/<region>/<lang>.ws.json and its ws-*.bin blobs are published
+SITE_ORIGIN = "https://streetzim.web.app"
+UPSTREAM = "https://archive.org/download/"
+# MERGED = "0"   switches off /merged/ (the torrents' webseed and direct downloads)
+# OFF = "1"      switches off everything

@@ -124,7 +124,9 @@
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
   // "{proxy}/item/file" -> the configured range proxy; any other URL as is.
-  const PROXY = String(window.STREETZIM_PREVIEW_PROXY || '').replace(/\/+$/, '');
+  // The build worker (build/build-config.js) when one is set, else the
+  // preview's proxy (/drive/preview-config.js).
+  const PROXY = String(window.STREETZIM_BUILD_PROXY || window.STREETZIM_PREVIEW_PROXY || '').replace(/\/+$/, '');
   const viaProxy = (u) => {
     if (typeof u !== 'string' || !u.startsWith('{proxy}')) return u;
     if (!PROXY) throw new Error('downloads are switched off on this site (no range proxy)');
@@ -209,6 +211,16 @@
       const wiki = m.packs.map((p) => langName(p.lang, p.label.replace(/ Wikipedia$/, ''))).join(' + ');
       meta.textContent = `${m.label} · ${fmtMB(m.size)} · ${wiki} Wikipedia`;
       li.append(a2, meta);
+      // The same file as a torrent (lang_torrents.py): byte for byte what
+      // this page builds, downloaded by a torrent client from the build
+      // worker and from anyone seeding it.
+      if (typeof m.torrent === 'string' && /^recipes\/[a-z0-9-]+\/[a-z]{2,3}(-[a-z0-9]+)?\.torrent$/.test(m.torrent)) {
+        const t = document.createElement('a');
+        t.href = m.torrent; t.textContent = 'Torrent'; t.className = 'torrent';
+        t.setAttribute('download', `${m.file_name || m.lang}.torrent`);
+        t.title = `${pickerName(m.lang, m.label)}: ${region.title} as a torrent (the same file)`;
+        li.append(t);
+      }
       dl.append(li);
     }
     const sel = $('lang');

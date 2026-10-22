@@ -139,3 +139,27 @@ def test_packs_stream_and_are_never_held_whole(ship: SimpleNamespace, tmp_path: 
         assert before.get(pk["file"], 0) <= 2 + (4 if pk["file"] == probe else 0), (k, before, probe)
     total = rows[0]["proxy"]["items"].get("streetzim-testland-lang", 0)
     assert total >= sum(chunks.values()), (total, chunks)       # the rest streamed during the build
+
+
+def test_the_page_offers_each_torrent_and_builds_the_torrents_file(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
+    """With language torrents (LANGPACK_WEBSEED): the download list links every
+    entry's torrent, and the file the page builds hashes piece for piece as
+    that torrent says (a visitor who built it can seed it)."""
+    import hashlib
+    from tools.langpack.lang_torrents import bdecode
+    r = _run(ship, LANGPACK_WEBSEED="https://streetzim-build-proxy.example.workers.dev")
+    assert r.returncode == 0, r.stdout[-2000:]
+    rec = tmp_path / "recipes"
+    shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
+                          capture_output=True).returncode == 0
+    p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
+    rc, rows = _e2e(p, "de")
+    assert rc == 0 and rows[0]["pass"], rows
+    shown = json.loads((p.out / "e2e-de.json").read_text())["shown"]
+    assert shown["torrents"] == [f"recipes/testland/{x}.torrent" for x in ("de", "fr", "th", "en")], shown
+    info = bdecode((rec / "testland" / "de.torrent").read_bytes())[b"info"]
+    data = (p.out / "testland-de.zim").read_bytes()
+    plen = info[b"piece length"]
+    assert info[b"length"] == len(data)
+    assert info[b"pieces"] == b"".join(hashlib.sha1(data[i:i + plen]).digest() for i in range(0, len(data), plen))
