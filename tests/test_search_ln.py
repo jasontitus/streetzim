@@ -606,3 +606,15 @@ def test_a_record_whose_names_fold_to_two_objects_gets_none(tmp_path):
     feat = {"name": "Zurích", "name_native": "Turígg", "type": "place", "lat": 47.3769, "lon": 8.5417}
     _search_bucket_with(tmp_path, [feat], {}, ["rm"], refs)
     assert all("ln" not in r for p in ("zu", "tu") for r in _chunk(tmp_path, p))
+
+
+def test_the_wrapper_takes_another_search_cache():
+    """STREETZIM_SEARCH_CACHE replaces build-region-fast.sh's cache path
+    (a cache extracted from the region's multilingual tiles)."""
+    import subprocess
+    text = (ROOT / "ops" / "build-region-fast.sh").read_text(encoding="utf-8")
+    [line] = [ln for ln in text.splitlines() if ln.startswith("SEARCH=")]
+    run = lambda env: subprocess.run(["bash", "-c", f'SRC_ID=switzerland; {line}; printf %s "$SEARCH"'],
+                                     env=env, capture_output=True, text=True).stdout
+    assert run({"PATH": "/usr/bin:/bin"}) == "/storage/streetzim/world-data/regions/switzerland.search.jsonl"
+    assert run({"PATH": "/usr/bin:/bin", "STREETZIM_SEARCH_CACHE": "/x/ml.search.jsonl"}) == "/x/ml.search.jsonl"
