@@ -121,16 +121,19 @@ export function checkIndex(ix, region, lang, uuid, file) {
   return '';
 }
 
+export class StaleSource extends Error {}
+
 // A per-isolate daily counter: the fallback meter when worker.js has no
 // shared one (approximate: each isolate counts only its own requests).
 export function isolateMeter(budget) {
   let day = '', n = 0;
   return {
     allow() {
+      if (!(budget > 0)) return false;                 // 0 (or not a number): the webseed is off
       const today = new Date().toISOString().slice(0, 10);
       if (today !== day) { day = today; n = 0; }
       n += 1;
-      return !(budget > 0) || n <= budget;
+      return n <= budget;
     },
   };
 }
@@ -141,6 +144,7 @@ export function isolateMeter(budget) {
 //   stats     optional (event) => void: per-request counters (tests, measurements)
 //   meter     optional {allow(ctx) -> boolean | Promise<boolean>}: false = the
 //             webseed's daily budget is used (503, before anything is fetched)
+//   subrequests  the most subrequests one request may spend (45: the free plan's 50)
 // -> (request, ctx) => Promise<Response>; handle.state() for tests
 export function createMergedHandler(opts) {
   const site = String(opts.site || '').replace(/\/+$/, '');
@@ -155,6 +159,9 @@ export function createMergedHandler(opts) {
   const pending = new Map();        // sha256 -> Promise<Uint8Array> (one fetch per blob at a time)
   let blobBytes = 0;
   const nodes = new Map();          // "<item>/<file>" -> storage-node URL after archive.org's redirect
+  const stale = new Set();          // recipe UUIDs whose archive.org files were replaced
+  const subBudget = opts.subrequests || 45;
+  const outOfDate = () => reply(404, 'this language version is out of date (the map or its packs were updated): get the new torrent or link from https://streetzim.web.app/build/');
 
   async function siteFetch(url, init, counter) {
     let last;
@@ -231,8 +238,10 @@ export function createMergedHandler(opts) {
 
   // One ranged GET of an archive.org file; follows the redirect once, then
   // goes to the remembered storage node (falling back to archive.org). Only
-  // a 206 for exactly these bytes of a file of the index's size (and the
-  // index's ETag, through If-Range) is used.
+  // a 206 for exactly these bytes of a file of the index's size is used. A
+  // 200 to our If-Range (archive.org's ETag changed) or a 206 of a file of
+  // another size means the file was replaced since the index was made:
+  // StaleSource, and this version is out of date.
   async function source(src, from, to, counter) {
     const key = `${src.item}/${src.file}`;
     const headers = { Range: `bytes=${from}-${to}` };
@@ -251,11 +260,37 @@ export function createMergedHandler(opts) {
         if (url === upstream + key && r.url && r.url !== url) nodes.set(key, r.url);
         return r.body;
       }
-      last = `HTTP ${r.status} ${cr}${cl != null ? ` length ${cl}` : ''}`;
       try { r.body && r.body.cancel(); } catch (e) { /* ignore */ }
+      const total = /\/(\d+)$/.exec(cr);
+      if ((r.status === 200 && src.etag) || (r.status === 206 && total && Number(total[1]) !== src.size)) {
+        throw new StaleSource(`${key} was replaced (HTTP ${r.status} ${cr})`);
+      }
+      last = `HTTP ${r.status} ${cr}${cl != null ? ` length ${cl}` : ''}`;
       nodes.delete(key);
     }
     throw new Error(`${key} bytes=${from}-${to}: ${last}`);
+  }
+
+  // Subrequests a range would cost on top of those already spent (what is
+  // cached counts nothing), and the end of the longest prefix of it that
+  // stays within the budget.
+  function fitEnd(ix, start, end, spent) {
+    let n = spent, fit = start - 1;
+    const seenBlob = new Set(), seenFile = new Set();
+    for (const { part, lo, hi } of slicesFor(ix, start, end)) {
+      const [pstart, , kind, ref] = part;
+      let add = 0;
+      if (kind === 'x') { if (!blobs.has(ref) && !seenBlob.has(ref)) add = 1; seenBlob.add(ref); }
+      else {
+        const src = ix.sources[ref];
+        add = seenFile.has(ref) || nodes.has(`${src.item}/${src.file}`) ? 1 : 2;
+        seenFile.add(ref);
+      }
+      if (n + add > subBudget) break;
+      n += add;
+      fit = pstart + hi - 1;
+    }
+    return { cost: n, fit };
   }
 
   async function handle(request, ctx) {
@@ -265,22 +300,19 @@ export function createMergedHandler(opts) {
     const m = PATH_RE.exec(url.pathname);
     if (!m) return reply(404, 'expected /merged/<region>/<lang>/<uuid>/<file>.zim');
     if (!site) return reply(503, 'the build worker has no SITE_ORIGIN');
+    const [, region, lang, uuid, file] = m;
+    if (stale.has(uuid)) return outOfDate();
     if (meter && !(await meter.allow(ctx))) {
       return reply(503, "today's share of this worker's requests is used; the torrent's peers and the /build/ page still work",
         { 'Retry-After': '3600' });
     }
-    const [, region, lang, uuid, file] = m;
     const counter = { sub: 0, parts: 0, bytes: 0 };
     const t0 = Date.now();
     let ix;
     try { ix = await getIndex(region, lang, uuid, file, counter); } catch (e) {
       return reply(503, `the site did not answer (${e && e.message || e}); try again shortly`, { 'Retry-After': '30' });
     }
-    if (ix.error) {
-      return ix.error === 'stale'
-        ? reply(404, 'this language version is out of date (the map or its packs were updated): get the new torrent or link from https://streetzim.web.app/build/')
-        : reply(502, `cannot serve this file: ${ix.error}`);
-    }
+    if (ix.error) return ix.error === 'stale' ? outOfDate() : reply(502, `cannot serve this file: ${ix.error}`);
     const size = ix.size;
     const etag = `"${ix.uuid}-${ix.md5}"`;
     const head = {
@@ -296,7 +328,20 @@ export function createMergedHandler(opts) {
     const ifRange = request.headers.get('If-Range');
     const range = parseRange(ifRange && ifRange !== etag ? null : request.headers.get('Range'), size);
     if (range === 'unsatisfiable') return reply(416, 'range not satisfiable', { 'Content-Range': `bytes */${size}` });
-    const [start, end] = range || [0, size - 1];
+    let [start, end] = range || [0, size - 1];
+    // within the subrequest budget: a range is cut to the longest prefix that
+    // fits (the client asks again for the rest); the whole file without a
+    // Range is refused if it does not fit (lang_torrents.py guarantees any
+    // 16 MiB range fits)
+    const { fit } = fitEnd(ix, start, end, counter.sub);
+    if (fit < end) {
+      if (!range) {
+        return reply(416, 'this file is served in byte ranges (as a torrent web seed): use the torrent, the /build/ page or a download manager',
+          { 'Content-Range': `bytes */${size}`, 'Accept-Ranges': 'bytes' });
+      }
+      if (fit < start) return reply(503, 'too many parts for one request; try again', { 'Retry-After': '5' });
+      end = fit;
+    }
     const len = end - start + 1;
     const headers = { ...head, 'Content-Length': String(len) };
     if (range) headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
@@ -306,13 +351,26 @@ export function createMergedHandler(opts) {
     let slices;
     try { slices = slicesFor(ix, start, end); } catch (e) { return reply(500, String(e.message || e)); }
     counter.parts = slices.length;
+    // the first archive.org part is opened before the headers go out, so a
+    // replaced file gets "out of date" (which a torrent client takes as final)
+    // instead of a 206 cut short (which it retries every second)
+    const firstSrc = slices.findIndex((x) => x.part[2] === 's');
+    let opened = null;
+    if (firstSrc >= 0) {
+      const { part, lo, hi } = slices[firstSrc];
+      try { opened = await source(ix.sources[part[3]], part[4] + lo, part[4] + hi - 1, counter); } catch (e) {
+        if (e instanceof StaleSource) { stale.add(uuid); return outOfDate(); }
+        opened = null;                            // a transient error: the stream tries again
+      }
+    }
     // FixedLengthStream (Workers) keeps Content-Length on the response;
     // elsewhere a TransformStream does the same job.
     const { readable, writable } = typeof FixedLengthStream === 'function'
       ? new FixedLengthStream(len) : new TransformStream();
     const pump = (async () => {
       try {
-        for (const { part, lo, hi } of slices) {
+        for (let i = 0; i < slices.length; i++) {
+          const { part, lo, hi } = slices[i];
           const [, , kind, ref, off] = part;
           if (kind === 'x') {
             const bytes = await getBlob(region, ix, ref, counter);
@@ -321,13 +379,15 @@ export function createMergedHandler(opts) {
             await w.write(bytes.slice(off + lo, off + hi));
             w.releaseLock();
           } else {
-            const body = await source(ix.sources[ref], off + lo, off + hi - 1, counter);
+            const body = (i === firstSrc && opened) || await source(ix.sources[ref], off + lo, off + hi - 1, counter);
             await body.pipeTo(writable, { preventClose: true });
           }
           counter.bytes += hi - lo;
         }
         await writable.close();
       } catch (e) {
+        if (e instanceof StaleSource) stale.add(uuid);
+        if (opened) { try { await opened.cancel(); } catch (e2) { /* used or gone */ } }
         try { await writable.abort(e); } catch (e2) { /* already errored */ }
         if (stats) stats({ region, lang, start, end, error: String(e && e.message || e), ...counter });
         return;
@@ -338,6 +398,6 @@ export function createMergedHandler(opts) {
     return new Response(readable, { status, headers });
   }
   handle.state = () => ({ blobCacheBytes: blobBytes, blobs: blobs.size, pending: pending.size,
-                          indexes: indexes.size, nodes: nodes.size });
+                          indexes: indexes.size, nodes: nodes.size, stale: stale.size });
   return handle;
 }

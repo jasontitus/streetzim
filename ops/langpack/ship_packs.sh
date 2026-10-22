@@ -311,13 +311,19 @@ if [ -n "${LANGPACK_WEBSEED:-}" ]; then
     done
   fi
   TLIM=(); command -v prlimit > /dev/null && TLIM=(prlimit --as=24000000000 --)
-  "${LOW[@]}" timeout "${SHIP_TORRENT_TIMEOUT:-7200}" "${TLIM[@]}" "$PY" "$TL/lang_torrents.py" "$OUT" --base "$BASE" \
-    --packs-dir "$PACKS" --webseed "$LANGPACK_WEBSEED" --ia-cache "$W/ia-cache" "${BTA[@]}" >> "$LOG" 2>&1
+  read -ra LTA <<< "${SHIP_LANG_TORRENTS_ARGS:-}"     # extra arguments (operators, tests)
+  TTO=${SHIP_TORRENT_TIMEOUT:-7200}
+  "${LOW[@]}" timeout "$TTO" "${TLIM[@]}" "$PY" "$TL/lang_torrents.py" "$OUT" --base "$BASE" \
+    --packs-dir "$PACKS" --webseed "$LANGPACK_WEBSEED" --ia-cache "$W/ia-cache" "${BTA[@]}" "${LTA[@]}" >> "$LOG" 2>&1
   TRC=$?
   case $TRC in
     0) say "language torrents: $(ls "$OUT" | grep -c '\.torrent$') (webseed $LANGPACK_WEBSEED)" ;;
-    3) say "language torrents: some entries failed (the log says which); they have none" ;;
-    *) say "lang_torrents.py failed (rc $TRC): publishing without torrents"
+    3) say "WARNING: language torrents: some entries failed (the log says which); they are published without one" ;;
+    124) say "WARNING: lang_torrents.py ran out of its ${TTO} s (SHIP_TORRENT_TIMEOUT): publishing WITHOUT torrents"
+       TORRENTS_OFF="lang_torrents.py ran out of its ${TTO} s"
+       "$PY" "$TL/lang_torrents.py" "$OUT" --strip >> "$LOG" 2>&1 || { say "could not strip the torrent files"; exit 1; } ;;
+    *) say "WARNING: lang_torrents.py failed (rc $TRC; the log says why): publishing WITHOUT torrents"
+       TORRENTS_OFF="lang_torrents.py failed (rc $TRC)"
        "$PY" "$TL/lang_torrents.py" "$OUT" --strip >> "$LOG" 2>&1 || { say "could not strip the torrent files"; exit 1; } ;;
   esac
 fi
@@ -327,7 +333,8 @@ CRC=$?
 cat "$STG.check" >> "$LOG"
 if [ $CRC != 0 ] && "$PY" "$TL/lang_torrents.py" "$OUT" --only-torrent-failures "$STG.check"; then
   # only the torrent files failed: publish the recipes without them
-  say "site_check.py: only torrent checks failed; stripping the torrent files and checking again"
+  say "WARNING: site_check.py: only torrent checks failed; stripping the torrent files and checking again"
+  TORRENTS_OFF="the torrent files failed site_check.py"
   "$PY" "$TL/lang_torrents.py" "$OUT" --strip >> "$LOG" 2>&1 || { say "could not strip the torrent files"; exit 1; }
   "${LOW[@]}" "$PY" "$TL/site_check.py" "$STG" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
     --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
@@ -344,5 +351,6 @@ rm -f "$STG.check"
 rm -rf "$STG" || say "$SITE replaced; the previous files in $STG could not all be removed"
 OUT=$SITE/recipes/$REGION
 say "== ready: $OUT ($("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json"))"
+[ -n "${TORRENTS_OFF:-}" ] && say "   WARNING: no language torrents this time: ${TORRENTS_OFF} (the log says why)"
 say "   publish: ops/langpack/publish_site.sh $REGION, then deploy the site"
 exit 0

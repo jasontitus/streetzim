@@ -17,6 +17,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createMergedHandler, parseRange, slicesFor, checkIndex, isolateMeter } from '../build-proxy/merged-webseed.js';
 import worker, { flag, doMeter, WebseedMeter, _reset } from '../build-proxy/worker.js';
 
@@ -101,6 +102,7 @@ const up = await listen((req, res) => {
   const f = m && upFiles.get(m[1]);
   hits.node++;
   if (upMode === 'node404-once') { upMode = 'ok'; res.writeHead(404); res.end(); return; }
+  if (upMode === 'node404-de-once' && m[1].startsWith('streetzim-testland-lang/')) { upMode = 'ok'; res.writeHead(404); res.end(); return; }
   if (!f) { res.writeHead(404); res.end(); return; }
   const data = f.data;
   const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
@@ -224,6 +226,15 @@ await settle();
 assert.equal(downloadsSeen, d0 + 1);
 assert.equal(events.at(-1).sub, 1 + 2, JSON.stringify(events.at(-1)));
 
+// the same for a later part of the range (fetched after the headers): the
+// fallback happens inside the request, the bytes arrive whole
+upMode = 'node404-de-once';
+const d1 = downloadsSeen;
+res = await get('bytes=250990-251100');                            // base, blob Y, then the pack
+assert.deepEqual(await bytesOf(res), expected.subarray(250990, 251101));
+assert.equal(downloadsSeen, d1 + 1);
+upMode = 'ok';
+
 // ---------- client If-Range ----------
 res = await get('bytes=0-9', { headers: { 'If-Range': `"${UUID}-${index.md5}"` } });
 assert.equal(res.status, 206);
@@ -319,27 +330,82 @@ await settle();
 assert.match(events.at(-1).error, /not the one the index names/);
 siteFiles.set(`/build/recipes/testland/${blobFile(sha(Y))}`, Buffer.from(Y));
 
-// archive.org answers that are not exactly these bytes of this file: refused
-for (const [mode, why] of [['ignore-range', /HTTP 200/], ['shift', /HTTP 206 bytes 10001-11001\/300000/], ['wrong-total', /\/300001/],
-  ['short-length', /length 1000/]]) {
+// archive.org answers that are not exactly these bytes of this file: refused.
+// Not replaced (no ETag on the pack, a shifted range, a short body): the 206
+// headers go out and the stream is cut short, which clients retry.
+for (const [mode, rng, why] of [['ignore-range', 'bytes=251060-252060', /HTTP 200/],
+  ['shift', 'bytes=1000-2000', /HTTP 206 bytes 10001-11001\/300000/], ['short-length', 'bytes=1000-2000', /length 1000/]]) {
   handle = mk();
   upMode = mode;
-  res = await get('bytes=1000-2000');
+  res = await get(rng);
+  assert.equal(res.status, 206, mode);
   await assert.rejects(res.arrayBuffer(), mode);
   await settle();
   assert.match(events.at(-1).error, why, mode);
   upMode = 'ok';
 }
-// If-Range: the index's ETag no longer matches archive.org's file -> 200 -> refused
-handle = mk();
-upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = '"6ad42479-493e0"';
-res = await get('bytes=1000-2000');
-await assert.rejects(res.arrayBuffer());
-await settle();
-assert.match(events.at(-1).error, /HTTP 200/);
-upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = ETAG_A;
-res = await get('bytes=1000-2000');
+// Replaced (a 200 to our If-Range, a 206 of a file of another size): "out of
+// date" before any body, and remembered: later requests for this version get
+// the 404 without asking archive.org (a torrent client drops the web seed
+// after one such error instead of retrying a cut 206 every second)
+for (const [mode, change] of [['etag', () => { upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = '"6ad42479-493e0"'; }],
+  ['wrong-total', () => { upMode = 'wrong-total'; }]]) {
+  handle = mk();
+  await (await get('bytes=0-9')).arrayBuffer();                  // the index and the header blob are cached
+  change();
+  res = await get('bytes=1000-2000');
+  assert.equal(res.status, 404, mode);
+  assert.match(await res.text(), /out of date/);
+  assert.equal(handle.state().stale, 1);
+  const n0 = hits.node + hits.download;
+  res = await get('bytes=0-9');
+  assert.equal(res.status, 404, `${mode}: remembered`);
+  await res.text();
+  assert.equal(hits.node + hits.download, n0, `${mode}: archive.org not asked again`);
+  upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = ETAG_A;
+  upMode = 'ok';
+}
+res = await get('bytes=1000-2000', { handle: mk() });            // a new isolate, the file as indexed again
 assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+// a replaced file met only after the headers (not the first archive.org part
+// of the range): the stream is cut, and the version is out of date from then on
+{
+  handle = mk();
+  upFiles.get('streetzim-testland-lang/osm_testland_wiki-de_2026-10-13.zim').etag = '"9-9"';
+  const ix2 = { ...index, sources: { ...index.sources, de: { ...index.sources.de, etag: '"1-2"' } } };
+  setIndex(ix2);
+  res = await get('bytes=1000-251100');                              // base first (fine), then de (replaced)
+  assert.equal(res.status, 206);
+  await assert.rejects(res.arrayBuffer());
+  await settle();
+  assert.equal(handle.state().stale, 1);
+  res = await get('bytes=0-9');
+  assert.equal(res.status, 404);
+  await res.text();
+  setIndex(index);
+  upFiles.get('streetzim-testland-lang/osm_testland_wiki-de_2026-10-13.zim').etag = '"1-2"';
+}
+
+// ---------- the subrequest budget at request time ----------
+{
+  // a fresh isolate with 3 subrequests: the index 1, the header blob 1, the
+  // base's first part 2 (archive.org's redirect) does not fit
+  res = await get(null, { handle: mk({ subrequests: 3 }) });         // the whole file does not fit: ranges only
+  assert.equal(res.status, 416);
+  assert.match(await res.text(), /byte ranges/);
+  const h = mk({ subrequests: 3 });
+  res = await get(`bytes=0-${index.size - 1}`, { handle: h });       // a range is cut to what fits
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('content-range'), `bytes 0-999/${index.size}`);
+  assert.deepEqual(await bytesOf(res), expected.subarray(0, 1000));
+  // with the index and that blob cached, more fits: the base part (2) and the next blob (1)
+  res = await get(`bytes=0-${index.size - 1}`, { handle: h });
+  assert.equal(res.headers.get('content-range'), `bytes 0-251049/${index.size}`);
+  assert.deepEqual(await bytesOf(res), expected.subarray(0, 251050));
+  res = await get('bytes=1000-1099', { handle: mk({ subrequests: 1 }) });   // nothing fits: try again later
+  assert.equal(res.status, 503);
+  await res.text();
+}
 
 // ---------- the blob cache ----------
 handle = mk();
@@ -372,7 +438,8 @@ assert.ok(handle.state().blobCacheBytes <= 1020, JSON.stringify(handle.state()))
   assert.equal(hits.site, s2, 'over budget: nothing fetched');
   const im = isolateMeter(2);
   assert.deepEqual([im.allow(), im.allow(), im.allow()], [true, true, false]);
-  assert.equal(isolateMeter(0).allow(), true);
+  assert.equal(isolateMeter(0).allow(), false, 'a budget of 0 switches the webseed off');
+  assert.equal(isolateMeter(NaN).allow(), false);
 }
 
 // ---------- worker.js: switches and the Durable Object meter ----------
@@ -393,61 +460,130 @@ res = await call('/not-a-proxy-path', { ...env, MERGED: 'off' });     // the pre
 assert.equal(res.status, 404);
 res = await call('/not-a-proxy-path', { ...env, OFF: '1' });
 assert.equal(res.status, 503);
-res = await call(mpath, { ...env, MERGED: '1', WEBSEED_DAILY_BUDGET: '0' });
+for (const b of ['0', '-1', 'lots']) {                                 // 0, negative or garbage: the webseed is off
+  res = await call(mpath, { ...env, WEBSEED_DAILY_BUDGET: b });
+  assert.equal(res.status, 503, `budget ${b}`);
+  await res.text();
+}
+res = await call(mpath, { ...env });                                   // unset: the default budget
 assert.equal(res.status, 206);
 await res.arrayBuffer();
-res = await call(mpath, { ...env, WEBSEED_DAILY_BUDGET: '-1' });     // a negative budget: no cap either
-assert.equal(res.status, 206);
-await res.arrayBuffer();
-{ // the Durable Object meter: isolates report in batches and learn the day's total
+
+// A Durable Object namespace whose stubs, like workerd's, can do I/O only in
+// the request that created them ("Cannot perform I/O on behalf of a
+// different request"); each test request runs in its own context.
+const als = new AsyncLocalStorage();
+const inRequest = (fn) => als.run({}, fn);
+function strictNs(dobjFetch, count) {
+  return {
+    idFromName: (n) => n,
+    get: () => {
+      const owner = als.getStore();
+      return {
+        fetch: async (u) => {
+          if (als.getStore() !== owner) throw new Error('Cannot perform I/O on behalf of a different request');
+          count.calls++;
+          return dobjFetch(u);
+        },
+      };
+    },
+  };
+}
+function newDO() {
   const store = new Map();
   const dobj = new WebseedMeter({ storage: { get: async (k) => store.get(k), put: async (k, v) => { store.set(k, v); } } });
-  let doCalls = 0;
-  const ns = { idFromName: (n) => n, get: () => ({ fetch: (u) => { doCalls++; return dobj.fetch(new Request(u)); } }) };
-  const m1 = doMeter(ns, 30), m2 = doMeter(ns, 30);
+  return { store, fetch: (u) => dobj.fetch(new Request(u)) };
+}
+{ // two isolates share one count; a stub is made inside each report
+  const d = newDO(), count = { calls: 0 };
+  const ns = strictNs(d.fetch, count);
+  let release;
+  const gate = () => new Promise((r) => { release = r; });
+  const mA = doMeter(ns, 30, { sleep: gate }), mB = doMeter(ns, 30, { sleep: gate });
   const waits = [];
   const ctx = { waitUntil: (p) => waits.push(p) };
-  let ok1 = 0;
-  // the first request reports at once (no report yet), then every 25th
-  for (let i = 0; i < 26; i++) if (m1.allow(ctx)) ok1++;
+  const okA = [];
+  for (let i = 0; i < 26; i++) okA.push(await inRequest(() => mA.allow(ctx)));
+  await Promise.all(waits.splice(0).filter((p) => p !== undefined).map((p) => Promise.race([p, Promise.resolve()])));
+  await settle();
+  assert.equal(okA.filter(Boolean).length, 26);
+  // request 1 asked the meter before answering; request 26 reported the batch
+  assert.equal(d.store.get('count').n, 26, JSON.stringify(d.store.get('count')));
+  assert.equal(count.calls, 2);
+  // isolate B: its first request learns the shared 27; 3 more fit the budget of 30
+  const okB = [];
+  for (let i = 0; i < 5; i++) okB.push(await inRequest(() => mB.allow(ctx)));
+  assert.deepEqual(okB, [true, true, true, true, false]);
+  // the tail: B's unreported requests are reported when the timer fires,
+  // although B gets no 25th request
+  const before = d.store.get('count').n;
+  release();
   await Promise.all(waits);
-  assert.equal(ok1, 26);
-  assert.equal(doCalls, 2);
-  assert.equal(store.get('count').n, 26, JSON.stringify(store.get('count')));
-  for (let i = 0; i < 6; i++) m2.allow(ctx);                         // m2 learns the total on its first flush
-  await Promise.all(waits);
-  assert.equal(m2.allow(ctx), false, 'over the shared budget');
-  // a worker wired to the DO meter: the first request is allowed and reports,
-  // the next one is over a budget of 1 (the shared count already exceeds it)
+  await settle();
+  assert.equal(d.store.get('count').n, before + 4, 'the quiet isolate reported its tail');
+}
+{ // fail closed: no meter, no webseed; back once the meter answers
+  let up2 = false, t = 1e12;
+  const d = newDO(), count = { calls: 0 };
+  const ns = strictNs((u) => (up2 ? d.fetch(u) : Promise.reject(new Error('DO down'))), count);
+  const m = doMeter(ns, 100, { now: () => t });
+  assert.equal(await inRequest(() => m.allow(null)), false, 'the meter is unreachable: refused');
+  const c0 = count.calls;
+  assert.equal(await inRequest(() => m.allow(null)), false);
+  assert.equal(count.calls, c0, 'not asked again within the retry pause');
+  up2 = true;
+  t += 6000;
+  assert.equal(await inRequest(() => m.allow(null)), true, 'back once it answers');
+  assert.equal(d.store.get('count').n, 3, 'the refused requests were counted too');
+}
+{ // out-of-order answers: the total never goes down; reports that came back
+  // no longer count as in flight
+  const answers = [{ n: 50 }, { n: 40 }];
+  const day = new Date().toISOString().slice(0, 10);
+  const ns = { idFromName: (n) => n, get: () => ({ fetch: async () => new Response(JSON.stringify({ day, ...answers.shift() })) }) };
+  const m = doMeter(ns, 55, { sleep: () => new Promise(() => {}) });   // no tail timer here
+  await m.allow(null);                                               // synced: total 50
+  assert.equal(m.state().total, 50);
+  const ctx = { waitUntil: () => {} };
+  for (let i = 0; i < 25; i++) await m.allow(ctx);                   // the 25th reports; the answer says 40
+  await settle();
+  assert.equal(answers.length, 0, 'both answers were used');
+  assert.equal(m.state().total, 50);                                 // the (stale) 40 did not lower it
+  const d = newDO();
+  const ns2 = { idFromName: (n) => n, get: () => ({ fetch: (u) => d.fetch(u) }) };
+  const m2 = doMeter(ns2, 30);
+  const w2 = [];
+  const ctx2 = { waitUntil: (p) => w2.push(p) };
+  for (let i = 0; i < 26; i++) await m2.allow(ctx2);                 // 1 + a batch of 25
+  await Promise.all(w2.filter((p) => p !== undefined));
+  await settle();
+  assert.equal(m2.state().inflight, 0);
+  assert.equal(m2.state().total, 26);
+  const more = [];
+  for (let i = 0; i < 5; i++) more.push(await m2.allow(ctx2));
+  assert.deepEqual(more, [true, true, true, true, false]);
+  let asked = 0;
+  const ns3 = { idFromName: (n) => n, get: () => ({ fetch: (u) => { asked++; return d.fetch(u); } }) };
+  assert.equal(await doMeter(ns3, 0).allow(null), false, 'a budget of 0: off');
+  assert.equal(await doMeter(ns3, NaN).allow(null), false);
+  assert.equal(asked, 0, 'off: the meter is not even asked');
+}
+{ // a worker wired to the DO meter: the first request (asked first) fits a
+  // budget of 1, the next does not
+  const d = newDO(), count = { calls: 0 };
+  const e1 = { ...env, METER: strictNs(d.fetch, count), WEBSEED_DAILY_BUDGET: '1' };
   _reset();
-  const e1 = { ...env, METER: ns, WEBSEED_DAILY_BUDGET: '1' };
-  res = await worker.fetch(new Request(`http://w.test${mpath}`, { headers: { Range: 'bytes=0-9' } }), e1, ctx);
+  const waits = [];
+  const ctx = { waitUntil: (p) => waits.push(p) };
+  res = await inRequest(() => worker.fetch(new Request(`http://w.test${mpath}`, { headers: { Range: 'bytes=0-9' } }), e1, ctx));
   assert.equal(res.status, 206);
   await res.arrayBuffer();
-  await Promise.all(waits);
-  res = await worker.fetch(new Request(`http://w.test${mpath}`, { headers: { Range: 'bytes=0-9' } }), e1, ctx);
+  res = await inRequest(() => worker.fetch(new Request(`http://w.test${mpath}`, { headers: { Range: 'bytes=0-9' } }), e1, ctx));
   assert.equal(res.status, 503, 'over the budget of 1');
-  // requests while a report is in flight still count (seen under workerd: a
-  // batch report reset the local count before the total came back)
-  {
-    const st2 = new Map();
-    const d2 = new WebseedMeter({ storage: { get: async (k) => st2.get(k), put: async (k, v) => { st2.set(k, v); } } });
-    const ns2 = { idFromName: (n) => n, get: () => ({ fetch: (u) => d2.fetch(new Request(u)) }) };
-    const m3 = doMeter(ns2, 3);
-    const w3 = [];
-    const ctx3 = { waitUntil: (p) => w3.push(p) };
-    const got = [];
-    for (let i = 0; i < 60; i++) got.push(m3.allow(ctx3));
-    assert.equal(got.filter(Boolean).length, 3, JSON.stringify(got));
-    await Promise.all(w3);
-    for (let i = 0; i < 30; i++) got.push(m3.allow(ctx3));
-    await Promise.all(w3);
-    assert.equal(got.filter(Boolean).length, 3, 'still over the budget after the reports came back');
-  }
+  await res.text();
   // a new UTC day starts from 0
-  store.set('count', { day: '2000-01-01', n: 999 });
-  const r = await dobj.fetch(new Request('https://meter/add?n=3'));
-  assert.equal((await r.json()).n, 3);
+  d.store.set('count', { day: '2000-01-01', n: 999 });
+  assert.equal((await (await d.fetch('https://meter/add?n=3')).json()).n, 3);
 }
 
 site.close(); up.close();

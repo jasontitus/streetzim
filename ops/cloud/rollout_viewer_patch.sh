@@ -212,6 +212,20 @@ while :; do
 
   if [ ! -s "$zim" ]; then log "  MISSING locally — skipped"; row "$id" missing "$zim"; continue; fi
 
+  # A base of language recipes published on /build/ is frozen: patching it in
+  # place breaks those recipes and their torrents until ops/langpack/ship_packs.sh
+  # regenerates them (user decision 2026-10-21). LANGPACK_RESHIP_AFTER_PATCH=1
+  # lifts the freeze and runs ship_packs.sh for it after the upload.
+  pub=""
+  if [ -f tools/langpack/published_base.py ]; then
+    pub=$("$PY" tools/langpack/published_base.py "$zim" --web web); prc=$?
+    if [ "$prc" = 3 ] && [ "${LANGPACK_RESHIP_AFTER_PATCH:-0}" != 1 ]; then
+      log "  FROZEN: published language recipes ($(echo $pub)) use $zim — not patched (LANGPACK_RESHIP_AFTER_PATCH=1 to patch and re-ship them)"
+      row "$id" frozen-published "$zim"; continue
+    fi
+    [ "$prc" = 3 ] || pub=""
+  fi
+
   if ! "$PY" cloud/patch_viewer_inplace.py "$zim" >> "$LOG" 2>&1; then
     log "  PATCH FAILED (no slots?) — skipped"; row "$id" patch-failed "$zim"; continue
   fi
@@ -234,8 +248,21 @@ while :; do
   case $RC in
     0) log "  SHIPPED $zim ($MIN min)"; row "$id" uploaded "$zim" ;;
     6) log "  uploaded, listing pending ($MIN min)"; row "$id" upload-pending "$zim" ;;
+    7) log "  REFUSED: published language recipes use $zim (upload_validated.sh step 1b)"; row "$id" frozen-published "$zim" ;;
     *) log "  UPLOAD FAILED rc=$RC"; row "$id" upload-failed "$zim" ;;
   esac
+  # the language recipes and torrents of a patched base, regenerated (outside
+  # the upload lock: ship_packs.sh takes it for its own uploads)
+  if [ -n "$pub" ] && [ "$RC" = 0 ]; then
+    for r in $pub; do
+      log "  re-shipping the language recipes of $r (ops/langpack/ship_packs.sh)"
+      bash ops/langpack/ship_packs.sh "$r" "$zim" >> "$LOG" 2>&1
+      SRC=$?
+      log "  ship_packs.sh $r: rc=$SRC (0 ready to publish: ops/langpack/publish_site.sh $r; 6 run it again later)"
+    done
+  elif [ -n "$pub" ]; then
+    log "  NOTE: run ops/langpack/ship_packs.sh for $(echo $pub) once $zim is listed (queued in langpack-reship.tsv)"
+  fi
 done
 
 log "=== rollout complete ==="

@@ -33,11 +33,14 @@ Blobs no index of OUT_DIR names any more are removed.
 
 Subrequests (the free Workers plan allows 50 per request): a request costs
 the worker 1 (the index, cold) + 1 per blob + 1 per archive.org part (2 for
-the first part of each file: archive.org's redirect). The whole file's cost
-bounds every range's; it must stay <= SUBREQ_LIMIT (40). Short segments
-start at 256 KiB remote threshold; an entry over the limit is rebuilt with
-a higher threshold (1, 4, 16, 64 MiB: more bytes in blobs, fewer parts),
-and fails if none fits.
+the first part of each file: archive.org's redirect). Every 16 MiB window
+(libtorrent's largest web seed request) must stay <= SUBREQ_LIMIT (40).
+Short segments start at a 256 KiB remote threshold, local runs shorter than
+4 KiB share one pool blob per entry, and an entry over the limit is rebuilt
+with a higher threshold (1, 4, 16, 64 MiB: more bytes in blobs, fewer
+parts); it fails if none fits or its blobs would pass BLOB_BUDGET (64 MiB).
+The worker cuts a bigger range to what fits and answers a whole-file GET
+that does not fit with 416 (ranges only).
 
 Every byte is read through recipe2.ChunkReader (each 16 MiB chunk checked
 against the recipe's SHA-256), and the merged stream's MD5 must equal the
@@ -86,22 +89,24 @@ ITEM_RE = re.compile(r"^streetzim-[a-z0-9-]+$")
 FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.zim$")
 REGION_RE = re.compile(r"^[a-z0-9-]+$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[a-z0-9]+)?$")
-# Trackers (2026-10-21): archive.org's two count peers of any infohash (two
-# peers announced on an arbitrary hash came back as complete=2), and these
-# open UDP trackers answered a BEP 15 connect; tracker.openbittorrent.com did
-# not. DHT and PEX also work (the torrents are not private).
+# Trackers (2026-10-21): open UDP trackers that answered a BEP 15 connect
+# (tracker.openbittorrent.com did not), opentrackr first as `announce`, and
+# archive.org's two, which answered an announce for a hash that is not one of
+# their items. DHT and PEX also work (the torrents are not private).
 LANG_TRACKERS = [
+    "udp://tracker.opentrackr.org:1337/announce",
     "http://bt1.archive.org:6969/announce",
     "http://bt2.archive.org:6969/announce",
-    "udp://tracker.opentrackr.org:1337/announce",
     "udp://open.stealth.si:80/announce",
     "udp://tracker.torrent.eu.org:451/announce",
     "udp://open.demonii.com:1337/announce",
     "udp://exodus.desync.com:6969/announce",
 ]
 SUBREQ_LIMIT = int(os.environ.get("LANGPACK_WEBSEED_SUBREQ_LIMIT") or 40)
+BLOB_BUDGET = int(os.environ.get("LANGPACK_WEBSEED_BLOB_BUDGET") or 64 << 20)   # blob bytes per entry
 REMOTE_LADDER = (256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20)
 WINDOW = 16 << 20            # a libtorrent web seed request (urlseed_max_request_bytes)
+TINY_MAX = 4096              # local runs shorter than this share the entry's pool blob
 
 
 class TorrentError(Exception):
@@ -166,6 +171,8 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
 
     parts: list[list] = []
     blobs: dict[str, bytes] = {}
+    pool = bytearray()             # the entry's tiny runs, one blob (offset-addressed)
+    pool_parts: list[list] = []
     buf = bytearray()
     buf_start = 0
     pos = 0
@@ -179,6 +186,29 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
             parts.append([buf_start, len(take), "x", sha, 0])
             buf_start += len(take)
             del buf[:len(take)]
+
+    def close_pool():
+        if pool:
+            sha = hashlib.sha256(bytes(pool)).hexdigest()
+            blobs[sha] = bytes(pool)
+            for part in pool_parts:
+                part[3] = sha
+            pool.clear()
+            pool_parts.clear()
+
+    def end_run():
+        """A local run ended: a short one joins the pool, a longer one is blobs."""
+        nonlocal buf_start
+        if buf and len(buf) < TINY_MAX:
+            if len(pool) + len(buf) > BLOB_MAX:
+                close_pool()
+            part = [buf_start, len(buf), "x", None, len(pool)]
+            pool.extend(buf)
+            parts.append(part)
+            pool_parts.append(part)
+            buf_start += len(buf)
+            buf.clear()
+        flush()
 
     for s in recipe["segments"]:
         src = s["src"]
@@ -200,7 +230,7 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
                         if s["off"] < off + ln and off < s["off"] + n:
                             raise TorrentError(f"base segment at {s['off']} reads the masked range at {off}")
                 if n >= remote_min:
-                    flush()
+                    end_run()
                     parts.append([pos, n, "s", key, s["off"]])
                     buf_start = pos + n
                     pos += n
@@ -213,7 +243,8 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
         buf += data
         pos += n
         flush(BLOB_MAX)
-    flush()
+    end_run()
+    close_pool()
     if pos != recipe["size"]:
         raise TorrentError(f"segments add up to {pos}, recipe size {recipe['size']}")
     file = f"{recipe.get('file_name') or recipe['name']}.zim"
@@ -251,23 +282,35 @@ def subrequests(index: dict, start: int, end: int) -> int:
 
 
 def costs(index: dict) -> dict:
-    """Worst-case subrequests: the whole file (which bounds every range) and
-    the worst 16 MiB window (a window starting at a part boundary)."""
+    """Worst-case subrequests: the worst 16 MiB window (which bounds what a
+    torrent client asks: libtorrent's web seed requests are at most 16 MiB)
+    and the whole file. A window's parts change only where it starts at a
+    part's first or last byte, so those starts (and multiples of 16 MiB) find
+    the worst."""
     size = index["size"]
-    starts = sorted({p[0] for p in index["parts"]} | set(range(0, size, WINDOW)))
+    starts = sorted({p[0] for p in index["parts"]} | {p[0] + p[1] - 1 for p in index["parts"]}
+                    | set(range(0, size, WINDOW)))
     return {"whole": subrequests(index, 0, size - 1),
             "window16m": max(subrequests(index, s, min(size, s + WINDOW) - 1) for s in starts)}
 
 
+def blob_bytes(blobs: dict[str, bytes]) -> int:
+    return sum(len(b) for b in blobs.values())
+
+
 def plan_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str, str], lang: str,
                webseed: str, etags: dict | None = None) -> tuple[dict, dict[str, bytes], dict]:
-    """build_index with the lowest remote threshold whose whole-file cost fits
-    SUBREQ_LIMIT; TorrentError if none does."""
+    """build_index with the lowest remote threshold at which every 16 MiB
+    window fits SUBREQ_LIMIT; TorrentError if none does, or if the blobs
+    would pass BLOB_BUDGET (a higher threshold only adds blob bytes)."""
     for rm in REMOTE_LADDER:
         index, blobs, readers = build_index(recipe, region, base_path, pack_paths, lang, webseed, rm, etags)
-        if index["subrequests"]["whole"] <= SUBREQ_LIMIT:
+        if blob_bytes(blobs) > BLOB_BUDGET:
+            raise TorrentError(f"{blob_bytes(blobs) / 1e6:.0f} MB of blobs at a {rm >> 10} KiB threshold "
+                               f"(budget {BLOB_BUDGET / 1e6:.0f} MB)")
+        if index["subrequests"]["window16m"] <= SUBREQ_LIMIT:
             return index, blobs, readers
-    raise TorrentError(f"needs {index['subrequests']['whole']} subrequests per request even with "
+    raise TorrentError(f"a 16 MiB request needs {index['subrequests']['window16m']} subrequests even with "
                        f"{REMOTE_LADDER[-1] >> 20} MiB parts (limit {SUBREQ_LIMIT})")
 
 
@@ -533,8 +576,10 @@ def verify_entry(out_dir: str, region: dict, entry: dict, recipe: dict, base_pat
                   "parts", "webseed", "remote_min", "subrequests"):
             if ix.get(k) != want.get(k):
                 bad(f"{L}.ws.json {k} != the index rebuilt from the recipe")
-        if want["subrequests"]["whole"] > SUBREQ_LIMIT:
-            bad(f"a request may need {want['subrequests']['whole']} subrequests (limit {SUBREQ_LIMIT})")
+        if want["subrequests"]["window16m"] > SUBREQ_LIMIT:
+            bad(f"a 16 MiB request may need {want['subrequests']['window16m']} subrequests (limit {SUBREQ_LIMIT})")
+        if blob_bytes(blobs) > BLOB_BUDGET:
+            bad(f"{blob_bytes(blobs)} blob bytes (budget {BLOB_BUDGET})")
         for sha in blobs:
             p = os.path.join(out_dir, blob_name(sha))
             if not os.path.exists(p) or hashlib.sha256(open(p, "rb").read()).hexdigest() != sha:

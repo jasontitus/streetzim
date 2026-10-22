@@ -44,20 +44,28 @@ Cloudflare's free plan (developers.cloudflare.com/workers/platform/limits/):
   preview) share them. Every request counts, including a 503 from a switch
   or the meter. Only `workers_dev = false` with no route (or deleting the
   worker) stops the counting.
-- **The daily meter**: `WEBSEED_DAILY_BUDGET` (default 50,000) caps
-  `/merged/` requests per UTC day, so torrents cannot use up the preview's
-  share. With the `METER` Durable Object bound (as in `wrangler.toml`;
-  SQLite-backed Durable Objects are on the free plan) all isolates share one
-  count, reported in batches of 25 requests or 20 s; without it each isolate
-  counts on its own. Over the budget `/merged/` answers 503 at once (still a
-  request) until 00:00 UTC; peers and the /build/ page keep working.
+- **The daily meter**: `WEBSEED_DAILY_BUDGET` (default 50,000; 0 switches
+  the webseed off) caps `/merged/` requests per UTC day, so torrents cannot
+  use up the preview's share. The `METER` Durable Object (as in
+  `wrangler.toml`; SQLite-backed Durable Objects are on the free plan) keeps
+  one count for all isolates: each isolate asks it before its first answer,
+  then reports every 25 requests and, through `ctx.waitUntil`, 20 s after its
+  first unreported one (so a quiet isolate's last few are counted too). The
+  stub is made inside each report (workerd refuses I/O through an object
+  made by another request). While the meter cannot be reached the webseed
+  answers 503 (fail closed: better that than the shared 100,000 used up).
+  Without the binding each isolate counts on its own. Over the budget
+  `/merged/` answers 503 at once (still a request) until 00:00 UTC; peers and
+  the /build/ page keep working.
 - **10 ms CPU per request** (waiting on fetch does not count): the handler's
   own work is about 0.5 ms; the archive.org bodies are piped into a
   FixedLengthStream.
-- **50 subrequests per request**: `lang_torrents.py` keeps the whole file —
-  and so every range — at 40 or fewer (index, blobs, archive.org parts),
-  raising its threshold for short segments when it must; `site_check.py`
-  checks it.
+- **50 subrequests per request**: `lang_torrents.py` keeps every 16 MiB
+  window (libtorrent's largest web seed request) at 40 or fewer (index,
+  blobs, archive.org parts), raising its threshold for short segments when it
+  must; `site_check.py` checks it. A bigger range is cut to the longest
+  prefix that fits (a 206 for fewer bytes; the client asks for the rest),
+  and a whole-file GET that does not fit is refused with 416 (ranges only).
 
 How many requests a download costs depends on the client:
 
@@ -75,11 +83,23 @@ downloads a day. Workers Paid ($5/month) removes the daily cap.
 The index records each archive.org file's size and, when ship_packs.sh had
 its metadata, its ETag (`"<mtime hex>-<size hex>"`). The worker sends
 `If-Range: <ETag>` and takes only a 206 for exactly the asked bytes of a
-file of that size; a file replaced since (a viewer re-patch of the base, a
-re-upload) answers 200 and is refused, so that torrent's webseed fails
-until `ship_packs.sh` runs again for the region (it regenerates the
-recipes, the torrents and their indexes on any base re-upload). The index
-is kept by an isolate for at most 5 minutes.
+file of that size. A file replaced since (a re-upload) answers 200 or
+another size: the version is out of date. The worker opens the range's
+first archive.org part before it sends any header, so it answers 404 "out
+of date" (a torrent client drops the web seed after one such answer)
+instead of a 206 cut short (which libtorrent retries about once a second),
+and the isolate remembers the version as out of date. The index is kept by
+an isolate for at most 5 minutes; a UUID it does not know is checked with
+the site itself, past every cache, before a 404.
+
+A base whose recipes are published is frozen against in-place viewer
+patches (user decision 2026-10-21): `ops/cloud/upload_validated.sh` refuses
+(exit 7) to re-upload such a base with other bytes, and
+`ops/cloud/rollout_viewer_patch.sh` skips it (row `frozen-published`),
+unless `LANGPACK_RESHIP_AFTER_PATCH=1`; then the rollout runs
+`ops/langpack/ship_packs.sh` for the region right after the upload, which
+regenerates the recipes, the torrents and their indexes (new UUIDs, the new
+ETag), and upload_validated.sh queues the region in `langpack-reship.tsv`.
 
 ## Local test under workerd (no Cloudflare login)
 

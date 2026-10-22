@@ -585,7 +585,83 @@ def test_language_torrents_ship_and_publish(ship: SimpleNamespace, tmp_path: Pat
 def test_a_failing_torrent_step_publishes_without_torrents(ship: SimpleNamespace) -> None:
     r = _run(ship, LANGPACK_WEBSEED="https://example.invalid/not-an-origin")     # refused: the tool exits 1
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    assert "publishing without torrents" in _log(ship)
+    assert "publishing WITHOUT torrents" in _log(ship)
     out = ship.work / "site" / "testland" / "recipes" / "testland"
     assert not list(out.glob("*.torrent")) and not list(out.glob("ws-*.bin"))
     assert all("torrent" not in m for m in json.loads((out / "region.json").read_text())["menu"])
+
+
+def test_a_viewer_patch_regenerates_the_torrents(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """Follow-up review H-2: the patched-base rerun regenerates the language
+    torrents too — a new recipe UUID in the webseed URL, a new infohash, and
+    the base's new archive.org ETag (its new mtime) in the index."""
+    import time
+    from tests.langpack.test_viewer_slots import V2, patch
+    base = tmp_path / "bases-t" / "osm-testland-2026-10-13.zim"
+    base.parent.mkdir()
+    lpzims.write_base(base, slots=lpzims.VIEWER_V1)
+    builder = tmp_path / "builder-t.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+open(os.environ["FAKE_BUILD_LOG"], "a").write(a.lang + "\\n")
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    def listed(b: Path, mtime: int) -> None:
+        (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+            {"files": [{"name": b.name, "size": str(b.stat().st_size), "md5": _md5(b), "mtime": str(mtime)}]}))
+    ws = "https://streetzim-build-proxy.example.workers.dev"
+    run = lambda: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True,  # noqa: E731
+                                 timeout=900, env={**ship.env, "BUILDER": str(builder), "LANGPACK_WEBSEED": ws})
+    listed(base, 1792287864)
+    r = run()
+    assert r.returncode == 0, r.stdout[-3000:]
+    site = ship.work / "site" / "testland" / "recipes" / "testland"
+    ix1 = json.loads((site / "de.ws.json").read_text())
+    t1 = (site / "de.torrent").read_bytes()
+    assert ix1["sources"]["base"]["etag"] == '"6ad42478-%x"' % base.stat().st_size
+    patch(base, tmp_path / "patched.zim", V2, tmp_path)
+    shutil.copy(tmp_path / "patched.zim", base)
+    listed(base, 1792287864 + 3600)                # re-uploaded: archive.org's mtime moves on
+    time.sleep(0.01)
+    r = run()
+    assert r.returncode == 0, r.stdout[-3000:]
+    ix2 = json.loads((site / "de.ws.json").read_text())
+    reg2 = json.loads((site / "region.json").read_text())
+    assert ix2["uuid"] != ix1["uuid"] and ix2["uuid"] in ix2["webseed"]
+    assert ix2["sources"]["base"]["etag"] == '"6ad43288-%x"' % base.stat().st_size
+    assert (site / "de.torrent").read_bytes() != t1
+    assert next(m for m in reg2["menu"] if m["lang"] == "de")["infohash"] == ix2["infohash"] != ix1["infohash"]
+
+
+def test_torrent_only_check_failures_publish_without_torrents(ship: SimpleNamespace) -> None:
+    """Follow-up review SH1: when site_check.py fails only on the torrent files
+    (here: the index lacks the base's archive.org ETag the metadata cache now
+    has), ship_packs.sh strips them, checks again and publishes the recipes,
+    saying so loudly."""
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": ship.base.name, "size": str(ship.base.stat().st_size), "md5": _md5(ship.base),
+                    "mtime": "1792287864"}]}))
+    r = _run(ship, LANGPACK_WEBSEED="https://streetzim-build-proxy.example.workers.dev",
+             SHIP_LANG_TORRENTS_ARGS=f"--ia-cache {ship.d / 'empty-ia'}")
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    log = _log(ship)
+    assert "WARNING: site_check.py: only torrent checks failed" in log
+    assert "FAIL TORRENT de:" in log and "WARNING: no language torrents this time" in log
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    assert not list(out.glob("*.torrent")) and not list(out.glob("ws-*.bin"))
+    assert all("torrent" not in m for m in json.loads((out / "region.json").read_text())["menu"])
+    assert (out / "checked.json").exists()                          # sealed: publishable
+
+
+def test_a_torrent_timeout_is_loud_and_publishes_without(ship: SimpleNamespace) -> None:
+    r = _run(ship, LANGPACK_WEBSEED="https://streetzim-build-proxy.example.workers.dev", SHIP_TORRENT_TIMEOUT="0.01")
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    log = _log(ship)
+    assert "WARNING: lang_torrents.py ran out of its 0.01 s" in log
+    assert "WARNING: no language torrents this time: lang_torrents.py ran out" in log
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    assert not list(out.glob("*.torrent"))

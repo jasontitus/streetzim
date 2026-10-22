@@ -113,6 +113,7 @@ def test_full_torrent_is_the_merged_file(tmp_path):
     assert t[b"url-list"] == [f"{WEBSEED}/merged/testland/de/{s['recipe']['uuid']}/osm_de_testland_2026-10-13.zim".encode()]
     assert [x[0].decode() for x in t[b"announce-list"]] == lt.LANG_TRACKERS
     assert not any(b"openbittorrent" in x[0] for x in t[b"announce-list"])
+    assert t[b"announce"] == b"udp://tracker.opentrackr.org:1337/announce"
     assert res["infohash"] == hashlib.sha1(bt.bencode(info)).hexdigest()
 
 
@@ -495,12 +496,45 @@ def test_dense_short_runs_get_a_higher_remote_threshold(tmp_path, monkeypatch):
     (s["site"] / "de.json").write_text(json.dumps(r))
     at256 = lt.build_index(r, s["region"], str(s["base"]), s["packs"], "de", WEBSEED, lt.REMOTE_MIN)[0]
     assert at256["subrequests"]["whole"] > lt.SUBREQ_LIMIT
+    assert at256["subrequests"]["window16m"] > lt.SUBREQ_LIMIT
     res = run(s)
-    assert res["remote_min"] == 1 << 20 and res["subrequests"]["whole"] <= lt.SUBREQ_LIMIT, res
+    assert res["remote_min"] == 1 << 20 and res["subrequests"]["window16m"] <= lt.SUBREQ_LIMIT, res
     assert res["subrequests"]["window16m"] <= res["subrequests"]["whole"]
     monkeypatch.setattr(lt, "SUBREQ_LIMIT", 2)
     with pytest.raises(lt.TorrentError, match="subrequests"):
         run(s)
+    monkeypatch.setattr(lt, "SUBREQ_LIMIT", 40)
+    monkeypatch.setattr(lt, "BLOB_BUDGET", 10 << 20)                # the 1 MiB rung would put 31 MB in blobs
+    with pytest.raises(lt.TorrentError, match="blobs"):
+        run(s)
+
+
+def test_long_runs_stay_on_archive_org(tmp_path):
+    """Plan review follow-up M3: 60 runs of 2 MB with 8-byte separators fit
+    every 16 MiB window at 256 KiB (8 runs + the separators' one pool blob);
+    the whole file (63 subrequests) is not forced into blobs any more — the
+    worker cuts large ranges and refuses a whole-file GET instead."""
+    s = synth(tmp_path, base_len=130_000_000, pack_len=300_000, slot=(129_000_000, 100_000))
+    r = json.loads((s["site"] / "de.json").read_text())
+    base = s["base"].read_bytes()
+    segs, content = [], bytearray()
+    for i in range(60):
+        off = 1_000_000 + i * 2_100_000
+        segs.append({"src": "base", "off": off, "len": 2_000_000})
+        content += base[off:off + 2_000_000]
+        sep = bytes([i % 256]) * 8
+        segs.append({"src": "inline", "len": 8, "data": base64.b64encode(sep).decode(), "sha256": hashlib.sha256(sep).hexdigest()})
+        content += sep
+    md5 = hashlib.md5(content).hexdigest()
+    segs.append({"src": "md5"})
+    r.update(segments=segs, size=len(content) + 16, md5=md5, file_md5=hashlib.md5(bytes(content) + bytes.fromhex(md5)).hexdigest())
+    (s["site"] / "de.json").write_text(json.dumps(r))
+    res = run(s)
+    ix = json.loads((s["site"] / "de.ws.json").read_text())
+    assert res["remote_min"] == lt.REMOTE_MIN, res
+    assert res["subrequests"]["whole"] > lt.SUBREQ_LIMIT >= res["subrequests"]["window16m"], res
+    assert len(ix["blobs"]) == 1 and res["blob_bytes"] == 60 * 8 + 16, res        # the separators and the md5: one pool
+    assert sum(1 for p in ix["parts"] if p[2] == "s") == 60
 
 
 def test_costs_counts_the_worst_window():
@@ -514,7 +548,9 @@ def test_costs_counts_the_worst_window():
     ix2 = {"size": 32 * M, "parts": [[0, 15 * M, "s", "base", 0], [15 * M, M, "x", "b", 0],
                                       [16 * M, M, "x", "c", 0], [17 * M, 15 * M, "s", "de", 0]]}
     assert lt.subrequests(ix2, 0, 16 * M - 1) == 4 and lt.subrequests(ix2, 16 * M, 32 * M - 1) == 4
-    assert lt.costs(ix2)["window16m"] == 5          # [15 MiB, 31 MiB): b, c, de
+    assert lt.subrequests(ix2, 15 * M, 31 * M - 1) == 5
+    # the worst: starting at the base part's last byte, [15 MiB - 1, 31 MiB - 1): base, b, c, de
+    assert lt.costs(ix2)["window16m"] == 7
 
 
 def test_verify_entry_checks_the_subrequest_bound(tmp_path, monkeypatch):
