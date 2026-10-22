@@ -245,7 +245,8 @@ it on archive.org) logs each step in PDT to
    `tools/langpack/regions/<REGION>.json`, else `region_json.py`'s.
 5. archive.org: the packs the passing entries use go to
    `streetzim-<REGION>-lang` (made on the first upload: mediatype data,
-   collection opensource, title, languages), under the host's upload lock.
+   collection opensource_media like the bases, licence CC BY-SA 4.0 for
+   Wikipedia's text, title, one language per pack), under the host's upload lock.
    A pack listed with its MD5 is not sent again, and neither is one sent
    before and not listed yet (`$LANGPACK_WORK/uploads/<item>.tsv`; after 72
    hours unlisted the run stops and says so); a name the item holds with

@@ -22,7 +22,9 @@
 #      The region file is tools/langpack/regions/<REGION>.json when there is
 #      one, else region_json.py's.
 #   5. archive.org: the packs the menu uses go to item streetzim-<REGION>-lang
-#      (created on the first upload: mediatype data, collection opensource);
+#      (created on the first upload: mediatype data, collection
+#      opensource_media like the bases, licence CC BY-SA 4.0 (Wikipedia's
+#      text), one language value per pack language);
 #      a pack already listed with its MD5 is not sent again, and a name the
 #      item holds with another MD5 stops the run (a published recipe may use
 #      that file). Not all listed yet: exit 6, run again later.
@@ -249,7 +251,8 @@ if [ ${#SEND[@]} -gt 0 ]; then
   say "upload to $ITEM: ${#SEND[@]} packs"
   # behind the host's upload lock, as every upload (MAINTAINING.md)
   ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "${SEND[@]##*/}" --retries 5 --checksum \
-      --metadata="mediatype:data" --metadata="collection:opensource" \
+      --metadata="mediatype:data" --metadata="collection:opensource_media" \
+      --metadata="licenseurl:https://creativecommons.org/licenses/by-sa/4.0/" \
       --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
       "${LANG_META[@]}" \
       --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \

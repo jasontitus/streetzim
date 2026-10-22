@@ -180,7 +180,9 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     rde_ = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
     assert rde_["packs"]["search"]["kind"] == "search"
     assert rde_["packs"]["search"]["url"] == f"{{proxy}}/streetzim-testland-lang/osm_testland_search-de_2026-10-21_{u8}.zim"
-    for m in ("--metadata=mediatype:data", "--metadata=collection:opensource", "--metadata=language:deu",
+    assert "--metadata=collection:opensource" not in ups[0]["args"]        # the bases' collection instead
+    for m in ("--metadata=mediatype:data", "--metadata=collection:opensource_media",
+              "--metadata=licenseurl:https://creativecommons.org/licenses/by-sa/4.0/", "--metadata=language:deu",
               "--metadata=language:fra", "--metadata=language:tha"):
         assert m in ups[0]["args"], ups[0]["args"]
     # the site files: proxy-relative URLs, the base on its own item, recipes under recipes/testland/
