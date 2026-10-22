@@ -63,6 +63,19 @@ def test_recipe_rebuilds_the_merged_bytes(lp: SimpleNamespace, tmp_path: Path, w
     assert (work / "sha-cache").is_dir()        # chunk hashes cached under $LANGPACK_WORK
 
 
+def test_recipe_build_by_hand_takes_the_language_meta(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """Review LOW: `recipe2.py build --language-meta map` gives the recipe of
+    the file production ships (ship_packs and run_gates merge with map), so a
+    by-hand check compares like with like."""
+    out = tmp_path / "m-th.zim"
+    merge_zim.merge(str(lp.base), _packs(lp), str(out), "th", region_langs=["fr"], language_meta="map")
+    r = tool("recipe2.py", "build", lp.base, *_packs(lp), "--lang", "th", "--region-langs", "fr",
+             "--language-meta", "map", "-o", tmp_path / "th.json", "--check", out)
+    assert r.returncode == 0, r.stderr[-2000:]
+    st = json.loads(r.stdout[r.stdout.index("{"):])
+    assert st["materialized_equals_merge"] and st["md5"] == out.read_bytes()[-16:].hex(), st
+
+
 @pytest.mark.parametrize("case", ["inline", "md5", "base_off", "swap_packs", "wrong_pack", "base_byte"])
 def test_materialize_refuses_a_bad_recipe_or_input(case: str, lp: SimpleNamespace, tmp_path: Path,
                                                     work: Path) -> None:
