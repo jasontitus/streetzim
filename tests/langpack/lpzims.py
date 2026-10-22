@@ -32,6 +32,7 @@ ARTICLES: dict[str, list[tuple[str, str]]] = {
     "fr": [("Alpha_Ville", "Alpha Ville"), ("L'Île_aux_Oiseaux", "L'Île aux Oiseaux"),
            ("Lac_Gamma", "Lac Gamma"), ("Pic_Beta", "Pic Beta")],
     "th": [("อัลฟา", "อัลฟา")],
+    "rm": [("Alfa_Citad", "Alfa Citad"), ("Piz_Beta", "Piz Beta")],
 }
 
 
@@ -136,7 +137,7 @@ def write_pack(path: Path, lang: str, base_uuid: str, *, region: str = REGION,
     """A Wikipedia pack under ~w/<lang>/ for the base with base_uuid; returns its UUID (hex)."""
     arts = ARTICLES[lang] if articles is None else articles
     pre = f"~w/{lang}/"
-    iso3 = {"de": "deu", "fr": "fra", "th": "tha", "en": "eng", "es": "spa"}[lang]
+    iso3 = {"de": "deu", "fr": "fra", "th": "tha", "en": "eng", "es": "spa", "rm": "roh"}[lang]
     with Creator(str(path)).config_indexing(False, iso3) as c:
         if arts:
             c.set_mainpath(f"{pre}wiki-article/{arts[0][0]}")     # as streetzim/wiki_pack.py does

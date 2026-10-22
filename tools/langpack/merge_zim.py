@@ -66,10 +66,15 @@ COUNTER_MIME = b"text/plain"
 META_MIME = b"text/plain;charset=UTF-8"
 CHUNK = 8 << 20
 PACK_PREFIX_RE = re.compile(rb"^~w/([a-z]{2,3})/")
-ISO3 = {"ar": "ara", "de": "deu", "el": "ell", "en": "eng", "es": "spa", "fa": "fas", "fr": "fra",
-        "he": "heb", "hi": "hin", "id": "ind", "it": "ita", "ja": "jpn", "ko": "kor", "nl": "nld",
-        "pl": "pol", "pt": "por", "ru": "rus", "th": "tha", "tr": "tur", "uk": "ukr", "vi": "vie",
-        "zh": "zho"}
+def iso3(lang: str) -> str:
+    """A pack language's ISO 639-3 code (streetzim.languages: the core
+    languages and the regions' own, rm -> roh); a fixed table of the core
+    ones failed Switzerland's Romansh pack and merge."""
+    from streetzim.languages import iso639_3
+    try:
+        return iso639_3(lang)
+    except ValueError:
+        raise MergeError(f"no ISO 639-3 code for {lang!r}") from None
 
 
 class MergeError(ValueError):
@@ -494,10 +499,7 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     langs = [lang] + [p.lang for p in visitor if p.lang != lang]
     if language_meta == "map":      # kiwix-serve refuses /search on a multi-language book
         langs = [lang]
-    try:
-        language = ",".join(ISO3[x] for x in langs)
-    except KeyError as e:
-        raise MergeError(f"no ISO 639-3 code for {e}") from None
+    language = ",".join(iso3(x) for x in langs)
     wiki_set = ([base_wiki] if base_wiki else []) + [p.lang for p in packs if p.lang != base_wiki]
     meta = {b"Name": f"osm_{lang}_{region}".encode(), b"Title": title.encode(),
             b"Language": language.encode(),

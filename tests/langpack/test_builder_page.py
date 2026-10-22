@@ -112,6 +112,16 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     p.ship = SimpleNamespace(base=base)
     rc, rows = _e2e(p, "th", "net")                     # the server's (patched) base
     assert rc == 0 and rows[0]["pass"], rows
+    # a recipe that reads a viewer slot from the base (whose bytes the chunk hashes do not
+    # cover) is refused by the worker before anything is saved (re-review LOW)
+    rp = rec / "testland" / "de.json"
+    r = json.loads(rp.read_text())
+    slot = r["base"]["slots"][0]
+    seg = next(x for x in r["segments"] if x["src"] == "base")
+    seg["off"] = slot["off"]
+    rp.write_text(json.dumps(r))
+    rc, rows = _e2e(p, "de", "net", "--expect", "fail")
+    assert rc == 0 and rows[0]["pass"] and "masked viewer slot" in rows[0]["status"], rows
 
 
 def test_packs_stream_and_are_never_held_whole(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811

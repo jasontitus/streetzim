@@ -192,6 +192,8 @@ MUTANTS = {
     "base_item": ("recipes/index.json+region.json", _base_item),
     "base_uuid": ("recipes/th.json", lambda d: d["base"].__setitem__("uuid", "0" * 32)),
     "inline": ("recipes/th.json", _inline),
+    # a recipe naming a viewer slot the base does not have (re-review LOW: site_check's slot list check)
+    "slots": ("recipes/de.json", lambda d: d["base"]["slots"].append({"name": "index.html", "off": 4096, "len": 64})),
     "verdict_fail": ("verdicts/fr.json", lambda d: (d.__setitem__("all_pass", False),
                                                     d["checks"].__setitem__("ui", False))),
     "verdict_other": ("verdicts/th.json", lambda d: d.__setitem__("recipe_md5", "0" * 32)),
@@ -219,7 +221,7 @@ def test_site_check_kills(name: str, site: SimpleNamespace, tmp_path: Path) -> N
     assert rc != 0 and any(ln.startswith("FAIL") for ln in lines), lines
     # the check meant for it fired (others may too): review r3 M-5
     want = {"pack_sha": "fr/fr: chunk sha256 != local", "base_sha": "de: base chunk sha256 != local base",
-            "base_md5": "index base md5"}.get(name)
+            "base_md5": "index base md5", "slots": "de: recipe viewer slots != the local base's"}.get(name)
     if want:
         assert any(want in ln for ln in lines), (want, lines)
 

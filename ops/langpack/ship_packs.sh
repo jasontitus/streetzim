@@ -7,7 +7,9 @@
 #   ops/langpack/ship_packs.sh REGION BASE.zim
 #
 # BASE is the map as published: archive.org item streetzim-<REGION> lists it
-# with this MD5 (site_check.py checks). Steps, each logged with PDT times to
+# with this MD5 (site_check.py checks). SHIP_BASE_ITEM and SHIP_PACK_ITEM
+# name other items (a preview on test items: streetzim-langtest-<REGION> and
+# streetzim-langtest-<REGION>-lang), SHIP_ITEM_TITLE the packs item's title. Steps, each logged with PDT times to
 # $LANGPACK_WORK/logs/ship-<REGION>-<base>.log:
 #   1. region_meta.py: the languages (core + the map's regionLanguages that
 #      have a Wikipedia ZIM; a language without one is skipped and logged),
@@ -43,7 +45,13 @@
 # Exit: 0 recipes ready; 6 packs transferred, archive.org listing pending
 # (run again later; nothing is redone); 2 another run holds the region's lock,
 # or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
-# gates (a dry run: nothing published); 1 anything else (the log says what).
+# gates (a dry run: nothing published); 4 a map v1 gives no packs (a
+# continent, or a base over SHIP_MAX_BASE_GB, 8: refused in step 1, before
+# any download or build); 5 nothing publishable: every entry with a
+# Wikipedia pack that passed its gates is over the per-entry budget
+# (make_site.py's; each refusal is logged as REFUSED, before anything is
+# sent), or make_site.py offers no entry;
+# 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
@@ -83,7 +91,8 @@ TAG=$(basename "$BASE" .zim)
 W=$LANGPACK_WORK
 PACKS=$W/packs/$TAG
 SITE=$W/site/$REGION
-ITEM=streetzim-$REGION-lang
+ITEM=${SHIP_PACK_ITEM:-streetzim-$REGION-lang}
+BASE_ITEM=${SHIP_BASE_ITEM:-streetzim-$REGION}
 mkdir -p "$W/logs" "$W/locks" "$W/regions" "$PACKS"
 LOG=$W/logs/ship-$REGION-$TAG.log
 exec 9> "$W/locks/ship-$REGION.lock"
@@ -101,6 +110,14 @@ META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --c
 printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
 mget() { "$PY" -c 'import json,sys; v=json.loads(sys.argv[1])[sys.argv[2]]; print(v if isinstance(v, str) else (",".join(v) if isinstance(v, list) else json.dumps(v, ensure_ascii=False)))' "$META" "$1"; }
 LANGS=$(mget langs); RL=$(mget region_langs); PACK_LANGS=$(mget pack_langs); TITLE=$(mget region_title)
+# v1: no packs for a continent, or for a base over SHIP_MAX_BASE_GB (its
+# search packs alone are over the per-entry budget), before any work
+TIER=$(mget tier); BASE_BYTES=$(stat -c %s "$BASE")
+if [ "$TIER" = continent ] || "$PY" -c 'import sys; sys.exit(0 if int(sys.argv[1]) > float(sys.argv[2]) * 1e9 else 1)' \
+     "$BASE_BYTES" "${SHIP_MAX_BASE_GB:-8}"; then
+  say "$REGION: a ${TIER/null/unregistered} map, $(( BASE_BYTES / 1000000 )) MB: no language packs in v1 (continents and bases over ${SHIP_MAX_BASE_GB:-8} GB come after a measured design)"
+  exit 4
+fi
 say "menu: $LANGS; region languages: ${RL:-none}; packs: $PACK_LANGS"
 "$PY" -c 'import json,sys; [print("skipped %s: %s" % (d["lang"], d["why"])) for d in json.loads(sys.argv[1])["dropped"]]' "$META" \
   | while read -r l; do say "$l"; done
@@ -194,6 +211,31 @@ PY
 )
 say "gates passed: ${PASSED:-none}"
 [ -n "$PASSED" ] || { say "no entry passed its gates; nothing to publish"; exit 1; }
+# the per-entry budget (make_site.py's), on the gated recipes: an entry over
+# it is refused here, said out loud, and none of its packs is sent for it
+BUDGET=$("$PY" - "$W/recipes/$TAG" "$PASSED" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.make_site import over_budget, touched_bytes
+d, langs = sys.argv[1:3]
+ok, wiki = [], 0
+for L in langs.split(","):
+    p = os.path.join(d, f"{L}.json")
+    r = json.load(open(p))
+    why = over_budget(os.path.getsize(p), sum(touched_bytes(r).values()))
+    if why:
+        print(f"REFUSED {L}: {why}")
+    else:
+        ok.append(L)
+        wiki += any(k != "search" for k in r["packs"])
+print("OK " + ",".join(ok))
+print(f"WIKI {wiki}")
+PY
+) || { say "budget check failed"; exit 1; }
+while read -r l; do case "$l" in REFUSED*) say "$l";; esac; done <<< "$BUDGET"
+PASSED=$(sed -n 's/^OK //p' <<< "$BUDGET")
+# an entry without a Wikipedia pack (the base's own language) is no reason to publish
+[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || { say "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"; exit 5; }
 if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org (exit 3: gated, nothing published)"; exit 3; fi
 
 # 5. archive.org: the packs the passing entries use
@@ -264,7 +306,7 @@ if [ ${#SEND[@]} -gt 0 ]; then
     ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "$f" --retries 5 --checksum \
         --metadata="mediatype:data" --metadata="collection:opensource_media" \
         --metadata="licenseurl:https://creativecommons.org/licenses/by-sa/4.0/" \
-        --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
+        --metadata="title:${SHIP_ITEM_TITLE:-StreetZim $TITLE: Wikipedia language packs}" \
         "${LANG_META[@]}" \
         --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
         >> "$LOG" 2>&1 ) || { say "ia upload of $f failed (the packs sent before it are recorded in $SENT)"; exit 1; }
@@ -297,15 +339,19 @@ rm -rf "$STG" && mkdir -p "$OUT"
 "${LOW[@]}" "$PY" "$TL/make_site.py" "$BASE" --packs-dir "$PACKS" --region "$REGION" --region-title "$TITLE" \
   --region-langs "$RL" --langs "$PASSED" --titles "$(mget titles)" --language-meta map \
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
-  --base-download "https://archive.org/download/streetzim-$REGION/$BF" --base-url "{proxy}/streetzim-$REGION/$BF" \
+  --base-download "https://archive.org/download/$BASE_ITEM/$BF" --base-url "{proxy}/$BASE_ITEM/$BF" \
   -o "$OUT" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
+"$PY" -c 'import json,sys; [print("REFUSED %s: %s" % (r.get("lang") or r.get("pack"), r["why"])) for r in json.load(open(sys.argv[1]))]' \
+  "$OUT/refused.json" | while read -r l; do say "$l"; done
+MENU=$("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json")
+[ -n "$MENU" ] || { say "make_site.py offers no entry: nothing to publish ($STG kept)"; exit 5; }
 if [ -n "${LANGPACK_WEBSEED:-}" ]; then
   BT=$ROOT/web/torrents/$REGION.torrent
   BTA=(); [ -f "$BT" ] && BTA=(--base-torrent "$BT")
   # the base's and the packs' archive.org metadata: their ETags go in the index
   mkdir -p "$W/ia-cache"
   if [ -n "${SHIP_IA_FETCH---ia-fetch}" ]; then
-    for it in "streetzim-$REGION" "$ITEM"; do
+    for it in "$BASE_ITEM" "$ITEM"; do
       "$IA" metadata "$it" > "$W/ia-cache/ia-$it.json.tmp" 2>/dev/null && mv -f "$W/ia-cache/ia-$it.json.tmp" "$W/ia-cache/ia-$it.json" \
         || rm -f "$W/ia-cache/ia-$it.json.tmp"
     done

@@ -34,7 +34,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from libzim.reader import Archive  # noqa: E402
 
-from tools.langpack.merge_zim import ISO3, base_lineage, blob_of, open_pack, utf16_units  # noqa: E402
+from tools.langpack.merge_zim import MergeError, base_lineage, blob_of, iso3, open_pack, utf16_units  # noqa: E402
 from tools.langpack.gatelib import zimcheck_version  # noqa: E402
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
 
@@ -117,8 +117,12 @@ def main():
     meta = {k: (blob_of(z, (ord("M"), k.encode())) or b"").decode() for k in ("Name", "Title", "Language", "Description")}
     pj = json.loads(blob_of(z, (ord("C"), p.prefix + b"pack.json")) or b"{}")
     checks["pack_json"] = pj.get("lang") == p.lang and bool(pj.get("base_uuid")) and isinstance(pj.get("articles"), int)
+    try:
+        want_lang = iso3(p.lang)
+    except MergeError:
+        want_lang = None
     checks["metadata"] = (utf16_units(meta["Title"]) <= 30 and 0 < len(meta["Description"]) <= 80
-                          and meta["Language"] == ISO3.get(p.lang) and bool(re.match(rf"^osm_[a-z0-9-]+_wiki-{p.lang}$", meta["Name"])))
+                          and meta["Language"] == want_lang and bool(re.match(rf"^osm_[a-z0-9-]+_wiki-{p.lang}$", meta["Name"])))
     if not checks["metadata"]:
         problems.append(f"metadata {meta}")
     checks["archive_check"] = Archive(a.pack).check()

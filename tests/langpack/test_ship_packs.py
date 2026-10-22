@@ -360,6 +360,68 @@ def test_a_failed_site_check_replaces_and_publishes_nothing(ship: SimpleNamespac
     assert not (tmp_path / "web2" / "build" / "recipes" / "testland").exists()
 
 
+def test_a_preview_on_test_items(ship: SimpleNamespace) -> None:
+    """A preview ships to test items (the live ones untouched): the base on
+    SHIP_BASE_ITEM, the packs to SHIP_PACK_ITEM with SHIP_ITEM_TITLE, and
+    the recipes point there."""
+    (ship.work / "ia-cache" / "ia-streetzim-langtest-testland.json").write_text(
+        (ship.work / "ia-cache" / "ia-streetzim-testland.json").read_text())
+    title = "PREVIEW (test) StreetZim Testland: Wikipedia packs"
+    r = _run(ship, SHIP_BASE_ITEM="streetzim-langtest-testland", SHIP_PACK_ITEM="streetzim-langtest-testland-lang",
+             SHIP_ITEM_TITLE=title)
+    assert r.returncode == 0, _log(ship)[-2000:]
+    ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
+    assert ups and all(x["item"] == "streetzim-langtest-testland-lang" and f"--metadata=title:{title}" in x["args"]
+                       for x in ups), ups
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    reg = json.loads((out / "index.json").read_text())["regions"][0]
+    assert reg["base"]["url"] == f"{{proxy}}/streetzim-langtest-testland/{ship.base.name}"
+    assert reg["base"]["download"] == f"https://archive.org/download/streetzim-langtest-testland/{ship.base.name}"
+    rde = json.loads((out / "de.json").read_text())
+    assert rde["packs"]["de"]["url"] == "{proxy}/streetzim-langtest-testland-lang/" + _pk(ship, "de")
+
+
+def test_a_continent_or_a_big_base_gets_no_packs(ship: SimpleNamespace) -> None:
+    """Re-review: v1 gives no packs to a continent (cloud/regions.tsv) or a
+    base over SHIP_MAX_BASE_GB: refused in step 1, exit 4, before any
+    download, pack build or gate."""
+    for region, extra in (("europe", {}), ("testland", {"SHIP_MAX_BASE_GB": "0.000001"})):
+        r = subprocess.run(["bash", str(SHIP), region, str(ship.base)], capture_output=True, text=True, timeout=300,
+                           env={**ship.env, **extra})
+        log = (ship.work / "logs" / f"ship-{region}-{ship.tag}.log").read_text()
+        assert r.returncode == 4 and "no language packs in v1" in log, (region, log[-1500:])
+        assert _lines(ship.logs["prefetch"]) == [] and _lines(ship.logs["build"]) == [] and _lines(ship.logs["gates"]) == []
+    assert "a continent map" in (ship.work / "logs" / f"ship-europe-{ship.tag}.log").read_text()
+
+
+def test_budget_refusals_are_loud(ship: SimpleNamespace) -> None:
+    """Re-review: entries over the per-entry budget are refused before
+    anything is sent, each said in the log; when no entry with a Wikipedia
+    pack is left the run exits 5 and replaces nothing (it said "ready")."""
+    assert _run(ship).returncode == 0
+    site = ship.work / "site" / "testland" / "recipes" / "testland"
+    menu = {m["lang"]: m["download_bytes"] for m in json.loads((site / "index.json").read_text())["regions"][0]["menu"]}
+    small = min(v for v in menu.values() if v)
+    big = sorted(L for L, v in menu.items() if v > small)
+    assert big, menu
+    sent = _sent(ship)
+    r = _run(ship, LANGPACK_ENTRY_BUDGET=str(small))       # only the smallest entries fit
+    log = _log(ship)
+    assert r.returncode == 0, log[-2000:]
+    for L in big:
+        assert f"REFUSED {L}: over the per-entry budget" in log, log[-2000:]
+    idx = json.loads((site / "index.json").read_text())
+    assert sorted(m["lang"] for m in idx["regions"][0]["menu"]) == sorted(L for L in menu if L not in big)
+    before = sorted(p.name for p in site.iterdir())
+    for extra in ({"LANGPACK_ENTRY_BUDGET": "1"}, {"LANGPACK_RECIPE_BUDGET": "1"}):   # nothing with a pack fits
+        r = _run(ship, **extra)
+        log = _log(ship)
+        assert r.returncode == 5, (extra, log[-2000:])
+        assert "with a Wikipedia pack is over the per-entry budget: nothing to publish" in log
+        assert sorted(p.name for p in site.iterdir()) == before
+    assert _sent(ship) == sent                              # nothing sent for refused entries
+
+
 def test_a_leftover_of_the_old_site_is_not_a_failed_swap(ship: SimpleNamespace) -> None:
     """Review LOW: the region's site files were replaced; only removing the
     previous ones (now in the staging folder) failed. The run says so and
@@ -580,6 +642,26 @@ def test_language_torrents_ship_and_publish(ship: SimpleNamespace, tmp_path: Pat
     pub = web / "build" / "recipes" / "testland"
     assert (pub / "de.torrent").read_bytes() == (out / "de.torrent").read_bytes()
     assert sorted(x.name for x in pub.glob("ws-*.bin")) == sorted(x.name for x in out.glob("ws-*.bin"))
+
+
+def test_a_preview_on_test_items_gets_torrents_from_them(ship: SimpleNamespace) -> None:
+    """SHIP_BASE_ITEM / SHIP_PACK_ITEM with LANGPACK_WEBSEED: the worker's
+    segment index reads the base from the test item, with that item's ETag."""
+    meta = json.loads((ship.work / "ia-cache" / "ia-streetzim-testland.json").read_text())
+    meta["files"][0]["mtime"] = "1760000000"
+    (ship.work / "ia-cache" / "ia-streetzim-langtest-testland.json").write_text(json.dumps(meta))
+    r = _run(ship, SHIP_BASE_ITEM="streetzim-langtest-testland", SHIP_PACK_ITEM="streetzim-langtest-testland-lang",
+             LANGPACK_WEBSEED="https://streetzim-build-proxy.example.workers.dev")
+    assert r.returncode == 0, _log(ship)[-3000:]
+    out = ship.work / "site" / "testland" / "recipes" / "testland"
+    menu = json.loads((out / "region.json").read_text())["menu"]
+    assert menu and all("torrent" in m for m in menu), menu
+    etag = '"%x-%x"' % (1760000000, ship.base.stat().st_size)
+    for m in menu:
+        srcs = json.loads((out / f"{m['lang']}.ws.json").read_text())["sources"].values()
+        bases = [x for x in srcs if x["file"] == ship.base.name]
+        assert bases and all(x["item"] == "streetzim-langtest-testland" and x.get("etag") == etag for x in bases), srcs
+        assert all(x["item"] in ("streetzim-langtest-testland", "streetzim-langtest-testland-lang") for x in srcs)
 
 
 def test_a_failing_torrent_step_publishes_without_torrents(ship: SimpleNamespace) -> None:

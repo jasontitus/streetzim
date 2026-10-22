@@ -163,10 +163,19 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
         if pos < end:
             yield Ref(pc.src, pos, end - pos), False
 
+    # the merger's own bytes, where they go: in the fingerprint (plan review
+    # B2-1: a merger change without a MERGER_VERSION bump is no light gate),
+    # without the UUID (header bytes 8-24, which follow the inputs' MD5s)
+    gen = hashlib.sha256()
+    at = 0
     for whole in pieces(plan):
         if not isinstance(whole, Ref):
+            b = bytes(whole)
+            gen.update(at.to_bytes(8, "little") + len(b).to_bytes(8, "little") + masked(b, at, [[8, 16]]))
+            at += len(b)
             pend += whole
             continue
+        at += whole.n
         for pc, is_slot in split(whole):
             if pc.n == 0:
                 continue
@@ -217,6 +226,7 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
                                    "url": url_template.format(file=os.path.basename(ix.path), proxy=PROXY),
                                    "size": os.path.getsize(ix.path), "chunk": CHUNK, "articles": 0,
                                    "sha256": chunk_hashes(ix.path)}
+    recipe["generated_sha256"] = gen.hexdigest()
     recipe["fingerprint"] = fingerprint(recipe, plan)
     # exact MD5: stream the recipe once (the same code path the browser follows)
     t1 = time.perf_counter()
@@ -239,10 +249,11 @@ def fingerprint(recipe: dict, plan: Plan) -> str:
     slots and what they change (the UUID, which follows the base's MD5, and
     the checksum): the base's masked chunk hashes, size and slot ranges,
     every pack's chunk hashes, the map language, the generated metadata and
-    map-config, the merger. A base patched in place (cloud/patch_viewer_inplace.py)
-    keeps it; anything else changes it."""
+    map-config, the merger and every byte it generates (UUID aside). A base
+    patched in place (cloud/patch_viewer_inplace.py) keeps it; anything else
+    changes it."""
     b = recipe["base"]
-    doc = {"base": [b["size"], b["mask"], b["sha256"]],
+    doc = {"base": [b["size"], b["mask"], b["sha256"]], "generated": recipe["generated_sha256"],
            "packs": {k: [p["size"], p["sha256"]] for k, p in sorted(recipe["packs"].items())},
            # the generated parts say the rest (title, language list, wikiPacks order)
            "lang": recipe["map_language"], "meta": plan.meta, "mapcfg": plan.layout["mapcfg"].decode("utf-8", "replace"),
