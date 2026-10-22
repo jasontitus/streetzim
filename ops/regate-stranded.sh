@@ -143,6 +143,7 @@ for spec in "${TARGETS[@]}"; do
     0) log "  uploaded → https://archive.org/details/streetzim-$ID"; row "$ID" uploaded "$OUT" "$MIN min" ;;
     6) log "  upload transferred, not yet listed — pending"; row "$ID" upload-pending "$OUT" "rc=6" ;;
     2) log "  VALIDATOR BLOCKED the upload"; row "$ID" upload-blocked "$OUT" "rc=2" ;;
+    7) log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; row "$ID" frozen-published "$OUT" "rc=7" ;;
     *) log "  UPLOAD FAILED rc=$URC"; row "$ID" upload-failed "$OUT" "rc=$URC" ;;
   esac
 done

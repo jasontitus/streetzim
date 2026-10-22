@@ -7,9 +7,11 @@ Reads WEB_DIR/build/recipes/*/region.json (default: this checkout's web/).
 Without --md5: exit 3 when any published region's base is a file of this
 name (an in-place viewer patch of it would break those recipes and their
 language torrents), else 0. With --md5 (the file's MD5 as it is now): exit
-3 only when a published region names this file with ANOTHER md5 (its bytes
-changed since the recipes were made), else 0. Prints the region ids, one
-per line, on exit 3. Exit 2 on a usage error. Used by
+3 only when a published region names this file with ANOTHER known md5 (its
+bytes changed since the recipes were made), else 0. Prints the region ids,
+one per line, on exit 3. Nothing it cannot read or match blocks: exit 0
+with a warning. Exit 2 on a usage error (callers treat any code but 3 as
+"not frozen"). Used by
 ops/cloud/upload_validated.sh and ops/cloud/rollout_viewer_patch.sh to
 enforce the freeze on in-place patches of bases with published recipes
 (user decision 2026-10-21; plan review B2/H-2) unless ship_packs.sh runs
@@ -26,21 +28,38 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def published(zim: str, web: str, md5: str | None = None) -> list[str]:
+    """The regions whose published recipes use this file as their base. It
+    blocks nothing it cannot positively match: an unreadable folder or a
+    region.json without a string base file is skipped (a warning on stderr);
+    with md5, a region whose base has no md5 is not counted (unknown, not a
+    change)."""
     name = os.path.basename(zim)
     rdir = os.path.join(web, "build", "recipes")
     out = []
-    if not os.path.isdir(rdir):
+    try:
+        regions = sorted(os.listdir(rdir))
+    except FileNotFoundError:
         return out
-    for region in sorted(os.listdir(rdir)):
+    except OSError as e:
+        print(f"published_base: WARNING: cannot list {rdir} ({e}); nothing matched", file=sys.stderr)
+        return out
+    for region in regions:
         p = os.path.join(rdir, region, "region.json")
         try:
-            base = json.load(open(p, encoding="utf-8"))["base"]
-        except (OSError, ValueError, KeyError, TypeError):
+            doc = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            if os.path.exists(p):
+                print(f"published_base: WARNING: {p} unreadable ({e}); skipped", file=sys.stderr)
             continue
-        if base.get("file") != name:
+        base = doc.get("base") if isinstance(doc, dict) else None
+        if not isinstance(base, dict) or not isinstance(base.get("file"), str):
             continue
-        if md5 is not None and base.get("md5") == md5:
+        if base["file"] != name:
             continue
+        if md5 is not None:
+            known = base.get("md5")
+            if not isinstance(known, str) or known == md5:
+                continue                         # unknown, or the same bytes
         out.append(region)
     return out
 

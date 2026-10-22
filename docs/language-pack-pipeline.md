@@ -28,7 +28,7 @@ Everything is set by arguments and environment variables.
 | `LANGPACK_WEBSEED` | ship_packs.sh, site_check.py | The build worker's origin (`build-proxy/`, e.g. `https://streetzim-build-proxy.<account>.workers.dev`). Set: a webseeded torrent per language entry (see "Language torrents"), and site_check.py requires every torrent's webseed to use it. Empty (the default): none. |
 | `LANGPACK_WEBSEED_SUBREQ_LIMIT`, `LANGPACK_WEBSEED_BLOB_BUDGET` | lang_torrents.py, site_check.py | The most worker subrequests a 16 MiB request of a language version may need (default 40; the free plan allows 50); the most blob bytes per entry (default 64 MiB). |
 | `SHIP_TORRENT_TIMEOUT`, `SHIP_LANG_TORRENTS_ARGS` | ship_packs.sh | lang_torrents.py's time limit (default 7200 s; on expiry: a WARNING, published without torrents); extra arguments for it. |
-| `LANGPACK_RESHIP_AFTER_PATCH` | upload_validated.sh, rollout_viewer_patch.sh | 1 lifts the freeze on re-uploading a base whose recipes are published (the rollout then runs ship_packs.sh for it). |
+| `LANGPACK_RESHIP_AFTER_PATCH` | upload_validated.sh, rollout_viewer_patch.sh | 1 lifts the freeze on re-uploading a base whose recipes are published; the region is queued in langpack-reship.tsv for ops/langpack/reship_queue.sh. |
 
 On StreetZim's build host, source `ops/langpack/host-env.sh` first. It sets these variables for that host; values already set win.
 
@@ -346,9 +346,14 @@ URL answers 404 instead of other bytes and the new torrent replaces it; a
 base re-uploaded under the same name (a viewer re-patch) changes its
 archive.org ETag, so the worker answers "out of date" until ship_packs.sh
 has run again for the region — which is why such re-uploads are frozen for
-bases with published recipes: upload_validated.sh refuses them (exit 7) and
-rollout_viewer_patch.sh skips them, unless `LANGPACK_RESHIP_AFTER_PATCH=1`,
-when the rollout runs ship_packs.sh right after the upload. A
+bases with published recipes: upload_validated.sh refuses them (exit 7,
+only on a positive match and only when bytes would be sent) and
+rollout_viewer_patch.sh skips them before patching, unless
+`LANGPACK_RESHIP_AFTER_PATCH=1`, which queues the region in
+`langpack-reship.tsv` for `ops/langpack/reship_queue.sh` (run it after the
+rollout; ship_packs.sh takes hours per region). A region's blobs, all
+entries together, are capped too (`LANGPACK_WEBSEED_REGION_BLOB_BUDGET`,
+256 MiB). A
 lang_torrents.py failure or timeout (`SHIP_TORRENT_TIMEOUT`, default 2 h)
 is logged as a WARNING and the recipes are published without torrents.
 

@@ -38,6 +38,7 @@
 
 const INDEX_FORMAT = 'streetzim-webseed/1';
 const INDEX_TTL_MS = 5 * 60 * 1000;
+const STALE_TTL_MS = 10 * 60 * 1000;
 const PATH_RE = /^\/merged\/([a-z0-9-]+)\/([a-z]{2,3}(?:-[a-z0-9]+)?)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([A-Za-z0-9._-]+\.zim)$/;
 const ITEM_RE = /^streetzim-[a-z0-9-]+$/;
 const FILE_RE = /^[A-Za-z0-9._-]+\.zim$/;
@@ -159,7 +160,7 @@ export function createMergedHandler(opts) {
   const pending = new Map();        // sha256 -> Promise<Uint8Array> (one fetch per blob at a time)
   let blobBytes = 0;
   const nodes = new Map();          // "<item>/<file>" -> storage-node URL after archive.org's redirect
-  const stale = new Set();          // recipe UUIDs whose archive.org files were replaced
+  const stale = new Map();          // recipe UUID -> when its archive.org file was found replaced
   const subBudget = opts.subrequests || 45;
   const outOfDate = () => reply(404, 'this language version is out of date (the map or its packs were updated): get the new torrent or link from https://streetzim.web.app/build/');
 
@@ -238,10 +239,10 @@ export function createMergedHandler(opts) {
 
   // One ranged GET of an archive.org file; follows the redirect once, then
   // goes to the remembered storage node (falling back to archive.org). Only
-  // a 206 for exactly these bytes of a file of the index's size is used. A
-  // 200 to our If-Range (archive.org's ETag changed) or a 206 of a file of
-  // another size means the file was replaced since the index was made:
-  // StaleSource, and this version is out of date.
+  // a 206 for exactly these bytes of a file of the index's size is used. An
+  // answer with another ETag (a 200 to our If-Range) or another size means
+  // the file was replaced since the index was made: StaleSource, and this
+  // version is out of date; anything else is transient.
   async function source(src, from, to, counter) {
     const key = `${src.item}/${src.file}`;
     const headers = { Range: `bytes=${from}-${to}` };
@@ -261,9 +262,13 @@ export function createMergedHandler(opts) {
         return r.body;
       }
       try { r.body && r.body.cancel(); } catch (e) { /* ignore */ }
+      // replaced only when the file says so: another ETag or another size (a
+      // 200 with the same ETag and size is archive.org ignoring Range: transient)
       const total = /\/(\d+)$/.exec(cr);
-      if ((r.status === 200 && src.etag) || (r.status === 206 && total && Number(total[1]) !== src.size)) {
-        throw new StaleSource(`${key} was replaced (HTTP ${r.status} ${cr})`);
+      const gotTag = r.headers.get('etag');
+      if ((r.status === 206 && total && Number(total[1]) !== src.size)
+          || (r.status === 200 && ((src.etag && gotTag && gotTag !== src.etag) || (cl != null && Number(cl) !== src.size)))) {
+        throw new StaleSource(`${key} was replaced (HTTP ${r.status} ${cr}${gotTag ? ` ETag ${gotTag}` : ''})`);
       }
       last = `HTTP ${r.status} ${cr}${cl != null ? ` length ${cl}` : ''}`;
       nodes.delete(key);
@@ -301,7 +306,10 @@ export function createMergedHandler(opts) {
     if (!m) return reply(404, 'expected /merged/<region>/<lang>/<uuid>/<file>.zim');
     if (!site) return reply(503, 'the build worker has no SITE_ORIGIN');
     const [, region, lang, uuid, file] = m;
-    if (stale.has(uuid)) return outOfDate();
+    if (stale.has(uuid)) {
+      if (now() - stale.get(uuid) < STALE_TTL_MS) return outOfDate();
+      stale.delete(uuid);                         // checked again from time to time
+    }
     if (meter && !(await meter.allow(ctx))) {
       return reply(503, "today's share of this worker's requests is used; the torrent's peers and the /build/ page still work",
         { 'Retry-After': '3600' });
@@ -358,9 +366,16 @@ export function createMergedHandler(opts) {
     let opened = null;
     if (firstSrc >= 0) {
       const { part, lo, hi } = slices[firstSrc];
-      try { opened = await source(ix.sources[part[3]], part[4] + lo, part[4] + hi - 1, counter); } catch (e) {
-        if (e instanceof StaleSource) { stale.add(uuid); return outOfDate(); }
-        opened = null;                            // a transient error: the stream tries again
+      let err = null;
+      for (let attempt = 0; attempt < 2 && !opened; attempt++) {      // a transient error is tried once more
+        try { opened = await source(ix.sources[part[3]], part[4] + lo, part[4] + hi - 1, counter); } catch (e) {
+          if (e instanceof StaleSource) { stale.set(uuid, now()); return outOfDate(); }
+          err = e;
+        }
+      }
+      if (!opened) {
+        return reply(503, `archive.org did not answer this range (${err && err.message || err}); try again shortly`,
+          { 'Retry-After': '30' });
       }
     }
     // FixedLengthStream (Workers) keeps Content-Length on the response;
@@ -386,7 +401,7 @@ export function createMergedHandler(opts) {
         }
         await writable.close();
       } catch (e) {
-        if (e instanceof StaleSource) stale.add(uuid);
+        if (e instanceof StaleSource) stale.set(uuid, now());
         if (opened) { try { await opened.cancel(); } catch (e2) { /* used or gone */ } }
         try { await writable.abort(e); } catch (e2) { /* already errored */ }
         if (stats) stats({ region, lang, start, end, error: String(e && e.message || e), ...counter });

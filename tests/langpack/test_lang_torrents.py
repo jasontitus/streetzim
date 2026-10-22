@@ -732,3 +732,45 @@ def test_webseed_smoke_against_the_local_worker(tmp_path):
         w.terminate()
         w.wait(timeout=10)
         srv.shutdown()
+
+
+def test_the_region_blob_budget(tmp_path, monkeypatch):
+    """Follow-up review: besides 64 MiB per entry, the region's blobs (all its
+    entries, shared ones counted once) are capped; an entry that would pass
+    it gets no torrent, the others keep theirs."""
+    s = synth(tmp_path)
+    fr = json.loads((s["site"] / "de.json").read_text())
+    fr.update(uuid="518f0e4d-684b-55b8-a110-d06933e1a0eb", file_name="osm_fr_testland_2026-10-13", name="osm_fr_testland")
+    head = b"F" * 5000                                                  # its own header: a blob of its own
+    fr["segments"][0].update(len=len(head), data=base64.b64encode(head).decode(), sha256=hashlib.sha256(head).hexdigest())
+    fr["size"] += len(head) - 80
+    from tools.langpack import recipe2
+    fr["md5"] = recipe2.materialize(fr, str(s["base"]), s["packs"], None, trust_md5=False)
+    fr["file_md5"] = recipe2._LAST_FILE_MD5[0]
+    (s["site"] / "fr.json").write_text(json.dumps(fr))
+    for name in ("region.json", "index.json"):
+        doc = json.loads((s["site"] / name).read_text())
+        r = doc["regions"][0] if "regions" in doc else doc
+        r["menu"].append({"lang": "fr", "recipe": "recipes/testland/fr.json"})
+        (s["site"] / name).write_text(json.dumps(doc))
+    args = [str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED, "--langs", "de"]
+    assert lt.main(args) == 0
+    de_bytes = lt.region_blob_bytes(str(s["site"]))
+    monkeypatch.setattr(lt, "REGION_BLOB_BUDGET", de_bytes + 1000)       # de fits; fr's 5,000-byte header does not
+    region_blobs = {sha: b["size"] for sha, b in json.loads((s["site"] / "de.ws.json").read_text())["blobs"].items()}
+    with pytest.raises(lt.TorrentError, match="region's blobs"):
+        lt.torrent_for(str(s["site"] / "fr.json"), json.loads((s["site"] / "region.json").read_text()), "fr",
+                       str(s["base"]), s["packs"], WEBSEED, region_blobs=region_blobs)
+    assert lt.main(args[:-2] + ["--langs", "fr"]) == 3                    # fr fails, de keeps its torrent
+    menu = json.loads((s["site"] / "region.json").read_text())["menu"]
+    assert menu[0].get("torrent") and not menu[1].get("torrent")
+
+
+def test_site_check_checks_the_region_blob_budget(tsite):
+    from tests.langpack.conftest import tool
+    out = tsite.out
+    r = tool("site_check.py", out.parent.parent, "--recipes-dir", out, "--base", tsite.base, "--packs-dir", tsite.packs,
+             "--ia-cache", tsite.ia, env={**tsite.env, "LANGPACK_WEBSEED_REGION_BLOB_BUDGET": "1"})
+    fails = [ln for ln in r.stdout.splitlines() if ln.startswith("FAIL")]
+    assert r.returncode != 0 and any("region's blobs" in ln for ln in fails), fails
+    assert all(ln.startswith("FAIL TORRENT ") for ln in fails)

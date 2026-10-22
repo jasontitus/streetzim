@@ -216,12 +216,17 @@ while :; do
   # place breaks those recipes and their torrents until ops/langpack/ship_packs.sh
   # regenerates them (user decision 2026-10-21). LANGPACK_RESHIP_AFTER_PATCH=1
   # lifts the freeze and runs ship_packs.sh for it after the upload.
+  # Checked BEFORE patching: a file this run then could not upload must never
+  # be patched. A checker that fails skips the region (not "frozen").
   pub=""
   if [ -f tools/langpack/published_base.py ]; then
     pub=$("$PY" tools/langpack/published_base.py "$zim" --web web); prc=$?
     if [ "$prc" = 3 ] && [ "${LANGPACK_RESHIP_AFTER_PATCH:-0}" != 1 ]; then
-      log "  FROZEN: published language recipes ($(echo $pub)) use $zim — not patched (LANGPACK_RESHIP_AFTER_PATCH=1 to patch and re-ship them)"
+      log "  FROZEN: published base — language recipes ($(echo $pub)) use $zim; not patched (LANGPACK_RESHIP_AFTER_PATCH=1 to patch it and queue their re-ship)"
       row "$id" frozen-published "$zim"; continue
+    elif [ "$prc" != 3 ] && [ "$prc" != 0 ]; then
+      log "  the freeze check failed (published_base.py rc=$prc) — not patched, skipped"
+      row "$id" freeze-check-failed "$zim"; continue
     fi
     [ "$prc" = 3 ] || pub=""
   fi
@@ -248,20 +253,14 @@ while :; do
   case $RC in
     0) log "  SHIPPED $zim ($MIN min)"; row "$id" uploaded "$zim" ;;
     6) log "  uploaded, listing pending ($MIN min)"; row "$id" upload-pending "$zim" ;;
-    7) log "  REFUSED: published language recipes use $zim (upload_validated.sh step 1b)"; row "$id" frozen-published "$zim" ;;
+    7) log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)"; row "$id" frozen-published "$zim" ;;
     *) log "  UPLOAD FAILED rc=$RC"; row "$id" upload-failed "$zim" ;;
   esac
-  # the language recipes and torrents of a patched base, regenerated (outside
-  # the upload lock: ship_packs.sh takes it for its own uploads)
-  if [ -n "$pub" ] && [ "$RC" = 0 ]; then
-    for r in $pub; do
-      log "  re-shipping the language recipes of $r (ops/langpack/ship_packs.sh)"
-      bash ops/langpack/ship_packs.sh "$r" "$zim" >> "$LOG" 2>&1
-      SRC=$?
-      log "  ship_packs.sh $r: rc=$SRC (0 ready to publish: ops/langpack/publish_site.sh $r; 6 run it again later)"
-    done
-  elif [ -n "$pub" ]; then
-    log "  NOTE: run ops/langpack/ship_packs.sh for $(echo $pub) once $zim is listed (queued in langpack-reship.tsv)"
+  # the language recipes and torrents of a patched base: queued (in
+  # langpack-reship.tsv, by upload_validated.sh), not run here — ship_packs.sh
+  # can take hours per region and would stall the rollout
+  if [ -n "$pub" ] && { [ "$RC" = 0 ] || [ "$RC" = 6 ]; }; then
+    log "  NOTE: language recipes ($(echo $pub)) of $zim queued for ops/langpack/reship_queue.sh (run it after this rollout)"
   fi
 done
 

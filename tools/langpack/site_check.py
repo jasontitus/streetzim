@@ -281,9 +281,11 @@ def main():
             need(not tf, "; ".join(tf))
         rows.append((L, r["md5"], r.get("file_md5"), {pl: url_item_file(p["url"])[0] for pl, p in r["packs"].items()},
                      "OK" if len(fails) == before else "FAIL"))
-    from tools.langpack.lang_torrents import stray_files
+    from tools.langpack.lang_torrents import REGION_BLOB_BUDGET, region_blob_bytes, stray_files
     strays = stray_files(rdir, region)
     need(not strays, f"TORRENT stray files no menu entry names: {strays}")
+    rb = region_blob_bytes(rdir)
+    need(rb <= REGION_BLOB_BUDGET, f"TORRENT the region's blobs are {rb} bytes (budget {REGION_BLOB_BUDGET})")
     if a.probe_urls:
         for u, lp in sorted(urls.items()):
             size = os.path.getsize(lp)

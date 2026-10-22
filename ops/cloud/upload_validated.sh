@@ -96,34 +96,36 @@ if ! [[ "$local_md5" =~ ^[0-9a-f]{32}$ ]]; then
     echo "FATAL ${id}: no md5 for $(basename "$dated") (got '${local_md5}') — nothing sent" >&2
     exit 3
 fi
-# --- 1b. A base whose language recipes are published on /build/ ---
-# Its recipes and language torrents pin its bytes: a re-upload under the same
-# name with other bytes (an in-place viewer patch) breaks every published
-# entry until ops/langpack/ship_packs.sh regenerates them. Frozen (user
-# decision 2026-10-21) unless LANGPACK_RESHIP_AFTER_PATCH=1 says ship_packs.sh
-# runs right after (rollout_viewer_patch.sh does); the region is then queued
-# in langpack-reship.tsv. Exit 7: refused, nothing sent.
-if [ -f "${PROJECT_DIR}/tools/langpack/published_base.py" ]; then
-    pub_regions=$("$PYTHON" "${PROJECT_DIR}/tools/langpack/published_base.py" "$dated" \
-        --web "${PROJECT_DIR}/web" --md5 "$local_md5"); pub_rc=$?
-    if [ "$pub_rc" = 3 ]; then
-        if [ "${LANGPACK_RESHIP_AFTER_PATCH:-0}" != 1 ]; then
-            echo "REFUSED ${id}: $(basename "$dated") is the base of language recipes published on /build/ ($(echo $pub_regions)) and its bytes changed; re-uploading it would break them and their torrents. Run with LANGPACK_RESHIP_AFTER_PATCH=1 and then ops/langpack/ship_packs.sh <region> $(basename "$dated") (rollout_viewer_patch.sh does both). Nothing sent." >&2
-            exit 7
-        fi
-        for r in $pub_regions; do
-            printf '%s\t%s\t%s\n' "$r" "$(basename "$dated")" "$(date -Iseconds)" >> "${PROJECT_DIR}/langpack-reship.tsv"
-        done
-        echo "NOTE ${id}: published language recipes ($(echo $pub_regions)) use $(basename "$dated"): queued in langpack-reship.tsv; ops/langpack/ship_packs.sh must run for them after this upload"
-    elif [ "$pub_rc" != 0 ]; then
-        echo "FATAL ${id}: published_base.py failed (rc ${pub_rc}) — nothing sent" >&2
-        exit 7
-    fi
-fi
 if "$IA" metadata "streetzim-${id}" 2>/dev/null \
         | "$PYTHON" "${PROJECT_DIR}/ops/cloud/archive_has_file.py" "$(basename "$dated")" "$local_md5"; then
     echo "  archive.org already holds $(basename "$dated") (md5 ${local_md5}): not sent again"
 else
+    # --- 1b. A base whose language recipes are published on /build/ ---
+    # (only when bytes are about to be sent: a finisher for a file archive.org
+    # already lists completes its torrent/prune/deploy.) The recipes and
+    # language torrents pin the base's bytes: a re-upload under the same name
+    # with other bytes (an in-place viewer patch) breaks every published entry
+    # until ops/langpack/ship_packs.sh regenerates them. Frozen (user decision
+    # 2026-10-21) unless LANGPACK_RESHIP_AFTER_PATCH=1, which queues the region
+    # in langpack-reship.tsv for ops/langpack/reship_queue.sh. Exit 7 only on a
+    # positive match; a checker that fails is a WARNING and the upload goes on.
+    if [ -f "${PROJECT_DIR}/tools/langpack/published_base.py" ]; then
+        pub_regions=$("$PYTHON" "${PROJECT_DIR}/tools/langpack/published_base.py" "$dated" \
+            --web "${PROJECT_DIR}/web" --md5 "$local_md5"); pub_rc=$?
+        if [ "$pub_rc" = 3 ]; then
+            if [ "${LANGPACK_RESHIP_AFTER_PATCH:-0}" != 1 ]; then
+                echo "REFUSED ${id}: frozen: published base — $(basename "$dated") is the base of language recipes published on /build/ ($(echo $pub_regions)) and its bytes changed; re-uploading it would break them and their torrents. Run with LANGPACK_RESHIP_AFTER_PATCH=1 (queues ops/langpack/reship_queue.sh). Nothing sent." >&2
+                exit 7
+            fi
+            ( flock 8
+              for r in $pub_regions; do
+                  printf '%s\t%s\t%s\n' "$r" "$(basename "$dated")" "$(date -Iseconds)" >> "${PROJECT_DIR}/langpack-reship.tsv"
+              done ) 8> "${PROJECT_DIR}/langpack-reship.tsv.write.lock"
+            echo "NOTE ${id}: published language recipes ($(echo $pub_regions)) use $(basename "$dated"): queued in langpack-reship.tsv; run ops/langpack/reship_queue.sh after this upload"
+        elif [ "$pub_rc" != 0 ]; then
+            echo "WARNING ${id}: published_base.py failed (rc ${pub_rc}): the freeze was not checked; uploading anyway" >&2
+        fi
+    fi
     # --checksum still skips it when the metadata above was stale.
     if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum; then
         echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2

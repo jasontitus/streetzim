@@ -56,7 +56,11 @@ Cloudflare's free plan (developers.cloudflare.com/workers/platform/limits/):
   answers 503 (fail closed: better that than the shared 100,000 used up).
   Without the binding each isolate counts on its own. Over the budget
   `/merged/` answers 503 at once (still a request) until 00:00 UTC; peers and
-  the /build/ page keep working.
+  the /build/ page keep working. Limits of the count: each active isolate can
+  run up to about 25 requests (or 20 s of requests) past the budget before
+  its report lands, so the real cap is the budget plus ~25 per busy isolate;
+  and when the meter fails, the webseed is refused for 5 s before it is
+  asked again.
 - **10 ms CPU per request** (waiting on fetch does not count): the handler's
   own work is about 0.5 ms; the archive.org bodies are piped into a
   FixedLengthStream.
@@ -96,10 +100,20 @@ A base whose recipes are published is frozen against in-place viewer
 patches (user decision 2026-10-21): `ops/cloud/upload_validated.sh` refuses
 (exit 7) to re-upload such a base with other bytes, and
 `ops/cloud/rollout_viewer_patch.sh` skips it (row `frozen-published`),
-unless `LANGPACK_RESHIP_AFTER_PATCH=1`; then the rollout runs
-`ops/langpack/ship_packs.sh` for the region right after the upload, which
-regenerates the recipes, the torrents and their indexes (new UUIDs, the new
-ETag), and upload_validated.sh queues the region in `langpack-reship.tsv`.
+unless `LANGPACK_RESHIP_AFTER_PATCH=1`; then upload_validated.sh queues the
+region in `langpack-reship.tsv`, and `ops/langpack/reship_queue.sh` (run
+after the rollout: ship_packs.sh can take hours per region, which inline
+would stall the rollout) regenerates the recipes, the torrents and their
+indexes (new UUIDs, the new ETag). Only a positive match blocks: an
+unreadable recipes folder or region.json, or a base without an md5, is not a
+match, and a checker that fails is a warning (the upload goes on; the
+rollout skips the region unpatched, row `freeze-check-failed`). The check
+runs only when bytes would be sent, so a finisher for a file archive.org
+already lists completes. Callers log exit 7 as "frozen: published base".
+An archive.org answer with the same ETag and size that ignores the Range
+(transient) is tried again and then answered 503 with Retry-After; only
+another ETag or size marks a version out of date, which an isolate
+remembers for 10 minutes.
 
 ## Local test under workerd (no Cloudflare login)
 

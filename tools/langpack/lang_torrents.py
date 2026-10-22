@@ -38,7 +38,8 @@ the first part of each file: archive.org's redirect). Every 16 MiB window
 Short segments start at a 256 KiB remote threshold, local runs shorter than
 4 KiB share one pool blob per entry, and an entry over the limit is rebuilt
 with a higher threshold (1, 4, 16, 64 MiB: more bytes in blobs, fewer
-parts); it fails if none fits or its blobs would pass BLOB_BUDGET (64 MiB).
+parts); it fails if none fits, or its blobs would pass BLOB_BUDGET (64 MiB),
+or the region's blobs, all entries together, REGION_BLOB_BUDGET (256 MiB).
 The worker cuts a bigger range to what fits and answers a whole-file GET
 that does not fit with 416 (ranges only).
 
@@ -104,6 +105,7 @@ LANG_TRACKERS = [
 ]
 SUBREQ_LIMIT = int(os.environ.get("LANGPACK_WEBSEED_SUBREQ_LIMIT") or 40)
 BLOB_BUDGET = int(os.environ.get("LANGPACK_WEBSEED_BLOB_BUDGET") or 64 << 20)   # blob bytes per entry
+REGION_BLOB_BUDGET = int(os.environ.get("LANGPACK_WEBSEED_REGION_BLOB_BUDGET") or 256 << 20)   # per region (all entries)
 REMOTE_LADDER = (256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20)
 WINDOW = 16 << 20            # a libtorrent web seed request (urlseed_max_request_bytes)
 TINY_MAX = 4096              # local runs shorter than this share the entry's pool blob
@@ -507,7 +509,8 @@ def write_atomic(path: str, data: bytes):
 
 def torrent_for(recipe_path: str, region: dict, lang: str, base_path: str, pack_paths: dict[str, str],
                 webseed: str, base_torrent: str | None = None, full: bool = False,
-                out_dir: str | None = None, etags: dict | None = None) -> dict:
+                out_dir: str | None = None, etags: dict | None = None,
+                region_blobs: dict[str, int] | None = None) -> dict:
     recipe = json.load(open(recipe_path, encoding="utf-8"))
     if not recipe.get("file_md5"):
         raise TorrentError(f"{lang}: the recipe has no file_md5")
@@ -531,6 +534,13 @@ def torrent_for(recipe_path: str, region: dict, lang: str, base_path: str, pack_
     index["infohash"] = infohash
     index["torrent"] = f"{lang}.torrent"
     out_dir = out_dir or os.path.dirname(recipe_path)
+    if region_blobs is not None:            # the region's blobs, all entries together
+        new = {sha: len(b) for sha, b in blobs.items() if sha not in region_blobs}
+        total = sum(region_blobs.values()) + sum(new.values())
+        if total > REGION_BLOB_BUDGET:
+            raise TorrentError(f"{lang}: the region's blobs would reach {total / 1e6:.0f} MB "
+                               f"(budget {REGION_BLOB_BUDGET / 1e6:.0f} MB)")
+        region_blobs.update(new)
     for sha, blob in blobs.items():
         p = os.path.join(out_dir, blob_name(sha))
         if not (os.path.exists(p) and os.path.getsize(p) == len(blob)
@@ -608,6 +618,11 @@ def verify_entry(out_dir: str, region: dict, entry: dict, recipe: dict, base_pat
     except (OSError, KeyError, ValueError, TypeError, TorrentError, MergeError, StopIteration) as e:
         bad(f"torrent files unreadable or inconsistent ({e})")
     return fails
+
+
+def region_blob_bytes(out_dir: str) -> int:
+    """Bytes of every blob in a region's folder (site_check.py: REGION_BLOB_BUDGET)."""
+    return sum(os.path.getsize(os.path.join(out_dir, f)) for f in os.listdir(out_dir) if BLOB_RE.match(f))
 
 
 def stray_files(out_dir: str, region: dict) -> list[str]:
@@ -697,6 +712,14 @@ def main(argv=None) -> int:
     only = set(a.langs.split(",")) if a.langs else None
     etags = load_etags(a.ia_cache)
     results: dict[str, dict] = {}
+    region_blobs: dict[str, int] = {}
+    for m in region["menu"]:                # the entries this run keeps count against the region budget
+        if only is not None and m["lang"] not in only and m.get("torrent"):
+            try:
+                ix = json.load(open(os.path.join(a.out_dir, f"{m['lang']}.ws.json"), encoding="utf-8"))
+                region_blobs.update({sha: b["size"] for sha, b in ix["blobs"].items()})
+            except (OSError, ValueError, KeyError):
+                pass
     rc = 0
     for m in region["menu"]:
         L = m["lang"]
@@ -707,7 +730,7 @@ def main(argv=None) -> int:
             recipe_packs = json.load(open(rpath, encoding="utf-8"))["packs"]
             pack_paths = {k: packs[p["file"]] for k, p in recipe_packs.items() if p["file"] in packs}
             res = torrent_for(rpath, region, L, a.base, pack_paths, a.webseed, a.base_torrent, a.full,
-                              etags=etags)
+                              etags=etags, region_blobs=region_blobs)
         except (TorrentError, MergeError, OSError, KeyError, ValueError) as e:
             print(json.dumps({"lang": L, "FAILED": str(e)}), flush=True)
             rc = 3

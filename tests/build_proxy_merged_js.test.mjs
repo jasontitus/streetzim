@@ -71,7 +71,7 @@ const upFiles = new Map([
   ['streetzim-testland-lang/osm_testland_wiki-de_2026-10-13.zim', { data: B, etag: '"1-2"' }],
 ]);
 const hits = { site: 0, download: 0, node: 0, blobs: 0 };
-let upMode = 'ok';             // ok | ignore-range | shift | wrong-total | short-length | node404-once
+let upMode = 'ok';             // ok | ignore-range | ignore-range-de | shift | wrong-total | short-length | node404-once | node404-de-once
 
 function listen(handler) {
   return new Promise((resolve) => {
@@ -107,7 +107,8 @@ const up = await listen((req, res) => {
   const data = f.data;
   const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
   const ir = req.headers['if-range'];
-  if (!r || upMode === 'ignore-range' || (ir && ir !== f.etag)) {
+  if (!r || upMode === 'ignore-range' || (upMode === 'ignore-range-de' && m[1].startsWith('streetzim-testland-lang/'))
+      || (ir && ir !== f.etag)) {
     res.writeHead(200, { 'Content-Length': data.length, ETag: f.etag }); res.end(Buffer.from(data)); return;
   }
   let a = Number(r[1]), b = Math.min(Number(r[2]), data.length - 1);
@@ -331,19 +332,33 @@ assert.match(events.at(-1).error, /not the one the index names/);
 siteFiles.set(`/build/recipes/testland/${blobFile(sha(Y))}`, Buffer.from(Y));
 
 // archive.org answers that are not exactly these bytes of this file: refused.
-// Not replaced (no ETag on the pack, a shifted range, a short body): the 206
-// headers go out and the stream is cut short, which clients retry.
-for (const [mode, rng, why] of [['ignore-range', 'bytes=251060-252060', /HTTP 200/],
+// Not replaced (the same ETag and size: archive.org ignoring Range, a shifted
+// range, a short body): on the range's first archive.org part, tried once
+// more, then 503 with Retry-After before any body — never "out of date"
+for (const [mode, rng, why] of [['ignore-range', 'bytes=1000-2000', /HTTP 200/],
   ['shift', 'bytes=1000-2000', /HTTP 206 bytes 10001-11001\/300000/], ['short-length', 'bytes=1000-2000', /length 1000/]]) {
   handle = mk();
   upMode = mode;
+  const n0 = hits.node;
   res = await get(rng);
-  assert.equal(res.status, 206, mode);
-  await assert.rejects(res.arrayBuffer(), mode);
-  await settle();
-  assert.match(events.at(-1).error, why, mode);
+  assert.equal(res.status, 503, mode);
+  assert.equal(res.headers.get('retry-after'), '30', mode);
+  assert.match(await res.text(), why, mode);
+  assert.ok(hits.node - n0 >= 2, `${mode}: tried again`);
+  assert.equal(handle.state().stale, 0, `${mode}: not out of date`);
   upMode = 'ok';
 }
+// the same on a later part (after the headers went out): the stream is cut,
+// which clients retry; still not out of date
+handle = mk();
+upMode = 'ignore-range-de';
+res = await get('bytes=1000-251100');                              // base (fine), blob Y, then the pack
+assert.equal(res.status, 206);
+await assert.rejects(res.arrayBuffer());
+await settle();
+assert.match(events.at(-1).error, /HTTP 200/);
+assert.equal(handle.state().stale, 0);
+upMode = 'ok';
 // Replaced (a 200 to our If-Range, a 206 of a file of another size): "out of
 // date" before any body, and remembered: later requests for this version get
 // the 404 without asking archive.org (a torrent client drops the web seed
@@ -367,6 +382,23 @@ for (const [mode, change] of [['etag', () => { upFiles.get('streetzim-testland/o
 }
 res = await get('bytes=1000-2000', { handle: mk() });            // a new isolate, the file as indexed again
 assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+{ // the memo expires: after 10 minutes the version is checked again
+  let t = 1e12;
+  const h = mk({ now: () => t });
+  upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = '"6ad42479-493e0"';
+  res = await get('bytes=1000-2000', { handle: h });
+  assert.equal(res.status, 404);
+  await res.text();
+  upFiles.get('streetzim-testland/osm-testland-2026-10-13.zim').etag = ETAG_A;   // put back (a false alarm, say)
+  t += 5 * 60 * 1000;
+  res = await get('bytes=1000-2000', { handle: h });
+  assert.equal(res.status, 404, 'within 10 minutes: still remembered');
+  await res.text();
+  t += 6 * 60 * 1000;
+  res = await get('bytes=1000-2000', { handle: h });
+  assert.equal(res.status, 206, 'after 10 minutes: checked again');
+  assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+}
 // a replaced file met only after the headers (not the first archive.org part
 // of the range): the stream is cut, and the version is out of date from then on
 {
@@ -567,6 +599,23 @@ function newDO() {
   assert.equal(await doMeter(ns3, 0).allow(null), false, 'a budget of 0: off');
   assert.equal(await doMeter(ns3, NaN).allow(null), false);
   assert.equal(asked, 0, 'off: the meter is not even asked');
+}
+{ // a report not yet answered still counts: the requests it carried are in flight
+  const d = newDO();
+  let hold = null;
+  const ns = { idFromName: (n) => n, get: () => ({ fetch: async (u) => { if (hold) await hold; return d.fetch(u); } }) };
+  const m = doMeter(ns, 30, { sleep: () => new Promise(() => {}) });
+  await m.allow(null);                                               // synced: total 1
+  let release;
+  hold = new Promise((r) => { release = r; });
+  const ctx = { waitUntil: () => {} };
+  const got = [];
+  for (let i = 0; i < 30; i++) got.push(await m.allow(ctx));         // the 25th reports; its answer is held
+  assert.equal(m.state().inflight, 25);
+  assert.deepEqual(got.map((x, i) => [i, x]).filter(([, x]) => !x).map(([i]) => i), [29], JSON.stringify(got));
+  release();
+  await settle();
+  assert.equal(m.state().inflight, 0);
 }
 { // a worker wired to the DO meter: the first request (asked first) fits a
   // budget of 1, the next does not

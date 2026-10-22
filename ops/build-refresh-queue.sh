@@ -456,7 +456,9 @@ print(int(d))" 2>/dev/null || echo 0)
       *) log "  scratch dir not identified from the build log — leaving it" ;;
     esac
   else
-    log "  UPLOAD FAILED (rc=$?) — ZIM kept: $ZIM"
+    URC=$?
+    if [ "$URC" = 7 ]; then log "  NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh); ZIM kept: $ZIM"
+    else log "  UPLOAD FAILED (rc=$URC) — ZIM kept: $ZIM"; fi
     row "$ID" upload-failed "$MIN" "$SIZE" "$(basename "$ZIM")"; n_fail=$((n_fail+1))
   fi
 done 3< "$REGISTRY"

@@ -94,5 +94,6 @@ rc=$?
 case $rc in
   0) log "SHIPPED https://archive.org/download/streetzim-$ID/$OUT" ;;
   6) log "uploaded, listing pending: https://archive.org/download/streetzim-$ID/$OUT" ;;
+  7) log "NOT UPLOADED rc=7 — frozen: published base (language recipes on /build/ use it; LANGPACK_RESHIP_AFTER_PATCH=1, then ops/langpack/reship_queue.sh)" ;;
   *) log "UPLOAD FAILED rc=$rc" ;;
 esac
