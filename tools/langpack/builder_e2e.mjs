@@ -22,6 +22,12 @@
 //   --feedback-only  stop after the watch (the build is abandoned): PASS when
 //        the first change came within 200 ms and no gap reached 1.5 s
 //   --viewport WxH (default 1280x900)   --shots DIR  a screenshot per phase
+// Every run records "ui": the texts #baseCheck (a live region) and
+// #packStatus took, the buttons' labels, the phases in order, every value
+// of the bar, the focused element during and after the job, the busy
+// button at the end, and the worker's last progress message.
+//   --corrupt-times N  corrupt only the first N answers (a transient fault)
+//   --status-timeout-secs S  how long to wait for the page's final word (7200)
 // Two local servers stand in for the site and the range proxy:
 //   page  http://localhost:P1/  WEB_DIR, with /build/recipes/ = RECIPES_DIR and
 //         /drive/preview-config.js naming the proxy below (the one place the
@@ -63,6 +69,8 @@ const WATCH = +opt('--watch-secs', '0');
 const FEEDBACK_ONLY = argv.includes('--feedback-only');
 const [VW, VH] = opt('--viewport', '1280x900').split('x').map(Number);
 const SHOTS = opt('--shots', '');
+const CORRUPT_TIMES = +opt('--corrupt-times', '0');
+const STATUS_TIMEOUT = +opt('--status-timeout-secs', '7200');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CORRUPT = (() => {
   const c = opt('--corrupt'); if (!c) return null;
@@ -130,7 +138,8 @@ const proxy = http.createServer((req, res) => {
   const fk = decodeURIComponent(m[2]); stats.files[fk] = (stats.files[fk] || 0) + 1;
   res.writeHead(206, { ...CORS, 'Content-Type': 'application/octet-stream', 'Content-Length': b - a + 1,
                        'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes' });
-  if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b) {
+  if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b
+      && !(CORRUPT_TIMES && (stats.corrupted || 0) >= CORRUPT_TIMES)) {
     const buf = Buffer.alloc(b - a + 1);
     const fd = fs.openSync(f, 'r'); fs.readSync(fd, buf, 0, buf.length, a); fs.closeSync(fd);
     buf[CORRUPT.at - a] ^= 0xff; stats.corrupted = (stats.corrupted || 0) + 1;
@@ -196,6 +205,36 @@ async function runOne(L) {
                         items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
                         files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) });
   let beforeBuild = null, feedback = null;    // what the proxy served before Build was pressed; the watch
+  // what the page showed, from now on (not only after the click)
+  await pg.evaluate(() => {
+    const q = (s) => document.querySelector(s);
+    const ui = window.__ui = { baseCheckTexts: [], packStatusTexts: [], buttonTexts: [], phases: [], bar: [], phaseWrites: 0,
+                               activeDuring: null };
+    const push = (arr, v) => { if (v && arr[arr.length - 1] !== v && arr.length < 400) arr.push(v); };
+    new MutationObserver((recs) => {
+      for (const r of recs) {
+        const t = r.target.nodeType === 3 ? r.target.parentNode : r.target;
+        if (t && t.id === 'phase' && r.type !== 'attributes') ui.phaseWrites++;
+      }
+      push(ui.baseCheckTexts, q('#baseCheck') && q('#baseCheck').textContent);
+      push(ui.packStatusTexts, q('#packStatus') && q('#packStatus').textContent);
+      push(ui.buttonTexts, q('#oneclick').textContent); push(ui.buttonTexts, q('#go') && q('#go').textContent);
+      push(ui.phases, q('#job') && q('#job').dataset.phase);
+      const v = q('#prog') && q('#prog').getAttribute('value');
+      if (v !== null && v !== undefined && ui.bar[ui.bar.length - 1] !== +v && ui.bar.length < 4000) ui.bar.push(+v);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    document.addEventListener('click', () => setTimeout(() => {
+      const a = document.activeElement; ui.activeDuring = a ? a.id || a.tagName : null; }, 1000), { capture: true, once: true });
+  });
+  const uiEnd = () => pg.evaluate(() => {
+    const q = (s) => document.querySelector(s), a = document.activeElement;
+    const btn = (b) => b && { text: b.textContent, cls: b.className, disabled: b.disabled, ariaDisabled: b.getAttribute('aria-disabled') };
+    const lp = window.__szProgress || null;
+    return Object.assign({}, window.__ui, { oneclick: btn(q('#oneclick')), go: btn(q('#go')), activeEnd: a ? a.id || a.tagName : null,
+      jobHidden: q('#job') ? q('#job').hidden : null, langDisabled: q('#lang') ? q('#lang').disabled : null,
+      workerPhases: window.__szPhaseLog || [],
+      lastProgress: lp && { written: lp.written, size: lp.size, map: lp.map, packs: lp.packs, base: lp.base && { got: lp.base.got, size: lp.base.size } } });
+  });
   // every visible change from the click on (page time), and the click itself
   await pg.evaluate(() => {
     window.__vis = []; window.__prog = []; window.__progText = []; window.__clickAt = null;
@@ -266,7 +305,7 @@ async function runOne(L) {
   }
   if (FEEDBACK_ONLY) {
     const fb = feedback || {};
-    const res = { lang: L, mode: MODE, viewport: `${VW}x${VH}`, throttle: THROTTLE, feedback: fb, phases,
+    const res = { lang: L, mode: MODE, viewport: `${VW}x${VH}`, throttle: THROTTLE, feedback: fb, phases, ui: await uiEnd(),
                   pass: fb.first_change_ms !== null && fb.first_change_ms < 200 && fb.max_gap_ms < 1500 };
     fs.writeFileSync(path.join(OUT, `feedback-${L}-${VW}x${VH}.json`), JSON.stringify(res, null, 1));
     console.log(JSON.stringify(res));
@@ -278,7 +317,7 @@ async function runOne(L) {
     if (/^(Done|Stopped|Not started)/.test(t)) return t;
     const save = document.querySelector('#saveLink');
     return save ? 'SAVE ' + t : null;
-  }, null, { timeout: 120 * 60000, polling: 1000 }).then((h) => h.jsonValue());
+  }, null, { timeout: STATUS_TIMEOUT * 1000, polling: 1000 }).then((h) => h.jsonValue());
   if (/^SAVE /.test(status)) await pg.click('#saveLink');     // built into browser storage: the Save step
   const res = { lang: L, mode: MODE, status, shown, expected_md5: recipe.file_md5, expected_size: recipe.size, log: log.slice(-15) };
   if (/^(Done|SAVE )/.test(status)) {
@@ -301,11 +340,12 @@ async function runOne(L) {
     ? /^(Stopped|Not started)/.test(String(status)) && !res.md5
     : res.md5 === recipe.file_md5 && res.bytes === recipe.size;
   res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
+  res.ui = await uiEnd();
   if (feedback) { res.feedback = feedback; res.phases = phases; }
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
   console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
                                md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, proxy_before_build: beforeBuild,
-                               feedback: res.feedback, phases: res.phases,
+                               feedback: res.feedback, phases: res.phases, ui: res.ui,
                                langOption: shown.langOption }));
   await ctx.close();
   return res.pass;
