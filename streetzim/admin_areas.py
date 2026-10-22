@@ -789,7 +789,7 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
     `geonames`: True loads reverse_geocoder's table when a clipped area
     needs it, False never uses it, or pass a GeoNamesPlaces. Needs the
     osmium CLI (as the address extraction does). `languages`: an area also
-    carries its name:<lang> tags for them as `names` (the record's `ln`)."""
+    carries its name:<lang> tags for them as `lnames` (the record's `ln`)."""
     tmp = tempfile.mkdtemp(prefix="streetzim_admin_")
     try:
         src = _filtered_input(pbf_path, tmp, bbox)
@@ -900,7 +900,10 @@ def extract_admin_areas(pbf_path: str, bbox: Sequence[float] | None = None, *,
         if languages:
             lnames = osm_names(tags, languages)
             if lnames:
-                feat["names"] = lnames
+                # Not `names`: that is the tiles' name:xx, which a build in
+                # another language shows (search_extract.localize_feature);
+                # these only name the record in other languages (ln).
+                feat["lnames"] = lnames
         if f["bbox"]:
             feat["bbox"] = [round(v, COORD_DP) for v in f["bbox"]]
         if tags.get("wikidata", "").startswith("Q"):

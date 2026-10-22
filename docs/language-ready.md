@@ -32,9 +32,14 @@ fr he hi id it ja ko nl pl pt ru th tr uk vi zh). A map whose row in
 languages also carries its own languages that the matrix lacks
 (`default_tile_languages`): Switzerland adds Romansh (`rm`), the Baltics
 `et lt lv`, the Balkans `bs cnr hr mk sl sq sr`; a longer row (Europe 38,
-Africa 31, the Indian subcontinent 22) adds none. Their codes are in
-`ISO639_3`, so `--tile-languages` accepts them. Search records name places
-in the tile and region languages (`ln`, [search-records.md](search-records.md)).
+Africa 31, the Indian subcontinent 22) adds none. Romansh is a build
+language (`ISO639_3`, "roh"); the other region codes are in
+`REGION_ISO639_3`. The contract (`streetzim/languages.py`):
+`check()` (`--language`, the CLI's choices, the offliner definition)
+accepts `ISO639_3` only; `iso639_3()` (ZIM metadata) and
+`tile_languages()` (`--tile-languages`, the `.langs` sidecar) accept both.
+Search records name places in the tile and region languages (`ln`,
+[search-records.md](search-records.md)).
 `cloud/region-languages.tsv` holds every registry region's own languages;
 `tests/test_region_languages.py` keeps it complete. Its header has the
 rule: the languages of the countries the region's site card names (and its
@@ -119,6 +124,12 @@ tiles reach past the box, where a region's extract has nothing: at zoom
 8-10 landcover has 6-15% fewer features and water 12% fewer at zoom 8
 (the same with the world tiles' own tilemaker build), and below zoom 8 the
 neighbours are missing altogether. The viewer never shows beyond the box.
+A search cache extracted from a region's tiles differs more than the tiles
+do: Switzerland's had 7.8% more POIs than the world-tile cache (bus 53,039
+-> 82,846: a station's bays and stop positions, each a POI of the same
+name metres apart), until `merge_near_duplicates` (search extraction)
+merged same-name stops and water features within 100 m: then bus 54,203,
+POIs +2.6%.
 
 With 3.0 the content changed too: a polygon's label (`LayerAsCentroid`)
 was copied into every tile under the polygon (the island name
