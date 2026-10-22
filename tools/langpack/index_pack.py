@@ -12,13 +12,17 @@ A search pack is a small ZIM written by libzim itself (python-libzim, so the
 indexes are exactly what libzim reads): one empty item per page of the
 merged file, at the merged file's path, with the page's title and its text
 as libzim index data (front articles in the title index, every HTML page in
-the full-text one). Its X/title/xapian and X/fulltext/xapian replace the
+the full-text one), and every front redirect of the base and the packs at
+its own path ("Δήμος Παλλήνης" -> the Pallini page: Kiwix suggests places by
+their other names). Its X/title/xapian and X/fulltext/xapian replace the
 base's in the merged file (merge_zim.py --index); its other entries are not
 carried over. Kiwix then finds the base's pages and the packs' articles
 alike, with libzim's own matching (case, accents, words inside titles).
 
-The base's pages' text is read once per base and cached
-(<cache>/index-text/<base uuid>.jsonl.gz). OUT.json beside the pack records
+Pages and redirects stream from the base and the packs into libzim's
+writer; nothing holds every page's text. The base's are read once per base
+and cached (<cache>/index-text/<base uuid>.v<TEXT_VERSION>.jsonl.gz; a cache
+of another version is not read). OUT.json beside the pack records
 what it was built from (base UUID, pack files and MD5s, language), and
 OUT.gate.json its own check (libzim opens it, both indexes, a suggestion
 and a full-text query find a page of each source); recipe2.py's menu takes
@@ -43,8 +47,12 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from streetzim.languages import iso639_3  # noqa: E402
 from tools.langpack.gatelib import md5_file  # noqa: E402
+from tools.langpack.merge_zim import peak_rss_mb  # noqa: E402
 
 FORMAT = "streetzim-search-pack/1"
+# The index-text cache's rows: 2 = libzim's folding (every Unicode mark, and
+# lowercase) and the front redirects. A new folding or row kind is a new version.
+TEXT_VERSION = 2
 _DROP = re.compile(r"<(script|style|head|nav)\b.*?</\1\s*>", re.S | re.I)
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
@@ -52,12 +60,16 @@ MAX_TEXT = 200_000          # characters of a page's text (a long article's inde
 
 
 def fold(text: str) -> str:
-    """Without accents (NFD, combining marks out): libzim's reader takes the
-    accents off every query, and python-libzim's writer keeps them in the
-    full-text terms of index data ("αθηνάς"), so a folded query ("αθηνας")
-    would never match. The base's own index is folded the same way."""
+    """libzim's zim::removeAccents (src/tools.cpp: the ICU transliterator
+    "Lower; NFD; [:M:] remove; NFC"): lowercase, then every Unicode mark out
+    (category M: the Thai and Devanagari vowel signs too, not only the
+    combining accents). libzim folds every query so, and the index data of
+    its own HTML indexer (defaultIndexData.h); custom index data, as a
+    search pack's, it indexes as given, so the pack folds it here: Greek
+    full text found nothing before ("Παρθενώνας"), Thai and Hindi words
+    nothing until category M ("สวัสดี", "दिल्ली")."""
     return unicodedata.normalize("NFC", "".join(
-        ch for ch in unicodedata.normalize("NFD", text) if not unicodedata.combining(ch)))
+        ch for ch in unicodedata.normalize("NFD", text.lower()) if not unicodedata.category(ch).startswith("M")))
 
 
 def page_text(raw: bytes) -> str:
@@ -69,44 +81,92 @@ def page_text(raw: bytes) -> str:
     return fold(_WS.sub(" ", t).strip()[:MAX_TEXT])
 
 
-def pages(path: str):
-    """(path, title, front, text) of every HTML page of a ZIM (redirects out)."""
+def front_bitmap(z) -> bytearray:
+    """Bit i set: entry i is a front article (in X/listing/titleOrdered/v1).
+    A bitmap, not a set: a continent's millions of entries in a few MB."""
+    bits = bytearray((z.header.entry_count + 7) // 8)
+    v1 = z.v1_listing()
+    for i in (z.iter_u32_blob(*v1) if v1 else []):
+        bits[i >> 3] |= 1 << (i & 7)
+    return bits
+
+
+def is_front(bits: bytearray, i: int) -> bool:
+    return bool(bits[i >> 3] >> (i & 7) & 1)
+
+
+def html_mimes(z) -> set[int]:
+    return {i for i, m in enumerate(z.mimes) if m.split(b";")[0].strip() == b"text/html"}
+
+
+def final_target(z, d, hm: set[int], hops: int = 8):
+    """The page a redirect leads to (through up to `hops` redirects), or None
+    when that is not an HTML page under C (the search pack has only those)."""
+    for _ in range(hops):
+        if d.target is None:
+            return None
+        d = z.dirent_at(d.target)
+        if not d.is_redirect:
+            return d if d.ns == ord("C") and d.mime in hm else None
+    return None
+
+
+def entries(path: str):
+    """Rows for the search pack, streamed in path order: ("p", path, title,
+    front, text) for every HTML page of a ZIM, ("r", path, title, target)
+    for every front redirect that leads to one."""
     from libzim.reader import Archive
 
     from tools.langpack.zimfmt import ZimReader
     z = ZimReader(path)
-    v1 = z.v1_listing()
-    fronts = set(z.iter_u32_blob(*v1)) if v1 else set()
+    fronts = front_bitmap(z)
     a = Archive(Path(path))
-    html_mimes = {i for i, m in enumerate(z.mimes) if m.split(b";")[0].strip() == b"text/html"}
+    hm = html_mimes(z)
     for d in z.iter_dirents():
-        if d.ns != ord("C") or d.is_redirect or d.mime not in html_mimes:
+        if d.ns != ord("C"):
+            continue
+        if d.is_redirect:
+            if is_front(fronts, d.index) and (t := final_target(z, d, hm)) is not None:
+                yield "r", d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), \
+                    t.path.decode("utf-8", "replace")
+            continue
+        if d.mime not in hm:
             continue
         item = a._get_entry_by_id(d.index).get_item()
-        yield d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), d.index in fronts, \
+        yield "p", d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), is_front(fronts, d.index), \
             page_text(bytes(item.content))
 
 
-def base_pages(base: str, cache: Path | None, log) -> list[tuple[str, str, bool, str]]:
+def base_entries(base: str, cache: Path | None, log):
+    """entries(base), from the index-text cache when it has them; else read
+    and written to the cache as they stream (kept only once complete)."""
     from libzim.reader import Archive
     uuid = str(Archive(Path(base)).uuid)
-    cf = cache / "index-text" / f"{uuid}.jsonl.gz" if cache else None
+    cf = cache / "index-text" / f"{uuid}.v{TEXT_VERSION}.jsonl.gz" if cache else None
     if cf and cf.exists():
+        log(f"  base pages: cached {cf.name}")
         with gzip.open(cf, "rt", encoding="utf-8") as fh:
-            rows = [tuple(json.loads(x)) for x in fh]
-        log(f"  base pages: {len(rows)} (cached {cf.name})")
-        return rows  # type: ignore[return-value]
+            for x in fh:
+                yield tuple(json.loads(x))
+        return
     t0 = time.time()
-    rows = list(pages(base))
-    if cf:
-        cf.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cf.with_name(cf.name + ".tmp")
+    if not cf:
+        yield from entries(base)
+        return
+    cf.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cf.with_name(cf.name + f".{os.getpid()}.tmp")
+    n = 0
+    try:
         with gzip.open(tmp, "wt", encoding="utf-8") as fh:
-            for r in rows:
+            for r in entries(base):
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+                n += 1
+                yield r
         os.replace(tmp, cf)
-    log(f"  base pages: {len(rows)} read in {time.time() - t0:.0f}s")
-    return rows
+        log(f"  base pages and redirects: {n} read in {time.time() - t0:.0f}s")
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: Path | None = None,
@@ -158,15 +218,22 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
             return {Hint.FRONT_ARTICLE: self._f, Hint.COMPRESS: True}
 
         def get_indexdata(self):
-            return Data(self._t, self._x)
+            # folded as libzim folds its own index data; the title index
+            # (the item's title) libzim folds itself
+            return Data(fold(self._t), self._x)
 
     t0 = time.time()
-    rows = base_pages(base, cache, log)
-    pack_rows: dict[str, int] = {}
-    for p in packs:
-        n0 = len(rows)
-        rows.extend(pages(p))
-        pack_rows[os.path.basename(p)] = len(rows) - n0
+    counts: dict[str, dict[str, int]] = {}
+
+    def add(c, src: str, rows) -> None:
+        n = counts.setdefault(src, {"pages": 0, "redirects": 0})
+        for r in rows:
+            if r[0] == "p":
+                c.add_item(Page(*r[1:]))
+                n["pages"] += 1
+            else:
+                c.add_redirection(r[1], r[2], r[3], {Hint.FRONT_ARTICLE: True})
+                n["redirects"] += 1
     b = Archive(Path(base))
     tmp = out + ".tmp"
     if os.path.exists(tmp):
@@ -182,13 +249,17 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
             c.add_illustration(48, bytes(b.get_illustration_item(48).content))
         except Exception:  # noqa: BLE001 - a base without one
             pass
-        for path, title, front, text in rows:
-            c.add_item(Page(path, title, front, text))
+        add(c, "base", base_entries(base, cache, log))
+        for p in packs:
+            add(c, os.path.basename(p), entries(p))
     os.replace(tmp, out)
-    side = {"format": FORMAT, "base_uuid": str(b.uuid).replace("-", ""),
+    side = {"format": FORMAT, "text_version": TEXT_VERSION, "base_uuid": str(b.uuid).replace("-", ""),
             "lang": lang, "region": region, "packs": {os.path.basename(p): md5_file(p) for p in packs},
-            "pages": len(rows), "pages_per_pack": pack_rows, "built": datetime.datetime.now().isoformat(timespec="seconds"),
-            "seconds": round(time.time() - t0, 1), "bytes": os.path.getsize(out)}
+            "pages": sum(x["pages"] for x in counts.values()),
+            "redirects": sum(x["redirects"] for x in counts.values()),
+            "pages_per_pack": {k: v["pages"] for k, v in counts.items() if k != "base"}, "per_source": counts,
+            "built": datetime.datetime.now().isoformat(timespec="seconds"),
+            "seconds": round(time.time() - t0, 1), "bytes": os.path.getsize(out), "peak_rss_mb": peak_rss_mb()}
     with open(out + ".json", "w") as fh:
         json.dump(side, fh, ensure_ascii=False, indent=1)
     side["gate"] = gate(out, base, packs)
@@ -197,8 +268,9 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
 
 def gate(out: str, base: str, packs: list[str]) -> dict:
     """The search pack's own check, written to OUT.gate.json: libzim opens it,
-    it has both indexes, and a page of the base and of every pack is found by
-    title suggestion and by full text."""
+    it has both indexes, a page of the base and of every pack is found by
+    title suggestion (a pack's by full text too), and so is a front redirect
+    of the base by its own title."""
     from libzim.reader import Archive
     from libzim.search import Query, Searcher
     from libzim.suggestion import SuggestionSearcher
@@ -208,25 +280,31 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
     a = Archive(Path(out))
     if not (a.has_title_index and a.has_fulltext_index):
         problems.append(f"indexes: title={a.has_title_index} fulltext={a.has_fulltext_index}")
-    found = {}
-    for src in [base, *packs]:
-        z = ZimReader(src)
+
+    def first(z, redirect: bool):
         v1 = z.v1_listing()
-        sample = None
         for i in (z.iter_u32_blob(*v1) if v1 else []):
             d = z.dirent_at(i)
             t = d.title.decode("utf-8", "replace")
-            if not d.is_redirect and len(t) >= 4:
-                sample = (d.path.decode("utf-8", "replace"), t)
-                break
-        if sample is None:
-            continue
-        p, t = sample
-        sug = list(SuggestionSearcher(a).suggest(t).getResults(0, 20)) if a.has_title_index else []
-        ful = list(Searcher(a).search(Query().set_query(t)).getResults(0, 50)) if a.has_fulltext_index else []
-        found[os.path.basename(src)] = {"title": t, "suggest": p in sug, "fulltext": p in ful}
-        if p not in sug:
-            problems.append(f"{os.path.basename(src)}: suggestion for {t!r} misses {p}")
+            if d.ns == ord("C") and d.is_redirect == redirect and len(t) >= 4:
+                return d.path.decode("utf-8", "replace"), t
+        return None
+
+    found = {}
+    for src in [base, *packs]:
+        z = ZimReader(src)
+        for kind, sample in (("page", first(z, False)), ("redirect", first(z, True) if src == base else None)):
+            if sample is None:
+                continue
+            p, t = sample
+            sug = list(SuggestionSearcher(a).suggest(t).getResults(0, 20)) if a.has_title_index else []
+            ful = list(Searcher(a).search(Query().set_query(t)).getResults(0, 50)) if a.has_fulltext_index else []
+            key = os.path.basename(src) + ("" if kind == "page" else " (redirect)")
+            found[key] = {"title": t, "suggest": p in sug, "fulltext": p in ful}
+            if p not in sug:
+                problems.append(f"{key}: suggestion for {t!r} misses {p}")
+            if src != base and p not in ful:
+                problems.append(f"{key}: full text for {t!r} misses {p}")
     g = {"ok": not problems, "problems": problems, "found": found, "pack_md5": md5_file(out),
          "kind": "search"}
     with open(out + ".gate.json", "w") as fh:

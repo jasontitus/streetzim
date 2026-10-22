@@ -86,10 +86,13 @@ VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
 
 
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
-               extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None) -> str:
+               extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
+               front_redirects: list[tuple[str, str, str]] | None = None) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
-    (cloud/viewer_slots.py), as published bases carry them."""
+    (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
+    (path, title, target) redirects in the title index, as a base's other
+    names for its places ("Δήμος Παλλήνης" -> the Pallini page)."""
     with Creator(str(path)).config_indexing(False, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -120,6 +123,8 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                 c.add_item(_Item(f"wiki-article/{p}", t, "text/html", _page(t, 1), front=True))
                 geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
             c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: False})
+        for rp, rt, tgt in front_redirects or []:
+            c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: True})
         c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
         for p, v in (extra or {}).items():
             c.add_item(_Item(p, "", "application/json", json.dumps(v)))

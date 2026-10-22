@@ -1,5 +1,6 @@
-"""search_gate.py: Kiwix's search (libzim suggestions) must find a merged
-file's pack-only article titles. libzim answers from the file's
+"""search_gate.py: Kiwix's search (libzim suggestions and full text) must
+find a merged file's pack-only article titles, and the base's own entries
+as the base's search does (test_search_pack.py has merged files that pass). libzim answers from the file's
 X/title/xapian, and a merged file keeps the base's (python-libzim writes
 one even with full-text indexing off): it knows only the base's entries, so
 the pack articles are not found. The gate FAILs on every merge today
@@ -37,8 +38,13 @@ def test_a_merge_hides_the_pack_articles_from_kiwix_search(lp: SimpleNamespace, 
 
 
 def test_found_where_the_title_index_has_them(lp: SimpleNamespace) -> None:
+    """The pack file's own title index finds its titles; it is no merged
+    file, though: it has no full-text index and none of the base's entries,
+    so full text and the base parity (review S-1) fail it."""
     rc, out = _gate(lp.packs["de"], lp.base)
-    assert rc == 0 and out["pass"] and out["suggest_found"] == out["titles"] == 3, out
+    assert out["suggest_found"] == out["titles"] == 3, out
+    assert rc == 1 and not out["pass"] and out["fulltext_found"] == 0, out
+    assert out["base"]["base_found"] > 0 and out["base"]["merged_found"] == 0, out
 
 
 def test_a_file_without_packs_passes(lp: SimpleNamespace) -> None:

@@ -72,7 +72,7 @@ which uses only packs with a passing gate. It writes
 | kiwix | kiwix-serve suggest/search, one article and `pack.json` per pack, and the catalog Title and Language |
 | viewer | `viewer_gate.mjs`: `WIKI_PACKS`, source order, the article offered |
 | ui | `ui_gate.mjs`: the UI in the map language (a language with no UI table FAILS; read through the viewer's runtime, any table format; RTL needs `dir="rtl"`), labels, popup → pack article → images → back to the map, the map's search |
-| search | `search_gate.py`: Kiwix's search (libzim suggestions, full text) finds 8 pack-only article titles; the kiwix-serve check asks `/suggest` and `/search` for three of them too. Required (v1 does not launch without it) |
+| search | `search_gate.py`: Kiwix's search finds 8 pack-only article titles by suggestion (first 10) and by full text (first 25), and base parity: of 12 base front pages and 12 base front redirects, each the base's own suggestions find, the merged file's find too; the kiwix-serve check asks `/suggest` and `/search` for three pack titles too. Required (v1 does not launch without it) |
 | smoke | `cloud/zim_viewer_smoke.mjs` |
 
 The viewer, UI and smoke gates also run on the base alone, first. Then one
@@ -204,9 +204,17 @@ that kept the base's indexes found none of its pack articles.
 
 A **search pack** (`tools/langpack/index_pack.py`) is a small ZIM written by
 libzim itself: one empty item per page of the merged file, at the merged
-path, with the page's title and its text (accents folded: libzim's reader
-folds every query, python-libzim's writer keeps accents in index data) as
-index data. `merge_zim.py --index` puts its two indexes in place of the
+path, with the page's title and its text as index data, and every front
+redirect of the base and the packs at its own path (a place's other names:
+Greece's base has 2,566, "Δήμος Παλλήνης" → the Pallini page). The index
+data is folded exactly as libzim folds every query and its own HTML
+indexer's text (`zim::removeAccents`, ICU "Lower; NFD; [:M:] remove;
+NFC": lowercase, every Unicode mark out, the Thai and Devanagari vowel
+signs too); libzim indexes custom index data as given. Pages stream from
+the base and the packs into libzim's writer (nothing holds every page's
+text); the base's are cached per base and text version
+(`<cache>/index-text/<uuid>.v2.jsonl.gz`; an older version's cache is not
+read). `merge_zim.py --index` puts its two indexes in place of the
 base's; its clusters are copied verbatim like a pack's, and the recipe
 names it as one more source (`packs.search`, `"kind": "search"`), so the
 browser streams it and builds nothing. Kiwix then finds the base's pages
@@ -218,7 +226,8 @@ bytes stay in the file, unused.
 menu (entries with the same packs share one: Greece's el and en entries),
 named `osm_<region>_search-<langs>_<date>_<base uuid8>.zim`, with a sidecar
 (the base UUID, the packs' files and MD5s) and a gate (both indexes; a page
-of the base and of each pack found by suggestion). `recipe2.find_search_pack`
+of the base, a front redirect of the base and a page of each pack found by
+suggestion, the packs' by full text too). `recipe2.find_search_pack`
 takes one only for exactly the entry's packs and base and with a passing
 gate. The index's stemmer is the visitor's language, else the base's.
 
