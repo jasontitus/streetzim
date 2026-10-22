@@ -28,7 +28,7 @@
 // CHROME_PATH: the Chromium to drive; BROWSER_LIBS: extra LD_LIBRARY_PATH for it.
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 import fs from 'node:fs';
-import { uiVerdict } from './ui_verdict.mjs';
+import { labelsVerdict, uiVerdict } from './ui_verdict.mjs';
 
 const [ORIGIN, LANG, REGION, MODE] = process.argv.slice(2);
 const R = JSON.parse(fs.readFileSync(REGION, 'utf8'));
@@ -90,7 +90,7 @@ try {
   // collide: a city drawn at z7 can be hidden at z9); the popup check
   // clicks it at the same zoom.
   const ZOOMS = [...new Set([R.city.zoom, 7, 8, 6, 9, 10, 5].filter((z) => typeof z === 'number'))];
-  await step('labels', () => page.evaluate(async ({ lang, city, base, isBase, zooms }) => {
+  await step('labels', async () => { const r = await page.evaluate(async ({ lang, city, base, isBase, zooms }) => {
     const map = window.__szMap;
     const key = 'name:' + lang;
     const settle = async (center, z) => {
@@ -106,10 +106,11 @@ try {
     // name_int, else name:latin), one line when they agree or the tile has
     // no name in the map language; without, "local · map language's".
     const first = (v) => { if (typeof v !== 'string') return ''; const i = v.indexOf(';'); return i > 0 ? v.slice(0, i) : v; };
-    let regionLangs = [];
+    let regionLangs = [], tileLangs = null;
     try {
       const cfg = await (await fetch('map-config.json')).json();
       regionLangs = Array.isArray(cfg.regionLanguages) ? cfg.regionLanguages.filter((x) => typeof x === 'string') : [];
+      tileLangs = Array.isArray(cfg.tileLanguages) ? cfg.tileLanguages : null;
     } catch (e) { /* none */ }
     const region = typeof SZ_REGION !== 'undefined' && !!SZ_REGION;
     const want = (p) => {
@@ -161,14 +162,17 @@ try {
     // A map language that is one of the region's own: its places' names are
     // the native ones, so bilingual labels may not be in view at all.
     const ownLang = regionLangs.includes(lang);
-    let pass;
-    if (!second) pass = SZ_LANG2 === '' && !!cf && cityShown === first(local);
-    else pass = usesKey && SZ_LANG2 === lang && !!cf && cityShown === cityWant
-      && (ownLang || bil.length > 0) && bilBad.length === 0;
-    return { SZ_LANG, SZ_LANG2, SZ_REGION: region, regionLanguages: regionLangs, textFieldUsesKey: usesKey,
-             cityRendered: !!cf, zoom: zoomUsed, cityLocal: local, cityNameInLang: other || null,
-             cityShown, cityWant, bilingualRendered: bil, bilingualWrong: bilBad, pass };
-  }, { lang: LANG, city: R.city, base: R.base_lang, isBase, zooms: ZOOMS }));
+    return { SZ_LANG, SZ_LANG2, SZ_REGION: region, regionLanguages: regionLangs, tileLanguages: tileLangs,
+             textFieldUsesKey: usesKey, second, ownLang,
+             cityRendered: !!cf, zoom: zoomUsed, cityLocal: local, cityLocalFirst: local === null ? null : first(local),
+             cityNameInLang: other || null, cityShown, cityWant, bilingualRendered: bil, bilingualWrong: bilBad };
+  }, { lang: LANG, city: R.city, base: R.base_lang, isBase, zooms: ZOOMS });
+    const v = labelsVerdict({ second: r.second, usesKey: r.textFieldUsesKey, lang2: r.SZ_LANG2, lang: LANG,
+                              cityRendered: r.cityRendered, cityShown: r.cityShown, cityWant: r.cityWant,
+                              cityLocal: r.cityLocalFirst, bilingual: r.bilingualRendered.length,
+                              bilingualWrong: r.bilingualWrong.length, ownLang: r.ownLang, tileLanguages: r.tileLanguages });
+    return Object.assign(r, { bilingualVacuous: v.vacuous, pass: v.pass });
+  });
   const cityZoom = (out.labels && out.labels.zoom) || R.city.zoom;
 
   await step('popup_article', async () => {

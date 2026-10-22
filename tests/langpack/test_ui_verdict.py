@@ -48,3 +48,44 @@ def test_the_ui_verdict_honours_the_viewers_fallback() -> None:
         assert (v["pass"], v["ui"]) == (ok, ui), (facts, v)
     assert got[0]["fallbackUsed"] == "de" and got[4]["fallbackUsed"] is None
     assert "the viewer's fallback for rm is de" in got[2]["why"][0], got[2]
+
+
+LABEL_CASES = [
+    # Vietnamese on Switzerland: Zurich is "Zürich" in both, no rendered place names itself
+    # differently in vi, the tiles carry vi: nothing to show bilingually, nothing wrong (the gate failed it)
+    ({"second": True, "usesKey": True, "lang2": "vi", "lang": "vi", "cityRendered": True, "cityShown": "Zürich",
+      "cityWant": "Zürich", "bilingual": 0, "bilingualWrong": 0, "ownLang": False, "tileLanguages": ["de", "vi"]},
+     True, True),
+    # the same, but the tiles do not carry the language: FAIL
+    ({"second": True, "usesKey": True, "lang2": "vi", "lang": "vi", "cityRendered": True, "cityShown": "Zürich",
+      "cityWant": "Zürich", "bilingual": 0, "bilingualWrong": 0, "ownLang": False, "tileLanguages": ["de"]},
+     False, False),
+    # a region language (rm on Switzerland): its names are the native ones
+    ({"second": True, "usesKey": True, "lang2": "rm", "lang": "rm", "cityRendered": True, "cityShown": "Turitg",
+      "cityWant": "Turitg", "bilingual": 0, "bilingualWrong": 0, "ownLang": True, "tileLanguages": None}, True, False),
+    # bilingual labels shown, one against the rule: FAIL
+    ({"second": True, "usesKey": True, "lang2": "el", "lang": "el", "cityRendered": True, "cityShown": "Αθήνα",
+      "cityWant": "Αθήνα", "bilingual": 2, "bilingualWrong": 1, "ownLang": False, "tileLanguages": ["el"]}, False, False),
+    # the city's label not what the rule says: FAIL
+    ({"second": True, "usesKey": True, "lang2": "th", "lang": "th", "cityRendered": True, "cityShown": "Zürich",
+      "cityWant": "ซูริก · Zürich", "bilingual": 1, "bilingualWrong": 0, "ownLang": False, "tileLanguages": ["th"]},
+     False, False),
+    # the base: one name, no second language
+    ({"second": False, "lang2": "", "lang": "en", "cityRendered": True, "cityShown": "Zürich", "cityLocal": "Zürich"},
+     True, False),
+    ({"second": False, "lang2": "vi", "lang": "en", "cityRendered": True, "cityShown": "Zürich", "cityLocal": "Zürich"},
+     False, False),
+]
+
+
+def test_the_labels_verdict_has_a_vacuous_case() -> None:
+    """Re-gate of Switzerland's vi entry: some rendered label must show two
+    names, unless none can (a region language, or a map language whose names
+    in view agree with the local ones while the tiles carry it)."""
+    script = ("import { labelsVerdict } from " + json.dumps(str(ROOT / "tools" / "langpack" / "ui_verdict.mjs")) + ";\n"
+              "console.log(JSON.stringify(JSON.parse(process.argv[1]).map((c) => labelsVerdict(c))));\n")
+    r = subprocess.run([NODE, "--input-type=module", "-e", script, json.dumps([c for c, _, _ in LABEL_CASES])],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    for (facts, ok, vacuous), v in zip(LABEL_CASES, json.loads(r.stdout)):
+        assert (v["pass"], v["vacuous"]) == (ok, vacuous), (facts, v)
