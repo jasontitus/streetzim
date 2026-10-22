@@ -747,3 +747,29 @@ def test_a_torrent_timeout_is_loud_and_publishes_without(ship: SimpleNamespace) 
     assert "WARNING: no language torrents this time: lang_torrents.py ran out" in log
     out = ship.work / "site" / "testland" / "recipes" / "testland"
     assert not list(out.glob("*.torrent"))
+
+
+SLOW_PREFETCH = """import os, sys, time
+log = os.environ["SLOW_PREFETCH_LOG"]
+open(log, "a").write(f"start {time.time()}\\n")
+time.sleep(2)
+open(log, "a").write(f"end {time.time()}\\n")
+"""
+
+
+def test_two_runs_take_turns_on_the_wikipedia_cache(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """pack_queue.sh runs two ship_packs.sh side by side: their network steps
+    (prefetch.py: downloads into, and appends to, the shared cache) take
+    turns under a lock on the cache."""
+    slow = tmp_path / "slow_prefetch.py"
+    slow.write_text(SLOW_PREFETCH)
+    log = tmp_path / "prefetch-times.log"
+    b2 = tmp_path / "bases2" / "osm-testland2-2026-10-13.zim"
+    b2.parent.mkdir()
+    shutil.copy(ship.base, b2)
+    env = {**ship.env, "SHIP_PREFETCH": str(slow), "SLOW_PREFETCH_LOG": str(log), "SHIP_SKIP_UPLOAD": "1"}
+    ps = [subprocess.Popen(["bash", str(SHIP), rid, str(b)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+          for rid, b in (("testland", ship.base), ("testland2", b2))]
+    assert [p.wait(timeout=900) for p in ps] == [3, 3]
+    ev = [x.split() for x in log.read_text().splitlines()]
+    assert [e[0] for e in ev] == ["start", "end", "start", "end"], ev       # one after the other, never together

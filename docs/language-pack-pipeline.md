@@ -471,6 +471,47 @@ MD5), and gives exactly those cards their "Build in another language"
 link (`/build/?region=<id>`): a pruned or re-uploaded base leaves the page
 with the next deploy.
 
+### During a rebuild round: the pack queue
+
+`ops/langpack/pack_queue.sh` follows a round: when a map's latest row in
+`rebuild-old.tsv` (written after the queue first started) says `uploaded`,
+or `upload-pending` and archive.org now lists the file with its MD5
+(`ops/cloud/archive_has_file.py`; nothing appends `uploaded` to such a row
+later), it runs `ship_packs.sh` for it with production's items
+(`streetzim-<region>`, `streetzim-<region>-lang`), `LANGPACK_WORK=/storage/streetzim/langpack-work`
+and the build worker as `LANGPACK_WEBSEED`, then publishes the region into a
+**preview** clone of production (`/storage/experiments/build-preview/streetzim`,
+moved to production's commit first) and redeploys the preview channel
+(`firebase hosting:channel:deploy swiss-languages --expires 30d --project
+streetzim`). Never the live site: production's `web/build/recipes` stays
+empty until the page goes live. A new preview clone starts with the Swiss
+test recipes the channel shows now (`QUEUE_SEED`, from
+`/storage/experiments/lang-torrents/swiss-site2`); production's Switzerland
+replaces them when it ships. The preview's home page is not regenerated.
+
+- Eligible: not a light map, at most 8 GB, multilingual tiles
+  (`tileLanguages`); `ship_packs.sh` refuses continents itself (exit 4).
+  The log says so for each: France, Germany, the Nordics and Italy (8.1 GB)
+  get no packs in v1.
+- In the order the maps shipped, one run at a time while a round driver
+  builds (the disk is saturated and its scheduler ignores ionice), up to 2
+  (`QUEUE_JOBS`) once none does: a second one starts only with 24 GB of
+  memory available, no memory pressure and room on the disk for its merged
+  files. `ship_packs.sh` takes turns on the shared Wikipedia cache (its
+  prefetch holds a lock).
+- Exit 6 (archive.org listing pending) or 2 (a lock held): tried again after
+  30 min; 4 and 5: logged, skipped for that base; anything else: a loud
+  failure (`queue.log`, stderr), not retried until the queue restarts.
+- Resumable: a map published for the same base UUID is not shipped again; a
+  new file is. State in `$LANGPACK_WORK/pack-queue/` (`status.tsv`,
+  `published.tsv`, `queue.log` in PDT); a file named `stop` there ends it
+  after the current pass. The round's files are only read.
+
+```bash
+cd /storage/streetzim                # QUEUE_SINCE: count maps the round shipped before this start
+QUEUE_SINCE='2026-10-23 00:00' setsid nohup ops/langpack/pack_queue.sh > langpack-work/pack-queue.nohup 2>&1 < /dev/null &
+```
+
 ### The builder page
 
 `/build/` (`web/build/`; the prototype's `/lab/build/` redirects there)
