@@ -731,16 +731,18 @@ def _annotate_lines_batch(lines, type_order):
 
 # Near-duplicates: one stop mapped as many (a station's bays, its stop
 # positions and platforms, each a POI of the same name metres apart; a
-# region's own tiles carry them all: Switzerland's "Luzern Bahnhof" 24
-# times within 250 m), and a lake's name repeated by its pieces. Search
-# shows each place once: within NEAR_DUP_M of each other, features of one
-# of these kinds with the same name and subtype are one, at the member
-# nearest their mean. Places, peaks and parks are never merged.
+# region's own tiles carry them all: Switzerland's "Luzern Bahnhof" 22
+# times within 250 m), and a lake's name repeated by its pieces. The search
+# pass merges them (zim_writer.near_duplicate_plan), after the Wikipedia
+# and names matching, so the member that links an article is the one kept;
+# extraction leaves them. Within NEAR_DUP_M of each other, features of one
+# of these kinds with the same name and subtype form a cluster. Places,
+# peaks and parks are never merged.
 NEAR_DUP_M = 100.0
 NEAR_DUP_POI = frozenset({"bus", "railway", "aerialway", "ferry_terminal"})
 
 
-def _near_dup_group(feat):
+def near_dup_group(feat):
     """The group a feature merges within, or None: (lowercased name,
     type, subtype) for a transit POI or a water feature."""
     t = feat.get("type")
@@ -749,18 +751,26 @@ def _near_dup_group(feat):
     return None
 
 
-def near_duplicates(points, metres=NEAR_DUP_M):
-    """Indexes to drop from ``points`` [(index, group, lat, lon)]: within a
-    group, points sorted by position are taken in turn; each not yet taken
-    gathers the untaken within ``metres`` of it, and the cluster keeps the
-    member nearest its mean. Deterministic whatever the input order."""
+def near_dup_line(line):
+    """Whether a features JSONL line may hold a near_dup_group feature (a
+    cheap test before parsing it)."""
+    return ('"water"' in line or '"bus"' in line or '"railway"' in line
+            or '"aerialway"' in line or '"ferry_terminal"' in line)
+
+
+def near_duplicate_clusters(points, metres=NEAR_DUP_M):
+    """Clusters of ``points`` [(index, group, lat, lon, ...)] that are
+    near-duplicates, each a list of two or more: within a group, points
+    sorted by position are taken in turn, and each not yet taken gathers
+    the untaken within ``metres`` of it. Deterministic whatever the input
+    order."""
     import math
     from collections import defaultdict
     cell = metres / 111_320.0                     # degrees of latitude
     by_group = defaultdict(list)
     for p in points:
         by_group[p[1]].append(p)
-    drop = set()
+    out = []
     for group in by_group.values():
         if len(group) < 2:
             continue
@@ -788,44 +798,17 @@ def near_duplicates(points, metres=NEAR_DUP_M):
             for q in members:
                 taken.add(q[0])
             if len(members) > 1:
-                mlat = sum(q[2] for q in members) / len(members)
-                mlon = sum(q[3] for q in members) / len(members)
-                keep = min(members, key=lambda q: ((q[2] - mlat) ** 2 + ((q[3] - mlon) * k) ** 2, q[0]))
-                drop.update(q[0] for q in members if q is not keep)
-    return drop
+                out.append(members)
+    return out
 
 
-def merge_near_duplicates(path):
-    """near_duplicates over a features JSONL, in place; returns how many
-    features it dropped. STREETZIM_NEAR_DUP=0 leaves the file as it is."""
-    if os.environ.get("STREETZIM_NEAR_DUP", "1") == "0":
-        return 0
-    points = []
-    with open(path, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            feat = json.loads(line)
-            g = _near_dup_group(feat)
-            if g is not None:
-                points.append((i, g, feat["lat"], feat["lon"]))
-    drop = near_duplicates(points)
-    if not drop:
-        return 0
-    tmp = str(path) + ".neardup"
-    with open(path, encoding="utf-8") as fin, open(tmp, "w", encoding="utf-8") as fout:
-        for i, line in enumerate(fin):
-            if i not in drop:
-                fout.write(line)
-    os.replace(tmp, path)
-    return len(drop)
-
-
-def merge_near_duplicate_features(features):
-    """merge_near_duplicates for an in-memory feature list."""
-    if os.environ.get("STREETZIM_NEAR_DUP", "1") == "0":
-        return features
-    drop = near_duplicates([(i, g, f["lat"], f["lon"]) for i, f in enumerate(features)
-                            if (g := _near_dup_group(f)) is not None])
-    return [f for i, f in enumerate(features) if i not in drop] if drop else features
+def central_member(members):
+    """The member of a cluster nearest its mean (ties: the lowest index)."""
+    import math
+    k = math.cos(math.radians(members[0][2]))
+    mlat = sum(q[2] for q in members) / len(members)
+    mlon = sum(q[3] for q in members) / len(members)
+    return min(members, key=lambda q: ((q[2] - mlat) ** 2 + ((q[3] - mlon) * k) ** 2, q[0]))
 
 
 def _finish_features_streaming(raw_path, output_dir, n_unique):
@@ -1130,18 +1113,9 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
             del seen_global
         print(f"    {n_unique} unique features after cross-worker dedup")
         if stream_out is not None:
-            merged = merge_near_duplicates(raw_path)
-            if merged:
-                n_unique -= merged
-                print(f"    {merged} near-duplicate stops and water features merged "
-                      f"(same name within {NEAR_DUP_M:.0f} m)")
             # Location context and the final sort both used to require every
             # feature resident. Do them over the file instead.
             return _finish_features_streaming(raw_path, output_dir, n_unique)
-        n_before = len(features)
-        features = merge_near_duplicate_features(features)
-        if len(features) < n_before:
-            print(f"    {n_before - len(features)} near-duplicate stops and water features merged")
     else:
         # Legacy mode: filter from in-memory dict
         z14_tiles = {(z, x, y): data for (z, x, y), data in tiles.items() if z == 14}
@@ -1191,7 +1165,7 @@ def extract_searchable_features(tiles=None, mbtiles_path=None, output_dir=None):
                 continue
             seen.add(dedup_key)
             deduped.append(f)
-        features = merge_near_duplicate_features(deduped)
+        features = deduped
 
     # Assign location context (nearest city/town) to each feature
     print("    Assigning location context to features...")

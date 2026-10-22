@@ -127,9 +127,10 @@ neighbours are missing altogether. The viewer never shows beyond the box.
 A search cache extracted from a region's tiles differs more than the tiles
 do: Switzerland's had 7.8% more POIs than the world-tile cache (bus 53,039
 -> 82,846: a station's bays and stop positions, each a POI of the same
-name metres apart), until `merge_near_duplicates` (search extraction)
-merged same-name stops and water features within 100 m: then bus 54,203,
-POIs +2.6%.
+name metres apart); the search pass merges same-name stops and water
+features within 100 m (`zim_writer.near_duplicate_plan`, after the
+Wikipedia matching, so no link is lost): bus stops about 54,000, POIs about
++2.6%.
 
 With 3.0 the content changed too: a polygon's label (`LayerAsCentroid`)
 was copied into every tile under the polygon (the island name

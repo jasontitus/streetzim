@@ -432,6 +432,8 @@ ok('the visitor reads the map\'s second language, the UI\'s, the one asked for a
   const VL = new Function('SZ_LANG2', 'SZ_UI_LANG', 'SZ_UI_ASKED', 'navigator',
     slice(HTML, 'function _szVisitorLangs()', '\n// The normalized texts') + '\nreturn _szVisitorLangs();');
   assert.deepStrictEqual(VL('rm', 'de', 'rm', undefined), ['rm', 'de']);
+  // The UI asked in Romansh, shown in German, on a map with no second language.
+  assert.deepStrictEqual(VL('', 'de', 'rm', undefined), ['de', 'rm']);
   assert.deepStrictEqual(VL('', 'en', 'en', { languages: ['fr-CH', 'de', 'fr'] }), ['en', 'fr', 'de']);
   assert.deepStrictEqual(VL('', 'en', 'en', { language: 'it-IT' }), ['en', 'it']);
   assert.deepStrictEqual(VL(undefined, undefined, undefined, undefined), []);

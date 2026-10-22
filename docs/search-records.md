@@ -149,12 +149,31 @@ Latin name already).
   shows as the record's name); a salvage build (`--skip-address-extract`)
   keeps the admin rows, and so the `lnames`, of the build whose search
   cache it reuses. Admin records never take names from the names lookup.
-- **Ranking (viewer):** a name in another language than the visitor's
-  (the map's second language `SZ_LANG2` and the UI's) finds its place but
-  gets no exact-match bonus: "Glion" is the village Glion before Ilanz
-  (Romansh Glion), while "Genf" still finds Geneva and a French visitor's
-  "Coire" Chur. The pin, its popup and the routing fields show the name
-  the result row showed.
+- **Ranking (viewer):** a name only in other languages than the
+  visitor's finds its place but gets no exact-match bonus: "Glion" is the
+  village Glion before Ilanz (Romansh Glion), while "Genf" still finds
+  Geneva and a French visitor's "Coire" Chur. The visitor reads the map's
+  second language (`SZ_LANG2`), the UI's, the one the UI was asked in
+  before any fallback (`SZ_UI_ASKED`: rm, shown in German) and the
+  device's (`navigator.languages`); a spelling several languages share
+  keeps them all (Lucerne's "Lucerna": es, it, rm). For ranking only:
+  display follows `SZ_LANG2`, the UI map-config. The pin, its popup and
+  the routing fields show the name the result row showed.
+- **Near-duplicates:** the search pass merges same-name stops (bus,
+  railway, aerialway, ferry terminal) and water features within 100 m
+  (`zim_writer.near_duplicate_plan`, a pre-pass), after the Wikipedia and
+  names matching (`feature_wiki_tier`: own cell, neighbouring cell,
+  ambiguous, none): it keeps one member per article the members link
+  (members linking different articles never merge), the one matched in
+  its own cell before one from next door, one with names before one
+  without, then the one nearest the cluster's mean; a member whose match
+  was ambiguous links nothing and so vetoes nothing; one member per other
+  set of names in other languages no kept member has, unless it is the
+  only one and the kept members lack names, which then take it. Dropped
+  members are skipped before the geo-index and the counts. Extraction
+  leaves them. `STREETZIM_NEAR_DUP=0` turns it off. On Switzerland's
+  production cache it merges 47,048 records and loses no article, Q-ID or
+  name in another language.
 - **Which names:** in the order of the languages; a name equal to `n`
   is left out (the viewer shows `n` then); one equal to `nn` is written as
   `""`, which stands for `nn`, so a French visitor sees "Genève" and a Greek
@@ -198,12 +217,9 @@ Latin name already).
   country; `build-region-fast.sh` takes it as `STREETZIM_SEARCH_CACHE`.
   Its features are the region tiles', not the world tiles': Switzerland's
   had 7.8% more POIs (a station's bays and stop positions, each a POI of
-  the same name: "Luzern Bahnhof" 22 times) until extraction merged
-  same-name stops and water features within 100 m
-  (`search_extract.merge_near_duplicates`; `STREETZIM_NEAR_DUP=0` leaves
-  them): bus stops 82,846 -> 54,203 (the world-tile cache: 53,039), lakes
-  8,141 -> 7,948, "Luzern Bahnhof" 6; no place, peak or park is touched,
-  and no name is lost but a spelling that differs only in case.
+  the same name: "Luzern Bahnhof" 22 times), which the search pass's
+  near-duplicate merge (above) brings back to the world-tile cache's
+  (bus stops 82,846 -> about 54,000; world tiles 53,039).
 - **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)
