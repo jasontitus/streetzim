@@ -226,6 +226,39 @@ Greece (1.05 GB base, 64,457 pages): 57–60 MB per search pack (the base's
 own indexes are 28 MB; a pack's full text adds most of the rest), 67–76 s
 each once the base's text is cached (21 s to read it the first time).
 
+## Viewer patches and recipes
+
+`cloud/patch_viewer_inplace.py` rewrites a base's three viewer slots (and
+its checksum) and keeps its name, size and UUID. A recipe carries those
+slots inline (from the base it was made from), lists their ranges and the
+base's checksum as `base.mask`, hashes the base's chunks with them zeroed
+and never reads them from the base. So:
+
+- a visitor's copy one viewer patch older (or newer) still builds the new
+  file: the page's check of the copy and the worker's chunk checks zero the
+  mask too;
+- the merged UUID follows the inputs' MD5s (`derive_uuid`), so a new viewer
+  is a new book for Kiwix;
+- a patched base keeps its recipes' `fingerprint` (everything but the slots
+  and the UUID/checksum they change), and `run_gates.sh` with `RESUME=1`
+  gives such an entry a **light gate**: recipe = merge, verify and the
+  browser checks again, zimcheck, route, kiwix-serve and Kiwix search carried
+  from the last passing verdict (`evidence.light_gate`). `ship_packs.sh` on a
+  patched base therefore rebuilds no pack, sends nothing, and only
+  regenerates, light-gates and re-seals the recipes; until it has, the
+  live-MD5 rule keeps the region off `/build/`.
+
+## The browser holds no pack whole
+
+The page checks each pack's first and last chunk before Build (a missing or
+replaced pack stops the visitor before anything is saved); the worker
+streams every pack, the search pack included, in verified 16 MiB chunks
+through the range proxy during the build, like the base, with the same
+sliding window and buffer pool. `make_site.py` refuses, and `site_check.py`
+fails, an entry over the per-entry budget: more than `LANGPACK_ENTRY_BUDGET`
+(2 GiB) of packs to download, or a recipe over `LANGPACK_RECIPE_BUDGET`
+(32 MiB).
+
 ## In production
 
 Every published map gets packs for the **core languages**, the tiles'

@@ -49,7 +49,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from tools.langpack import gatelib  # noqa: E402
-from tools.langpack.make_site import touched_bytes  # noqa: E402
+from tools.langpack.make_site import ENTRY_BUDGET, RECIPE_BUDGET, over_budget, touched_bytes  # noqa: E402
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
 
 UA = {"User-Agent": "streetzim-site-check/1"}
@@ -137,6 +137,8 @@ def main():
     ap.add_argument("--probe-urls", action="store_true")
     ap.add_argument("--recipes-dir", help="index/region/refused.json here (default SITE/recipes)")
     ap.add_argument("--proxy", help="what {proxy} stands for in URLs (default: web/drive/preview-config.js)")
+    ap.add_argument("--entry-budget", type=int, default=ENTRY_BUDGET)
+    ap.add_argument("--recipe-budget", type=int, default=RECIPE_BUDGET)
     a = ap.parse_args()
     tag = os.path.basename(os.path.realpath(a.base))[:-4]
     vdir = a.verdicts or os.path.join(gatelib.work_dir(), "verdicts", tag)
@@ -207,6 +209,9 @@ def main():
         need(m.get("gate_verdict", "").endswith(f"/{tag}/{L}.json"), f"{L}: gate_verdict {m.get('gate_verdict')} is not .../{tag}/{L}.json")
         tb = touched_bytes(r)
         need(m["download_bytes"] == sum(tb.values()), f"{L}: download_bytes {m['download_bytes']} != {sum(tb.values())}")
+        why = over_budget(os.path.getsize(os.path.join(a.site, m["recipe"])), sum(tb.values()),
+                          a.entry_budget, a.recipe_budget)
+        need(why is None, f"{L}: {why}")
         ipacks = {p["lang"]: p for p in m["packs"] if not p.get("in_base")}
         wiki = {k: v for k, v in r["packs"].items() if v.get("kind") != "search"}    # the search pack is not listed
         need(set(ipacks) == set(wiki) and all(ipacks[x]["bytes"] == tb[x] and ipacks[x]["articles"] == wiki[x]["articles"]

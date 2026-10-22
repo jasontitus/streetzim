@@ -112,3 +112,30 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     p.ship = SimpleNamespace(base=base)
     rc, rows = _e2e(p, "th", "net")                     # the server's (patched) base
     assert rc == 0 and rows[0]["pass"], rows
+
+
+def test_packs_stream_and_are_never_held_whole(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
+    """Plan review M-3: the page checks only each pack's first and last chunk
+    before Build; the worker streams the rest during the build, chunk by
+    verified chunk (a small chunk size here, so a pack spans many)."""
+    env = {**ship.env, "LANGPACK_RECIPE_CHUNK": "4096"}
+    r = subprocess.run(["bash", str(ROOT / "ops" / "langpack" / "ship_packs.sh"), "testland", str(ship.base)],
+                       capture_output=True, text=True, timeout=900, env=env)
+    assert r.returncode == 0, r.stdout[-3000:]
+    rec = tmp_path / "recipes"
+    shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
+                          capture_output=True).returncode == 0
+    recipe = json.loads((rec / "testland" / "de.json").read_text())
+    chunks = {k: len(p["sha256"]) for k, p in recipe["packs"].items()}
+    assert recipe["packs"]["de"]["chunk"] == 4096 and min(chunks.values()) > 4, chunks
+    p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
+    rc, rows = _e2e(p, "de", "file")
+    assert rc == 0 and rows[0]["pass"], rows
+    before = rows[0]["proxy_before_build"]["files"]
+    probe = json.loads((rec / "index.json").read_text())["regions"][0]["probe"]["url"].rsplit("/", 1)[1]
+    for k, pk in recipe["packs"].items():
+        # its first and last chunk (and, for the speed probe's file, the probe's 4 ranges)
+        assert before.get(pk["file"], 0) <= 2 + (4 if pk["file"] == probe else 0), (k, before, probe)
+    total = rows[0]["proxy"]["items"].get("streetzim-testland-lang", 0)
+    assert total >= sum(chunks.values()), (total, chunks)       # the rest streamed during the build

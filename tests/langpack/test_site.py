@@ -352,3 +352,29 @@ def test_kiwix_search_is_required_unless_reported(site: SimpleNamespace, lp: Sim
     th = json.loads((tmp_path / "work" / "verdicts" / site.tag / "th.json").read_text())
     assert th["checks"]["search"] is False and th["all_pass"] is th_passes
     assert th["advisory"] == (["search"] if mode else [])
+
+
+def test_the_per_entry_budget(site: SimpleNamespace, lp: SimpleNamespace, tmp_path: Path) -> None:
+    """Plan review M-3: make_site refuses, and site_check fails, an entry whose
+    packs or recipe exceed the per-entry budget."""
+    env = {"LANGPACK_WORK": str(site.work)}
+    out = tmp_path / "site"
+    sizes = {L: json.loads((site.out / "recipes" / f"{L}.json").read_text()) for L in ("de", "fr", "th")}
+    from tools.langpack.make_site import touched_bytes
+    dl = {L: sum(touched_bytes(r).values()) for L, r in sizes.items()}
+    budget = sorted(dl.values())[1]                      # one entry above it
+    r = tool("make_site.py", lp.base, "--packs-dir", site.packs, "--region", "testland", "--region-title", "Testland",
+             "--region-langs", "en", "--langs", LANGS, "--titles", TITLES, "--language-meta", "map",
+             "--url-template", f"{DL}/testland-packs/{{file}}", "--url-override", f"fr={DL}/testland-fr/{{file}}",
+             "--base-download", f"{DL}/testland-base/{lp.base.name}", "--entry-budget", str(budget),
+             "-o", out / "recipes", env=env)
+    assert r.returncode == 0, r.stderr
+    refused = {x["lang"]: x["why"] for x in json.loads((out / "recipes" / "refused.json").read_text())}
+    over = [L for L, n in dl.items() if n > budget]
+    assert sorted(refused) == over and all("over the per-entry budget" in w for w in refused.values()), refused
+    # site_check with a lower budget fails the published site
+    rc, lines = _check(site, site.out)
+    assert rc == 0
+    r = tool("site_check.py", site.out, "--base", site.base, "--packs-dir", site.packs, "--ia-cache", site.ia,
+             "--recipe-budget", "100", env=site.env)
+    assert r.returncode == 1 and "over the per-entry budget: a" in r.stdout, r.stdout[-1500:]

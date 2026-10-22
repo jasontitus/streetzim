@@ -312,16 +312,19 @@
   }
 
   // ------------------------------------------------------------ packs
-  // All of the language's packs (each at most ~31 MB) are downloaded,
-  // checked against the recipe's SHA-256 of each 16 MiB chunk and kept in
-  // memory as soon as the language and a right map file are chosen. Build is
-  // enabled only after that, so a missing or damaged pack stops the visitor
+  // The language's packs (and its search pack) are not downloaded ahead
+  // any more: the worker streams them during the build in verified 16 MiB
+  // chunks, like the base, so no pack is ever held whole in memory. Before
+  // Build is enabled the page checks that every pack is there and is the
+  // one the recipe names: its first and its last chunk are downloaded and
+  // checked against the recipe's SHA-256 (fetcher.js: stall timeout,
+  // resume, retries), so a missing or replaced pack stops the visitor
   // before any save target is opened or any byte is written.
   // Range requests come from fetcher.js (shared with the worker): 30 s stall
   // timeout, resume from the first missing byte, laggards asked again,
   // backoff retries.
   const { FetchError, newNet, pct, fetchRetrying } = self.SZFetch;
-  const PART = 4 * 1048576;            // range request size for packs
+  const PART = 4 * 1048576;            // range request size for the pack checks
   const PARALLEL = 4;                  // pack range requests in flight
   const langName = (() => {
     let dn = null;
@@ -351,49 +354,42 @@
   };
   let net = newNet();
   let packsOk = false, packSeq = 0, packAbort = null;
-  const packBytes = new Map();         // url|size|hashes -> verified Uint8Array
-  const packKey = (p) => [p.url, p.size, p.sha256.join(',')].join('|');
 
-  // One pack, chunk by chunk; each chunk's SHA-256 must match the recipe. A
-  // chunk that does not match is downloaded once more before giving up. A
-  // range that fails for good stops the other ranges in flight.
-  async function downloadPack(p, outer, onProgress) {
+  // Chunk k of a pack: downloaded in PART-sized ranges, PARALLEL at a
+  // time, and checked against the recipe; a chunk that does not match is
+  // downloaded once more before giving up. A range that fails for good stops
+  // the other ranges in flight.
+  async function checkChunk(p, k, outer, onProgress) {
     const ac = new AbortController();
     const stop = () => ac.abort();
     outer.addEventListener('abort', stop, { once: true });
-    try { return await downloadPackRanges(p, ac, onProgress); }
-    finally { ac.abort(); outer.removeEventListener('abort', stop); }
-  }
-  async function downloadPackRanges(p, ac, onProgress) {
-    const signal = ac.signal;
-    const out = new Uint8Array(p.size);
-    let got = 0;
-    const bump = (n) => { got += n; onProgress(got, null); };
-    for (let k = 0; k < p.sha256.length; k++) {
+    try {
       const a0 = k * p.chunk, b0 = Math.min(a0 + p.chunk, p.size);
+      const out = new Uint8Array(b0 - a0);
+      let got = 0;
+      const bump = (n) => { got += n; onProgress(got, null); };
       for (let pass = 0; ; pass++) {
         const parts = [];
         for (let a = a0; a < b0; a += PART) parts.push([a, Math.min(a + PART, b0)]);
-        let next = 0, before = got;
+        let next = 0;
         const lane = async () => {
           while (next < parts.length) {
             const [a, b] = parts[next++];
-            await fetchRetrying(p.url, out, 0, a, b, p.size, signal, net, bump, (note) => onProgress(got, note));
+            await fetchRetrying(p.url, out, a0, a, b, p.size, ac.signal, net, bump, (note) => onProgress(got, note));
           }
         };
         await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, () => lane().catch((e) => { ac.abort(); throw e; })));
-        const sum = hex(await crypto.subtle.digest('SHA-256', out.subarray(a0, b0)));
-        if (sum === p.sha256[k]) break;
+        if (hex(await crypto.subtle.digest('SHA-256', out)) === p.sha256[k]) return;
         if (pass >= 1) throw new FetchError('it arrived damaged twice (it does not match its checksum)', true);
         net.hash_retries++;
-        got = before; onProgress(got, 'a piece arrived damaged; downloading it again');
+        got = 0; onProgress(got, 'a piece arrived damaged; downloading it again');
       }
-    }
-    return out;
+    } finally { ac.abort(); outer.removeEventListener('abort', stop); }
   }
-  // Resolves true once the language's packs are in memory (false if they
-  // could not be had, or a newer call took over). Without force it waits
-  // for a right base file (the "build from my copy" path).
+  // Resolves true once every pack of the language is there and matches the
+  // recipe (its first and last chunks; false if one could not be had, or a
+  // newer call took over). Without force it waits for a right base file
+  // (the "build from my copy" path).
   async function ensurePacks(force) {
     if (!force && running) return false;   // a build's own download is running; leave it
     const seq = ++packSeq;
@@ -408,50 +404,41 @@
     try { rec = await recipeFor(entry); } catch (e) { return false; }   // #notice says why
     if (seq !== packSeq) return false;
     const ids = Object.keys(rec.packs);
-    const keep = new Set(ids.map((id) => packKey(rec.packs[id])));
-    for (const k of [...packBytes.keys()]) if (!keep.has(k)) packBytes.delete(k);   // only this language's packs stay in memory
     const t0 = performance.now();
     net = newNet();
-    const todo = ids.filter((id) => !packBytes.has(packKey(rec.packs[id])));
-    const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round(todo.reduce((t, id) => t + rec.packs[id].size, 0) / 1e6) };
+    const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round((entry.download_bytes || 0) / 1e6) };
     const ac = packAbort = new AbortController();
-    if (todo.length) {
-      track('packs_start', evBase);
-      holdScreen();
-      announce(`Downloading ${todo.map(packName).join(', ')}.`);
-    }
+    if (ids.length) track('packs_start', evBase);
     try {
-      for (const id of todo) {
+      for (const id of ids) {
         const p = rec.packs[id], name = packName(id);
-        let shown = 0;
-        const bytes = await downloadPack(p, ac.signal, (got, note) => {
-          const now = performance.now();
-          if (!note && now - shown < 1000 && got < p.size) return;
-          shown = now;
-          out.textContent = `Downloading ${name}: ${(got / 1e6).toFixed(0)} of ${fmtMB(p.size)}` + (note ? ` — ${note}` : '');
-        }).catch((e) => { e.pack = name; throw e; });
-        if (seq !== packSeq) return false;     // the language changed meanwhile
-        packBytes.set(packKey(p), bytes);
+        const last = p.sha256.length - 1;
+        for (const k of last > 0 ? [0, last] : [0]) {
+          out.textContent = `Checking ${name}…`;
+          await checkChunk(p, k, ac.signal, (got, note) => { if (note) out.textContent = `Checking ${name} — ${note}`; })
+            .catch((e) => { e.pack = name; throw e; });
+          if (seq !== packSeq) return false;     // the language changed meanwhile
+        }
       }
     } catch (e) {
       if (seq !== packSeq || e.name === 'AbortError') return false;
-      packAbort = null; releaseScreen();
+      packAbort = null;
       out.className = 'bad';
       out.textContent = /HTTP 40[34]|HTTP 410/.test(e.message)
         ? `${e.pack} isn't available right now (${e.message}). Nothing was saved. Try again later.`
-        : `Could not download ${e.pack || 'the language pack'}: ${e.message}. Nothing was saved. Try again.`;
+        : `Could not check ${e.pack || 'the language pack'}: ${e.message}. Nothing was saved. Try again.`;
       announce(out.textContent);
       $('packRetry').hidden = false;
       track('packs_end', Object.assign({}, evBase, netParams(), { outcome: /damaged/.test(e.message) ? 'hash_mismatch' : 'error', secs: Math.round((performance.now() - t0) / 1000) }));
       return false;
     }
     if (seq !== packSeq) return false;
-    packAbort = null; releaseScreen();
-    if (todo.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
+    packAbort = null;
+    if (ids.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
     packsOk = true;
     out.className = 'ok';
-    out.textContent = ids.length ? `✓ ${ids.map(packName).join(', ')} downloaded and checked (${fmtMB(ids.reduce((t, id) => t + rec.packs[id].size, 0))})` : '';
-    if (todo.length) announce(out.textContent.replace(/^✓ /, '') + '.');
+    const wiki = ids.filter((id) => id !== 'search');
+    out.textContent = wiki.length ? `✓ ${wiki.map(packName).join(', ')}${ids.includes('search') ? ' and the search index' : ''} ready: ${fmtMB(entry.download_bytes || 0)} to download with the map` : '';
     checkReady();
     return true;
   }
@@ -722,8 +709,6 @@
       }
     }
     const packs = Object.keys(recipe.packs).join(',');
-    const bytes = {};
-    for (const id of Object.keys(recipe.packs)) bytes[id] = packBytes.get(packKey(recipe.packs[id]));
     const t0 = performance.now();
     hiddenMs = 0; hiddenSince = document.visibilityState === 'hidden' ? performance.now() : null;
     const base = { region: region.id, lang: entry.lang, packs, mode, size_mb: Math.round(recipe.size / 1e6),
@@ -778,17 +763,12 @@
         } else if (d.type === 'done') resolve(d.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      // One click: the pack bytes move to the worker (no copy) and are
-      // downloaded again for another build. From a copy they are copied, so
-      // the Build button stays ready (its save dialog needs the click).
-      const packBufs = mode === 'net' ? Object.values(bytes).map((u8) => u8.buffer) : [];
-      worker.postMessage({ cmd: 'run', proto: 6, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, packs: bytes, mem: MEM,
+      // The worker streams the packs itself (recipe.packs[id].url); nothing
+      // of them is held here.
+      worker.postMessage({ cmd: 'run', proto: 7, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, mem: MEM,
+                           packBytes: entry.download_bytes,
                            sink: sinkInfo ? sinkInfo.sink : 'later', handle: sinkInfo && sinkInfo.handle,
-                           port: sinkInfo && sinkInfo.port, fileName }, (sinkInfo ? sinkInfo.transfer : []).concat(packBufs));
-      if (mode === 'net') {
-        for (const id of Object.keys(recipe.packs)) packBytes.delete(packKey(recipe.packs[id]));
-        packsOk = false;
-      }
+                           port: sinkInfo && sinkInfo.port, fileName }, sinkInfo ? sinkInfo.transfer : []);
     });
     worker.terminate();
     $('startDl').hidden = true;
@@ -834,6 +814,8 @@
           (sinkInfo ? 'The download was cancelled; ' : 'Nothing was saved; ') +
           (/nothing arrived/.test(result.error) ? 'try again when the connection is back.' : 'try again later.')
         : result.outcome === 'wrong_base' && mode === 'net' ? `Stopped: the ${region.title} map on the server is not the one this language was made for (${result.error}). Nothing was saved. Try again later.`
+        : result.outcome === 'pack_download' ? `Stopped: could not download Wikipedia (${result.error}). ` +
+          (sinkInfo ? 'The download was cancelled; ' : 'Nothing was saved; ') + 'try again later.'
         : result.outcome === 'no_sink' ? 'Not started: ' + result.error
         : 'Stopped: ' + result.error, true);
       announce($('status').textContent);

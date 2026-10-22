@@ -46,6 +46,24 @@ NATIVE = {"ar": "العربية", "de": "Deutsch", "el": "Ελληνικά", "en
           "th": "ไทย", "tr": "Türkçe", "uk": "Українська", "vi": "Tiếng Việt", "zh": "中文"}
 
 
+# Per entry (plan review M-3): what a visitor downloads besides the base
+# (the packs' chunks the recipe touches, the search pack's included), and the
+# recipe itself, which the page parses whole.
+ENTRY_BUDGET = int(os.environ.get("LANGPACK_ENTRY_BUDGET") or 2 << 30)
+RECIPE_BUDGET = int(os.environ.get("LANGPACK_RECIPE_BUDGET") or 32 << 20)
+
+
+def over_budget(recipe_bytes: int, download_bytes: int, entry_budget: int = ENTRY_BUDGET,
+                recipe_budget: int = RECIPE_BUDGET) -> str | None:
+    """Why an entry is over the per-entry budget, or None."""
+    if download_bytes > entry_budget:
+        return (f"over the per-entry budget: {download_bytes / 1e6:.0f} MB of packs to download "
+                f"> {entry_budget / 1e6:.0f} MB")
+    if recipe_bytes > recipe_budget:
+        return f"over the per-entry budget: a {recipe_bytes / 1e6:.1f} MB recipe > {recipe_budget / 1e6:.0f} MB"
+    return None
+
+
 def touched_bytes(recipe: dict) -> dict[str, int]:
     out = {}
     for lang, p in recipe["packs"].items():
@@ -74,6 +92,10 @@ def main():
     ap.add_argument("--base-url", help="the base through the range proxy (region.base.url, one-click mode)")
     ap.add_argument("--language-meta", choices=("list", "map"), default="list")
     ap.add_argument("--recipe-prefix", default="recipes/")
+    ap.add_argument("--entry-budget", type=int, default=ENTRY_BUDGET,
+                    help="most bytes of packs one entry may download (LANGPACK_ENTRY_BUDGET; 2 GiB)")
+    ap.add_argument("--recipe-budget", type=int, default=RECIPE_BUDGET,
+                    help="largest recipe JSON (LANGPACK_RECIPE_BUDGET; 32 MiB)")
     ap.add_argument("-o", "--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -119,6 +141,12 @@ def main():
         with open(path, "w") as fh:
             json.dump(recipe, fh, ensure_ascii=False)
         tb = touched_bytes(recipe)
+        why = over_budget(os.path.getsize(path), sum(tb.values()), a.entry_budget, a.recipe_budget)
+        if why:
+            refused.append({"lang": L, "why": why})
+            print(json.dumps({"L": L, "REFUSED": why}), flush=True)
+            os.remove(path)
+            continue
         wiki_order = [w["lang"] for w in json.loads(plan.layout["mapcfg"])["wikiPacks"]]
         plist = [{"lang": x, "label": f"{NATIVE.get(x, x)} Wikipedia", "articles": avail[x].articles,
                   "bytes": tb[x]} for x in wiki_order]

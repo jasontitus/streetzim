@@ -53,7 +53,7 @@ if (process.env.BROWSER_LIBS) {
 fs.mkdirSync(OUT, { recursive: true });
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json',
   '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
-const stats = { proxyRanges: 0, proxyBytes: 0, proxyRefused: 0, items: {} };
+const stats = { proxyRanges: 0, proxyBytes: 0, proxyRefused: 0, items: {}, files: {} };
 
 function within(dir, rel) {
   const p = path.resolve(dir, rel);
@@ -105,6 +105,7 @@ const proxy = http.createServer((req, res) => {
   const a = +r[1], b = Math.min(r[2] === '' ? size - 1 : +r[2], size - 1);
   if (a > b) { res.writeHead(416, { ...CORS, 'Content-Range': `bytes */${size}` }); res.end(); return; }
   stats.proxyRanges++; stats.proxyBytes += b - a + 1; stats.items[m[1]] = (stats.items[m[1]] || 0) + 1;
+  const fk = decodeURIComponent(m[2]); stats.files[fk] = (stats.files[fk] || 0) + 1;
   res.writeHead(206, { ...CORS, 'Content-Type': 'application/octet-stream', 'Content-Length': b - a + 1,
                        'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes' });
   if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b) {
@@ -140,7 +141,7 @@ async function runOne(L) {
   const log = [];
   pg.on('console', (m) => log.push(`${m.type()}: ${m.text()}`));
   pg.on('pageerror', (e) => log.push(`pageerror: ${e.message}`));
-  const before = { ...stats, items: { ...stats.items } };
+  const before = { ...stats, items: { ...stats.items }, files: { ...stats.files } };
   await pg.goto(`${PAGE}?region=${encodeURIComponent(REGION)}&lang=${encodeURIComponent(L)}`);
   await pg.waitForFunction((l) => document.querySelector('#lang') && document.querySelector('#lang').value === l, L, { timeout: 60000 });
   const shown = await pg.evaluate(() => ({
@@ -151,14 +152,20 @@ async function runOne(L) {
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });
   dlP.catch(() => {});                       // no download (an expected failure): closing the context rejects it
+  const snap = () => ({ ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
+                        items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
+                        files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) });
+  let beforeBuild = null;                     // what the proxy served before Build was pressed
   if (MODE === 'file') {
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
     await pg.waitForFunction(() => !document.querySelector('#go').disabled, null, { timeout: 30 * 60000, polling: 1000 });
+    beforeBuild = snap();
     await pg.click('#go');
   } else {
     await pg.waitForFunction(() => !document.querySelector('#oneclick').disabled, null, { timeout: 60000 });
     await pg.waitForTimeout(1200);           // the page ignores a key press within 1 s of being ready (not a click; to be safe)
+    beforeBuild = snap();
     await pg.click('#oneclick');
   }
   const status = await pg.waitForFunction(() => {
@@ -179,6 +186,7 @@ async function runOne(L) {
     res.saved = path.join(OUT, `${REGION}-${L}.zim`);
     fs.renameSync(p, res.saved);
   }
+  res.proxy_before_build = beforeBuild;
   res.proxy = { ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
                 refused: stats.proxyRefused - before.proxyRefused,
                 items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])) };
@@ -189,7 +197,8 @@ async function runOne(L) {
   res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
   console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
-                               md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, langOption: shown.langOption }));
+                               md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, proxy_before_build: beforeBuild,
+                               langOption: shown.langOption }));
   await ctx.close();
   return res.pass;
 }

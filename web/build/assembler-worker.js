@@ -3,17 +3,18 @@
 //
 // A recipe lists the merged ZIM's bytes in order: ranges of the base ZIM
 // (the visitor's own copy, a File, or else downloaded here through the range
-// proxy as it is needed), ranges of Wikipedia packs (downloaded and checked
-// by the page before the build starts, passed in as bytes), and small
-// generated pieces (inline, base64). Every byte is checked before it is
+// proxy as it is needed), ranges of Wikipedia packs and of the search pack
+// (downloaded here through the range proxy as they are needed, never held
+// whole), and small generated pieces (inline, base64). Every byte is checked before it is
 // written: base and pack bytes
 // against the recipe's SHA-256 of each 16 MiB chunk of their file, inline
 // pieces against their own SHA-256. The ZIM's MD5 is computed as the bytes
 // go out, appended as its last 16 bytes, and compared with the recipe's; so
 // is the MD5 of the whole file (recipe file_md5, what md5sum prints).
 //
-// In:  {cmd:'run', proto, recipe, baseFile | baseUrl, packs: {id: Uint8Array},
+// In:  {cmd:'run', proto, recipe, baseFile | baseUrl,
 //       sink: 'fsa'|'sw'|'opfs'|'later', handle?, port?, fileName}
+//      (recipe.packs[id].url: each pack's range URL, the page's proxy in it)
 //      {cmd:'sink', sink, handle?, port?}   answers 'need-sink' when sink was 'later'
 // Out: {type:'need-sink'} once the base's first chunk (and its ZIM UUID) is
 //      checked, so nothing is saved before the base is known to be right;
@@ -191,9 +192,6 @@ function fileReader(file, net) {
   };
 }
 
-function memoryReader(u8) {          // a pack the page has downloaded and checked
-  return async (a, b) => u8.subarray(a, b);
-}
 
 // The base map over HTTP, for a visitor without a copy: whole 16 MiB chunks
 // through the range proxy (fetcher.js: stall timeout, resume, laggards asked
@@ -207,7 +205,7 @@ function memoryReader(u8) {          // a pack the page has downloaded and check
 // net.waiting then says how long it has been. Chunk buffers come from a pool
 // that release() refills, so a long download does not churn 16 MiB buffers.
 const PATIENCE_MS = 30 * 60000;
-function httpReader(url, size, chunk, net, signal, onRetry, mem) {
+function httpReader(url, size, chunk, net, signal, onRetry, mem, kind = 'base') {
   const [kMin, kMax] = mem.window;
   const win = { k: kMin, done: 0, t: performance.now(), bytes: 0, rate: 0 };
   const pool = [];
@@ -215,16 +213,16 @@ function httpReader(url, size, chunk, net, signal, onRetry, mem) {
     const out = b - a === chunk && pool.length ? pool.pop() : new Uint8Array(b - a);
     if (!net.base_t0) net.base_t0 = performance.now();
     try {
-      await SZFetch.fetchRetrying(url, out, a, a, b, size, signal, net.http, (n) => { net.base_bytes += n; }, onRetry,
+      await SZFetch.fetchRetrying(url, out, a, a, b, size, signal, net.http, (n) => { net[kind + '_bytes'] += n; net.got_bytes += n; }, onRetry,
         { tries: 8, maxBackoffMs: 30000, patienceMs: mem.patienceMs || PATIENCE_MS, onWait: (ms) => { net.waiting = ms; net.waitingAt = performance.now(); } });
-    } catch (e) { e.baseDownload = true; throw e; }
+    } catch (e) { if (kind === 'base') e.baseDownload = true; else e.packDownload = true; throw e; }
     net.base_t1 = performance.now();
     if (++win.done % 4 === 0) {
       const now = performance.now();
-      const rate = (net.base_bytes - win.bytes) / ((now - win.t) / 1000);
+      const rate = (net.got_bytes - win.bytes) / ((now - win.t) / 1000);
       if (win.rate && rate > win.rate * 1.1 && win.k < kMax) win.k++;
       else if (win.rate && rate < win.rate * 0.8 && win.k > kMin) win.k--;
-      win.rate = rate; win.t = now; win.bytes = net.base_bytes;
+      win.rate = rate; win.t = now; win.bytes = net.got_bytes;
     }
     return out;
   };
@@ -237,7 +235,7 @@ async function run(o) {
   const t0 = performance.now();
   const recipe = o.recipe;
   if (recipe.format !== 'streetzim-recipe/2') throw new Error('unknown recipe format ' + recipe.format);
-  const net = { local_bytes: 0, local_ms: 0, base_bytes: 0, http: SZFetch.newNet(), hash_retries: 0 };
+  const net = { local_bytes: 0, local_ms: 0, base_bytes: 0, pack_bytes: 0, got_bytes: 0, http: SZFetch.newNet(), hash_retries: 0 };
   const abort = new AbortController();
   let http = null;
   const mem = o.mem || { window: [4, 6] };
@@ -248,11 +246,17 @@ async function run(o) {
   }
   const sources = { base: new Source('base file', recipe.base, http ? http.read : fileReader(o.baseFile, net), net) };
   sources.base.refetch = !!http;
+  // network readers by source key: the base (one click) and every pack
+  const readers = {};
+  if (http) readers.base = http;
   for (const [id, p] of Object.entries(recipe.packs)) {
-    const bytes = o.packs && o.packs[id];
-    if (!bytes || bytes.length !== p.size) throw new Error(`the ${id} pack was not downloaded`);
-    sources['pack:' + id] = new Source(`${id} pack`, p, memoryReader(bytes), net);
+    if (!p.url) throw new Error(`the recipe gives no address for the ${id} pack`);
+    const r = httpReader(p.url, p.size, p.chunk, net, abort.signal, (text) => postMessage({ type: 'note', text }), mem, 'pack');
+    readers['pack:' + id] = r;
+    sources['pack:' + id] = new Source(`${id} pack`, p, r.read, net);
+    sources['pack:' + id].refetch = true;
   }
+  const downloadSize = (http ? recipe.base.size : 0) + (o.packBytes || Object.values(recipe.packs).reduce((t, p) => t + p.size, 0));
 
   const last = recipe.segments[recipe.segments.length - 1];
   if (!last || last.src !== 'md5' || recipe.segments.filter((x) => x.src === 'md5').length !== 1) throw new Error('the recipe must end with the checksum');
@@ -333,7 +337,9 @@ async function run(o) {
   let nextAhead = 0;
   const prefetch = (i) => {
     while (nextAhead < ahead.length && ahead[nextAhead] < i) nextAhead++;
-    const depth = http ? http.win.k : 2;
+    // from the network: that reader's sliding window; from a file: 2 chunks
+    const cur = nextAhead < ahead.length ? readers[steps[ahead[nextAhead]].src] : null;
+    const depth = cur ? cur.win.k : 2;
     const seen = new Set();
     for (let j = nextAhead; j < ahead.length && j < nextAhead + 64 && seen.size < depth; j++) {
       const s = steps[ahead[j]], key = keyOf(s);
@@ -373,13 +379,15 @@ async function run(o) {
   const progress = (extra) => {
     const now = performance.now();
     const msg = { type: 'progress', written, size: recipe.size, ms: now - t0, saved: sink.pulled };
-    if (http) {
-      rate.push([now, net.base_bytes]);
+    if (Object.keys(readers).length) {
+      // what comes over the network: the base (one click) and the packs
+      rate.push([now, net.got_bytes]);
       while (rate.length > 2 && now - rate[0][0] > 30000) rate.shift();
       const [t1, b1] = rate[0];
       if (net.waitingAt && now - net.waitingAt < 2500) msg.waiting = net.waiting;
-      msg.base = { got: net.base_bytes, size: recipe.base.size, bps: now > t1 ? (net.base_bytes - b1) / ((now - t1) / 1000) : 0, k: http.win.k,
-                   avg: net.base_t0 && now > net.base_t0 ? net.base_bytes / ((now - net.base_t0) / 1000) : 0 };
+      msg.base = { got: net.got_bytes, size: downloadSize, bps: now > t1 ? (net.got_bytes - b1) / ((now - t1) / 1000) : 0,
+                   k: http ? http.win.k : 2,
+                   avg: net.base_t0 && now > net.base_t0 ? net.got_bytes / ((now - net.base_t0) / 1000) : 0 };
     }
     postMessage(Object.assign(msg, extra));
   };
@@ -409,13 +417,13 @@ async function run(o) {
         data = buf.subarray(s.from, s.to);
         release(i);
         // The chunk's last use: its buffer can move to the service worker
-        // (no copy) or, after the write, go back to the download pool.
-        if (s.src === 'base' && nextUse[i] === Infinity) lastUse = buf;
+        // (no copy) or, after the write, go back to its reader's pool.
+        if (nextUse[i] === Infinity && (s.src === 'base' || readers[s.src])) lastUse = { buf, reader: readers[s.src] };
       }
       if (s.src !== 'md5') md5.update(data);
       const n = data.length;
-      const moved = await sink.write(data, !!lastUse && data.buffer === lastUse.buffer);
-      if (lastUse && !moved && http) http.free(lastUse);
+      const moved = await sink.write(data, !!lastUse && data.buffer === lastUse.buf.buffer);
+      if (lastUse && !moved && lastUse.reader) lastUse.reader.free(lastUse.buf);
       lastUse = null;
       written += n;
     }
@@ -426,7 +434,8 @@ async function run(o) {
     clearInterval(ticker);
     abort.abort();
     await sink.abort(e);
-    const outcome = e instanceof SinkStopped ? 'download_stopped' : e.baseDownload ? 'base_download' : /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error';
+    const outcome = e instanceof SinkStopped ? 'download_stopped' : e.baseDownload ? 'base_download' : e.packDownload ? 'pack_download'
+      : /checksum|match/.test(String(e.message)) ? 'hash_mismatch' : 'error';
     return { ok: false, outcome, watchdog: !!(e instanceof SinkStopped && e.watchdog), error: String(e && e.message || e), written, net: summary(net), ms: Math.round(performance.now() - t0) };
   }
   const ms = performance.now() - t0;
@@ -450,7 +459,7 @@ function summary(net) {
 
 // PROTO: what builder.js sends. A tab opened before an update loads its old
 // builder.js with this worker; it gets a plain "reload" instead of a failure.
-const PROTO = 6;
+const PROTO = 7;                     // 7: the worker streams the packs itself
 let sinkReply = null;                // set while run() waits for {cmd:'sink'}
 onmessage = async (e) => {
   if (e.data.cmd === 'sink') { if (sinkReply) { const r = sinkReply; sinkReply = null; r(e.data); } return; }

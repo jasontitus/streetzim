@@ -50,7 +50,7 @@ from tools.langpack.merge_zim import (  # noqa: E402
     MERGER_VERSION, SEARCH, MergeError, Plan, Ref, build_plan, peak_rss_mb, pieces, ref_path)
 
 FORMAT = "streetzim-recipe/2"
-CHUNK = 16 << 20
+CHUNK = int(os.environ.get("LANGPACK_RECIPE_CHUNK") or 16 << 20)   # tests set a small one
 INLINE_MAX_REF = 256         # verbatim runs shorter than this are inlined (bounds the segment count)
 PROXY = "{proxy}"            # the builder page substitutes its range proxy
 _LAST_FILE_MD5: list[str | None] = [None]
