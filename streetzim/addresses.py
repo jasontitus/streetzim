@@ -979,6 +979,41 @@ def merge_overture_places(overture_parquet, search_jsonl_path, bbox=None,
     }
 
 
+def osm_kind(props, gtype):
+    """What sort of thing an OSM object is, from its tags and geometry
+    type, for matching it to a search record of the same sort in a
+    neighbouring cell (zim_writer.feature_wiki, NEIGHBOUR_KINDS): "water"
+    (waterway, water, natural=water|bay|strait, place=sea|ocean, a
+    reservoir), "peak" (natural=peak, volcano, hill, saddle, ridge...),
+    "place" (any other place=*), "street" (a road, rail or lift line, not
+    its stops) or "other"."""
+    nat = props.get("natural")
+    if (props.get("waterway") or props.get("water") or nat in ("water", "bay", "strait")
+            or props.get("place") in ("sea", "ocean")
+            or props.get("landuse") in ("reservoir", "basin")):
+        return "water"
+    if nat in ("peak", "volcano", "hill", "saddle", "ridge", "mountain_range", "arete"):
+        return "peak"
+    if props.get("place"):
+        return "place"
+    if gtype != "Point" and (props.get("highway") or props.get("railway")
+                             or props.get("aerialway")):
+        return "street"
+    return "other"
+
+
+class OsmRef(dict):
+    """A lookup entry (extract_wiki_tags_pbf, extract_name_tags_pbf) that
+    knows its OSM object's sort (`kind`, osm_kind). The kind is an
+    attribute, not an item: entries compare, count their tags and go into
+    records as plain dicts do."""
+    __slots__ = ("kind",)
+
+    def __init__(self, kind, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kind = kind
+
+
 def _point_of(geom):
     """(lat, lon) for an osmium-exported geometry, as extract_wiki_tags_pbf
     places an object: a point, a polygon's outer-ring mean, a line's middle
@@ -1057,7 +1092,7 @@ def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
                 key = (name.lower(), int(round(pt[0] * 1e4)), int(round(pt[1] * 1e4)))
                 existing = lookup.get(key)
                 if existing is None or len(names) > len(existing["names"]):
-                    lookup[key] = {"names": names}
+                    lookup[key] = OsmRef(osm_kind(props, feat["geometry"].get("type")), names=names)
         print(f"    Indexed {len(lookup)} objects with names in other languages")
         return lookup
     finally:
@@ -1155,7 +1190,7 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False, languages=None):
                     continue
 
                 key = (name.lower(), int(round(lat * 1e4)), int(round(lon * 1e4)))
-                entry = {}
+                entry = OsmRef(osm_kind(props, gtype))
                 if wikipedia:
                     entry["wikipedia"] = wikipedia
                 if wikidata:

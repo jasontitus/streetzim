@@ -45,9 +45,15 @@ first piece that has one); else whose `name` is its own-script name
 (`nn`), where every piece of a merged street that has such an object
 must link the same article; else, likewise, an object whose name equals
 either once folded (accents off; the first of a `;` list), as for `n`
-"Poznan" and OSM's `name` "Poznań" (`feature_wiki` in
-`streetzim/zim_writer.py`). An administrative area's are its relation's
-own (below). Records written by `_add_search_in_memory` (small builds and
+"Poznan" and OSM's `name` "Poznań"; else, by those names, an object of
+the record's own sort (a place for a place, a peak, water, a road or
+rail line for a street, anything else for the rest; none for an
+address) in one of the 8 grid cells around its point, when every such
+object found links the same article (`feature_wiki` in
+`streetzim/zim_writer.py`). A tile's point is within a metre of the OSM
+node, but on either side of a cell edge: Zurich's record is in the cell
+north of its node's. An administrative area's are its relation's own
+(below). Records written by `_add_search_in_memory` (small builds and
 tests) get no `w`/`q` except an administrative area's.
 
 Readers must ignore keys they don't know.

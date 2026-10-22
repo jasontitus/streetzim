@@ -166,7 +166,10 @@ def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
       Tunnel's Q-ID on 68 ways OSM mis-tags; a record made only of those
       still links the tunnel);
     - else, with `folded` (wiki_folded_index), the entry its names fold
-      to, likewise none when two differ or a key is ambiguous.
+      to, likewise none when two differ or a key is ambiguous;
+    - else the same names, as they are and folded, in the 8 cells around
+      each of those, for an OSM object of the record's sort only, likewise
+      none when two differ (_neighbour_link).
     None when nothing matches. `link`: what entries agree on (names_link
     for the names lookup, extract_name_tags_pbf)."""
     if not wiki_cross_refs:
@@ -183,18 +186,67 @@ def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
             if (w := wiki_cross_refs.get((nm, qlat, qlon)))]
     if hits:
         return _one_link(hits, link)
-    if not folded:
+    folded_names = []
+    if folded:
+        from cloud.search_shards import norm
+        # norm of an ASCII name is its lower(), at a fraction of the cost.
+        folded_names = list(dict.fromkeys(n.lower() if n.isascii() else norm(n)
+                                          for n in (feat.get("name"), feat.get("name_native")) if n))
+        hits = [folded[k] for nm in folded_names for qlat, qlon in cells
+                if (k := (nm, qlat, qlon)) in folded]
+        if hits:
+            return None if any(h is None for h in hits) else _one_link(hits, link)
+    return _neighbour_link(feat, names, folded_names, cells, wiki_cross_refs, folded, link)
+
+
+# The sorts of OSM object (addresses.osm_kind) a search record of each type
+# matches in a neighbouring cell (_neighbour_link); any other type: "other".
+# An address none.
+NEIGHBOUR_KINDS = {"place": ("place",), "peak": ("peak",), "water": ("water",),
+                   "street": ("street",), "addr": ()}
+
+
+_AROUND = tuple((dlat, dlon) for dlat in (-1, 0, 1) for dlon in (-1, 0, 1) if dlat or dlon)
+
+
+def _cells_around(cells):
+    """The 8 cells around each of `cells` that are none of them, in order."""
+    if len(cells) == 1:
+        qlat, qlon = cells[0]
+        return [(qlat + dlat, qlon + dlon) for dlat, dlon in _AROUND]
+    own = set(cells)
+    out = {}
+    for qlat, qlon in cells:
+        for dlat, dlon in _AROUND:
+            c = (qlat + dlat, qlon + dlon)
+            if c not in own:
+                out[c] = None
+    return list(out)
+
+
+def _neighbour_link(feat, names, folded_names, cells, lookup, folded, link):
+    """feature_wiki's last try, in the cells around the feature's own: the
+    entry its names find there (folded, with `folded`: that finds them as
+    they are too), whose OSM object is of the feature's sort
+    (NEIGHBOUR_KINDS, addresses.OsmRef.kind; an entry that does not know
+    it never matches here); none when two such differ (`link`) or a
+    folded key there is ambiguous. A tile's point of an OSM node is within
+    a metre of it, but a cell is 11 m: Zurich's record (47.37445075) is in
+    cell 473745, its node (47.3744489) in 473744. A building's POI is the
+    mean of its ring in the tile, its key here a corner of it (the closed
+    way's middle vertex)."""
+    want = NEIGHBOUR_KINDS.get(feat.get("type"), ("other",))
+    if not want:
         return None
-    from cloud.search_shards import norm
-    # norm of an ASCII name is its lower(), at a fraction of the cost.
-    keys = [(nm, qlat, qlon)
-            for nm in dict.fromkeys(n.lower() if n.isascii() else norm(n)
-                                    for n in (feat.get("name"), feat.get("name_native")) if n)
-            for qlat, qlon in cells]
-    hits = [folded[k] for k in keys if k in folded]
-    if any(h is None for h in hits):
-        return None
-    return _one_link(hits, link)
+    around = _cells_around(cells)
+    if folded:
+        hits = [folded[k] for nm in folded_names for c in around if (k := (nm,) + c) in folded]
+        if any(h is None for h in hits):
+            return None
+    else:
+        hits = [e for nm in names for c in around if (e := lookup.get((nm,) + c))]
+    hits = [h for h in hits if getattr(h, "kind", None) in want]
+    return _one_link(hits, link) if hits else None
 
 
 def admin_record_fields(feat):
