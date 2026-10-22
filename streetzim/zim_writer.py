@@ -166,11 +166,22 @@ def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
       Tunnel's Q-ID on 68 ways OSM mis-tags; a record made only of those
       still links the tunnel);
     - else, with `folded` (wiki_folded_index), the entry its names fold
-      to, likewise none when two differ or a key is ambiguous.
+      to, likewise none when two differ or a key is ambiguous;
+    - else the same names, as they are and folded, in the 8 cells around
+      each of those, for an OSM object of the record's sort only, likewise
+      none when two differ, there or in the 16 cells beyond
+      (_neighbour_link).
     None when nothing matches. `link`: what entries agree on (names_link
     for the names lookup, extract_name_tags_pbf)."""
+    return feature_wiki_match(feat, wiki_cross_refs, folded, link)[0]
+
+
+def feature_wiki_match(feat, wiki_cross_refs, folded=None, link=wiki_link):
+    """(feature_wiki's entry, whether the cells around the feature's own
+    gave it): a geo-index row placed by a record's own cell beats one
+    placed from next door (_search_bucket)."""
     if not wiki_cross_refs:
-        return None
+        return None, False
     pts = [(feat["lat"], feat["lon"])] + [tuple(p) for p in feat.get("_pts", ())]
     cells = [(int(round(plat * 1e4)), int(round(plon * 1e4))) for plat, plon in pts]
     names = wiki_match_names(feat)
@@ -178,23 +189,105 @@ def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
         for qlat, qlon in cells:
             wiki = wiki_cross_refs.get((nm, qlat, qlon))
             if wiki:
-                return wiki
+                return wiki, False
     hits = [w for nm in names[1:] for qlat, qlon in cells
             if (w := wiki_cross_refs.get((nm, qlat, qlon)))]
     if hits:
-        return _one_link(hits, link)
-    if not folded:
+        return _one_link(hits, link), False
+    folded_names = []
+    if folded:
+        from cloud.search_shards import norm
+        # norm of an ASCII name is its lower(), at a fraction of the cost.
+        folded_names = list(dict.fromkeys(n.lower() if n.isascii() else norm(n)
+                                          for n in (feat.get("name"), feat.get("name_native")) if n))
+        hits = [folded[k] for nm in folded_names for qlat, qlon in cells
+                if (k := (nm, qlat, qlon)) in folded]
+        if hits:
+            return (None if any(h is None for h in hits) else _one_link(hits, link)), False
+    near = _neighbour_link(feat, names, folded_names, cells, wiki_cross_refs, folded, link)
+    return near, near is not None
+
+
+# The sorts of OSM object (addresses.osm_kind) a search record of each type
+# matches in a neighbouring cell (_neighbour_link); any other type: "other".
+# An address none.
+NEIGHBOUR_KINDS = {"place": ("place",), "peak": ("peak",), "water": ("water",),
+                   "street": ("street",), "addr": ()}
+# A POI by its subtype: a railway station takes only a station, a bus stop
+# and an information board nothing (the stop "Kurtheater" is not the
+# theatre, the guidepost "Wettingen" not its station, "Rathaus" not the town
+# hall; a stop next door is often tagged with its operator's or line's item,
+# not its own). An "other" object is never a stop, a station or a board.
+POI_NEIGHBOUR_KINDS = {"bus": (), "railway": ("station",), "information": ()}
+
+
+def neighbour_kinds(feat):
+    """The sorts of OSM object a search record takes from a neighbouring
+    cell (NEIGHBOUR_KINDS, POI_NEIGHBOUR_KINDS)."""
+    t = feat.get("type")
+    if t == "poi" and feat.get("subtype") in POI_NEIGHBOUR_KINDS:
+        return POI_NEIGHBOUR_KINDS[feat["subtype"]]
+    return NEIGHBOUR_KINDS.get(t, ("other",))
+
+
+# The 8 cells around a cell, and the 16 around those.
+_AROUND = tuple((dlat, dlon) for dlat in (-1, 0, 1) for dlon in (-1, 0, 1) if dlat or dlon)
+_BEYOND = tuple((dlat, dlon) for dlat in range(-2, 3) for dlon in range(-2, 3)
+                if max(abs(dlat), abs(dlon)) == 2)
+
+
+def _cells_around(cells, ring=_AROUND, skip=()):
+    """The cells at `ring`'s offsets around each of `cells` that are none
+    of them nor in `skip`, in order."""
+    if len(cells) == 1 and not skip:
+        qlat, qlon = cells[0]
+        return [(qlat + dlat, qlon + dlon) for dlat, dlon in ring]
+    own = set(cells).union(skip)
+    out = {}
+    for qlat, qlon in cells:
+        for dlat, dlon in ring:
+            c = (qlat + dlat, qlon + dlon)
+            if c not in own:
+                out[c] = None
+    return list(out)
+
+
+def _neighbour_link(feat, names, folded_names, cells, lookup, folded, link):
+    """feature_wiki's last try, in the cells around the feature's own: the
+    entry its names find there (folded, with `folded`: that finds them as
+    they are too), whose OSM object is of the feature's sort
+    (NEIGHBOUR_KINDS, addresses.OsmRef.kind; an entry that does not know
+    it never matches here); none when two such differ (`link`) or a
+    folded key there is ambiguous. A tile's point of an OSM node is within
+    a metre of it, but a cell is 11 m: Zurich's record (47.37445075) is in
+    cell 473745, its node (47.3744489) in 473744. A building's POI is the
+    mean of its ring in the tile, its key here a corner of it (the closed
+    way's middle vertex). Taken from the 8 cells around only, but checked
+    against the 16 beyond them too: another object of the name and sort
+    there that links another article (the castle of Monolithos, two cells
+    from a ruin of its name tagged with the village; a second "Kaplica
+    grobowa") leaves the record with none."""
+    want = neighbour_kinds(feat)
+    if not want:
         return None
-    from cloud.search_shards import norm
-    # norm of an ASCII name is its lower(), at a fraction of the cost.
-    keys = [(nm, qlat, qlon)
-            for nm in dict.fromkeys(n.lower() if n.isascii() else norm(n)
-                                    for n in (feat.get("name"), feat.get("name_native")) if n)
-            for qlat, qlon in cells]
-    hits = [folded[k] for k in keys if k in folded]
-    if any(h is None for h in hits):
+
+    def found(around):
+        if folded:
+            hits = [folded[k] for nm in folded_names for c in around if (k := (nm,) + c) in folded]
+            if any(h is None for h in hits):
+                return None
+        else:
+            hits = [e for nm in names for c in around if (e := lookup.get((nm,) + c))]
+        return [h for h in hits if getattr(h, "kind", None) in want]
+
+    around = _cells_around(cells)
+    hits = found(around)
+    if not hits:
         return None
-    return _one_link(hits, link)
+    beyond = found(_cells_around(cells, _BEYOND, around))
+    if beyond is None:
+        return None
+    return _one_link(hits + beyond, link)
 
 
 def admin_record_fields(feat):
@@ -2470,6 +2563,16 @@ def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None)
     return rec
 
 
+def _geo_rank(feat, near):
+    """How well a search record places the article it links in the wiki
+    geo-index, lowest best: a city or town, then any record but a street,
+    then a street; within each, a match in its own cell before one from a
+    neighbouring cell (feature_wiki_match)."""
+    t = feat.get("type")
+    return (0 if t == "place" and feat.get("subtype") in ("city", "town") else 1,
+            1 if t == "street" else 0, 1 if near else 0)
+
+
 def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None, ln_name_refs=None):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file.
@@ -2518,6 +2621,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     # linearly today; see STREETZIM_CONSUMPTION.md).
     type_counts = {}
     wiki_fields_added = 0
+    wiki_geo_rank = {}  # title_us -> _geo_rank of the record that placed it
     wiki_geo = {}  # title_us -> [lat, lon, type]: geo-index for the
                    # viewer's nearby-Wikipedia list + markers (any zoom)
     cat_chunk_fds = {}
@@ -2557,6 +2661,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                 # Enrich with wiki cross-refs if this POI has matching
                 # (name, coord) in the OSM-tag lookup built from the PBF.
                 wiki = None
+                wiki_near = False
                 if t == "admin":
                     # An admin area carries its relation's own tags; a
                     # name+point match could be another object (the place
@@ -2568,7 +2673,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                     # By its search or own-script name, at its point or
                     # a merged street's pieces', else by a folded name
                     # (feature_wiki).
-                    wiki = feature_wiki(feat, wiki_cross_refs, _wiki_folded)
+                    wiki, wiki_near = feature_wiki_match(feat, wiki_cross_refs, _wiki_folded)
                     if wiki:
                         wiki_fields_added += 1
 
@@ -2594,14 +2699,16 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                         # Only index titles whose article was actually
                         # bundled (enwiki had a page) — else the viewer
                         # would list places that 404 on "Read full article".
-                        # The first feature places it, but any other kind
-                        # takes it from a street: a merged street's point is
-                        # one of its pieces', kilometres from the subject.
+                        # Placed by the best record that links it
+                        # (_geo_rank), the first of equals: a city or town
+                        # first, a street last (a merged street's point is
+                        # one of its pieces', kilometres from the subject),
+                        # a record's own cell before a neighbouring one.
+                        _rank = _geo_rank(feat, wiki_near)
                         if (_gt and _bundled_set is not None
                                 and _gt in _bundled_set
-                                and (_gt not in wiki_geo
-                                     or (wiki_geo[_gt][2] == "street"
-                                         and t != "street"))):
+                                and (_gt not in wiki_geo or _rank < wiki_geo_rank[_gt])):
+                            wiki_geo_rank[_gt] = _rank
                             # [lat, lon, type, qid, desc]. The short
                             # description is baked in so the viewer's
                             # nearby-Wikipedia list needs NO
