@@ -27,13 +27,14 @@ for _cmd in ("bash", "curl", "ss", "setsid"):
 KIWIX_STUB = r'''
 import http.server, json, os, sys
 port = int(sys.argv[sys.argv.index("--port") + 1])
+addr = sys.argv[sys.argv.index("--address") + 1] if "--address" in sys.argv else "0.0.0.0"
 books = [a for a in sys.argv[1:] if a.endswith(".zim")]
 # what the disk held when this server started (the gates must stream: one merged file at a time)
 log = os.environ.get("KIWIX_STUB_LOG")
 if log:
     merged = os.path.join(os.environ["LANGPACK_WORK"], "merged")
     with open(log, "a") as fh:
-        fh.write(json.dumps({"books": [os.path.basename(b) for b in books],
+        fh.write(json.dumps({"books": [os.path.basename(b) for b in books], "address": addr,
                              "merged_dir": sorted(os.listdir(merged))}) + "\n")
 xml = "<feed>" + "".join(f"<entry><title>x</title><link href=\"/content/{b.rsplit('/', 1)[-1][:-4].lower()}\"/></entry>"
                          for b in books) + "</feed>"
@@ -44,7 +45,7 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(404); self.end_headers()
     def log_message(self, *a): pass
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+http.server.HTTPServer((addr, port), H).serve_forever()
 '''
 
 NODE_STUB = r'''#!/bin/bash
@@ -149,6 +150,8 @@ def test_one_merged_file_at_a_time(gates: SimpleNamespace) -> None:
     for r in rows[1:]:
         assert r["merged_dir"] == r["books"], r
     assert sorted(os.listdir(gates.work / "merged")) == []
+    # nothing is served beyond the host itself: kiwix-serve listens on 127.0.0.1 only
+    assert {r["address"] for r in rows} == {"127.0.0.1"}, rows
 
 
 def test_keep_merged_and_search_as_advisory(gates: SimpleNamespace, tmp_path: Path) -> None:
@@ -374,7 +377,18 @@ def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path
                                             "carried": ["zimcheck", "route", "kiwix", "search"]}
     assert v2["checks"]["recipe_eq_merge"] and v2["checks"]["verify"]
     # another title: another fingerprint, the full gate again
-    r = subprocess.run(args, capture_output=True, text=True, timeout=600,
-                       env={**env, "TITLES": json.dumps({"de": "Testland neu"})})
+    env_t = {**env, "TITLES": json.dumps({"de": "Testland neu"})}
+    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
     assert r.returncode == 0 and "light gate" not in r.stdout
     assert int(runs.read_text()) == 2
+    # the pack rebuilt with other bytes (same name, same articles): its chunk hashes are in the
+    # fingerprint, so the full gate again, though the last verdict passed
+    v3 = json.loads(vp.read_text())
+    v3["checks"].update(route=True, kiwix=True, search=True)
+    v3["all_pass"] = all(v3["checks"].values())
+    vp.write_text(json.dumps(v3))
+    lpzims.write_pack(de, "de", uuid, title="Testland Wiki (de) 2")
+    assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
+    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
+    assert r.returncode == 0 and "light gate" not in r.stdout, r.stdout
+    assert int(runs.read_text()) == 3

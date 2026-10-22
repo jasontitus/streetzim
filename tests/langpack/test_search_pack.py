@@ -64,8 +64,199 @@ def test_the_text_is_folded_like_libzims_queries() -> None:
     """python-libzim keeps accents in index-data terms while libzim's reader
     folds every query: the search pack folds the text itself (Greek full text
     found nothing before: 'Παρθενώνας' 0 hits on Greece el)."""
-    assert index_pack.page_text("<p>Ο Παρθενώνας, Αθηνάς — Zürich</p>".encode()) == "Ο Παρθενωνας, Αθηνας — Zurich"
+    assert index_pack.page_text("<p>Ο Παρθενώνας, Αθηνάς — Zürich</p>".encode()) == "ο παρθενωνας, αθηνας — zurich"
     assert index_pack.page_text(b"<head><title>x</title></head><script>var a</script><nav>menu</nav><p>body</p>") == "body"
+
+
+# Words whose marks libzim's folding takes off: Thai and Devanagari vowel
+# signs (category M, combining class 0), accents, Arabic harakat, a dotted
+# capital I, a final sigma.
+FOLD_WORDS = ["สวัสดี", "เชียงใหม่", "दिल्ली", "मुंबई", "Μονεμβασιά", "Préfecture", "Hà Nội", "القَاهِرَة",
+              "İstanbul", "ΟΔΟΣ", "Straße"]
+
+
+def test_fold_is_libzims_own(tmp_path: Path) -> None:
+    """Review S-2: fold() must equal libzim's zim::removeAccents ("Lower; NFD;
+    [:M:] remove; NFC"). libzim's own HTML indexer folds a page's text so;
+    a search pack's index data, folded by fold(), must give the same full
+    text hits for every word (the old fold kept the Thai and Devanagari
+    vowel signs: 'สวัสดี', 'दिल्ली' were never found)."""
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+    from libzim.writer import Creator, Hint, IndexData, Item, StringProvider
+
+    class Data(IndexData):
+        def __init__(self, t: str, x: str):
+            super().__init__()
+            self.t, self.x = t, x
+
+        def has_indexdata(self): return True
+        def get_title(self): return self.t
+        def get_content(self): return self.x
+        def get_keywords(self): return ""
+        def get_wordcount(self): return len(self.x.split())
+        def get_geoposition(self): return None
+
+    class Page(Item):                   # libzim's own indexer reads the HTML
+        def __init__(self, p: str, html: str, idx=None):
+            super().__init__()
+            self.p, self.h, self.idx = p, html, idx
+
+        def get_path(self): return self.p
+        def get_title(self): return "t " + self.p
+        def get_mimetype(self): return "text/html"
+        def get_contentprovider(self): return StringProvider(self.h)
+        def get_hints(self): return {Hint.FRONT_ARTICLE: True}
+
+    class PackPage(Page):               # a search pack's: our index data
+        def get_indexdata(self): return self.idx
+
+    zims = {}
+    for how in ("libzim", "fold"):
+        zims[how] = tmp_path / f"{how}.zim"
+        with Creator(zims[how]).config_indexing(True, "eng") as c:
+            c.add_metadata("Title", "t")
+            for i, w in enumerate(FOLD_WORDS):
+                text = f"{w} filler words"
+                html = f"<html><head><title>t{i}</title></head><body><p>{text}</p></body></html>"
+                c.add_item(Page(f"p{i}", html) if how == "libzim" else
+                           PackPage(f"p{i}", html, Data("", index_pack.fold(text))))
+    for i, w in enumerate(FOLD_WORDS):
+        got = {how: list(Searcher(Archive(z)).search(Query().set_query(w)).getResults(0, 5)) for how, z in zims.items()}
+        assert got["libzim"] == [f"p{i}"] and got["fold"] == got["libzim"], (w, index_pack.fold(w), got)
+
+
+@pytest.fixture(scope="module")
+def sr(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
+    """A base whose places have other names (front redirects), a de pack and
+    a th (non-Latin) pack, their search pack and the merged file."""
+    from tests.langpack import lpzims
+    d = tmp_path_factory.mktemp("searchredir")
+    base = d / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base, front_redirects=[("wiki-article/Alpha_GR", "Άλφα Πόλη", "wiki-article/Alpha_Town"),
+                                                 ("wiki-article/Beta_BG", "Бета Връх", "wiki-article/Beta_Peak")])
+    packs = {x: d / f"osm_testland_wiki-{x}_2026-10-13_{u[:8]}.zim" for x in ("de", "th")}
+    for x, p in packs.items():
+        lpzims.write_pack(p, x, u)
+    out = d / "osm_testland_search-de-th_2026-10-13_x.zim"
+    side = index_pack.build(str(base), [str(p) for p in packs.values()], "de", "testland", str(out), d / "cache",
+                            log=lambda m: None)
+    merged = d / "m.zim"
+    r = tool("merge_zim.py", base, *packs.values(), "--index", out, "-o", merged, "--lang", "th", "--region", "testland")
+    assert r.returncode == 0, r.stdout + r.stderr
+    return SimpleNamespace(d=d, base=base, packs=packs, out=out, side=side, merged=merged, uuid=u)
+
+
+def test_kiwix_suggests_the_bases_other_names(sr: SimpleNamespace) -> None:
+    """Review S-1: the base's front redirects (a place's other names) are in
+    the search pack's title index, so Kiwix still suggests them in the
+    merged file (Greece: 2,566 such; 20 of 20 sampled found by the base, 3
+    by the merged file before)."""
+    for q, path in (("Άλφα", "wiki-article/Alpha_GR"), ("αλφα πολη", "wiki-article/Alpha_GR"),
+                    ("Бета", "wiki-article/Beta_BG")):
+        assert path in _suggest(sr.base, q), q            # what the base's own index finds
+        assert path in _suggest(sr.merged, q), q
+    assert sr.side["redirects"] == 2 and sr.side["per_source"]["base"]["redirects"] == 2, sr.side
+    assert sr.side["gate"]["ok"] and sr.side["gate"]["found"]["osm-testland-2026-10-13.zim (redirect)"]["suggest"]
+
+
+def test_a_non_latin_pack_is_found_by_full_text(sr: SimpleNamespace) -> None:
+    """Review S-2: the gate requires full text, and a Thai pack's article is
+    found by it (the old fold kept its vowel sign; libzim folds it off the
+    query)."""
+    assert "~w/th/wiki-article/อัลฟา" in _fulltext(sr.merged, "อัลฟา")
+    r = tool("search_gate.py", sr.merged, sr.base, "--lang", "th")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert r.returncode == 0 and out["pass"] and out["fulltext_found"] == out["titles"] == 1, out
+    assert out["base"]["base_found"] == out["base"]["merged_found"] and out["base"]["redirects"] == 2, out
+
+
+def test_the_gate_requires_the_bases_redirects(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
+    """Review S-1: a search pack without the base's redirects fails the
+    search gate's base parity (the base suggests them, the merged file not)."""
+    real = getattr(index_pack, "entries", None)
+    if real is not None:
+        monkeypatch.setattr(index_pack, "entries", lambda p: (r for r in real(p) if r[0] != "r"))
+    out = tmp_path / "osm_testland_search-de-th_2026-10-13_y.zim"
+    index_pack.build(str(sr.base), [str(p) for p in sr.packs.values()], "de", "testland", str(out), None,
+                     log=lambda m: None)
+    merged = tmp_path / "m.zim"
+    assert tool("merge_zim.py", sr.base, *sr.packs.values(), "--index", out, "-o", merged, "--lang", "th",
+                "--region", "testland").returncode == 0
+    r = tool("search_gate.py", merged, sr.base, "--lang", "de")
+    g = json.loads(r.stdout.strip().splitlines()[-1])
+    assert g["suggest_found"] == g["fulltext_found"] == g["titles"] == 3, g      # the de pack's part passes
+    assert r.returncode == 1 and not g["pass"], g
+    assert {x["path"] for x in g["base"]["missed"]} == {"wiki-article/Alpha_GR", "wiki-article/Beta_BG"}, g
+
+
+def test_the_gates_require_full_text(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
+    """Review S-2: text folded the old way (combining marks only) keeps the
+    Thai vowel sign, so full text misses the th article while suggestions
+    find it: the search pack's own gate and the merged file's search gate
+    fail it (the th entry passed with 2/12 by full text on Greece)."""
+    import unicodedata
+    monkeypatch.setattr(index_pack, "fold", lambda t: unicodedata.normalize("NFC", "".join(
+        ch for ch in unicodedata.normalize("NFD", t) if not unicodedata.combining(ch))))
+    out = tmp_path / "osm_testland_search-de-th_2026-10-13_w.zim"
+    side = index_pack.build(str(sr.base), [str(p) for p in sr.packs.values()], "th", "testland", str(out), None,
+                            log=lambda m: None)
+    assert not side["gate"]["ok"] and any("full text" in x and "อัลฟา" in x for x in side["gate"]["problems"]), side["gate"]
+    merged = tmp_path / "m.zim"
+    assert tool("merge_zim.py", sr.base, *sr.packs.values(), "--index", out, "-o", merged, "--lang", "th",
+                "--region", "testland").returncode == 0
+    r = tool("search_gate.py", merged, sr.base, "--lang", "th")
+    g = json.loads(r.stdout.strip().splitlines()[-1])
+    assert g["suggest_found"] == g["titles"] == 1 and g["fulltext_found"] == 0, g
+    assert g["base"]["merged_found"] == g["base"]["base_found"], g        # parity holds: full text alone fails it
+    assert r.returncode == 1 and not g["pass"], g
+
+
+def test_full_text_finds_a_title_alone(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
+    """The index data's title is folded too, as libzim's own indexer folds
+    it: with no page text at all, full text still finds the Thai article by
+    its title."""
+    monkeypatch.setattr(index_pack, "page_text", lambda raw: "")
+    out = tmp_path / "osm_testland_search-th_2026-10-13_t.zim"
+    index_pack.build(str(sr.base), [str(sr.packs["th"])], "th", "testland", str(out), None, log=lambda m: None)
+    assert "~w/th/wiki-article/อัลฟา" in _fulltext(out, "อัลฟา")
+
+
+def test_pages_stream_into_the_writer(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
+    """Review S-3: rows go to libzim's writer as they are read; nothing holds
+    every page's text (Greece: 497 MB peak before). Each add_item comes
+    right after its row; a stale cache version is not read; the cache is
+    written once complete."""
+    import libzim.writer as lw
+    made = [0]
+
+    def counting(real):
+        def rows(p):
+            for r in real(p):
+                made[0] += 1
+                yield r
+        return rows
+    for name in ("entries", "pages"):              # the row reader (pages before S-3)
+        if hasattr(index_pack, name):
+            monkeypatch.setattr(index_pack, name, counting(getattr(index_pack, name)))
+    seen: list[int] = []
+
+    class Spy(lw.Creator):
+        def add_item(self, item):
+            seen.append(made[0])
+            return super().add_item(item)
+    monkeypatch.setattr(lw, "Creator", Spy)
+    cache = tmp_path / "cache"
+    (cache / "index-text").mkdir(parents=True)
+    import gzip
+    uuid = str(__import__("uuid").UUID(sr.uuid))
+    with gzip.open(cache / "index-text" / f"{uuid}.jsonl.gz", "wt") as fh:      # an old version's cache
+        fh.write(json.dumps(["wiki-article/Junk", "Junk", True, "junk"]) + "\n")
+    out = tmp_path / "osm_testland_search-de_2026-10-13_z.zim"
+    side = index_pack.build(str(sr.base), [str(sr.packs["de"])], "de", "testland", str(out), cache, log=lambda m: None)
+    assert 1 <= seen[0] <= 2 and len(seen) == side["pages"], (seen, side["pages"])
+    assert "wiki-article/Junk" not in _suggest(out, "Junk")
+    assert (cache / "index-text" / f"{uuid}.v{index_pack.TEXT_VERSION}.jsonl.gz").exists()
 
 
 def test_the_merge_carries_the_search_packs_indexes(sp: SimpleNamespace, tmp_path: Path) -> None:

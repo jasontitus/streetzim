@@ -108,11 +108,11 @@ zimcheck_merged() {
   $N $ZC -A --threads=1 "$1" > "$2" 2>&1
 }
 
-B=http://localhost:$PORT
+B=http://127.0.0.1:$PORT
 SRV=
-serve() {     # kiwix-serve on $PORT with these books
+serve() {     # kiwix-serve on 127.0.0.1:$PORT with these books (nothing is served beyond this host)
   wait_mem
-  setsid nohup "${LIM[@]}" timeout 7200 "$KS" --port "$PORT" "$@" > "$OUT/kiwix-serve.log" 2>&1 < /dev/null &
+  setsid nohup "${LIM[@]}" timeout 7200 "$KS" --address 127.0.0.1 --port "$PORT" "$@" > "$OUT/kiwix-serve.log" 2>&1 < /dev/null &
   SRV=$!
   for _ in $(seq 1 90); do curl -s -m 2 -o /dev/null "$B/catalog/v2/entries" && break; sleep 1; done
   curl -s -m 30 "$B/catalog/v2/entries" > "$OUT/catalog.xml"

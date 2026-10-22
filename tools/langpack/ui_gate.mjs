@@ -8,7 +8,9 @@
 // Checks (each recorded with its evidence):
 //   html_lang     the UI is in LANG: the viewer chose LANG's table (SZ_UI_LANG), <html lang>
 //                 says so and a translated string is on screen; a language with no UI
-//                 table FAILS; right-to-left languages need <html dir="rtl"> where the
+//                 table FAILS, unless the viewer declares a fallback for it
+//                 (SZ_UI_FALLBACK: rm -> de) and shows that (ui_verdict.mjs);
+//                 right-to-left languages need <html dir="rtl"> where the
 //                 viewer knows them (SZ_RTL_LANGS). English (base, en entry): English UI
 //   labels        text-field reads name:<LANG> (merged, LANG != base); the city's label
 //                 as displayed (szDisplayLabelOf) is what the label rule says (with
@@ -26,6 +28,7 @@
 // CHROME_PATH: the Chromium to drive; BROWSER_LIBS: extra LD_LIBRARY_PATH for it.
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 import fs from 'node:fs';
+import { uiVerdict } from './ui_verdict.mjs';
 
 const [ORIGIN, LANG, REGION, MODE] = process.argv.slice(2);
 const R = JSON.parse(fs.readFileSync(REGION, 'utf8'));
@@ -57,7 +60,8 @@ try {
   // viewer-i18n-core): SZ_UI_LANG / SZ_I18N after it chose the language,
   // szUiLanguages() where the viewer has it. Right-to-left languages
   // (SZ_RTL_LANGS, where the viewer has it) need <html dir="rtl">.
-  await step('html_lang', () => page.evaluate((lang) => {
+  await step('html_lang', async () => {
+    const f = await page.evaluate((lang) => {
     const tables = typeof szUiLanguages === 'function' ? szUiLanguages() : null;
     const table = typeof SZ_I18N !== 'undefined' && SZ_I18N && typeof SZ_I18N === 'object' ? SZ_I18N : null;
     const uiLang = typeof SZ_UI_LANG !== 'undefined' ? SZ_UI_LANG : null;
@@ -72,19 +76,15 @@ try {
     const htmlLang = document.documentElement.lang || '';
     const dir = document.documentElement.dir || '';
     const rtl = typeof SZ_RTL_LANGS === 'object' && SZ_RTL_LANGS && !!SZ_RTL_LANGS[lang];
-    const why = [];
-    if (lang === 'en') {
-      if (uiLang !== 'en') why.push(`UI in ${uiLang}, not English`);
-    } else {
-      if (!table || uiLang !== lang) why.push(`no ${lang} UI table: the UI is in ${uiLang || '?'}`);
-      if (htmlLang.split('-')[0] !== lang) why.push(`<html lang="${htmlLang}">`);
-      if (table && !shown.length) why.push('no translated string on screen');
-      if (rtl && dir !== 'rtl') why.push(`<html dir="${dir}"> for a right-to-left language`);
-    }
-    return { htmlLang, dir, uiLang, hasTable: !!table && uiLang === lang,
-             viewerLanguages: Array.isArray(tables) ? tables : null, translatedShown: shown,
-             rtlRequired: rtl, why, pass: why.length === 0 };
-  }, LANG));
+    const fallback = typeof SZ_UI_FALLBACK === 'object' && SZ_UI_FALLBACK ? SZ_UI_FALLBACK[lang] || null : null;
+    return { lang, htmlLang, dir, uiLang, hasTable: !!table, shownCount: shown.length, rtl, fallback,
+             viewerLanguages: Array.isArray(tables) ? tables : null, translatedShown: shown };
+    }, LANG);
+    const v = uiVerdict(f);
+    return { htmlLang: f.htmlLang, dir: f.dir, uiLang: f.uiLang, hasTable: f.hasTable && f.uiLang === v.ui,
+             fallback: v.fallbackUsed, viewerLanguages: f.viewerLanguages, translatedShown: f.translatedShown,
+             rtlRequired: f.rtl, why: v.why, pass: v.pass };
+  });
 
   // The city's label at the first zoom of ZOOMS that renders it (labels
   // collide: a city drawn at z7 can be hidden at z9); the popup check
