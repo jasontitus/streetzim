@@ -255,16 +255,21 @@ for f in "${FILES[@]}"; do
 done
 if [ ${#SEND[@]} -gt 0 ]; then
   say "upload to $ITEM: ${#SEND[@]} packs"
-  # behind the host's upload lock, as every upload (MAINTAINING.md)
-  ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "${SEND[@]##*/}" --retries 5 --checksum \
-      --metadata="mediatype:data" --metadata="collection:opensource_media" \
-      --metadata="licenseurl:https://creativecommons.org/licenses/by-sa/4.0/" \
-      --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
-      "${LANG_META[@]}" \
-      --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
-      >> "$LOG" 2>&1 ) || { say "ia upload failed"; exit 1; }
-  now=$(date +%s)
-  for p in "${SEND[@]}"; do printf '%s\t%s\t%s\n' "${p##*/}" "${MD5[${p##*/}]}" "$now" >> "$SENT"; done
+  # One pack per `ia upload`, recorded as soon as it is sent: a run that
+  # fails part way never sends again what it sent before the failure (one
+  # batch call recorded nothing then, so a rerun sent them all again).
+  # Behind the host's upload lock, as every upload (MAINTAINING.md).
+  for p in "${SEND[@]}"; do
+    f=${p##*/}
+    ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "$f" --retries 5 --checksum \
+        --metadata="mediatype:data" --metadata="collection:opensource_media" \
+        --metadata="licenseurl:https://creativecommons.org/licenses/by-sa/4.0/" \
+        --metadata="title:StreetZim $TITLE: Wikipedia language packs" \
+        "${LANG_META[@]}" \
+        --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
+        >> "$LOG" 2>&1 ) || { say "ia upload of $f failed (the packs sent before it are recorded in $SENT)"; exit 1; }
+    printf '%s\t%s\t%s\n' "$f" "${MD5[$f]}" "$(date +%s)" >> "$SENT"
+  done
 fi
 # Every pack listed with its MD5, checked a round at a time.
 LEFT=("${FILES[@]}")
@@ -317,7 +322,8 @@ if [ $CRC != 0 ]; then
 fi
 "$PY" "$TL/checked.py" write "$OUT" --summary "$(grep '^SUMMARY' "$STG.check" | tail -1)" || { say "could not seal $OUT"; exit 1; }
 rm -f "$STG.check"
-"$PY" "$TL/checked.py" swap "$STG" "$SITE" && rm -rf "$STG" || { say "could not replace $SITE"; exit 1; }
+"$PY" "$TL/checked.py" swap "$STG" "$SITE" || { say "could not replace $SITE"; exit 1; }
+rm -rf "$STG" || say "$SITE replaced; the previous files in $STG could not all be removed"
 OUT=$SITE/recipes/$REGION
 say "== ready: $OUT ($("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json"))"
 say "   publish: ops/langpack/publish_site.sh $REGION, then deploy the site"

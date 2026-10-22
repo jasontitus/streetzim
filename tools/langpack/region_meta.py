@@ -9,9 +9,10 @@ Prints one JSON object:
    "base_lang": the base's language (map-config "language", else en),
    "base_wiki": the language of the base's own Wikipedia articles, or null,
    "region_langs": map-config regionLanguages (most spoken first) that have a
-            Wikipedia ZIM; a continent or multi-country map (--tier, or the
-            region's tier in cloud/regions.tsv) keeps at most
-            --region-packs-max (3) besides the base's own, a country map all,
+            Wikipedia ZIM; a map of any tier but country, local and us-region
+            (--tier, or the region's tier in cloud/regions.tsv; a region not
+            in it counts as capped) keeps at most --region-packs-max (3)
+            besides the base's own, a country map all,
    "langs": the menu: CORE + region_langs (+ the base's language), each with
             a Wikipedia ZIM in --wiki-src or needing none (the base's own),
    "pack_langs": the packs to build: every language a menu entry needs
@@ -53,7 +54,9 @@ TITLE_MAX_UTF16 = 30
 # base's own not counted. A country map keeps all its languages
 # (Switzerland: de, fr, it, rm in every entry).
 REGION_PACKS_MAX = 3
-CAPPED_TIERS = ("continent", "multi-country")
+# The cap applies to every tier but these (continent, multi-country, and a
+# region cloud/regions.tsv does not know: review S-4, it fails closed).
+UNCAPPED_TIERS = ("country", "local", "us-region")
 REGISTRY = os.path.join(ROOT, "cloud", "regions.tsv")
 
 
@@ -131,8 +134,9 @@ def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
 
 def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_max: int | None = REGION_PACKS_MAX,
          tier: str | None = None) -> dict:
-    """`region_max` applies to CAPPED_TIERS only (None: never)."""
-    if tier not in CAPPED_TIERS:
+    """`region_max` applies to every tier but UNCAPPED_TIERS (None: never),
+    an unknown one (None) included."""
+    if tier in UNCAPPED_TIERS:
         region_max = None
     z = ZimReader(base)
     cfg = json.loads(blob_of(z, KEY_MAPCFG) or b"{}")
@@ -186,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--core", default=",".join(CORE_LANGS))
     ap.add_argument("--cache", default=None, help="the pack builder's cache (region names in each language)")
     ap.add_argument("--region-packs-max", type=int, default=REGION_PACKS_MAX,
-                    help=f"a continent or multi-country map keeps its first N languages with a Wikipedia ZIM "
+                    help=f"a map of any tier but country, local and us-region keeps its first N languages with a Wikipedia ZIM "
                          f"(default {REGION_PACKS_MAX})")
     ap.add_argument("--region", help="the region id: its tier (cloud/regions.tsv) decides the cap")
     ap.add_argument("--tier", help="the tier, instead of looking it up")

@@ -142,11 +142,23 @@ def test_a_country_map_carries_all_its_languages(tmp_path: Path) -> None:
     cfg = {"name": "Switzerland", "hasWikiArticles": True, "regionLanguages": ["de", "fr", "it", "rm"]}
     b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
     w = _wiki(tmp_path, ["de", "fr", "it", "rm", "en", "ja"])
-    for extra in (("--region", "switzerland"), ("--tier", "country"), ()):
+    for extra in (("--region", "switzerland"), ("--tier", "country"), ("--tier", "local"), ("--tier", "us-region")):
         m = _meta(b, w, "ja,en", None, *extra)
         assert m["region_langs"] == ["de", "fr", "it", "rm"] and not m["dropped"], (extra, m)
         assert m["pack_langs"] == ["de", "fr", "it", "ja", "rm"]
     assert _meta(b, w, "ja,en", None, "--tier", "multi-country")["region_langs"] == ["de", "fr", "it"]
+
+
+def test_the_cap_fails_closed(tmp_path: Path) -> None:
+    """Review S-4: a region cloud/regions.tsv does not list (or no region at
+    all) is capped like a continent, not given every language."""
+    cfg = {"name": "Somewhere", "hasWikiArticles": True, "regionLanguages": ["de", "fr", "it", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
+    w = _wiki(tmp_path, ["de", "fr", "it", "rm", "en", "ja"])
+    for extra in (("--region", "not-in-the-registry"), ()):
+        m = _meta(b, w, "ja,en", None, *extra)
+        assert m["region_langs"] == ["de", "fr", "it"] and m["tier"] is None, (extra, m)
+        assert [d["lang"] for d in m["dropped"]] == ["rm"], m
     from tools.langpack.region_meta import registry_tier
     assert (registry_tier("switzerland"), registry_tier("europe"), registry_tier("balkans"),
             registry_tier("switzerland-de"), registry_tier(None)) == ("country", "continent", "multi-country", None, None)

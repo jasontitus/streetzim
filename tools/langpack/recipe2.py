@@ -431,6 +431,8 @@ def main(argv=None):
     b.add_argument("--region-langs", default="")
     b.add_argument("--check", help="compare the materialized recipe with this merge_zim.py output")
     b.add_argument("--index", help="the entry's search pack (index_pack.py)")
+    b.add_argument("--language-meta", choices=("list", "map"), default="list",
+                   help="the Language metadata, as merge_zim.py (ship_packs and run_gates use map)")
     mn = sub.add_parser("menu")
     mn.add_argument("base")
     mn.add_argument("--packs-dir", required=True)
@@ -450,7 +452,7 @@ def main(argv=None):
     if a.cmd == "build":
         recipe, plan, st = build_recipe(a.base, a.packs, a.lang, region=a.region, title=a.title,
                                         region_langs=[x for x in a.region_langs.split(",") if x],
-                                        index_path=a.index)
+                                        index_path=a.index, language_meta=a.language_meta)
         with open(a.out, "w") as fh:
             json.dump(recipe, fh, ensure_ascii=False)
         st["recipe_json_bytes"] = os.path.getsize(a.out)

@@ -94,14 +94,17 @@ $N $PY "$TL/recipe2.py" menu "$BASE" --packs-dir "$PACKS" --langs "$LANGS" --reg
 # zimcheck -A, single-threaded: with --threads=4, zim-tools 3.8.0 twice
 # stopped making progress in its redundant-data pass on Greece's merged
 # files (el 2026-10-21, ja 2026-10-22: 41 min at 100% CPU, 193 log lines,
-# where --threads=1 passed in 27 s). A run that ends without its verdict
-# line (killed or crashed, not a finding) is run once more. A Fail is never
-# retried.
+# where --threads=1 passed in 27 s). A run killed by a signal (the OOM
+# killer, a shutdown) is run once more; one that ended on its own without
+# its verdict line, or hit the 2 h timeout, fails: the same run would only
+# do the same again. A Fail is never retried.
 zimcheck_merged() {
   $N $ZC -A --threads=1 "$1" > "$2" 2>&1
+  local rc=$?
   grep -q 'Overall Test Status:' "$2" && return
+  { [ $rc -gt 128 ] && [ $rc != 124 ]; } || return 0
   mv -f "$2" "$2.first"
-  echo "zimcheck: no verdict line, run again ($2.first)" >&2
+  echo "zimcheck: killed (rc=$rc), run again ($2.first)" >&2
   $N $ZC -A --threads=1 "$1" > "$2" 2>&1
 }
 

@@ -8,11 +8,13 @@
 # 1. zim-tools 3.8.0 (the official zimcheck the gates require) at
 #    $TOOLS/zim-tools_linux-x86_64-3.8.0/: unpacked from the release tarball,
 #    whose SHA-256 must be ZIM_TOOLS_SHA256 (the copy already on the host,
-#    ZIM_TOOLS_TARBALL, is used when it matches; else it is downloaded).
+#    ZIM_TOOLS_TARBALL, is used when it matches; else it is downloaded),
+#    in a temporary folder inside $TOOLS. A folder there whose zimcheck is
+#    not 3.8.0 is moved aside (<name>.broken-<time>), never unpacked into.
 # 2. playwright-core for the browser gates: `npm ci` in ops/langpack/ only
 #    (its own package.json and lock; never npm at the repository root, which
-#    would rewrite production's package.json). Refused unless that folder has
-#    both files.
+#    would rewrite production's package.json), with --prefix naming that
+#    folder too. Refused unless that folder has both files.
 # 3. $LANGPACK_WORK (/storage/streetzim/langpack-work) with wpcache/ seeded
 #    from SEED_WPCACHE (the Greece end-to-end's cache: 21 languages' SQL
 #    dumps, title maps, Wikidata text; a reflink copy where the filesystem
@@ -40,7 +42,7 @@ step "1. zim-tools 3.8.0 at $ZT"
 if [ -x "$ZT/zimcheck" ] && "$ZT/zimcheck" --version 2>&1 | head -n 1 | grep -q '^zim-tools 3\.8\.0'; then
   echo "   present: $("$ZT/zimcheck" --version 2>&1 | head -n 1)"
 else
-  TMP=; [ $APPLY = 1 ] && { TMP=$(mktemp -d "$TOOLS.zimtools.XXXXXX" 2>/dev/null) || TMP=$(mktemp -d) || exit 1; }
+  TMP=; [ $APPLY = 1 ] && { mkdir -p "$TOOLS" && TMP=$(mktemp -d "$TOOLS/.zimtools.XXXXXX") || exit 1; }
   TB=${TMP:-<tmp>}/zim-tools.tar.gz
   if [ -f "$ZIM_TOOLS_TARBALL" ] && [ "$(sha256sum "$ZIM_TOOLS_TARBALL" | cut -d' ' -f1)" = "$ZIM_TOOLS_SHA256" ]; then
     run cp "$ZIM_TOOLS_TARBALL" "$TB"
@@ -50,8 +52,12 @@ else
   if [ $APPLY = 1 ]; then
     got=$(sha256sum "$TB" | cut -d' ' -f1)
     [ "$got" = "$ZIM_TOOLS_SHA256" ] || { echo "   SHA-256 $got is not $ZIM_TOOLS_SHA256: not installed" >&2; rm -rf "$TMP"; exit 1; }
-    mkdir -p "$TOOLS" && tar -xzf "$TB" -C "$TMP" || { rm -rf "$TMP"; exit 1; }
+    tar -xzf "$TB" -C "$TMP" || { rm -rf "$TMP"; exit 1; }
     [ -x "$TMP/zim-tools_linux-x86_64-3.8.0/zimcheck" ] || { echo "   the tarball has no zim-tools_linux-x86_64-3.8.0/zimcheck" >&2; rm -rf "$TMP"; exit 1; }
+    if [ -e "$ZT" ]; then                     # there, but its zimcheck is not 3.8.0: aside, not into it
+      echo "   + mv $ZT $ZT.broken-$(date +%Y%m%d-%H%M%S)"
+      mv "$ZT" "$ZT.broken-$(date +%Y%m%d-%H%M%S)" || { rm -rf "$TMP"; exit 1; }
+    fi
     mv "$TMP/zim-tools_linux-x86_64-3.8.0" "$ZT" && rm -rf "$TMP"
     "$ZT/zimcheck" --version 2>&1 | head -n 1
   else
@@ -69,14 +75,14 @@ else
   NPM=${NPM:-$(dirname "${NODE:-/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node}")/npm}
   [ -x "$NPM" ] || NPM=npm
   # npm is a node script: its node on PATH
-  if [ $APPLY = 1 ]; then (cd "$ROOT/ops/langpack" && echo "   + (cd ops/langpack && $NPM ci)" \
-                            && PATH="$(dirname "$NPM"):$PATH" "$NPM" ci --no-audit --no-fund) || exit 1
-  else echo "   would run: (cd $ROOT/ops/langpack && $NPM ci)"; TODO=1; fi
+  if [ $APPLY = 1 ]; then (cd "$ROOT/ops/langpack" && echo "   + (cd ops/langpack && $NPM ci --prefix $ROOT/ops/langpack)" \
+                            && PATH="$(dirname "$NPM"):$PATH" "$NPM" ci --prefix "$ROOT/ops/langpack" --no-audit --no-fund) || exit 1
+  else echo "   would run: (cd $ROOT/ops/langpack && $NPM ci --prefix $ROOT/ops/langpack)"; TODO=1; fi
 fi
 
 step "3. $LANGPACK_WORK and its wpcache/"
 if [ -d "$LANGPACK_WORK/wpcache" ]; then
-  echo "   present: $(du -sh "$LANGPACK_WORK/wpcache" 2>/dev/null | cut -f1)"
+  echo "   present: $LANGPACK_WORK/wpcache"           # (no du: a walk of the shared HDD)
 else
   run mkdir -p "$LANGPACK_WORK"
   if [ -d "$SEED_WPCACHE" ]; then run cp -a --reflink=auto "$SEED_WPCACHE" "$LANGPACK_WORK/wpcache"

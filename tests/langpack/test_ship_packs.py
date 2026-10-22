@@ -69,7 +69,8 @@ sys.exit(int(os.environ.get("FAKE_GATES_RC", "0")))
 
 # archive.org's CLI: `metadata ITEM` prints the listing kept in $LANGPACK_WORK/ia-cache/ia-ITEM.json
 # (where site_check.py reads it without --ia-fetch); `upload` records the call and lists the files
-# at once, or (FAKE_IA_PENDING=1) only into ia-ITEM.pending.json.
+# at once, or (FAKE_IA_PENDING=1) only into ia-ITEM.pending.json; FAKE_IA_FAIL_ON=NAME: the call
+# takes the files before NAME and fails there, as an upload cut off part way.
 FAKE_IA = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
 d = os.path.join(os.environ["LANGPACK_WORK"], "ia-cache"); os.makedirs(d, exist_ok=True)
@@ -81,14 +82,17 @@ if cmd == "metadata":
 if cmd == "upload":
     files = [a for a in sys.argv[3:] if not a.startswith("--") and not a.isdigit()]
     with open(os.environ["FAKE_IA_LOG"], "a") as fh: fh.write(json.dumps({"item": item, "args": sys.argv[3:]}) + "\n")
-    rows = [{"name": f, "size": str(os.path.getsize(f)), "md5": hashlib.md5(open(f, "rb").read()).hexdigest()} for f in files]
+    bad = os.environ.get("FAKE_IA_FAIL_ON")
+    cut = files.index(bad) if bad in files else None
+    rows = [{"name": f, "size": str(os.path.getsize(f)), "md5": hashlib.md5(open(f, "rb").read()).hexdigest()}
+            for f in files[:cut]]
     if os.environ.get("FAKE_IA_PENDING") == "1":
         pend = path[:-5] + ".pending.json"
         old = json.load(open(pend)) if os.path.exists(pend) else []
-        json.dump(old + rows, open(pend, "w")); sys.exit(0)
+        json.dump(old + rows, open(pend, "w")); sys.exit(1 if cut is not None else 0)
     meta.setdefault("files", [])
     meta["files"] = [x for x in meta["files"] if x["name"] not in files] + rows
-    json.dump(meta, open(path, "w")); sys.exit(0)
+    json.dump(meta, open(path, "w")); sys.exit(1 if cut is not None else 0)
 sys.exit(2)
 '''
 
@@ -147,6 +151,11 @@ def _lines(p: Path) -> list[str]:
     return p.read_text().splitlines() if p.exists() else []
 
 
+def _sent(ship: SimpleNamespace) -> list[str]:
+    """Every pack file handed to `ia upload`, in order, over all calls."""
+    return [a for x in _lines(ship.logs["ia"]) for a in json.loads(x)["args"] if a.endswith(".zim")]
+
+
 def _log(ship: SimpleNamespace) -> str:
     return (ship.work / "logs" / f"ship-testland-{ship.tag}.log").read_text()
 
@@ -169,10 +178,10 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     g = json.loads(_lines(ship.logs["gates"])[0])
     assert g["langs"] == "de,fr,th,en" and g["resume"] == "1"
     assert g["rj"].endswith(f"regions/{ship.tag}.json")         # no hand-written region file: region_json.py's
-    # uploaded once, all packs the menu uses, with the new item's metadata
+    # uploaded once, one pack per call (review M-c), all packs the menu uses, with the new item's metadata
     ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
-    assert len(ups) == 1 and ups[0]["item"] == "streetzim-testland-lang"
-    sent = sorted(a for a in ups[0]["args"] if a.endswith(".zim"))
+    assert all(x["item"] == "streetzim-testland-lang" and sum(a.endswith(".zim") for a in x["args"]) == 1 for x in ups)
+    sent = sorted(_sent(ship))
     # the packs and each entry's search pack (index_pack.py)
     u8 = lpzims.read_uuid(ship.base)[:8]
     assert sent == sorted([_pk(ship, x) for x in ("de", "fr", "th")]
@@ -184,7 +193,7 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     for m in ("--metadata=mediatype:data", "--metadata=collection:opensource_media",
               "--metadata=licenseurl:https://creativecommons.org/licenses/by-sa/4.0/", "--metadata=language:deu",
               "--metadata=language:fra", "--metadata=language:tha"):
-        assert m in ups[0]["args"], ups[0]["args"]
+        assert all(m in x["args"] for x in ups), (m, ups)
     # the site files: proxy-relative URLs, the base on its own item, recipes under recipes/testland/
     out = ship.work / "site" / "testland" / "recipes" / "testland"
     idx = json.loads((out / "index.json").read_text())
@@ -209,13 +218,14 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     r2 = _run(ship)
     assert r2.returncode == 0, r2.stderr
     assert sorted(_lines(ship.logs["build"])) == ["de", "fr", "th"]
-    assert len(_lines(ship.logs["ia"])) == 1
+    assert len(_lines(ship.logs["ia"])) == len(ups)
     assert "packs: all gated for this base already" in _log(ship)
 
 
 def test_listing_pending_then_rerun(ship: SimpleNamespace) -> None:
     r = _run(ship, FAKE_IA_PENDING="1")
     assert r.returncode == 6, r.stdout[-2000:] + r.stderr[-2000:]
+    n = len(_lines(ship.logs["ia"]))
     assert "listing pending" in _log(ship)
     assert not (ship.work / "site" / "testland" / "recipes" / "testland" / "index.json").exists()
     # archive.org lists them now
@@ -224,7 +234,7 @@ def test_listing_pending_then_rerun(ship: SimpleNamespace) -> None:
     (cache / "ia-streetzim-testland-lang.json").write_text(json.dumps({"files": pend}))
     r2 = _run(ship)
     assert r2.returncode == 0, r2.stdout[-2000:] + r2.stderr[-2000:]
-    assert len(_lines(ship.logs["ia"])) == 1            # nothing sent twice
+    assert len(_lines(ship.logs["ia"])) == n            # nothing sent twice
 
 
 def test_never_overwrites_a_published_name(ship: SimpleNamespace) -> None:
@@ -244,8 +254,7 @@ def test_only_passing_entries_are_published(ship: SimpleNamespace) -> None:
     assert r.returncode == 0, r.stderr[-2000:]
     idx = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "index.json").read_text())
     assert [m["lang"] for m in idx["regions"][0]["menu"]] == ["de", "th", "en"]
-    sent = [a for a in json.loads(_lines(ship.logs["ia"])[0])["args"] if a.endswith(".zim")]
-    assert _pk(ship, "fr") not in sent
+    assert _pk(ship, "fr") not in _sent(ship)
 
 
 def test_one_run_per_region(ship: SimpleNamespace) -> None:
@@ -351,6 +360,27 @@ def test_a_failed_site_check_replaces_and_publishes_nothing(ship: SimpleNamespac
     assert not (tmp_path / "web2" / "build" / "recipes" / "testland").exists()
 
 
+def test_a_leftover_of_the_old_site_is_not_a_failed_swap(ship: SimpleNamespace) -> None:
+    """Review LOW: the region's site files were replaced; only removing the
+    previous ones (now in the staging folder) failed. The run says so and
+    succeeds (`swap && rm || exit 1` reported "could not replace")."""
+    assert _run(ship).returncode == 0
+    stuck = ship.work / "site" / "testland" / "stuck"
+    stuck.mkdir()
+    (stuck / "f").write_text("x")
+    stuck.chmod(0o555)                            # its file cannot be removed
+    try:
+        r = _run(ship)
+        log = _log(ship)
+        assert r.returncode == 0, log[-2000:]
+        assert "could not replace" not in log and "replaced; the previous files" in log, log[-2000:]
+        assert not (ship.work / "site" / "testland" / "stuck").exists()     # the new files are live
+    finally:
+        for d in (stuck, ship.work / "site" / ".testland.tmp" / "stuck"):
+            if d.exists():
+                d.chmod(0o755)
+
+
 def test_publish_needs_a_seal(ship: SimpleNamespace, tmp_path: Path) -> None:
     src = ship.work / "site" / "testland" / "recipes" / "testland"
     src.mkdir(parents=True)
@@ -388,16 +418,33 @@ def test_no_second_send_while_the_listing_is_pending(ship: SimpleNamespace) -> N
     waits for them; it never sends them again (ia upload --checksum does not
     skip a file while the item has a pending task)."""
     assert _run(ship, FAKE_IA_PENDING="1").returncode == 6
+    n = len(_lines(ship.logs["ia"]))
     r2 = _run(ship, FAKE_IA_PENDING="1")
     assert r2.returncode == 6 and "not sent again" in _log(ship)
-    assert len(_lines(ship.logs["ia"])) == 1
+    assert len(_lines(ship.logs["ia"])) == n
     # still unlisted long after: the run stops and says what to do, and sends nothing
     sent = ship.work / "uploads" / "streetzim-testland-lang.tsv"
     rows = [x.split("\t") for x in sent.read_text().splitlines()]
     sent.write_text("".join(f"{f}\t{m}\t0\n" for f, m, _t in rows))
     r3 = _run(ship, FAKE_IA_PENDING="1")
     assert r3.returncode == 1 and "still not listed: check the item's tasks" in _log(ship)
-    assert len(_lines(ship.logs["ia"])) == 1
+    assert len(_lines(ship.logs["ia"])) == n
+
+
+def test_a_failed_upload_sends_nothing_twice(ship: SimpleNamespace) -> None:
+    """Review M-c: an upload cut off at the fr pack; the packs sent before it
+    are recorded, so the rerun sends only what was not sent (one batch call
+    recorded nothing and sent them all again, a second copy each while
+    archive.org's tasks were pending)."""
+    r = _run(ship, FAKE_IA_PENDING="1", FAKE_IA_FAIL_ON=_pk(ship, "fr"))
+    assert r.returncode == 1, _log(ship)[-2000:]
+    log1 = _log(ship)
+    r2 = _run(ship, FAKE_IA_PENDING="1")
+    assert r2.returncode == 6, _log(ship)[-2000:]
+    sent = _sent(ship)
+    twice = sorted({f for f in sent if sent.count(f) > 1})
+    assert twice == [_pk(ship, "fr")], sent          # only the one cut off is sent again
+    assert f"ia upload of {_pk(ship, 'fr')} failed" in log1, log1[-2000:]
 
 
 def test_uploads_hold_the_host_upload_lock(ship: SimpleNamespace) -> None:
@@ -416,7 +463,7 @@ def test_uploads_hold_the_host_upload_lock(ship: SimpleNamespace) -> None:
         time.sleep(2)
         assert _lines(ship.logs["ia"]) == []           # waiting for the lock
     assert p.wait(timeout=300) == 0
-    assert len(_lines(ship.logs["ia"])) == 1
+    assert len(_lines(ship.logs["ia"])) == len(set(_sent(ship))) > 0
 
 
 def test_a_second_base_the_same_day_ships_too(ship: SimpleNamespace, tmp_path: Path) -> None:

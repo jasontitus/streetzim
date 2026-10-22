@@ -172,8 +172,9 @@ def test_refuses_without_room_for_a_merged_file(gates: SimpleNamespace, tmp_path
     assert not (work / "verdicts").exists() and not (work / "recipes").exists()
 
 
-def _flaky_zimcheck(d: Path, first: str, then: str) -> str:
-    """A zimcheck whose first -A run prints `first` and every later one `then`."""
+def _flaky_zimcheck(d: Path, first: str, then: str, killed: bool = False) -> str:
+    """A zimcheck whose first -A run prints `first` (and then, `killed`, dies
+    of SIGKILL) and every later one `then`."""
     d.mkdir(parents=True, exist_ok=True)
     n = d / "runs"
     script = d / "zc.py"
@@ -182,18 +183,21 @@ def _flaky_zimcheck(d: Path, first: str, then: str) -> str:
         "if '--version' in sys.argv: print('zim-tools 3.8.0'); sys.exit(0)",
         f"p = {str(n)!r}", "k = int(open(p).read()) if os.path.exists(p) else 0", "open(p, 'w').write(str(k + 1))",
         "with open(p + '.args', 'a') as fh: fh.write(' '.join(sys.argv[1:-1]) + '\\n')",
-        f"sys.stdout.write({first!r} if k == 0 else {then!r})", "sys.exit(0)"]) + "\n")
+        f"sys.stdout.write({first!r} if k == 0 else {then!r})", "sys.stdout.flush()",
+        f"k == 0 and {killed!r} and os.kill(os.getpid(), 9)", "sys.exit(0)"]) + "\n")
     script.chmod(0o755)
     return str(script)
 
 
-@pytest.mark.parametrize("first,then,runs,ok", [
-    ("[INFO] Verifying...\n", "[INFO] Overall Test Status: Pass\n", 2, True),       # killed: run again
-    ("[INFO] Overall Test Status: Fail\n", "[INFO] Overall Test Status: Pass\n", 1, False),  # a Fail stays
+@pytest.mark.parametrize("first,killed,then,runs,ok", [
+    ("[INFO] Verifying...\n", True, "[INFO] Overall Test Status: Pass\n", 2, True),     # killed: run again
+    # ended on its own without a verdict: the same run again would do the same (review LOW)
+    ("[INFO] Verifying...\n", False, "[INFO] Overall Test Status: Pass\n", 1, False),
+    ("[INFO] Overall Test Status: Fail\n", False, "[INFO] Overall Test Status: Pass\n", 1, False),  # a Fail stays
 ])
-def test_zimcheck_without_a_verdict_runs_once_more(gates: SimpleNamespace, tmp_path: Path,
-                                                   first: str, then: str, runs: int, ok: bool) -> None:
-    zc = _flaky_zimcheck(tmp_path / "zc", first, then)
+def test_zimcheck_without_a_verdict_runs_once_more(gates: SimpleNamespace, tmp_path: Path, first: str, killed: bool,
+                                                   then: str, runs: int, ok: bool) -> None:
+    zc = _flaky_zimcheck(tmp_path / "zc", first, then, killed)
     work = tmp_path / "work"
     r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
                         str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
