@@ -99,16 +99,24 @@ def has_wiki(src: str, lang: str) -> bool:
         return False
 
 
-def region_qid(z: ZimReader, name: str) -> str | None:
+def region_qid(z: ZimReader, name: str, region: str | None = None) -> str | None:
     """The Q-ID of the base's admin record named like the region (a country
-    map's country), else None."""
+    map's country), else None: its name, else one of its other names, is
+    the map's name, else the region id ("switzerland": the map is
+    "Switzerland and the Alps", the country record "Schweiz/Suisse/
+    Svizzera/Svizra", also called Switzerland)."""
     try:
         admin = json.loads(blob_of(z, (ord("C"), b"category-index/admin.json")) or b"[]")
     except ValueError:
         return None
-    for r in admin if isinstance(admin, list) else []:
-        if isinstance(r, dict) and r.get("n") == name and r.get("q") and r.get("s") in ("country", "state", "region"):
-            return str(r["q"])
+    recs = [r for r in (admin if isinstance(admin, list) else [])
+            if isinstance(r, dict) and r.get("q") and r.get("s") in ("country", "state", "region")]
+    wants = [name.casefold()] + ([region.replace("-", " ").casefold()] if region else [])
+    for want in wants:
+        for names in (lambda r: [r.get("n")], lambda r: r.get("alt") or []):
+            for r in recs:
+                if any(isinstance(x, str) and x.casefold() == want for x in names(r)):
+                    return str(r["q"])
     return None
 
 
@@ -133,7 +141,7 @@ def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
 
 
 def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_max: int | None = REGION_PACKS_MAX,
-         tier: str | None = None) -> dict:
+         tier: str | None = None, region: str | None = None) -> dict:
     """`region_max` applies to every tier but UNCAPPED_TIERS (None: never),
     an unknown one (None) included."""
     if tier in UNCAPPED_TIERS:
@@ -173,7 +181,7 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
     except Exception:  # noqa: BLE001 - a base without M/Title
         base_title = None
     fallback = (base_title or b"").decode("utf-8", "replace") or name
-    qid = region_qid(z, name)
+    qid = region_qid(z, name, region)
     titles = {}
     for L in langs:
         t = label_in(cache, L, qid) or fallback
@@ -197,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     core = [x.strip() for x in a.core.split(",") if x.strip()]
     tier = a.tier or registry_tier(a.region)
-    out = meta(a.base, a.wiki_src, core, Path(a.cache) if a.cache else None, a.region_packs_max, tier)
+    out = meta(a.base, a.wiki_src, core, Path(a.cache) if a.cache else None, a.region_packs_max, tier, a.region)
     out["tier"] = tier
     print(json.dumps(out, ensure_ascii=False))
     return 0

@@ -189,6 +189,29 @@ def test_region_meta_titles_from_the_wikidata_cache(tmp_path: Path) -> None:
     assert m["titles"] == {"de": "Testlandia", "ja": "OSM - Testland", "en": "OSM - Testland"}
 
 
+def test_the_region_is_found_by_another_name_or_its_id(tmp_path: Path) -> None:
+    """Switzerland: the map is "Switzerland and the Alps", the country record
+    "Schweiz/Suisse/Svizzera/Svizra" (also called Switzerland): found through
+    the region id, so every entry's title is the country's name in its
+    language (the dry run titled all 23 "OSM - Switzerland and the Alps")."""
+    cache = tmp_path / "cache"
+    (cache / "wikidata-text").mkdir(parents=True)
+    for lg, label in (("de", "Schweiz"), ("rm", "Svizra"), ("ja", "スイス")):
+        (cache / "wikidata-text" / f"{lg}.jsonl").write_text(json.dumps(["Q39", label, ""]) + "\n")
+    admin = [{"n": "Liechtenstein", "s": "country", "q": "Q347", "alt": ["Principality of Liechtenstein"]},
+             {"n": "Schweiz/Suisse/Svizzera/Svizra", "s": "country", "q": "Q39", "alt": ["Switzerland", "Swiss Confederation"]}]
+    cfg = {"name": "Switzerland and the Alps", "hasWikiArticles": True, "regionLanguages": ["de", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg, admin)
+    w = _wiki(tmp_path, ["de", "rm", "ja", "en"])
+    m = _meta(b, w, "de,ja,en", cache, "--region", "switzerland")
+    assert m["region_qid"] == "Q39", m
+    assert (m["titles"]["de"], m["titles"]["rm"], m["titles"]["ja"]) == ("Schweiz", "Svizra", "スイス"), m["titles"]
+    # an alt name equal to the map's name counts too; no region id, no other match: none
+    cfg2 = dict(cfg, name="Swiss Confederation")
+    assert _meta(_base(tmp_path / "b2.zim", PLACES, GEO, cfg2, admin), w, "de", cache)["region_qid"] == "Q39"
+    assert _meta(b, w, "de", cache)["region_qid"] is None
+
+
 def _region_dir(root: Path, rid: str, title: str, menu: bool = True) -> None:
     d = root / rid
     d.mkdir(parents=True)
