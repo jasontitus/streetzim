@@ -63,6 +63,29 @@ def test_recipe_rebuilds_the_merged_bytes(lp: SimpleNamespace, tmp_path: Path, w
     assert (work / "sha-cache").is_dir()        # chunk hashes cached under $LANGPACK_WORK
 
 
+def test_a_romansh_pack_gates_and_merges(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """Switzerland's region language Romansh (rm, ISO 639-3 roh) is no core
+    language: the merger's and the pack gate's fixed code table lacked it, so
+    the dry run's rm pack failed its gate ("metadata") and the rm entry could
+    not merge ("no ISO 639-3 code for 'rm'")."""
+    from tests.langpack import lpzims
+    rm = tmp_path / "osm_testland_wiki-rm_2026-10-13.zim"
+    lpzims.write_pack(rm, "rm", lpzims.read_uuid(lp.base))
+    zc = lpzims.fake_zimcheck(tmp_path / "zc", "clean", None)
+    g = tool("pack_gate.py", rm, "--base", lp.base, env={"PACK_GATE_ZIMCHECK": zc})
+    assert g.returncode == 0, g.stdout[-1500:]
+    out = tmp_path / "m-rm.zim"
+    res = merge_zim.merge(str(lp.base), [str(rm), *_packs(lp, "de")], str(out), "rm", region_langs=["de", "rm"],
+                          language_meta="map")
+    assert res["metadata"]["Language"] == "roh"
+    r = tool("verify_merge.py", out, lp.base, rm, *_packs(lp, "de"), "--lang", "rm", "--region-langs", "de,rm",
+             "--language-meta", "map")
+    assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].endswith("PASS"), r.stdout[-2000:]
+    listed = tmp_path / "m-list.zim"
+    assert merge_zim.merge(str(lp.base), [str(rm), *_packs(lp, "de")], str(listed), "de",
+                           region_langs=["de", "rm"])["metadata"]["Language"] == "deu,roh"
+
+
 def test_recipe_build_by_hand_takes_the_language_meta(lp: SimpleNamespace, tmp_path: Path) -> None:
     """Review LOW: `recipe2.py build --language-meta map` gives the recipe of
     the file production ships (ship_packs and run_gates merge with map), so a

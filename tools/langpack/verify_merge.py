@@ -23,7 +23,7 @@ from libzim.reader import Archive  # noqa: E402
 from libzim.search import Query, Searcher  # noqa: E402
 from libzim.suggestion import SuggestionSearcher  # noqa: E402
 
-from tools.langpack.merge_zim import (ISO3, NO_U64, base_lineage, blob_of, content_md5s, derive_uuid,  # noqa: E402
+from tools.langpack.merge_zim import (NO_U64, base_lineage, blob_of, content_md5s, derive_uuid, iso3,  # noqa: E402
                        open_index, open_pack,
                        parse_counter, strip_mime, utf16_units)
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
@@ -180,7 +180,7 @@ def main():
     langs = [a.lang] + ([p.lang for p in visitor if p.lang != a.lang] if a.language_meta == "list" else [])
     meta = {k: bytes(am.get_metadata(k)).decode() for k in am.metadata_keys if not k.startswith("Illustration")}
     title = meta.get("Title", "")
-    ok = (meta.get("Name") == f"osm_{a.lang}_{region}" and meta.get("Language") == ",".join(ISO3[x] for x in langs)
+    ok = (meta.get("Name") == f"osm_{a.lang}_{region}" and meta.get("Language") == ",".join(iso3(x) for x in langs)
           and utf16_units(title) <= 30 and (a.title is None or title == a.title)
           and all(x in meta.get("Flavour", "") for x in (p.lang for p in packs)))
     check("metadata: Name, Language (639-3 list), Title <= 30 UTF-16, Flavour has the wiki set", ok,
