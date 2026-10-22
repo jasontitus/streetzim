@@ -213,11 +213,12 @@ def feature_wiki_match(feat, wiki_cross_refs, folded=None, link=wiki_link):
 # An address none.
 NEIGHBOUR_KINDS = {"place": ("place",), "peak": ("peak",), "water": ("water",),
                    "street": ("street",), "addr": ()}
-# A POI by its subtype: a bus stop takes only a stop, a railway station only
-# a station, an information board nothing (the stop "Kurtheater" is not the
+# A POI by its subtype: a railway station takes only a station, a bus stop
+# and an information board nothing (the stop "Kurtheater" is not the
 # theatre, the guidepost "Wettingen" not its station, "Rathaus" not the town
-# hall). An "other" object is never a stop, a station or a board.
-POI_NEIGHBOUR_KINDS = {"bus": ("stop",), "railway": ("station",), "information": ()}
+# hall; a stop next door is often tagged with its operator's or line's item,
+# not its own). An "other" object is never a stop, a station or a board.
+POI_NEIGHBOUR_KINDS = {"bus": (), "railway": ("station",), "information": ()}
 
 
 def neighbour_kinds(feat):

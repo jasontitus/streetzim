@@ -231,15 +231,17 @@ def test_the_extractors_know_each_objects_sort(tmp_path):
 
 # --- review of cbea330 ------------------------------------------------------
 
-def test_a_stop_takes_only_a_stop_and_a_station_only_a_station():
-    # The bus stop "Patras" beside Patras railway station; a stop of the
-    # station's name; the station record itself.
+def test_a_bus_stop_takes_nothing_and_a_station_only_a_station():
+    # The bus stop "Patras" beside Patras railway station; a stop of its
+    # name tagged with its operator's item; the station record itself.
     bus = {"name": "Patras", "type": "poi", "subtype": "bus", "lat": LAT, "lon": LON}
     station = OsmRef("station", {"wikidata": "Q1"})
-    stop = OsmRef("stop", {"wikidata": "Q2"})
-    assert match(bus, {("patras",) + NEXT: station}) is None
-    assert match(bus, {("patras",) + NEXT: stop}) is stop
-    assert match(bus, {("patras",) + NEXT: OsmRef("other", {"wikidata": "Q3"})}) is None   # "Kurtheater"
+    stop = OsmRef("stop", {"wikipedia": "pl:Komunikacja Miejska w Głogowie", "wikidata": "Q11742123"})
+    for kind in ("station", "stop", "other", "place", "information"):   # "other": "Kurtheater"
+        assert match(bus, {("patras",) + NEXT: OsmRef(kind, {"wikidata": "Q3"})}) is None
+    assert match(bus, {("patras",) + NEXT: stop}) is None
+    # In its own cell, as before the cells around were looked at.
+    assert match(bus, {("patras", 460000, 80000): stop}) is stop
     rail = dict(bus, subtype="railway")
     assert match(rail, {("patras",) + NEXT: station}) is station
     assert match(rail, {("patras",) + NEXT: stop}) is None

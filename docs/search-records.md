@@ -47,8 +47,8 @@ must link the same article; else, likewise, an object whose name equals
 either once folded (accents off; the first of a `;` list), as for `n`
 "Poznan" and OSM's `name` "Poznań"; else, by those names, an object of
 the record's own sort (a place for a place, a peak, water, a road or
-rail line for a street, a bus stop for a bus stop, a railway station
-for a station, nothing for an information board or an address,
+rail line for a street, a railway station for a station, nothing for
+a bus stop, an information board or an address,
 anything else but stops, stations and boards for the rest) in one of
 the 8 grid cells around its point, when every such object found there
 and in the 16 cells beyond links the same article (`feature_wiki` in
