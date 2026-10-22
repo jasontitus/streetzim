@@ -333,12 +333,36 @@ def test_a_search_pack_makes_kiwix_find_the_pack(gates: SimpleNamespace, tmp_pat
     assert any(x.startswith("EXPECT_PACKS=1 ") and "m-" in x for x in log.read_text().splitlines()), log.read_text()
 
 
+def _flip_a_non_slot_byte(base: Path) -> None:
+    """One byte of an image blob (uncompressed, not a viewer slot) changed in
+    place and the trailing MD5 recomputed: same name and UUID, other bytes."""
+    import hashlib
+    from tools.langpack.zimfmt import ZimReader
+    z = ZimReader(str(base))
+    d = z.dirent_at(z.find(ord("C"), b"images/marker.webp"))
+    off, n = z.raw_blob(d.cluster, d.blob)
+    data = bytearray(base.read_bytes())
+    data[off + n - 1] ^= 0xFF
+    data[-16:] = hashlib.md5(bytes(data[:-16]), usedforsecurity=False).digest()
+    base.write_bytes(bytes(data))
+
+
+def _passed_by_hand(vp: Path) -> dict:
+    """The stand-ins cannot route or answer kiwix-serve: passed by hand, as a real run would."""
+    v = json.loads(vp.read_text())
+    v["checks"].update(route=True, kiwix=True, search=True)
+    v["all_pass"] = all(v["checks"].values())
+    assert v["all_pass"], v["checks"]
+    vp.write_text(json.dumps(v))
+    return v
+
+
 def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path: Path) -> None:
     """Plan review B2: a base patched in place (new viewer slots, nothing else)
-    keeps its recipes' fingerprint, so a resumed run re-checks only what the
-    viewer can change (recipe = merge, verify, the browser checks) and carries
-    zimcheck, route, kiwix-serve and Kiwix search from the last passing
-    verdict; anything else changed means the full gate."""
+    keeps its recipes' fingerprint, so a resumed run re-checks what the viewer
+    can change (recipe = merge, verify, zimcheck, the browser checks) and
+    carries route, kiwix-serve and Kiwix search from the last passing verdict
+    for another base MD5; anything else changed means the full gate (B2-1, B2-2)."""
     from tests.langpack.test_viewer_slots import V2, patch
     d = tmp_path
     base = d / "bases" / "osm-testland-2026-10-13.zim"
@@ -356,39 +380,54 @@ def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path
     env = {**gates.env, "LANGPACK_WORK": str(work), "RESUME": "1", "PACK_GATE_ZIMCHECK": zc}
     args = [str(TOOLS / "run_gates.sh"), str(base), str(packs), "de", "en", "testland", str(gates.region),
             str(_free_port())]
-    assert subprocess.run(args, capture_output=True, text=True, timeout=600, env=env).returncode == 0
+    out = work / "gates" / "osm-testland-2026-10-13"
+
+    def run(e: dict) -> subprocess.CompletedProcess[str]:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=e)
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        return r
+
+    run(env)
     vp = work / "verdicts" / "osm-testland-2026-10-13" / "de.json"
-    v1 = json.loads(vp.read_text())
-    assert v1["fingerprint"] and int(runs.read_text()) == 1
-    # the stand-ins cannot route or answer kiwix-serve: pass them by hand, as a real run would
-    v1["checks"].update(route=True, kiwix=True, search=True)
-    v1["all_pass"] = all(v1["checks"].values())
-    assert v1["all_pass"], v1["checks"]
-    vp.write_text(json.dumps(v1))
+    v1 = _passed_by_hand(vp)
+    assert v1["fingerprint"] and v1["base_md5"] and int(runs.read_text()) == 1
     patch(base, d / "patched.zim", V2, d)
     shutil.copy(d / "patched.zim", base)                      # in place: same name and UUID, new viewer
-    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env)
-    assert r.returncode == 0 and "de: the base changed only in its viewer slots: light gate" in r.stdout, r.stdout
-    assert int(runs.read_text()) == 1                         # zimcheck not run again
+    r = run(env)
+    assert "de: the base changed only in its viewer slots: light gate" in r.stdout, r.stdout
+    assert int(runs.read_text()) == 2                         # zimcheck runs in a light gate too (B2-1)
     v2 = json.loads(vp.read_text())
     assert v2["recipe_md5"] != v1["recipe_md5"] and v2["fingerprint"] == v1["fingerprint"]
-    assert v2["all_pass"] is True, v2["checks"]
-    assert v2["evidence"]["light_gate"] == {"from_recipe_md5": v1["recipe_md5"],
-                                            "carried": ["zimcheck", "route", "kiwix", "search"]}
-    assert v2["checks"]["recipe_eq_merge"] and v2["checks"]["verify"]
+    assert v2["base_md5"] != v1["base_md5"] and v2["all_pass"] is True, v2["checks"]
+    assert v2["evidence"]["light_gate"] == {"from_recipe_md5": v1["recipe_md5"], "carried": ["route", "kiwix", "search"]}
+    assert v2["checks"]["recipe_eq_merge"] and v2["checks"]["verify"] and v2["checks"]["zimcheck"]
+    # compose_verdicts checks the light gate again: the fingerprint, and a base MD5 that changed
+    compose = [sys.executable, str(TOOLS / "compose_verdicts.py"), str(out), str(base), "de"]
+    for change, carried in (({}, True), ({"fingerprint": "0" * 64}, False), ({"base_md5": v2["base_md5"]}, False)):
+        (out / "de.light.json").write_text(json.dumps({**v1, "base_md5": "f" * 32, **change}))
+        subprocess.run(compose, capture_output=True, text=True, env=env)
+        assert json.loads(vp.read_text())["checks"]["route"] is carried, change
+    # a passing verdict of this base MD5 and fingerprint for another recipe (a merger change
+    # that escaped the fingerprint): no light gate (B2-1)
+    vp.write_text(json.dumps({**v2, "recipe_md5": "0" * 32}))
+    r = run(env)
+    assert "light gate" not in r.stdout and int(runs.read_text()) == 3, r.stdout
     # another title: another fingerprint, the full gate again
+    _passed_by_hand(vp)
     env_t = {**env, "TITLES": json.dumps({"de": "Testland neu"})}
-    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
-    assert r.returncode == 0 and "light gate" not in r.stdout
-    assert int(runs.read_text()) == 2
+    r = run(env_t)
+    assert "light gate" not in r.stdout and int(runs.read_text()) == 4
     # the pack rebuilt with other bytes (same name, same articles): its chunk hashes are in the
     # fingerprint, so the full gate again, though the last verdict passed
-    v3 = json.loads(vp.read_text())
-    v3["checks"].update(route=True, kiwix=True, search=True)
-    v3["all_pass"] = all(v3["checks"].values())
-    vp.write_text(json.dumps(v3))
+    _passed_by_hand(vp)
     lpzims.write_pack(de, "de", uuid, title="Testland Wiki (de) 2")
     assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
-    r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=env_t)
-    assert r.returncode == 0 and "light gate" not in r.stdout, r.stdout
-    assert int(runs.read_text()) == 3
+    r = run(env_t)
+    assert "light gate" not in r.stdout and int(runs.read_text()) == 5, r.stdout
+    # a base byte outside the viewer slots changed in place (same name and UUID, new MD5):
+    # the base's chunk hashes are in the fingerprint, so the full gate (B2-2)
+    _passed_by_hand(vp)
+    _flip_a_non_slot_byte(base)
+    assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
+    r = run(env_t)
+    assert "light gate" not in r.stdout and int(runs.read_text()) == 6, r.stdout

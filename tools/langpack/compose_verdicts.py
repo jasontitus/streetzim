@@ -29,6 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from tools.langpack.gatelib import md5_file, verdict_path, work_dir  # noqa: E402
+from tools.langpack.merge_zim import file_md5  # noqa: E402
 
 
 def read(p):
@@ -55,7 +56,8 @@ def smoke_ok(p):
 
 # What a light gate carries over from the last passing verdict: the checks a
 # new viewer cannot change (it lives in three uncompressed slots of the base).
-CARRIED = ("zimcheck", "route", "kiwix", "search")
+# Not zimcheck: its link checks read the viewer's HTML (28 s on Greece).
+CARRIED = ("route", "kiwix", "search")
 
 
 def mark(b):
@@ -71,6 +73,7 @@ def main():
                    "base_viewer": bool(jline(f"{out}/base.viewer.json").get("pass")),
                    "base_ui": bool(jline(f"{out}/base.ui.json").get("pass"))}
     zver = read(f"{out}/zimcheck.version").strip()      # run_gates.sh: `zimcheck --version`
+    base_md5 = file_md5(base)                           # a light gate needs it changed (patched in place)
     official = zver.startswith("zim-tools ")
     advisory = ["search"] if os.environ.get("LANGPACK_SEARCH_GATE") == "report" else []
     rows = [["L", "packs", "recipe=merge", "verify", "zimcheck", "route", "kiwix", "search", "viewer", "ui", "smoke", "ALL"]]
@@ -111,7 +114,10 @@ def main():
             light = {}
         carried = []
         if light:
-            same = bool(r.get("fingerprint")) and light.get("fingerprint") == r.get("fingerprint") and light.get("all_pass")
+            # run_gates.sh decided; checked again: the same fingerprint, a passing
+            # verdict, and a base whose MD5 is not the one that verdict checked
+            same = (bool(r.get("fingerprint")) and light.get("fingerprint") == r.get("fingerprint")
+                    and light.get("all_pass") and bool(light.get("base_md5")) and light["base_md5"] != base_md5)
             for k in CARRIED:
                 checks[k] = bool(same and (light.get("checks") or {}).get(k))
                 carried.append(k)
@@ -120,7 +126,8 @@ def main():
             evidence_light = {"from_recipe_md5": light.get("recipe_md5"), "carried": carried}
         else:
             evidence_light = None
-        v = {"tag": tag, "lang": L, "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
+        v = {"tag": tag, "lang": L, "base_md5": base_md5,
+             "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
              "recipe_file_md5": r.get("file_md5"), "fingerprint": r.get("fingerprint"),
              "packs": pack_md5, "zimcheck_version": zver, "checks": checks,
              "all_pass": all(ok for k, ok in checks.items() if k not in advisory), "advisory": advisory,
