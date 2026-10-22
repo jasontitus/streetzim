@@ -88,6 +88,8 @@ checks = {
     "core ui tables":  b"function szTableFrom" in idx and b"function szTableFrom" in plc,
     "rtl ui":          b"SZ_RTL_LANGS" in idx and b"SZ_RTL_LANGS" in plc,
     "label priority":  b"_SZ_PLACE_SORT" in idx,
+    # 2026-10-22: exits and on-ramps told apart by the road classes (600 szLinkKind)
+    "ramp cues":       b"szLinkKind" in idx,
     "slot marker idx": b"SZVSLOT1:index.html" in idx,
     "slot marker plc": b"SZVSLOT1:places.html" in plc,
     "archive check":   a.check(),

@@ -88,8 +88,6 @@
  "drive.on_ramp": "驶入匝道",
  "drive.on_ramp_onto": "驶入匝道，前往 {road}",
  "drive.onto": "进入 {road}",
- "drive.ramp": "驶入匝道",
- "drive.ramp_onto": "驶入匝道，前往 {road}",
  "drive.recenter_title": "恢复默认缩放和倾斜",
  "drive.remaining": "剩余",
  "drive.reroute": "重新规划",

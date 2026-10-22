@@ -86,8 +86,6 @@
  "drive.on_ramp": "ambil jalur masuk",
  "drive.on_ramp_onto": "ambil jalur masuk ke {road}",
  "drive.onto": "ke {road}",
- "drive.ramp": "ambil jalan penghubung",
- "drive.ramp_onto": "ambil jalan penghubung ke {road}",
  "drive.recenter_title": "Kembali ke zoom & kemiringan bawaan",
  "drive.remaining": "Sisa:",
  "drive.reroute": "Rute ulang",

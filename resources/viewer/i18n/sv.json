@@ -86,8 +86,6 @@
  "drive.on_ramp": "ta påfarten",
  "drive.on_ramp_onto": "ta påfarten mot {road}",
  "drive.onto": "in på {road}",
- "drive.ramp": "ta rampen",
- "drive.ramp_onto": "ta rampen mot {road}",
  "drive.recenter_title": "Återställ standardzoom och lutning",
  "drive.remaining": "Kvar:",
  "drive.reroute": "Beräkna om",

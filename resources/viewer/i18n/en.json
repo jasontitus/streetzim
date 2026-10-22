@@ -85,8 +85,6 @@
  "drive.on_ramp": "take ramp",
  "drive.on_ramp_onto": "take ramp onto {road}",
  "drive.onto": "onto {road}",
- "drive.ramp": "take ramp",
- "drive.ramp_onto": "take ramp onto {road}",
  "drive.recenter_title": "Recenter to default zoom & pitch",
  "drive.remaining": "Remaining:",
  "drive.reroute": "Re-route",

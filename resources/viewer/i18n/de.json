@@ -85,8 +85,6 @@
  "drive.on_ramp": "Auffahrt nehmen",
  "drive.on_ramp_onto": "Auffahrt auf {road}",
  "drive.onto": "auf {road}",
- "drive.ramp": "Abzweig nehmen",
- "drive.ramp_onto": "Abzweig Richtung {road}",
  "drive.recenter_title": "Ansicht zurücksetzen (Zoom & Neigung)",
  "drive.remaining": "Verbleibend:",
  "drive.reroute": "Neu berechnen",

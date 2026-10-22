@@ -86,8 +86,6 @@
  "drive.on_ramp": "pegue o acesso",
  "drive.on_ramp_onto": "pegue o acesso para {road}",
  "drive.onto": "para {road}",
- "drive.ramp": "pegue o acesso",
- "drive.ramp_onto": "pegue o acesso para {road}",
  "drive.recenter_title": "Voltar ao zoom e à inclinação padrão",
  "drive.remaining": "Restante:",
  "drive.reroute": "Recalcular",

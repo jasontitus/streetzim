@@ -86,8 +86,6 @@
  "drive.on_ramp": "bağlantı yoluna girin",
  "drive.on_ramp_onto": "bağlantı yolu: {road}",
  "drive.onto": "{road} yönüne",
- "drive.ramp": "bağlantı yoluna girin",
- "drive.ramp_onto": "bağlantı yolu: {road}",
  "drive.recenter_title": "Varsayılan yakınlaştırma ve eğime dön",
  "drive.remaining": "Kalan:",
  "drive.reroute": "Yeni rota",

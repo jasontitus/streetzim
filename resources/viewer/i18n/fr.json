@@ -86,8 +86,6 @@
  "drive.on_ramp": "prendre la bretelle",
  "drive.on_ramp_onto": "prendre la bretelle vers {road}",
  "drive.onto": "sur {road}",
- "drive.ramp": "prendre la bretelle",
- "drive.ramp_onto": "prendre la bretelle vers {road}",
  "drive.recenter_title": "Recentrer (zoom et inclinaison par défaut)",
  "drive.remaining": "Restant :",
  "drive.reroute": "Recalculer",

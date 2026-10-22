@@ -201,13 +201,6 @@ def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
     ("210-place-detail-sheet.js", "leadIcon.style.cssText = SZ_UI_RTL ? 'margin-left:6px;' : 'margin-right:6px;';"),
     # nearby rows align with the text
     ("240-on-map-find-ui.js", "'text-align:' + (SZ_UI_RTL ? 'right' : 'left') + '; font:inherit;'"),
-    # an exit says "take exit", an on-ramp "take ramp onto" (szLinkKind)
-    ("600-driving-mode.js", "if (kind === 'exit') {\n"
-     "            streetEl.textContent = name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })\n"
-     "                                        : szT('drive.exit_ramp', 'take exit');\n"
-     "          } else if (kind === 'on') {\n"
-     "            streetEl.textContent = name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })\n"
-     "                                        : szT('drive.on_ramp', 'take ramp');"),
     # a translated UI writes the "Map data" month as About does (Persian calendar)
     ("120-map-init-and-style.js", "{ date: SZ_I18N ? _szMonth(config.buildDate) : config.buildDate });"),
     # the preview banner ends its sentence as the language does (hi "।")

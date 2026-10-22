@@ -86,8 +86,6 @@
  "drive.on_ramp": "въезд",
  "drive.on_ramp_onto": "въезд: {road}",
  "drive.onto": "{road}",
- "drive.ramp": "съезд",
- "drive.ramp_onto": "съезд: {road}",
  "drive.recenter_title": "Вернуть масштаб и наклон по умолчанию",
  "drive.remaining": "Осталось:",
  "drive.reroute": "Перестроить",

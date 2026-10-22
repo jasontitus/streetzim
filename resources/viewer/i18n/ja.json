@@ -87,8 +87,6 @@
  "drive.on_ramp": "ランプを進む",
  "drive.on_ramp_onto": "ランプを進み {road} へ",
  "drive.onto": "{road} へ",
- "drive.ramp": "ランプを進む",
- "drive.ramp_onto": "ランプを進み {road} へ",
  "drive.recenter_title": "既定のズームと傾きに戻す",
  "drive.remaining": "残り：",
  "drive.reroute": "再検索",

@@ -87,8 +87,6 @@
  "drive.on_ramp": "램프 진입",
  "drive.on_ramp_onto": "램프로 {road} 진입",
  "drive.onto": "{road} 진입",
- "drive.ramp": "램프 진입",
- "drive.ramp_onto": "램프로 {road} 진입",
  "drive.recenter_title": "기본 확대·기울기로 다시 맞추기",
  "drive.remaining": "남음:",
  "drive.reroute": "경로 재탐색",

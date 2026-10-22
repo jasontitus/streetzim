@@ -86,8 +86,6 @@
  "drive.on_ramp": "neem de oprit",
  "drive.on_ramp_onto": "neem de oprit naar {road}",
  "drive.onto": "naar {road}",
- "drive.ramp": "neem de afslag",
- "drive.ramp_onto": "neem de afslag naar {road}",
  "drive.recenter_title": "Terug naar standaardzoom en -kanteling",
  "drive.remaining": "Resterend:",
  "drive.reroute": "Herberekenen",

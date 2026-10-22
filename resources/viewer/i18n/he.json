@@ -86,8 +86,6 @@
  "drive.on_ramp": "כניסה לרמפה",
  "drive.on_ramp_onto": "כניסה לרמפה אל {road}",
  "drive.onto": "אל {road}",
- "drive.ramp": "כניסה לרמפה",
- "drive.ramp_onto": "כניסה לרמפה אל {road}",
  "drive.recenter_title": "חזרה לזום ולהטיה ברירת המחדל",
  "drive.remaining": "נותרו:",
  "drive.reroute": "חישוב מחדש",

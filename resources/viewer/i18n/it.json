@@ -86,8 +86,6 @@
  "drive.on_ramp": "prendi la rampa",
  "drive.on_ramp_onto": "prendi la rampa per {road}",
  "drive.onto": "su {road}",
- "drive.ramp": "prendi la rampa",
- "drive.ramp_onto": "prendi la rampa per {road}",
  "drive.recenter_title": "Torna a zoom e inclinazione predefiniti",
  "drive.remaining": "Restano:",
  "drive.reroute": "Ricalcola",

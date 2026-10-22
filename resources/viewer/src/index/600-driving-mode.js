@@ -24,16 +24,45 @@
   // Which way a link road goes, from the road classes around it
   // (class_access ordinals, docs/formats.md: motorway 1, trunk 3, primary
   // 5, secondary 7, tertiary 9, residential 11, …, track 15; lower is
-  // bigger): 'on' when it joins a bigger road (onto a motorway, from a
-  // trunk road too), 'exit' when it leads to a road of the same size or
-  // smaller (off a motorway, a motorway-to-motorway interchange), '' when
-  // a class is unknown (graphs before SZRG v4, a route that ends on the
-  // link). fromCls: the road before the link, toCls: the first road after
-  // it that is not a link (neither is a link, so no link ordinal compares).
+  // bigger). Only a link with a motorway or trunk on one side is an exit
+  // or an on-ramp: 'on' when it joins the bigger road (onto a motorway,
+  // from a trunk road too), 'exit' when it leaves one for a road of the
+  // same size or smaller (an interchange, a slip road off a trunk road);
+  // with no class after it (the route ends on the link) one that leaves a
+  // motorway is an exit. '' for a slip road in town (primary_link between
+  // primaries, a tertiary_link): the HUD gives it the ordinary turn cue,
+  // which is what a driver expects there. fromCls: the road before the
+  // link, toCls: the first road after it that is not a link.
   function szLinkKind(fromCls, toCls) {
     var a = fromCls & 0x1F, b = toCls & 0x1F;
-    if (!a || !b || a > 15 || b > 15) return '';   // 1..15: motorway … track
+    var big = function(c) { return c === 1 || c === 3; };   // motorway, trunk
+    if (!big(a) && !big(b)) return '';
+    if (!a) return 'on';
+    if (!b) return 'exit';
     return b < a ? 'on' : 'exit';
+  }
+
+  // The HUD line for the link road entered at nextTurn ("take exit toward
+  // A8", "take ramp onto E75"), or '' when it is no exit or on-ramp
+  // (szLinkKind): the caller then shows the ordinary turn cue. turns: the
+  // route's turns (augmentRouteForDriving); name: the road's name, or ''.
+  function szLinkCue(nextTurn, turns, name) {
+    var afterCls = 0;
+    for (var t = 0; t < turns.length; t++) {
+      var tt = turns[t];
+      if (tt.distM <= nextTurn.distM) continue;
+      if (!(tt.flags & 2)) { afterCls = tt.toCls || 0; break; }
+    }
+    var kind = szLinkKind(nextTurn.fromCls || 0, afterCls);
+    if (kind === 'exit') {
+      return name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })
+                  : szT('drive.exit_ramp', 'take exit');
+    }
+    if (kind === 'on') {
+      return name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })
+                  : szT('drive.on_ramp', 'take ramp');
+    }
+    return '';
   }
 
   // Augment a route with data the HUD needs:
@@ -498,6 +527,7 @@
         var enteringRound = (nextFlags & 1) && !(prevFlags & 1);
         var exitingRound  = !(nextFlags & 1) && (prevFlags & 1);
         var enteringLink  = (nextFlags & 2) && !(prevFlags & 2);
+        var linkCue = '';
         if (enteringRound) {
           // Hunt forward for the first named non-roundabout road — that's
           // the actual destination the driver cares about.
@@ -517,26 +547,10 @@
           streetEl.textContent = name ? szT('drive.exit_onto', 'exit onto {road}', { road: name })
                                       : szT('drive.exit_roundabout', 'exit roundabout');
           arrowEl.textContent = '↱';
-        } else if (enteringLink) {
-          // Exit or on-ramp from the classes of the roads around the link:
-          // the one before it and the first after it that is no link.
-          var afterCls = 0;
-          for (var t = 0; t < state.route.turns.length; t++) {
-            var tt = state.route.turns[t];
-            if (tt.distM <= nextTurn.distM) continue;
-            if (!(tt.flags & 2)) { afterCls = tt.toCls || 0; break; }
-          }
-          var kind = szLinkKind(nextTurn.fromCls || 0, afterCls);
-          if (kind === 'exit') {
-            streetEl.textContent = name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })
-                                        : szT('drive.exit_ramp', 'take exit');
-          } else if (kind === 'on') {
-            streetEl.textContent = name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })
-                                        : szT('drive.on_ramp', 'take ramp');
-          } else {
-            streetEl.textContent = name ? szT('drive.ramp_onto', 'take ramp onto {road}', { road: name })
-                                        : szT('drive.ramp', 'take ramp');
-          }
+        } else if (enteringLink && (linkCue = szLinkCue(nextTurn, state.route.turns, name))) {
+          // An exit or an on-ramp (a motorway or trunk on one side of the
+          // link); a slip road in town takes the ordinary cue below.
+          streetEl.textContent = linkCue;
           arrowEl.textContent = '↗';
         } else {
           streetEl.textContent = name ? szT('drive.onto', 'onto {road}', { road: name })

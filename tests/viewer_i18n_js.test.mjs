@@ -667,43 +667,145 @@ await ok('a language without a table falls back along SZ_UI_FALLBACK (rm -> de),
   r = mk(); r.api.setFallback({}); assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'en');
 });
 
-await ok('link roads: an exit or an on-ramp from the classes of the roads around them', () => {
+await ok('link roads: an exit or an on-ramp only beside a motorway or trunk (szLinkKind)', () => {
   const src = fs.readFileSync(`${REPO}/resources/viewer/src/index/600-driving-mode.js`, 'utf8');
   const fn = /\n  function szLinkKind\(fromCls, toCls\) \{[\s\S]*?\n  \}/.exec(src)[0];
   const szLinkKind = new Function(fn + '; return szLinkKind;')();
   // class ordinals (docs/formats.md): motorway 1, trunk 3, primary 5,
-  // secondary 7, tertiary 9, residential 11, service 14
+  // secondary 7, tertiary 9, residential 11, unclassified 13, service 14
   const cases = [
     [1, 7, 'exit'],     // motorway -> secondary: leave the motorway
     [1, 1, 'exit'],     // motorway -> motorway: an interchange is an exit
     [3, 11, 'exit'],    // trunk -> residential
+    [1, 3, 'exit'],     // motorway -> trunk: leaving it
     [7, 1, 'on'],       // secondary -> motorway: an on-ramp
     [11, 3, 'on'],      // residential -> trunk
-    [5, 7, 'exit'],     // primary -> secondary (smaller)
-    [9, 5, 'on'],       // tertiary -> primary (bigger)
-    [5, 5, 'exit'],     // primary -> primary
     [3, 1, 'on'],       // trunk -> motorway: joining the motorway
-    [1, 3, 'exit'],     // motorway -> trunk: leaving it
-    [15, 14, 'on'],     // track -> service
-    [14, 15, 'exit'],
-    [0, 1, ''],         // unknown before (graph without classes)
-    [1, 0, ''],         // unknown after (the route ends on the link)
-    [16, 1, ''],        // a path is no road
+    [1, 0, 'exit'],     // off a motorway, the route ends on the link
+    [0, 1, 'on'],       // onto a motorway, nothing known before
+    [5, 5, ''],         // primary_link between primaries: a slip road in town
+    [9, 5, ''],         // tertiary -> primary
+    [13, 9, ''],        // unclassified -> tertiary (a tertiary_link)
+    [5, 7, ''],
+    [0, 0, ''],         // unknown both sides (a graph without classes)
+    [16, 1, 'on'],      // a path before is no road: only the motorway counts
+    [1, 16, 'exit'],
   ];
   for (const [a, b, want] of cases) assert.strictEqual(szLinkKind(a, b), want, `${a} -> ${b}`);
-  // The HUD picks the cue by it, and every engine hands driving mode the classes.
-  assert.match(src, /var kind = szLinkKind\(nextTurn\.fromCls \|\| 0, afterCls\);/);
-  assert.match(src, /toCls: roads\[r \+ 1\]\.cls0 \|\| 0,\n\s+fromCls: roads\[r\]\.cls1 \|\| 0/);
-  for (const f of ['src/index/530-routing-astar.js', 'src/index/540-routing-worker-bridge.js', 'routing-worker.js']) {
-    const t = fs.readFileSync(`${REPO}/resources/viewer/${f}`, 'utf8');
-    assert.match(t, /cls0: s\.cls,?\s*(\/\/[^\n]*\n\s*)?cls1: s\.cls/, f);
-    assert.match(t, /\.cls1 = s\.cls;/, f);
-  }
-  // every table has the two cues and the neutral one for an unknown direction
-  for (const lang of ALL) for (const k of ['drive.exit_ramp', 'drive.exit_ramp_onto', 'drive.on_ramp', 'drive.on_ramp_onto', 'drive.ramp'])
+  for (const lang of ALL) for (const k of ['drive.exit_ramp', 'drive.exit_ramp_onto', 'drive.on_ramp', 'drive.on_ramp_onto'])
     assert.ok(TABLES[lang][k], `${lang} ${k}`);
   assert.strictEqual(DE['drive.exit_ramp'], 'Ausfahrt nehmen');
   assert.strictEqual(DE['drive.on_ramp_onto'], 'Auffahrt auf {road}');
+});
+
+// The HUD's code out of 600-driving-mode.js, run on a synthetic route:
+// augmentRouteForDriving turns the roads into turns, szLinkCue picks the line.
+function hudCode() {
+  const src = fs.readFileSync(`${REPO}/resources/viewer/src/index/600-driving-mode.js`, 'utf8');
+  const take = (name) => {
+    const m = new RegExp('\\n  function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}').exec(src);
+    assert.ok(m, name); return m[0];
+  };
+  return ['haversineMeters', 'augmentRouteForDriving', 'szLinkKind', 'szLinkCue'].map(take).join('\n');
+}
+// roads: [name, flags, cls0, cls1, distM]; coords along a meridian, 1 m apart.
+function syntheticRoute(roads) {
+  const total = roads.reduce((t, r) => t + r[4], 0);
+  const coords = []; for (let i = 0; i <= total; i += 10) coords.push([23.7, 37.9 + i / 111320]);
+  return { coords, distance: total, time: total / 10,
+           roads: roads.map(([n, flags, cls0, cls1, distM], i) => ({ nameIdx: i, name: n, flags, cls0, cls1, distM })) };
+}
+
+await ok('the HUD on a synthetic route: exits, on-ramps, slip roads in town, an end on the link', () => {
+  const run = (lang) => new Function('document', 'window', RUNTIME + hudCode() + `
+    return { szSetUiLanguage: szSetUiLanguage, augment: augmentRouteForDriving, cue: szLinkCue };`)(
+    { documentElement: {}, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
+  const en = run('en'); en.szSetUiLanguage('en', '');
+  const cueAt = (h, route, i, name) => {
+    const r = h.augment(syntheticRoute(route));
+    return h.cue(r.turns[i], r.turns, name);
+  };
+  // motorway (1, ending in class 1) -> motorway_link (2) -> secondary (7): an exit
+  const exit = [['A8', 0, 1, 1, 400], ['', 2, 2, 2, 120], ['Main St', 0, 7, 7, 300]];
+  let r = en.augment(syntheticRoute(exit));
+  assert.deepStrictEqual(r.turns.map((t) => [t.flags, t.fromFlags, t.toCls, t.fromCls]), [[2, 0, 2, 1], [0, 2, 7, 2]]);
+  assert.deepStrictEqual(r.turns.map((t) => t.distM), [400, 520]);
+  assert.strictEqual(en.cue(r.turns[0], r.turns, 'Main St'), 'take exit toward Main St');
+  assert.strictEqual(en.cue(r.turns[0], r.turns, ''), 'take exit');
+  // a road that changes class keeps both ends: residential (11) that becomes
+  // secondary (7) before the on-ramp; the class where it ends counts.
+  assert.strictEqual(cueAt(en, [['Elm', 0, 11, 7, 300], ['', 2, 2, 2, 100], ['E75', 0, 1, 1, 500]], 0, 'E75'), 'take ramp onto E75');
+  assert.strictEqual(cueAt(en, [['Elm', 0, 11, 7, 300], ['', 2, 2, 2, 100], ['E75', 0, 1, 1, 500]], 0, ''), 'take ramp');
+  // two links in a row: the class after both counts (motorway -> link -> link -> primary)
+  assert.strictEqual(cueAt(en, [['A1', 0, 1, 1, 300], ['', 2, 2, 2, 80], ['X', 2, 2, 2, 80], ['B', 0, 5, 5, 200]], 0, 'B'), 'take exit toward B');
+  // a slip road in town and a tertiary_link: no exit / ramp wording
+  assert.strictEqual(cueAt(en, [['Amalias', 0, 5, 5, 300], ['', 2, 6, 6, 60], ['Syngrou', 0, 5, 5, 300]], 0, 'Syngrou'), '');
+  assert.strictEqual(cueAt(en, [['Odos', 0, 13, 13, 200], ['', 2, 10, 10, 50], ['Leof', 0, 9, 9, 200]], 0, 'Leof'), '');
+  // the class after the link is the first road past it, not an earlier one:
+  // residential -> primary -> link -> motorway is an on-ramp at the link
+  assert.strictEqual(cueAt(en, [['Res', 0, 11, 11, 200], ['Prim', 0, 5, 5, 300], ['', 2, 2, 2, 80], ['A1', 0, 1, 1, 400]], 1, 'A1'), 'take ramp onto A1');
+  // the road before counts where it ends: a motorway that becomes a primary,
+  // then a link to a secondary, is a slip road in town
+  assert.strictEqual(cueAt(en, [['A', 0, 1, 5, 400], ['', 2, 6, 6, 60], ['B', 0, 7, 7, 300]], 0, 'B'), '');
+  // the route ends on the link off a motorway: an exit
+  assert.strictEqual(cueAt(en, [['A8', 0, 1, 1, 400], ['', 2, 2, 2, 120]], 0, ''), 'take exit');
+  // German
+  const de = run('de'); de.szSetUiLanguage('de', '');
+  assert.strictEqual(cueAt(de, exit, 0, 'Hauptstraße'), 'Ausfahrt Richtung Hauptstraße');
+  assert.strictEqual(cueAt(de, [['L1', 0, 7, 7, 300], ['', 2, 2, 2, 100], ['A5', 0, 1, 1, 500]], 0, 'A5'), 'Auffahrt auf A5');
+  // the HUD uses it, and falls back to the ordinary cue when it says ''
+  const src = fs.readFileSync(`${REPO}/resources/viewer/src/index/600-driving-mode.js`, 'utf8');
+  assert.match(src, /\} else if \(enteringLink && \(linkCue = szLinkCue\(nextTurn, state\.route\.turns, name\)\)\) \{\n[^\n]*\n[^\n]*\n\s+streetEl\.textContent = linkCue;/);
+});
+
+// The route engines' road building, run: the worker's (with its leg join)
+// and the main thread's (530, shared with 540).
+function engineCode(file, names) {
+  const src = fs.readFileSync(`${REPO}/resources/viewer/${file}`, 'utf8');
+  return names.map((name) => {
+    // up to the closing brace at the function's own indentation
+    const m = new RegExp('\\n( *)function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\1\\}').exec(src);
+    assert.ok(m, file + ' ' + name); return m[0];
+  }).join('\n');
+}
+
+await ok('route engines: segments carry flags and class, roads their classes at both ends, legs join', () => {
+  for (const [file, names] of [['routing-worker.js', ['szRouteSegment', 'szRoadsFromSegments', 'concatenateLegs']],
+                               ['src/index/530-routing-astar.js', ['szRouteSegment', 'szRoadsFromSegments']]]) {
+    const e = new Function(engineCode(file, names) + `; return { seg: szRouteSegment, roads: szRoadsFromSegments,
+      legs: typeof concatenateLegs === 'function' ? concatenateLegs : null };`)();
+    // class_access: ordinal in bits 0..4, roundabout bit 8, oneway bit 7 and others ignored
+    assert.deepStrictEqual(e.seg(7, 12.5, 2 | (1 << 7) | (1 << 5)), { nameIdx: 7, distM: 12.5, flags: 2, cls: 2 }, file);
+    assert.deepStrictEqual(e.seg(3, 4, 5 | (1 << 8)), { nameIdx: 3, distM: 4, flags: 1, cls: 5 }, file);
+    assert.deepStrictEqual(e.seg(3, 4, 11), { nameIdx: 3, distM: 4, flags: 0, cls: 11 }, file);
+    assert.deepStrictEqual(e.seg(3, 4, 0), { nameIdx: 3, distM: 4, flags: 0, cls: 0 }, file);   // graphs before v4
+    for (const c of [6, 8, 10]) assert.strictEqual(e.seg(0, 1, c).flags, 2, file + ' link ' + c);
+    // segments end to start: A(11) A(7) [link 2] B(1) -> roads A(11..7), link, B
+    const segRev = [e.seg(2, 50, 1), e.seg(1, 20, 2), e.seg(0, 30, 7), e.seg(0, 40, 11)];
+    const roads = e.roads(segRev, file === 'routing-worker.js' ? (i) => 'n' + i : undefined);
+    assert.deepStrictEqual(roads.map((r) => [r.nameIdx, r.distM, r.flags, r.cls0, r.cls1]),
+                           [[0, 70, 0, 11, 7], [1, 20, 2, 2, 2], [2, 50, 0, 1, 1]], file);
+    if (file === 'routing-worker.js') {
+      assert.deepStrictEqual(roads.map((r) => r.name), ['n0', 'n1', 'n2']);
+      // A long route's legs: the join road merges and keeps the class it ends with.
+      const leg = (rs) => ({ coords: [[0, 0], [1, 1]], distance: 1, time: 1, roads: rs });
+      const j = e.legs([leg([{ nameIdx: 0, name: 'A', distM: 5, flags: 0, cls0: 11, cls1: 9 }]),
+                        leg([{ nameIdx: 0, name: 'A', distM: 6, flags: 0, cls0: 9, cls1: 7 },
+                             { nameIdx: 4, name: 'L', distM: 2, flags: 2, cls0: 2, cls1: 2 }])]);
+      assert.deepStrictEqual(j.roads.map((r) => [r.nameIdx, r.distM, r.flags, r.cls0, r.cls1]),
+                             [[0, 11, 0, 11, 7], [4, 2, 2, 2, 2]]);
+    }
+  }
+  // Every engine builds its route through these.
+  const w = fs.readFileSync(`${REPO}/resources/viewer/routing-worker.js`, 'utf8');
+  assert.match(w, /segRev\.push\(szRouteSegment\(nameIdx, distM, classAccess\)\);/);
+  assert.match(w, /var roads = szRoadsFromSegments\(segRev, function\(i\) \{ return graph\.getName\(i\); \}\);/);
+  const m = fs.readFileSync(`${REPO}/resources/viewer/src/index/530-routing-astar.js`, 'utf8');
+  assert.match(m, /segRev\.push\(szRouteSegment\(nameIdx, distM, classAccess\)\);/);
+  assert.match(m, /var roads = szRoadsFromSegments\(segRev\);/);
+  const b = fs.readFileSync(`${REPO}/resources/viewer/src/index/540-routing-worker-bridge.js`, 'utf8');
+  assert.match(b, /segRev\.push\(szRouteSegment\(nameIdx, distM, graph\.edgeClassAccess\(ei\)\)\);/);
+  assert.match(b, /var roads = szRoadsFromSegments\(segRev\);/);
 });
 
 console.log(`${pass} passed`);

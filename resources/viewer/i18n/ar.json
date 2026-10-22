@@ -87,8 +87,6 @@
  "drive.on_ramp": "اسلك المنحدر",
  "drive.on_ramp_onto": "اسلك المنحدر إلى {road}",
  "drive.onto": "إلى {road}",
- "drive.ramp": "اسلك المنحدر",
- "drive.ramp_onto": "اسلك المنحدر إلى {road}",
  "drive.recenter_title": "العودة إلى التكبير والميل الافتراضيين",
  "drive.remaining": "المتبقي:",
  "drive.reroute": "إعادة التوجيه",

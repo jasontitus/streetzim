@@ -86,8 +86,6 @@
  "drive.on_ramp": "ใช้ทางลาด",
  "drive.on_ramp_onto": "ใช้ทางลาดสู่ {road}",
  "drive.onto": "เข้าสู่ {road}",
- "drive.ramp": "ใช้ทางลาด",
- "drive.ramp_onto": "ใช้ทางลาดสู่ {road}",
  "drive.recenter_title": "กลับสู่การซูมและมุมเอียงเริ่มต้น",
  "drive.remaining": "เหลือ:",
  "drive.reroute": "หาเส้นทางใหม่",
