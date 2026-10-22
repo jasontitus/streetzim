@@ -37,7 +37,13 @@
 # Exit: 0 recipes ready; 6 packs transferred, archive.org listing pending
 # (run again later; nothing is redone); 2 another run holds the region's lock,
 # or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
-# gates (a dry run: nothing published); 1 anything else (the log says what).
+# gates (a dry run: nothing published); 4 a map v1 gives no packs (a
+# continent, or a base over SHIP_MAX_BASE_GB, 8: refused in step 1, before
+# any download or build); 5 nothing publishable: every entry with a
+# Wikipedia pack that passed its gates is over the per-entry budget
+# (make_site.py's; each refusal is logged as REFUSED, before anything is
+# sent), or make_site.py offers no entry;
+# 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
@@ -95,6 +101,14 @@ META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --c
 printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
 mget() { "$PY" -c 'import json,sys; v=json.loads(sys.argv[1])[sys.argv[2]]; print(v if isinstance(v, str) else (",".join(v) if isinstance(v, list) else json.dumps(v, ensure_ascii=False)))' "$META" "$1"; }
 LANGS=$(mget langs); RL=$(mget region_langs); PACK_LANGS=$(mget pack_langs); TITLE=$(mget region_title)
+# v1: no packs for a continent, or for a base over SHIP_MAX_BASE_GB (its
+# search packs alone are over the per-entry budget), before any work
+TIER=$(mget tier); BASE_BYTES=$(stat -c %s "$BASE")
+if [ "$TIER" = continent ] || "$PY" -c 'import sys; sys.exit(0 if int(sys.argv[1]) > float(sys.argv[2]) * 1e9 else 1)' \
+     "$BASE_BYTES" "${SHIP_MAX_BASE_GB:-8}"; then
+  say "$REGION: a ${TIER/null/unregistered} map, $(( BASE_BYTES / 1000000 )) MB: no language packs in v1 (continents and bases over ${SHIP_MAX_BASE_GB:-8} GB come after a measured design)"
+  exit 4
+fi
 say "menu: $LANGS; region languages: ${RL:-none}; packs: $PACK_LANGS"
 "$PY" -c 'import json,sys; [print("skipped %s: %s" % (d["lang"], d["why"])) for d in json.loads(sys.argv[1])["dropped"]]' "$META" \
   | while read -r l; do say "$l"; done
@@ -188,6 +202,31 @@ PY
 )
 say "gates passed: ${PASSED:-none}"
 [ -n "$PASSED" ] || { say "no entry passed its gates; nothing to publish"; exit 1; }
+# the per-entry budget (make_site.py's), on the gated recipes: an entry over
+# it is refused here, said out loud, and none of its packs is sent for it
+BUDGET=$("$PY" - "$W/recipes/$TAG" "$PASSED" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.make_site import over_budget, touched_bytes
+d, langs = sys.argv[1:3]
+ok, wiki = [], 0
+for L in langs.split(","):
+    p = os.path.join(d, f"{L}.json")
+    r = json.load(open(p))
+    why = over_budget(os.path.getsize(p), sum(touched_bytes(r).values()))
+    if why:
+        print(f"REFUSED {L}: {why}")
+    else:
+        ok.append(L)
+        wiki += any(k != "search" for k in r["packs"])
+print("OK " + ",".join(ok))
+print(f"WIKI {wiki}")
+PY
+) || { say "budget check failed"; exit 1; }
+while read -r l; do case "$l" in REFUSED*) say "$l";; esac; done <<< "$BUDGET"
+PASSED=$(sed -n 's/^OK //p' <<< "$BUDGET")
+# an entry without a Wikipedia pack (the base's own language) is no reason to publish
+[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || { say "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"; exit 5; }
 if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org (exit 3: gated, nothing published)"; exit 3; fi
 
 # 5. archive.org: the packs the passing entries use
@@ -293,6 +332,10 @@ rm -rf "$STG" && mkdir -p "$OUT"
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
   --base-download "https://archive.org/download/streetzim-$REGION/$BF" --base-url "{proxy}/streetzim-$REGION/$BF" \
   -o "$OUT" >> "$LOG" 2>&1 || { say "make_site.py failed"; exit 1; }
+"$PY" -c 'import json,sys; [print("REFUSED %s: %s" % (r.get("lang") or r.get("pack"), r["why"])) for r in json.load(open(sys.argv[1]))]' \
+  "$OUT/refused.json" | while read -r l; do say "$l"; done
+MENU=$("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json")
+[ -n "$MENU" ] || { say "make_site.py offers no entry: nothing to publish ($STG kept)"; exit 5; }
 "${LOW[@]}" "$PY" "$TL/site_check.py" "$STG" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
   --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
 CRC=$?

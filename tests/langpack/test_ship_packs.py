@@ -360,6 +360,47 @@ def test_a_failed_site_check_replaces_and_publishes_nothing(ship: SimpleNamespac
     assert not (tmp_path / "web2" / "build" / "recipes" / "testland").exists()
 
 
+def test_a_continent_or_a_big_base_gets_no_packs(ship: SimpleNamespace) -> None:
+    """Re-review: v1 gives no packs to a continent (cloud/regions.tsv) or a
+    base over SHIP_MAX_BASE_GB: refused in step 1, exit 4, before any
+    download, pack build or gate."""
+    for region, extra in (("europe", {}), ("testland", {"SHIP_MAX_BASE_GB": "0.000001"})):
+        r = subprocess.run(["bash", str(SHIP), region, str(ship.base)], capture_output=True, text=True, timeout=300,
+                           env={**ship.env, **extra})
+        log = (ship.work / "logs" / f"ship-{region}-{ship.tag}.log").read_text()
+        assert r.returncode == 4 and "no language packs in v1" in log, (region, log[-1500:])
+        assert _lines(ship.logs["prefetch"]) == [] and _lines(ship.logs["build"]) == [] and _lines(ship.logs["gates"]) == []
+    assert "a continent map" in (ship.work / "logs" / f"ship-europe-{ship.tag}.log").read_text()
+
+
+def test_budget_refusals_are_loud(ship: SimpleNamespace) -> None:
+    """Re-review: entries over the per-entry budget are refused before
+    anything is sent, each said in the log; when no entry with a Wikipedia
+    pack is left the run exits 5 and replaces nothing (it said "ready")."""
+    assert _run(ship).returncode == 0
+    site = ship.work / "site" / "testland" / "recipes" / "testland"
+    menu = {m["lang"]: m["download_bytes"] for m in json.loads((site / "index.json").read_text())["regions"][0]["menu"]}
+    small = min(v for v in menu.values() if v)
+    big = sorted(L for L, v in menu.items() if v > small)
+    assert big, menu
+    sent = _sent(ship)
+    r = _run(ship, LANGPACK_ENTRY_BUDGET=str(small))       # only the smallest entries fit
+    log = _log(ship)
+    assert r.returncode == 0, log[-2000:]
+    for L in big:
+        assert f"REFUSED {L}: over the per-entry budget" in log, log[-2000:]
+    idx = json.loads((site / "index.json").read_text())
+    assert sorted(m["lang"] for m in idx["regions"][0]["menu"]) == sorted(L for L in menu if L not in big)
+    before = sorted(p.name for p in site.iterdir())
+    for extra in ({"LANGPACK_ENTRY_BUDGET": "1"}, {"LANGPACK_RECIPE_BUDGET": "1"}):   # nothing with a pack fits
+        r = _run(ship, **extra)
+        log = _log(ship)
+        assert r.returncode == 5, (extra, log[-2000:])
+        assert "with a Wikipedia pack is over the per-entry budget: nothing to publish" in log
+        assert sorted(p.name for p in site.iterdir()) == before
+    assert _sent(ship) == sent                              # nothing sent for refused entries
+
+
 def test_a_leftover_of_the_old_site_is_not_a_failed_swap(ship: SimpleNamespace) -> None:
     """Review LOW: the region's site files were replaced; only removing the
     previous ones (now in the staging folder) failed. The run says so and
