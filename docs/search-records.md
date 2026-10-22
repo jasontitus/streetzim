@@ -157,7 +157,7 @@ Latin name already).
   | | records | with `ln` | chunk bytes | tier-c chunks | place category | new 2-char keys |
   |---|---|---|---|---|---|---|
   | Switzerland (22 languages, with admin) | 2.3 M | 3,086 | +0.4% | +2.4% | +0.9% | +294 |
-  | Switzerland, with the names lookup | 2.3 M | 8,595 | +0.8% | +3.1% | | +356 |
+  | Switzerland, with the names lookup (≈, two runs combined) | 2.3 M | 8,595 | ≈+0.8% | ≈+3.1% | | ≈+356 |
   | Greece (21) | 1.07 M | 10,343 | +1.5% | +9.2% | +9.8% | +227 |
   | Poland (21) | 2.95 M | 26,268 | +1.7% | +9.0% | +4.9% | +289 |
 
@@ -166,6 +166,15 @@ Latin name already).
   share; Europe's manifest (4.03 MB of `validate_zim.py`'s 4 MiB) is
   estimated at +30-50 KB. Cross-ref names cost 23-233 B per cross-ref in
   memory (Poland 14 MB); the extraction time is unchanged.
+- **A search cache from the region's own multilingual tiles** (search
+  features extracted with `STREETZIM_TILE_LANGUAGES` set to the tiles'
+  `.langs`: every feature carries its own `names`) reaches about twice as
+  many records again, lines and polygons included: Switzerland 14,889
+  non-admin records with `ln` (rivers and streams 4,548, villages 1,260,
+  peaks 765; Romansh on 671), against 7,842 with the names lookup and
+  2,333 from wiki objects alone. It costs a full extraction (Switzerland
+  2,911 s, mostly assigning location context), so it suits a single
+  country; `build-region-fast.sh` takes it as `STREETZIM_SEARCH_CACHE`.
 - **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)
