@@ -134,12 +134,18 @@
   async function getJSON(url) {
     let r;
     try { r = await fetch(url, { cache: 'no-cache' }); } catch (e) { throw new Error('no connection (' + (e.message || e) + ')'); }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { status: r.status });
     try { return await r.json(); } catch (e) { throw new Error('the file is damaged'); }
   }
 
   async function load() {
-    index = await getJSON('recipes/index.json');
+    // No recipes published yet (no index, or an empty one): say so; the
+    // controls stay disabled.
+    try { index = await getJSON('recipes/index.json'); } catch (e) { if (e.status !== 404) throw e; index = { regions: [] }; }
+    if (!Array.isArray(index.regions) || !index.regions.length) {
+      $('notice').textContent = 'No maps yet: none can be built in another language here so far. Come back later.';
+      return;
+    }
     for (const reg of index.regions) {
       try {
         if (reg.probe) reg.probe.url = viaProxy(reg.probe.url);
