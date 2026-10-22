@@ -68,7 +68,9 @@ if [ -f "$ROOT/ops/langpack/node_modules/playwright-core/index.mjs" ]; then
 else
   NPM=${NPM:-$(dirname "${NODE:-/storage/streetzim/.browser-libs/node-v20.18.1-linux-x64/bin/node}")/npm}
   [ -x "$NPM" ] || NPM=npm
-  if [ $APPLY = 1 ]; then (cd "$ROOT/ops/langpack" && echo "   + (cd ops/langpack && $NPM ci)" && "$NPM" ci --no-audit --no-fund) || exit 1
+  # npm is a node script: its node on PATH
+  if [ $APPLY = 1 ]; then (cd "$ROOT/ops/langpack" && echo "   + (cd ops/langpack && $NPM ci)" \
+                            && PATH="$(dirname "$NPM"):$PATH" "$NPM" ci --no-audit --no-fund) || exit 1
   else echo "   would run: (cd $ROOT/ops/langpack && $NPM ci)"; TODO=1; fi
 fi
 
