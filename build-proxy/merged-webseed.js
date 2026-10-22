@@ -11,23 +11,33 @@
 // with 206/Content-Range/Content-Length like any static file, so it works as
 // a torrent's BEP 19 webseed (url-list) and as a plain download. Each part
 // of the requested range is either a byte range of one archive.org file
-// (fetched with Range, the body piped through untouched) or a slice of a
-// blob from the site (ws-<h>.bin: inline bytes, the MD5, short runs), held
-// in memory. Nothing is written or cached on disk; the bytes are not
-// hashed here — torrent clients check every piece against the torrent.
+// (fetched with Range, and If-Range: <its archive.org ETag> when the index
+// records one, so a file replaced since answers 200 and is refused; the body
+// piped through untouched) or a slice of a blob from the site (ws-<h>.bin:
+// inline bytes, the MD5, short runs), held in memory. Nothing is written or
+// cached on disk; the bytes are not hashed here — torrent clients check every
+// piece against the torrent, so a failure after the headers is a truncated
+// 206, which clients retry, while an error status before the body (404,
+// 502, 503) makes libtorrent drop the web seed for minutes: those are kept
+// for real staleness, a broken index and the daily budget.
 //
 // Free-plan limits (developers.cloudflare.com/workers/platform/limits):
 // 10 ms CPU per request (time waiting on fetch does not count), 128 MB per
-// isolate, 50 subrequests per request with each redirect counted. So the
-// index is a few KB, parsed once per isolate per version; blobs are at most
-// 4 MiB and kept in a bounded per-isolate cache; archive.org's redirect
-// target (the storage node) is remembered per file, so a part costs one
-// subrequest after the first.
+// isolate, 50 subrequests per request with each redirect counted, 100,000
+// requests a day per ACCOUNT (shared with streetzim-preview-proxy; a 503 is a
+// request too). So the index is a few KB, parsed once per isolate per version
+// and revalidated after INDEX_TTL_MS; blobs are at most 4 MiB, fetched once
+// per isolate (concurrent misses share one fetch) and kept within a byte
+// budget; archive.org's redirect target (the storage node) is remembered per
+// file, so a part costs one subrequest after the first; lang_torrents.py
+// keeps every request under 40 subrequests; and opts.meter can stop the
+// webseed once its daily share is used.
 //
 // Runtime-neutral (Fetch API and web streams): Cloudflare Workers
 // (worker.js) or Node >= 18 (serve-local.mjs).
 
 const INDEX_FORMAT = 'streetzim-webseed/1';
+const INDEX_TTL_MS = 5 * 60 * 1000;
 const PATH_RE = /^\/merged\/([a-z0-9-]+)\/([a-z]{2,3}(?:-[a-z0-9]+)?)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([A-Za-z0-9._-]+\.zim)$/;
 const ITEM_RE = /^streetzim-[a-z0-9-]+$/;
 const FILE_RE = /^[A-Za-z0-9._-]+\.zim$/;
@@ -48,24 +58,23 @@ function reply(status, message, extra) {
   });
 }
 
-// "bytes=a-b", "bytes=a-", "bytes=-n" -> [start, end] (inclusive), or null
-// when absent; 'bad' for anything else (several ranges included).
+// RFC 9110 §14: one "bytes" range -> [start, end] (inclusive); null when
+// there is no usable Range (absent, another unit, several ranges, or not
+// valid syntax: all ignored, the whole file is sent); 'unsatisfiable' when
+// it is valid but selects nothing (start past the end, a suffix of 0).
 export function parseRange(header, size) {
-  if (header == null || header === '') return null;
-  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (!m || (m[1] === '' && m[2] === '')) return 'bad';
-  let start, end;
+  if (header == null) return null;
+  const m = /^bytes=(\d*)-(\d*)$/i.exec(String(header).trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
   if (m[1] === '') {                          // suffix: the last n bytes
     const n = Number(m[2]);
-    if (!(n > 0)) return 'bad';
-    start = Math.max(0, size - n); end = size - 1;
-  } else {
-    start = Number(m[1]);
-    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
-    if (m[2] !== '' && Number(m[2]) < start) return 'bad';
+    if (n === 0) return 'unsatisfiable';
+    return [Math.max(0, size - n), size - 1];
   }
+  const start = Number(m[1]);
+  if (m[2] !== '' && Number(m[2]) < start) return null;      // invalid: ignored
   if (!Number.isSafeInteger(start) || start >= size) return 'unsatisfiable';
-  return [start, end];
+  return [start, m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1)];
 }
 
 // The parts of `index` that cover [start, end] (inclusive), as
@@ -112,34 +121,76 @@ export function checkIndex(ix, region, lang, uuid, file) {
   return '';
 }
 
-// createMergedHandler({site, upstream, fetchImpl, blobCacheBytes, stats})
+// A per-isolate daily counter: the fallback meter when worker.js has no
+// shared one (approximate: each isolate counts only its own requests).
+export function isolateMeter(budget) {
+  let day = '', n = 0;
+  return {
+    allow() {
+      const today = new Date().toISOString().slice(0, 10);
+      if (today !== day) { day = today; n = 0; }
+      n += 1;
+      return !(budget > 0) || n <= budget;
+    },
+  };
+}
+
+// createMergedHandler({site, upstream, fetchImpl, blobCacheBytes, stats, meter})
 //   site      origin of the site holding /build/recipes/<region>/ (index, blobs)
 //   upstream  archive.org's download prefix, "https://archive.org/download/"
 //   stats     optional (event) => void: per-request counters (tests, measurements)
-// -> (request, ctx) => Promise<Response>
+//   meter     optional {allow(ctx) -> boolean | Promise<boolean>}: false = the
+//             webseed's daily budget is used (503, before anything is fetched)
+// -> (request, ctx) => Promise<Response>; handle.state() for tests
 export function createMergedHandler(opts) {
   const site = String(opts.site || '').replace(/\/+$/, '');
   const upstream = String(opts.upstream || 'https://archive.org/download/').replace(/\/*$/, '/');
   const fetchImpl = opts.fetchImpl || ((...a) => fetch(...a));
   const blobBudget = opts.blobCacheBytes || 24 << 20;
   const stats = opts.stats || null;
-  const indexes = new Map();        // "<region>/<lang>" -> index (latest seen)
+  const meter = opts.meter || null;
+  const now = opts.now || (() => Date.now());
+  const indexes = new Map();        // "<region>/<lang>" -> {ix, at}
   const blobs = new Map();          // sha256 -> Uint8Array (LRU by insertion order)
+  const pending = new Map();        // sha256 -> Promise<Uint8Array> (one fetch per blob at a time)
   let blobBytes = 0;
   const nodes = new Map();          // "<item>/<file>" -> storage-node URL after archive.org's redirect
 
+  async function siteFetch(url, init, counter) {
+    let last;
+    for (let i = 0; i < 2; i++) {                 // one retry: a transient site error is not staleness
+      counter.sub++;
+      try { return await fetchImpl(url, init); } catch (e) { last = e; }
+    }
+    throw last;
+  }
+
+  async function loadIndex(region, lang, fresh, counter) {
+    const url = `${site}/build/recipes/${region}/${lang}.ws.json` + (fresh ? `?fresh=${now()}` : '');
+    // fresh: a new query string, so no cache (edge or Firebase CDN) answers it
+    const r = await siteFetch(url, { cf: { cacheTtl: fresh ? 0 : 60 } }, counter);
+    if (r.status === 404) return { missing: true };
+    if (!r.ok) throw new Error(`index HTTP ${r.status}`);
+    try { return { ix: await r.json() }; } catch (e) { return { bad: 'index is not JSON' }; }
+  }
+
   async function getIndex(region, lang, uuid, file, counter) {
     const key = `${region}/${lang}`;
-    let ix = indexes.get(key);
-    if (ix && ix.uuid === uuid && ix.file === file) return ix;
-    counter.sub++;
-    const r = await fetchImpl(`${site}/build/recipes/${region}/${lang}.ws.json`, { cf: { cacheTtl: 60 } });
-    if (!r.ok) return { error: r.status === 404 ? 'stale' : `index HTTP ${r.status}` };
-    try { ix = await r.json(); } catch (e) { return { error: 'index is not JSON' }; }
-    const why = checkIndex(ix, region, lang, uuid, file);
-    if (why) return { error: why };
-    indexes.set(key, ix);
-    return ix;
+    const hit = indexes.get(key);
+    if (hit && hit.ix.uuid === uuid && hit.ix.file === file && now() - hit.at < INDEX_TTL_MS) return hit.ix;
+    // a cached or edge-cached index for another version: ask the site itself
+    // before calling this torrent out of date
+    for (const fresh of hit ? [true] : [false, true]) {
+      const got = await loadIndex(region, lang, fresh, counter);
+      if (got.bad) return { error: got.bad };
+      if (got.missing) { if (fresh) return { error: 'stale' }; continue; }
+      const why = checkIndex(got.ix, region, lang, uuid, file);
+      if (why === 'stale' && !fresh) continue;
+      if (why) return { error: why };
+      indexes.set(key, { ix: got.ix, at: now() });
+      return got.ix;
+    }
+    return { error: 'stale' };
   }
 
   async function sha256hex(bytes) {
@@ -149,79 +200,101 @@ export function createMergedHandler(opts) {
     return s;
   }
 
-  async function getBlob(region, ix, sha, counter) {
-    const hit = blobs.get(sha);
-    if (hit) { blobs.delete(sha); blobs.set(sha, hit); return hit; }
-    const meta = ix.blobs[sha];
-    counter.sub++;
-    const r = await fetchImpl(`${site}/build/recipes/${region}/${meta.file}`, { cf: { cacheTtl: 86400 } });
-    if (!r.ok) throw new Error(`blob ${meta.file}: HTTP ${r.status}`);
-    const bytes = new Uint8Array(await r.arrayBuffer());
-    if (bytes.length !== meta.size || await sha256hex(bytes) !== sha) throw new Error(`blob ${meta.file} is not the one the index names`);
+  function remember(sha, bytes) {
+    const old = blobs.get(sha);
+    if (old) { blobs.delete(sha); blobBytes -= old.length; }
     blobs.set(sha, bytes);
     blobBytes += bytes.length;
     for (const [k, v] of blobs) {                // evict the oldest beyond the budget
       if (blobBytes <= blobBudget || k === sha) break;
       blobs.delete(k); blobBytes -= v.length;
     }
-    return bytes;
+  }
+
+  function getBlob(region, ix, sha, counter) {
+    const hit = blobs.get(sha);
+    if (hit) { blobs.delete(sha); blobs.set(sha, hit); return Promise.resolve(hit); }
+    if (pending.has(sha)) return pending.get(sha);
+    const meta = ix.blobs[sha];
+    const p = (async () => {
+      const r = await siteFetch(`${site}/build/recipes/${region}/${meta.file}`, { cf: { cacheTtl: 86400 } }, counter);
+      if (!r.ok) throw new Error(`blob ${meta.file}: HTTP ${r.status}`);
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      if (bytes.length !== meta.size || await sha256hex(bytes) !== sha) throw new Error(`blob ${meta.file} is not the one the index names`);
+      remember(sha, bytes);
+      return bytes;
+    })();
+    pending.set(sha, p);
+    p.then(() => pending.delete(sha), () => pending.delete(sha));
+    return p;
   }
 
   // One ranged GET of an archive.org file; follows the redirect once, then
-  // goes to the remembered storage node (falling back to archive.org).
+  // goes to the remembered storage node (falling back to archive.org). Only
+  // a 206 for exactly these bytes of a file of the index's size (and the
+  // index's ETag, through If-Range) is used.
   async function source(src, from, to, counter) {
     const key = `${src.item}/${src.file}`;
-    const want = `bytes=${from}-${to}`;
+    const headers = { Range: `bytes=${from}-${to}` };
+    if (src.etag) headers['If-Range'] = src.etag;
     const tries = nodes.has(key) ? [nodes.get(key), upstream + key] : [upstream + key];
     let last = '';
     for (const url of tries) {
       counter.sub += url === upstream + key ? 2 : 1;   // archive.org redirects to its storage node
       let r;
       try {
-        r = await fetchImpl(url, { headers: { Range: want }, redirect: 'follow' });
+        r = await fetchImpl(url, { headers, redirect: 'follow' });
       } catch (e) { last = String(e && e.message || e); nodes.delete(key); continue; }
       const cr = r.headers.get('content-range') || '';
-      if (r.status === 206 && cr.startsWith(`bytes ${from}-${to}/`)) {
+      const cl = r.headers.get('content-length');
+      if (r.status === 206 && cr === `bytes ${from}-${to}/${src.size}` && (cl == null || Number(cl) === to - from + 1)) {
         if (url === upstream + key && r.url && r.url !== url) nodes.set(key, r.url);
         return r.body;
       }
-      last = `HTTP ${r.status} ${cr}`;
+      last = `HTTP ${r.status} ${cr}${cl != null ? ` length ${cl}` : ''}`;
       try { r.body && r.body.cancel(); } catch (e) { /* ignore */ }
       nodes.delete(key);
     }
-    throw new Error(`${key} ${want}: ${last}`);
+    throw new Error(`${key} bytes=${from}-${to}: ${last}`);
   }
 
-  return async function handle(request, ctx) {
+  async function handle(request, ctx) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (request.method !== 'GET' && request.method !== 'HEAD') return reply(405, 'GET or HEAD only');
     const url = new URL(request.url);
     const m = PATH_RE.exec(url.pathname);
     if (!m) return reply(404, 'expected /merged/<region>/<lang>/<uuid>/<file>.zim');
     if (!site) return reply(503, 'the build worker has no SITE_ORIGIN');
+    if (meter && !(await meter.allow(ctx))) {
+      return reply(503, "today's share of this worker's requests is used; the torrent's peers and the /build/ page still work",
+        { 'Retry-After': '3600' });
+    }
     const [, region, lang, uuid, file] = m;
     const counter = { sub: 0, parts: 0, bytes: 0 };
     const t0 = Date.now();
-    const ix = await getIndex(region, lang, uuid, file, counter);
+    let ix;
+    try { ix = await getIndex(region, lang, uuid, file, counter); } catch (e) {
+      return reply(503, `the site did not answer (${e && e.message || e}); try again shortly`, { 'Retry-After': '30' });
+    }
     if (ix.error) {
       return ix.error === 'stale'
         ? reply(404, 'this language version is out of date (the map or its packs were updated): get the new torrent or link from https://streetzim.web.app/build/')
         : reply(502, `cannot serve this file: ${ix.error}`);
     }
     const size = ix.size;
+    const etag = `"${ix.uuid}-${ix.md5}"`;
     const head = {
       ...CORS,
       'Accept-Ranges': 'bytes',
       'Content-Type': 'application/octet-stream',
-      'ETag': `"${ix.uuid}-${ix.md5}"`,
+      'ETag': etag,
       // A recipe UUID names exactly one byte sequence: safe to cache.
       'Cache-Control': 'public, max-age=86400',
+      'Vary': 'Range',
       'Content-Disposition': `attachment; filename="${ix.file}"`,
     };
-    const rh = request.headers.get('Range');
     const ifRange = request.headers.get('If-Range');
-    let range = parseRange(ifRange && ifRange !== head.ETag ? null : rh, size);
-    if (range === 'bad') return reply(400, 'only one byte range is supported, as "Range: bytes=start-end"');
+    const range = parseRange(ifRange && ifRange !== etag ? null : request.headers.get('Range'), size);
     if (range === 'unsatisfiable') return reply(416, 'range not satisfiable', { 'Content-Range': `bytes */${size}` });
     const [start, end] = range || [0, size - 1];
     const len = end - start + 1;
@@ -244,7 +317,8 @@ export function createMergedHandler(opts) {
           if (kind === 'x') {
             const bytes = await getBlob(region, ix, ref, counter);
             const w = writable.getWriter();
-            await w.write(bytes.subarray(off + lo, off + hi));
+            // a copy: a stream may take (detach) the buffer it is given
+            await w.write(bytes.slice(off + lo, off + hi));
             w.releaseLock();
           } else {
             const body = await source(ix.sources[ref], off + lo, off + hi - 1, counter);
@@ -262,5 +336,8 @@ export function createMergedHandler(opts) {
     })();
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(pump);
     return new Response(readable, { status, headers });
-  };
+  }
+  handle.state = () => ({ blobCacheBytes: blobBytes, blobs: blobs.size, pending: pending.size,
+                          indexes: indexes.size, nodes: nodes.size });
+  return handle;
 }

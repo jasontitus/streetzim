@@ -3,47 +3,57 @@
 page offers, webseeded by the build worker (build-proxy/).
 
     lang_torrents.py OUT_DIR --base BASE.zim --packs-dir DIR --webseed URL
-                     [--base-torrent BASE.torrent] [--full] [--langs el,de]
+                     [--base-torrent BASE.torrent] [--ia-cache DIR] [--full] [--langs el,de]
     lang_torrents.py OUT_DIR --strip      remove every torrent file and menu field
-
-Exit: 0 every entry has its torrent; 3 some entries failed (they have none,
-the others do: the folder is consistent); 1 the run itself failed
-(ship_packs.sh then runs --strip).
+    lang_torrents.py X --only-torrent-failures CHECK_OUT   (ship_packs.sh: did site_check fail on torrents only?)
 
 OUT_DIR is make_site.py's output for one region (recipes/<region>/: <L>.json,
 region.json, index.json). For every menu entry it writes, next to the recipe:
 
   <L>.torrent   a single-file torrent of the merged ZIM, byte for byte the
                 file the builder page assembles (so a visitor who built it
-                can seed it). Piece length and trackers as
-                ops/cloud/build_torrent.py chooses for that size; the BEP 19
-                webseed (url-list) is
+                can seed it). Piece length as ops/cloud/build_torrent.py
+                chooses for that size; trackers LANG_TRACKERS (and DHT); the
+                BEP 19 webseed (url-list) is
                 URL/merged/<region>/<L>/<recipe uuid>/<file_name>.zim
   <L>.ws.json   the worker's segment index (streetzim-webseed/1, a few KB):
                 the merged file as parts, each either a byte range of one
-                archive.org file (the base, a pack, the search pack) or a
-                range of one of the blobs below
+                archive.org file (the base, a pack, the search pack; with its
+                archive.org ETag when --ia-cache knows the file's mtime, so the
+                worker's If-Range refuses a file replaced since) or a range of
+                one of the blobs below
   ws-<h>.bin    the bytes the worker cannot range-read from archive.org: the
-                recipe's inline segments, the MD5, and runs of short base or
-                pack segments, coalesced so that one webseed request touches
-                a handful of parts (the free Workers plan allows 50
-                subrequests per request); named by content, so identical
-                runs (the viewer slots) are stored once per region
+                recipe's inline segments, the MD5, and base or pack segments
+                shorter than the remote threshold, coalesced; named by
+                content, so identical runs (the viewer slots) are stored once
+                per region
 
 and adds "torrent" and "infohash" to the entry in region.json and index.json.
 Blobs no index of OUT_DIR names any more are removed.
 
+Subrequests (the free Workers plan allows 50 per request): a request costs
+the worker 1 (the index, cold) + 1 per blob + 1 per archive.org part (2 for
+the first part of each file: archive.org's redirect). The whole file's cost
+bounds every range's; it must stay <= SUBREQ_LIMIT (40). Short segments
+start at 256 KiB remote threshold; an entry over the limit is rebuilt with
+a higher threshold (1, 4, 16, 64 MiB: more bytes in blobs, fewer parts),
+and fails if none fits.
+
 Every byte is read through recipe2.ChunkReader (each 16 MiB chunk checked
-against the recipe's SHA-256), and, without a base torrent, the merged
-stream's MD5 must equal the recipe's file_md5.
+against the recipe's SHA-256), and the merged stream's MD5 must equal the
+recipe's file_md5 -- always.
 
 --base-torrent: the base's own torrent (ops/cloud/build_torrent.py, same
 piece length). The base's bytes keep their offsets in the merged file, so a
 piece lying wholly inside an unchanged base range has the base torrent's
 hash. Used only when the base torrent names this base (file name, length)
-with the same piece length, and only after a sample of the reused hashes
-matches the local base; then the MD5 pass is skipped (every byte that is
-hashed is still chunk-checked). --full ignores it.
+with the same piece length and EVERY one of its pieces matches the local
+base (hashed once per run, for all entries); it saves the SHA-1 of those
+pieces, not the read or the MD5. --full ignores it.
+
+Exit: 0 every entry has its torrent; 3 some entries failed (they have none,
+the others do: the folder is consistent); 1 the run itself failed
+(ship_packs.sh then runs --strip).
 
 Nothing is served or uploaded: the files are site data, sealed and published
 with the recipes (ship_packs.sh, publish_site.sh).
@@ -64,19 +74,34 @@ from typing import Any
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from ops.cloud.build_torrent import TRACKERS, auto_piece_size, bencode  # noqa: E402
+from ops.cloud.build_torrent import auto_piece_size, bencode  # noqa: E402
 from tools.langpack.merge_zim import MergeError  # noqa: E402
 from tools.langpack.recipe2 import FORMAT as RECIPE_FORMAT, ChunkReader  # noqa: E402
 
 INDEX_FORMAT = "streetzim-webseed/1"
-REMOTE_MIN = 256 << 10       # shorter base/pack segments are served from blobs
+REMOTE_MIN = 256 << 10       # shorter base/pack segments are served from blobs (the ladder's first step)
 BLOB_MAX = 4 << 20           # a blob is fetched whole by the worker and kept in memory
 BLOB_RE = re.compile(r"^ws-[0-9a-f]{32}\.bin$")
 ITEM_RE = re.compile(r"^streetzim-[a-z0-9-]+$")
 FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.zim$")
 REGION_RE = re.compile(r"^[a-z0-9-]+$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[a-z0-9]+)?$")
-SAMPLES = 8                  # reused base hashes checked against the local base
+# Trackers (2026-10-21): archive.org's two count peers of any infohash (two
+# peers announced on an arbitrary hash came back as complete=2), and these
+# open UDP trackers answered a BEP 15 connect; tracker.openbittorrent.com did
+# not. DHT and PEX also work (the torrents are not private).
+LANG_TRACKERS = [
+    "http://bt1.archive.org:6969/announce",
+    "http://bt2.archive.org:6969/announce",
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://exodus.desync.com:6969/announce",
+]
+SUBREQ_LIMIT = int(os.environ.get("LANGPACK_WEBSEED_SUBREQ_LIMIT") or 40)
+REMOTE_LADDER = (256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20)
+WINDOW = 16 << 20            # a libtorrent web seed request (urlseed_max_request_bytes)
 
 
 class TorrentError(Exception):
@@ -108,9 +133,11 @@ def webseed_url(webseed: str, region: str, lang: str, uuid: str, file: str) -> s
 
 
 def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str, str],
-                lang: str, webseed: str) -> tuple[dict, dict[str, bytes], dict]:
+                lang: str, webseed: str, remote_min: int = REMOTE_MIN,
+                etags: dict[tuple[str, str], str] | None = None) -> tuple[dict, dict[str, bytes], dict]:
     """The worker's segment index for one recipe, the blobs it names, and the
-    open ChunkReaders (for hashing)."""
+    open ChunkReaders (for hashing). Base/pack segments of at least remote_min
+    bytes are archive.org parts; the rest goes into blobs."""
     if recipe.get("format") != RECIPE_FORMAT:
         raise TorrentError("not a streetzim-recipe/2")
     b = recipe["base"]
@@ -122,6 +149,7 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
         raise TorrentError(f"region base {base_file} != recipe base {b['file']}")
     readers = {"base": ChunkReader(base_path, b["size"], b["chunk"], b["sha256"], "base", b.get("mask"))}
     sources = {"base": {"item": base_item, "file": base_file, "size": b["size"]}}
+    etags = etags or {}
     for key, p in recipe["packs"].items():
         item, file = item_of(p["url"], f"pack {key}")
         if file != p["file"]:
@@ -130,6 +158,10 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
             raise TorrentError(f"pack {key}: {p['file']} is not in the packs folder")
         readers[key] = ChunkReader(pack_paths[key], p["size"], p["chunk"], p["sha256"], f"pack {key}")
         sources[key] = {"item": item, "file": file, "size": p["size"]}
+    for src in sources.values():
+        tag = etags.get((src["item"], src["file"]))
+        if tag:
+            src["etag"] = tag
     masks = b.get("mask") or []
 
     parts: list[list] = []
@@ -167,7 +199,7 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
                     for off, ln in masks:
                         if s["off"] < off + ln and off < s["off"] + n:
                             raise TorrentError(f"base segment at {s['off']} reads the masked range at {off}")
-                if n >= REMOTE_MIN:
+                if n >= remote_min:
                     flush()
                     parts.append([pos, n, "s", key, s["off"]])
                     buf_start = pos + n
@@ -194,8 +226,71 @@ def build_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str
         "blobs": {sha: {"file": blob_name(sha), "size": len(data)} for sha, data in blobs.items()},
         "parts": parts,
         "webseed": webseed_url(webseed, region["id"], lang, recipe["uuid"], file),
+        "remote_min": remote_min,
     }
+    index["subrequests"] = costs(index)
     return index, blobs, readers
+
+
+def subrequests(index: dict, start: int, end: int) -> int:
+    """The worker's subrequests for bytes [start, end] in a cold isolate: the
+    index, each blob once, each archive.org part (2 for a file's first part:
+    archive.org's redirect to its storage node)."""
+    n, blobs, files = 1, set(), set()
+    for pstart, plen, kind, ref, _off in index["parts"]:
+        if pstart + plen <= start or pstart > end:
+            continue
+        if kind == "x":
+            if ref not in blobs:
+                blobs.add(ref)
+                n += 1
+        else:
+            n += 1 if ref in files else 2
+            files.add(ref)
+    return n
+
+
+def costs(index: dict) -> dict:
+    """Worst-case subrequests: the whole file (which bounds every range) and
+    the worst 16 MiB window (a window starting at a part boundary)."""
+    size = index["size"]
+    starts = sorted({p[0] for p in index["parts"]} | set(range(0, size, WINDOW)))
+    return {"whole": subrequests(index, 0, size - 1),
+            "window16m": max(subrequests(index, s, min(size, s + WINDOW) - 1) for s in starts)}
+
+
+def plan_index(recipe: dict, region: dict, base_path: str, pack_paths: dict[str, str], lang: str,
+               webseed: str, etags: dict | None = None) -> tuple[dict, dict[str, bytes], dict]:
+    """build_index with the lowest remote threshold whose whole-file cost fits
+    SUBREQ_LIMIT; TorrentError if none does."""
+    for rm in REMOTE_LADDER:
+        index, blobs, readers = build_index(recipe, region, base_path, pack_paths, lang, webseed, rm, etags)
+        if index["subrequests"]["whole"] <= SUBREQ_LIMIT:
+            return index, blobs, readers
+    raise TorrentError(f"needs {index['subrequests']['whole']} subrequests per request even with "
+                       f"{REMOTE_LADDER[-1] >> 20} MiB parts (limit {SUBREQ_LIMIT})")
+
+
+def load_etags(ia_dir: str | None) -> dict[tuple[str, str], str]:
+    """archive.org ETags ("<mtime hex>-<size hex>") from item metadata JSON in
+    ia_dir (ia-<item>.json, as site_check.py caches it): (item, file) -> etag."""
+    out: dict[tuple[str, str], str] = {}
+    if not ia_dir or not os.path.isdir(ia_dir):
+        return out
+    for f in os.listdir(ia_dir):
+        if not (f.startswith("ia-") and f.endswith(".json")):
+            continue
+        try:
+            doc = json.load(open(os.path.join(ia_dir, f), encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        item = (doc.get("metadata") or {}).get("identifier") or f[len("ia-"):-len(".json")]
+        for x in doc.get("files") or doc.get("result") or []:
+            try:
+                out[(item, x["name"])] = '"%x-%x"' % (int(x["mtime"]), int(x["size"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+    return out
 
 
 class Stream:
@@ -269,34 +364,34 @@ def reusable_pieces(index: dict, plen: int) -> set[int]:
 
 
 def piece_hashes(index: dict, stream: Stream, plen: int, base_pieces: bytes | None = None,
-                 reuse: set[int] | None = None) -> tuple[bytes, str | None, dict]:
-    """SHA-1 of every piece (and the stream's MD5 when nothing is reused)."""
+                 reuse: set[int] | None = None) -> tuple[bytes, str, dict]:
+    """SHA-1 of every piece (a reused piece takes the base torrent's) and the
+    MD5 of the whole stream: every byte is read (and chunk-checked) either way."""
     size = index["size"]
     n_pieces = -(-size // plen)
     reuse = reuse or set()
-    md5 = None if reuse else hashlib.md5(usedforsecurity=False)
+    md5 = hashlib.md5(usedforsecurity=False)
     out = bytearray()
     hashed = 0
     for k in range(n_pieces):
-        if k in reuse:
-            assert base_pieces is not None
-            out += base_pieces[20 * k:20 * k + 20]
-            continue
         start = k * plen
         n = min(plen, size - start)
-        h = hashlib.sha1(usedforsecurity=False)
+        h = None if k in reuse else hashlib.sha1(usedforsecurity=False)
         got = 0
         for chunk in stream.read(start, n):
-            h.update(chunk)
-            if md5 is not None:
-                md5.update(chunk)
+            md5.update(chunk)
+            if h is not None:
+                h.update(chunk)
             got += len(chunk)
         if got != n:
             raise TorrentError(f"piece {k}: read {got} of {n} bytes")
-        hashed += n
-        out += h.digest()
-    return bytes(out), (md5.hexdigest() if md5 is not None else None), {
-        "pieces": n_pieces, "reused": len(reuse), "hashed_bytes": hashed}
+        if h is None:
+            assert base_pieces is not None
+            out += base_pieces[20 * k:20 * k + 20]
+        else:
+            hashed += n
+            out += h.digest()
+    return bytes(out), md5.hexdigest(), {"pieces": n_pieces, "reused": len(reuse), "hashed_bytes": hashed}
 
 
 def load_base_torrent(path: str, base_file: str, base_size: int, plen: int) -> tuple[bytes | None, str]:
@@ -316,11 +411,39 @@ def load_base_torrent(path: str, base_file: str, base_size: int, plen: int) -> t
     return pieces, ""
 
 
+_VERIFIED: dict[tuple, tuple[bytes | None, str]] = {}
+
+
+def verified_base_pieces(path: str, base_path: str, base_file: str, base_size: int,
+                         plen: int) -> tuple[bytes | None, str]:
+    """load_base_torrent, then every piece checked against the local base
+    (once per run: the result is kept for the other entries)."""
+    st = os.stat(base_path)
+    key = (os.path.realpath(path), os.path.realpath(base_path), st.st_size, st.st_mtime_ns, plen)
+    if key not in _VERIFIED:
+        pieces, why = load_base_torrent(path, base_file, base_size, plen)
+        if pieces is not None:
+            with open(base_path, "rb", buffering=0) as fh:
+                k = 0
+                while True:
+                    b = fh.read(plen)
+                    if not b:
+                        break
+                    if hashlib.sha1(b, usedforsecurity=False).digest() != pieces[20 * k:20 * k + 20]:
+                        pieces, why = None, f"base torrent piece {k} does not match the local base"
+                        break
+                    k += 1
+            if pieces is not None:
+                why = f"base torrent verified against the local base ({k} pieces)"
+        _VERIFIED[key] = (pieces, why)
+    return _VERIFIED[key]
+
+
 def make_torrent(index: dict, pieces: bytes, plen: int) -> tuple[bytes, str]:
     info = {"name": index["file"], "piece length": plen, "pieces": pieces, "length": index["size"]}
     torrent = {
-        "announce": TRACKERS[0],
-        "announce-list": [[t] for t in TRACKERS],
+        "announce": LANG_TRACKERS[0],
+        "announce-list": [[t] for t in LANG_TRACKERS],
         "comment": f"streetzim — {index['file']} ({index['region']}, {index['lang']})",
         "created by": "streetzim/lang_torrents.py",
         "creation date": int(time.time()),
@@ -341,34 +464,24 @@ def write_atomic(path: str, data: bytes):
 
 def torrent_for(recipe_path: str, region: dict, lang: str, base_path: str, pack_paths: dict[str, str],
                 webseed: str, base_torrent: str | None = None, full: bool = False,
-                out_dir: str | None = None) -> dict:
+                out_dir: str | None = None, etags: dict | None = None) -> dict:
     recipe = json.load(open(recipe_path, encoding="utf-8"))
+    if not recipe.get("file_md5"):
+        raise TorrentError(f"{lang}: the recipe has no file_md5")
     t0 = time.perf_counter()
-    index, blobs, readers = build_index(recipe, region, base_path, pack_paths, lang, webseed)
+    index, blobs, readers = plan_index(recipe, region, base_path, pack_paths, lang, webseed, etags)
     plen = auto_piece_size(index["size"])
     stream = Stream(index, blobs, readers)
     reuse: set[int] = set()
     base_pieces = None
     why = "--full" if full else "no base torrent"
     if base_torrent and not full:
-        base_pieces, why = load_base_torrent(base_torrent, recipe["base"]["file"], recipe["base"]["size"], plen)
+        base_pieces, why = verified_base_pieces(base_torrent, base_path, recipe["base"]["file"],
+                                                recipe["base"]["size"], plen)
         if base_pieces is not None:
             reuse = reusable_pieces(index, plen)
-            # the reused hashes must be this base's: check a spread of them
-            picks = sorted(reuse)
-            sample = sorted({picks[int(i * (len(picks) - 1) / max(1, SAMPLES - 1))] for i in range(SAMPLES)}) if picks else []
-            for k in sample:
-                start = k * plen
-                h = hashlib.sha1(b"".join(stream.read(start, min(plen, index["size"] - start))),
-                                 usedforsecurity=False).digest()
-                if h != base_pieces[20 * k:20 * k + 20]:
-                    reuse, base_pieces = set(), None
-                    why = f"base torrent piece {k} does not match the local base"
-                    break
-            else:
-                why = f"reused {len(reuse)} base pieces (sample of {len(sample)} checked)"
     pieces, md5, st = piece_hashes(index, stream, plen, base_pieces, reuse)
-    if md5 is not None and recipe.get("file_md5") and md5 != recipe["file_md5"]:
+    if md5 != recipe["file_md5"]:
         raise TorrentError(f"{lang}: the merged stream's MD5 {md5} != recipe file_md5 {recipe['file_md5']}")
     data, infohash = make_torrent(index, pieces, plen)
     index["piece_length"] = plen
@@ -385,56 +498,70 @@ def torrent_for(recipe_path: str, region: dict, lang: str, base_path: str, pack_
     write_atomic(os.path.join(out_dir, f"{lang}.torrent"), data)
     return {"lang": lang, "infohash": infohash, "size": index["size"], "piece_length": plen,
             "parts": len(index["parts"]), "blobs": len(blobs), "blob_bytes": sum(len(x) for x in blobs.values()),
-            "md5_checked": md5 is not None, "reuse": why, **st, "s": round(time.perf_counter() - t0, 2)}
+            "remote_min": index["remote_min"], "subrequests": index["subrequests"],
+            "etags": sum(1 for x in index["sources"].values() if "etag" in x),
+            "md5_checked": True, "reuse": why, **st, "s": round(time.perf_counter() - t0, 2)}
 
 
 def verify_entry(out_dir: str, region: dict, entry: dict, recipe: dict, base_path: str,
-                 pack_paths: dict[str, str], sample_pieces: int = 4) -> list[str]:
+                 pack_paths: dict[str, str], expected_origin: str | None = None,
+                 etags: dict | None = None) -> list[str]:
     """What is wrong with a menu entry's torrent files (site_check.py), [] if
-    nothing: the index is rebuilt from the recipe and must be the stored one,
-    every blob must be on disk with its SHA-256, the torrent must describe the
-    recipe's file with the index's webseed and the entry's infohash, and a
-    sample of pieces (first, last, spread) must hash as the torrent says."""
+    nothing; every message starts "TORRENT " (ship_packs.sh strips torrents
+    when they are all that failed). The index is rebuilt from the recipe (with
+    its remote threshold) and must be the stored one and fit SUBREQ_LIMIT;
+    the webseed origin must be expected_origin (LANGPACK_WEBSEED) when given;
+    every blob must be on disk with its SHA-256; the torrent must describe the
+    recipe's file with that webseed and the entry's infohash; and EVERY piece
+    must hash as the torrent says (the bytes read through the recipe's chunk
+    check), and the stream's MD5 be the recipe's file_md5."""
     L = entry["lang"]
     fails: list[str] = []
+
+    def bad(msg: str):
+        fails.append(f"TORRENT {L}: {msg}")
     try:
         ix = json.load(open(os.path.join(out_dir, f"{L}.ws.json"), encoding="utf-8"))
         origin = ix["webseed"].split("/merged/", 1)[0]
-        want, blobs, readers = build_index(recipe, region, base_path, pack_paths, L, origin)
+        if expected_origin is not None and origin != expected_origin.rstrip("/"):
+            bad(f"webseed origin {origin} != LANGPACK_WEBSEED {expected_origin}")
+        if etags is None:
+            etags = {(x["item"], x["file"]): x["etag"] for x in ix.get("sources", {}).values() if "etag" in x}
+        want, blobs, readers = build_index(recipe, region, base_path, pack_paths, L, origin,
+                                           int(ix.get("remote_min") or REMOTE_MIN), etags)
         for k in ("format", "region", "lang", "uuid", "file", "size", "md5", "file_md5", "sources", "blobs",
-                  "parts", "webseed"):
+                  "parts", "webseed", "remote_min", "subrequests"):
             if ix.get(k) != want.get(k):
-                fails.append(f"{L}: {L}.ws.json {k} != the index rebuilt from the recipe")
+                bad(f"{L}.ws.json {k} != the index rebuilt from the recipe")
+        if want["subrequests"]["whole"] > SUBREQ_LIMIT:
+            bad(f"a request may need {want['subrequests']['whole']} subrequests (limit {SUBREQ_LIMIT})")
         for sha in blobs:
             p = os.path.join(out_dir, blob_name(sha))
             if not os.path.exists(p) or hashlib.sha256(open(p, "rb").read()).hexdigest() != sha:
-                fails.append(f"{L}: blob {blob_name(sha)} missing or not its SHA-256")
+                bad(f"blob {blob_name(sha)} missing or not its SHA-256")
         t = bdecode(open(os.path.join(out_dir, f"{L}.torrent"), "rb").read())
         info = t[b"info"]
         plen = auto_piece_size(recipe["size"])
         if (info[b"name"].decode(), info[b"length"], info[b"piece length"]) != (want["file"], recipe["size"], plen):
-            fails.append(f"{L}: torrent name/length/piece length != the recipe's file")
+            bad("torrent name/length/piece length != the recipe's file")
         if len(info[b"pieces"]) != 20 * -(-recipe["size"] // plen):
-            fails.append(f"{L}: torrent piece count")
+            bad("torrent piece count")
         if [u.decode() for u in t.get(b"url-list", [])] != [want["webseed"]]:
-            fails.append(f"{L}: torrent webseed != {want['webseed']}")
+            bad(f"torrent webseed != {want['webseed']}")
         ih = hashlib.sha1(bencode(info)).hexdigest()
         if ih != entry.get("infohash") or ih != ix.get("infohash"):
-            fails.append(f"{L}: infohash {ih} != the entry's/index's")
+            bad(f"infohash {ih} != the entry's/index's")
         if entry.get("torrent", "").rsplit("/", 1)[-1] != f"{L}.torrent":
-            fails.append(f"{L}: entry torrent path {entry.get('torrent')}")
+            bad(f"entry torrent path {entry.get('torrent')}")
         if not fails:
-            stream = Stream(want, blobs, readers)
-            n = len(info[b"pieces"]) // 20
-            for k in sorted({0, n - 1, *[(n - 1) * i // max(1, sample_pieces - 1) for i in range(sample_pieces)]}):
-                start = k * plen
-                h = hashlib.sha1(b"".join(stream.read(start, min(plen, recipe["size"] - start))),
-                                 usedforsecurity=False).digest()
-                if h != info[b"pieces"][20 * k:20 * k + 20]:
-                    fails.append(f"{L}: torrent piece {k} does not hash as the merged bytes do")
-                    break
-    except (OSError, KeyError, ValueError, TypeError, TorrentError, MergeError) as e:
-        fails.append(f"{L}: torrent files unreadable or inconsistent ({e})")
+            pieces, md5, _ = piece_hashes(want, Stream(want, blobs, readers), plen)
+            if pieces != info[b"pieces"]:
+                k = next(i for i in range(len(pieces) // 20) if pieces[20 * i:20 * i + 20] != info[b"pieces"][20 * i:20 * i + 20])
+                bad(f"torrent piece {k} does not hash as the merged bytes do")
+            if md5 != recipe.get("file_md5"):
+                bad(f"the merged stream's MD5 {md5} != recipe file_md5")
+    except (OSError, KeyError, ValueError, TypeError, TorrentError, MergeError, StopIteration) as e:
+        bad(f"torrent files unreadable or inconsistent ({e})")
     return fails
 
 
@@ -484,6 +611,13 @@ def prune(out_dir: str) -> list[str]:
     return removed
 
 
+def only_torrent_failures(check_output: str) -> bool:
+    """True when site_check.py failed only on torrent files (every FAIL line
+    starts "FAIL TORRENT "): ship_packs.sh then strips them and checks again."""
+    fails = [ln for ln in check_output.splitlines() if ln.startswith("FAIL")]
+    return bool(fails) and all(ln.startswith("FAIL TORRENT ") for ln in fails)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out_dir")
@@ -494,7 +628,12 @@ def main(argv=None) -> int:
     ap.add_argument("--base-torrent", help="the base's torrent (reuse its piece hashes)")
     ap.add_argument("--full", action="store_true", help="hash every byte and check the MD5 (ignore --base-torrent)")
     ap.add_argument("--langs", help="only these menu languages (comma-separated)")
+    ap.add_argument("--ia-cache", help="archive.org item metadata (ia-<item>.json): the sources' ETags")
+    ap.add_argument("--only-torrent-failures", metavar="CHECK_OUT",
+                    help="exit 0 if site_check.py's output CHECK_OUT failed only on torrent files, else 1")
     a = ap.parse_args(argv)
+    if a.only_torrent_failures:
+        return 0 if only_torrent_failures(open(a.only_torrent_failures, encoding="utf-8").read()) else 1
     if a.strip:
         annotate(a.out_dir, {})
         print(json.dumps({"stripped": prune(a.out_dir)}), flush=True)
@@ -511,6 +650,7 @@ def main(argv=None) -> int:
         if f.endswith(".zim"):
             packs[f] = os.path.join(a.packs_dir, f)
     only = set(a.langs.split(",")) if a.langs else None
+    etags = load_etags(a.ia_cache)
     results: dict[str, dict] = {}
     rc = 0
     for m in region["menu"]:
@@ -521,7 +661,8 @@ def main(argv=None) -> int:
         try:
             recipe_packs = json.load(open(rpath, encoding="utf-8"))["packs"]
             pack_paths = {k: packs[p["file"]] for k, p in recipe_packs.items() if p["file"] in packs}
-            res = torrent_for(rpath, region, L, a.base, pack_paths, a.webseed, a.base_torrent, a.full)
+            res = torrent_for(rpath, region, L, a.base, pack_paths, a.webseed, a.base_torrent, a.full,
+                              etags=etags)
         except (TorrentError, MergeError, OSError, KeyError, ValueError) as e:
             print(json.dumps({"lang": L, "FAILED": str(e)}), flush=True)
             rc = 3

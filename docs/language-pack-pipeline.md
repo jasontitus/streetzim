@@ -25,7 +25,8 @@ Everything is set by arguments and environment variables.
 | `PLAYWRIGHT_CORE`, `CHROME_PATH`, `BROWSER_LIBS` | the browser gates | Path to playwright-core's `index.mjs` (default: the installed package); the Chromium to drive; extra `LD_LIBRARY_PATH` for that Chromium. |
 | `LANGPACK_MIN_FREE_GB` | shell scripts | Pause while MemAvailable is below this; default 0. On the shared build host it is 40 (`ops/langpack/host-env.sh`). |
 | `LANGPACK_DISK_MARGIN_GB`, `KEEP_MERGED`, `RESUME` | run_gates.sh | Free disk asked beyond twice the base (default 20); 1 keeps every merged file; 1 skips what already passed (see §2). |
-| `LANGPACK_WEBSEED` | ship_packs.sh | The build worker's origin (`build-proxy/`, e.g. `https://streetzim-build-proxy.<account>.workers.dev`). Set: a webseeded torrent per language entry (see "Language torrents"). Empty (the default): none. |
+| `LANGPACK_WEBSEED` | ship_packs.sh, site_check.py | The build worker's origin (`build-proxy/`, e.g. `https://streetzim-build-proxy.<account>.workers.dev`). Set: a webseeded torrent per language entry (see "Language torrents"), and site_check.py requires every torrent's webseed to use it. Empty (the default): none. |
+| `LANGPACK_WEBSEED_SUBREQ_LIMIT` | lang_torrents.py, site_check.py | The most worker subrequests one request of a language version may need (default 40; the free plan allows 50). |
 
 On StreetZim's build host, source `ops/langpack/host-env.sh` first. It sets these variables for that host; values already set win.
 
@@ -265,48 +266,70 @@ fails, an entry over the per-entry budget: more than `LANGPACK_ENTRY_BUDGET`
 ## Language torrents
 
 `tools/langpack/lang_torrents.py OUT_DIR --base BASE --packs-dir DIR --webseed URL
-[--base-torrent T]` gives every entry of a region's site files a torrent of
-its language version: a single-file torrent of exactly the file the page
-builds (so a visitor who built it can seed it; same infohash), with piece
-length and trackers as `ops/cloud/build_torrent.py` picks for that size and
-one BEP 19 webseed, `URL/merged/<region>/<L>/<recipe uuid>/<file>.zim`. That
-URL is the build worker (`build-proxy/`, Cloudflare Workers), which serves
-the language version virtually: no merged file is stored anywhere, and
-nothing is served from the build host.
+[--base-torrent T] [--ia-cache DIR]` gives every entry of a region's site
+files a torrent of its language version: a single-file torrent of exactly
+the file the page builds (so a visitor who built it can seed it; same
+infohash), with the piece length `ops/cloud/build_torrent.py` picks for that
+size, the trackers in `LANG_TRACKERS` (archive.org's two, which count peers
+of any infohash, and open UDP trackers that answered; DHT works too) and one
+BEP 19 webseed, `URL/merged/<region>/<L>/<recipe uuid>/<file>.zim`. That URL
+is the build worker (`build-proxy/`, Cloudflare Workers), which serves the
+language version virtually: no merged file is stored anywhere, and nothing
+is served from the build host.
 
 Beside each recipe it writes `<L>.torrent`, `<L>.ws.json` (the worker's
 segment index, streetzim-webseed/1: the merged file as parts, each a byte
-range of one archive.org file or of a blob; a few KB) and `ws-<h>.bin`
-blobs: the recipe's inline bytes, the MD5 and runs of base or pack segments
-shorter than 256 KiB, coalesced into blobs of at most 4 MiB so a webseed
-request touches a handful of parts (the free Workers plan allows 50
-subrequests per request), named by content (the viewer slots are stored
-once per region). It adds `torrent` and `infohash` to the entry in
-`region.json`/`index.json`; the page shows a "Torrent" link.
+range of one archive.org file, with its archive.org ETag when `--ia-cache`
+has the file's mtime, or of a blob; a few KB) and `ws-<h>.bin` blobs: the
+recipe's inline bytes, the MD5 and base or pack segments shorter than the
+remote threshold, coalesced into blobs of at most 4 MiB, named by content
+(the viewer slots are stored once per region). It adds `torrent` and
+`infohash` to the entry in `region.json`/`index.json`; the page shows a
+"Torrent" link.
+
+Subrequests: the worker spends 1 on the index, 1 per blob and 1 per
+archive.org part (2 for a file's first: archive.org's redirect), and the
+free plan allows 50 per request. The whole file's count bounds every
+range's, so it must be at most `LANGPACK_WEBSEED_SUBREQ_LIMIT` (40); the
+threshold starts at 256 KiB and rises (1, 4, 16, 64 MiB) for an entry that
+would need more, and an entry that cannot fit gets no torrent. The index
+records the threshold and the counts (whole file, worst 16 MiB window).
 
 Every byte is read through the recipe's chunk check, and the merged
-stream's MD5 must equal the recipe's `file_md5`. With `--base-torrent` (the
-base's own torrent, `web/torrents/<region>.torrent`), pieces lying wholly
-inside a base range at its own offset take the base torrent's hashes, once a
-spread sample of them matches the local base: on Greece 997 of 1,104 pieces,
-5.5 s for four entries instead of 22 s, identical infohashes. Exit 0, 3
-(some entries failed: they have no torrent, the rest do), 1 (run failed;
+stream's MD5 must equal the recipe's `file_md5`, always. With
+`--base-torrent` (the base's own torrent, `web/torrents/<region>.torrent`),
+pieces lying wholly inside a base range at its own offset take the base
+torrent's hashes, but only after every piece of the base torrent has been
+checked against the local base (once per run, for all entries); a base
+torrent that differs anywhere (one made before a viewer patch, say) is not
+used. On Greece: 997 of 1,104 pieces reused, identical infohashes. Exit 0,
+3 (some entries failed: they have no torrent, the rest do), 1 (run failed;
 `--strip` removes every torrent file and field).
 
-`ship_packs.sh` runs it after `make_site.py` when `LANGPACK_WEBSEED` is set;
-`site_check.py` rebuilds each index from its recipe and compares, checks the
-blobs' SHA-256, the torrent's name/length/piece length/webseed/infohash and
-a sample of pieces, and fails on torrent files no entry names. They are
-sealed and published with the recipes. When a map or its packs change, the
-recipe's UUID changes, so the old torrent's webseed URL answers 404 instead
-of other bytes and the new torrent replaces it.
+`ship_packs.sh` runs it (under timeout and prlimit) after `make_site.py`
+when `LANGPACK_WEBSEED` is set, first fetching the base's and the packs'
+archive.org metadata for their ETags. `site_check.py` rebuilds each index
+from its recipe and compares (ETags from the metadata cache included),
+checks the subrequest bound, the blobs' SHA-256, the webseed origin against
+`LANGPACK_WEBSEED`, the torrent's name/length/piece length/webseed/infohash
+and every piece and the MD5, and fails on torrent files no entry names;
+torrent failures start "FAIL TORRENT", and when they are the only ones,
+ship_packs.sh strips the torrent files and publishes the recipes without
+them. Otherwise they are sealed and published with the recipes. When a map
+or its packs change, the recipe's UUID changes, so the old torrent's webseed
+URL answers 404 instead of other bytes and the new torrent replaces it; a
+base re-uploaded under the same name (a viewer re-patch) changes its
+archive.org ETag, so the worker refuses its bytes until ship_packs.sh has
+run again for the region.
 
 Measured on Greece's 22 entries (tools/langpack/webseed_e2e.py: archive.org
 and site stand-ins and the worker on 127.0.0.1): every piece of every
 torrent fetched as a webseed client does matched its SHA-1, every stream's
 MD5 its recipe's, and libtorrent (webseed only, no peers, uploads off)
 downloaded all 22 byte-exact; 25,520 webseed requests, at most 5 parts and 5
-subrequests each. Deploying the worker: `build-proxy/README.md`.
+subrequests each. After deploying, `tools/langpack/webseed_smoke.py` checks
+the published torrents' pieces through the live worker. Deploying the worker,
+its request budget and switches: `build-proxy/README.md`.
 
 ## In production
 

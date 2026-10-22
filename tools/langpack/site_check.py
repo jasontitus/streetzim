@@ -36,9 +36,12 @@ Per menu entry:
     distinct URL equals the local bytes.
   * an entry with a language torrent (lang_torrents.py): its <L>.ws.json is
     the index rebuilt from the recipe, every blob it names is there with its
-    SHA-256, <L>.torrent describes the recipe's file with that webseed and the
-    entry's infohash, and sampled pieces hash as the torrent says; no torrent,
-    index or blob is left that no entry names.
+    SHA-256 and the archive.org ETags of the cached metadata, the webseed's
+    origin is --webseed ($LANGPACK_WEBSEED) when set, a request fits the
+    worker's subrequest limit, <L>.torrent describes the recipe's file with
+    that webseed and the entry's infohash, and every piece hashes as the
+    torrent says (and the stream's MD5 is file_md5); no torrent, index or
+    blob is left that no entry names. Torrent failures start "TORRENT ".
 """
 from __future__ import annotations
 
@@ -144,7 +147,10 @@ def main():
     ap.add_argument("--proxy", help="what {proxy} stands for in URLs (default: web/drive/preview-config.js)")
     ap.add_argument("--entry-budget", type=int, default=ENTRY_BUDGET)
     ap.add_argument("--recipe-budget", type=int, default=RECIPE_BUDGET)
+    ap.add_argument("--webseed", default=os.environ.get("LANGPACK_WEBSEED") or None,
+                    help="the build worker's origin every torrent's webseed must use (default $LANGPACK_WEBSEED)")
     a = ap.parse_args()
+    webseed = a.webseed
     tag = os.path.basename(os.path.realpath(a.base))[:-4]
     vdir = a.verdicts or os.path.join(gatelib.work_dir(), "verdicts", tag)
     gdir = a.gated or os.path.join(gatelib.work_dir(), "recipes", tag)
@@ -267,16 +273,17 @@ def main():
             ia_listed(p["url"], lp, f"{L}/{pl}")
             urls[p["url"]] = lp
         # language torrent (lang_torrents.py): index, blobs, torrent, sampled pieces
-        if m.get("torrent") or os.path.exists(os.path.join(rdir, f"{L}.torrent")):
-            from tools.langpack.lang_torrents import verify_entry
+        if m.get("torrent"):           # an orphan torrent file is caught by stray_files below
+            from tools.langpack.lang_torrents import load_etags, verify_entry
             tf = verify_entry(rdir, region, m, r, a.base,
-                              {k: os.path.join(a.packs_dir, p["file"]) for k, p in r["packs"].items()})
+                              {k: os.path.join(a.packs_dir, p["file"]) for k, p in r["packs"].items()},
+                              expected_origin=webseed, etags=load_etags(a.ia_cache) if a.ia_cache else None)
             need(not tf, "; ".join(tf))
         rows.append((L, r["md5"], r.get("file_md5"), {pl: url_item_file(p["url"])[0] for pl, p in r["packs"].items()},
                      "OK" if len(fails) == before else "FAIL"))
     from tools.langpack.lang_torrents import stray_files
     strays = stray_files(rdir, region)
-    need(not strays, f"torrent files no menu entry names: {strays}")
+    need(not strays, f"TORRENT stray files no menu entry names: {strays}")
     if a.probe_urls:
         for u, lp in sorted(urls.items()):
             size = os.path.getsize(lp)

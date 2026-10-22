@@ -27,25 +27,80 @@ Files:
   `tools/langpack/lang_torrents.py`, a few KB: parts that are byte ranges of
   archive.org files or of `ws-<sha256>.bin` blobs), and streams the requested
   range. The recipe UUID is in the URL: once a map or its packs change, the
-  old torrent's URL answers 404 ("out of date") instead of other bytes.
+  old torrent's URL answers 404 ("out of date") instead of other bytes —
+  after asking the site itself, past any cache, for the current index.
 - `worker.js`, `wrangler.toml` — Cloudflare Workers packaging
   (`streetzim-build-proxy`, separate from `streetzim-preview-proxy` so each
-  can be switched off alone and each has its own request budget).
+  can be switched off alone), the switches and the daily meter.
 - `serve-local.mjs` — the same on Node, on 127.0.0.1, for tests
   (`tools/langpack/webseed_e2e.py`, `tests/build_proxy_merged_js.test.mjs`).
 
-Free plan (developers.cloudflare.com/workers/platform/limits/): 100,000
-requests a day, 10 ms CPU per request (waiting on fetch does not count), 50
-subrequests per request. Measured on Greece (22 language versions, 25,520
-webseed requests through the local worker): at most 5 parts and 5
-subrequests per request (the median request: 1 of each, once the index, the
-blobs and archive.org's storage node are remembered); the handler's own CPU
-is about 0.5 ms per request on Node, 1.3 ms per 1 MiB piece including Node's
-JavaScript piping (on Workers the archive.org body is piped natively into a
-FixedLengthStream). A torrent client asks for one piece (1-2 MiB) or a few at
-a time: a 1.2 GB language version is about 1,100 requests, so the free plan
-carries roughly 90 such downloads a day; Workers Paid ($5/month) removes the
-daily cap.
+## Limits and budget
+
+Cloudflare's free plan (developers.cloudflare.com/workers/platform/limits/):
+
+- **100,000 requests a day per account**, not per worker: this worker and
+  `streetzim-preview-proxy` (the /build/ page's downloads and the /drive/
+  preview) share them. Every request counts, including a 503 from a switch
+  or the meter. Only `workers_dev = false` with no route (or deleting the
+  worker) stops the counting.
+- **The daily meter**: `WEBSEED_DAILY_BUDGET` (default 50,000) caps
+  `/merged/` requests per UTC day, so torrents cannot use up the preview's
+  share. With the `METER` Durable Object bound (as in `wrangler.toml`;
+  SQLite-backed Durable Objects are on the free plan) all isolates share one
+  count, reported in batches of 25 requests or 20 s; without it each isolate
+  counts on its own. Over the budget `/merged/` answers 503 at once (still a
+  request) until 00:00 UTC; peers and the /build/ page keep working.
+- **10 ms CPU per request** (waiting on fetch does not count): the handler's
+  own work is about 0.5 ms; the archive.org bodies are piped into a
+  FixedLengthStream.
+- **50 subrequests per request**: `lang_torrents.py` keeps the whole file —
+  and so every range — at 40 or fewer (index, blobs, archive.org parts),
+  raising its threshold for short segments when it must; `site_check.py`
+  checks it.
+
+How many requests a download costs depends on the client:
+
+| client | request size | a 1.2 GB language version |
+|---|---|---|
+| libtorrent (qBittorrent, Deluge, …) | up to 16 MiB (`urlseed_max_request_bytes`) | about 90 requests (measured: 4 per 51 MB) |
+| a client asking one piece at a time | the piece length (1 MiB here) | about 1,100 requests |
+| a browser or `curl` (the plain download) | the whole file | 1 request |
+
+So the 50,000 budget is roughly 45 per-piece downloads or 550 libtorrent
+downloads a day. Workers Paid ($5/month) removes the daily cap.
+
+## Staleness and archive.org
+
+The index records each archive.org file's size and, when ship_packs.sh had
+its metadata, its ETag (`"<mtime hex>-<size hex>"`). The worker sends
+`If-Range: <ETag>` and takes only a 206 for exactly the asked bytes of a
+file of that size; a file replaced since (a viewer re-patch of the base, a
+re-upload) answers 200 and is refused, so that torrent's webseed fails
+until `ship_packs.sh` runs again for the region (it regenerates the
+recipes, the torrents and their indexes on any base re-upload). The index
+is kept by an isolate for at most 5 minutes.
+
+## Local test under workerd (no Cloudflare login)
+
+`wrangler dev --local` runs the worker in workerd, the Workers runtime, with
+the METER Durable Object, which exercises what Node cannot (FixedLengthStream,
+the blob copies, HEAD's Content-Length, the meter). Install wrangler in a
+folder with its own package.json (never under /storage/streetzim), start
+the stand-ins and point the worker at them:
+
+```sh
+npm install --prefix /storage/experiments/wrangler wrangler@4     # that folder has its own package.json
+cd build-proxy
+/storage/experiments/wrangler/node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8799 \
+  --var SITE_ORIGIN:http://127.0.0.1:<stand-in> --var UPSTREAM:http://127.0.0.1:<stand-in>/download/
+python3 ../tools/langpack/webseed_smoke.py --site http://127.0.0.1:<stand-in> --region <region> --via http://127.0.0.1:8799
+```
+
+(`tools/langpack/webseed_e2e.py`'s `ranged_server` is the stand-in for
+archive.org and the site.) Checked 2026-10-22 on Greece: every piece of two
+torrents, their MD5s, a libtorrent webseed-only download, and the meter with
+WEBSEED_DAILY_BUDGET=3 (3 answers, then 503s).
 
 ## Deploy (by hand, once)
 
@@ -53,8 +108,9 @@ daily cap.
 cd build-proxy
 npx wrangler login            # opens a browser; the build host has no Cloudflare login
 npx wrangler deploy           # prints https://streetzim-build-proxy.<account>.workers.dev
-curl -sI https://streetzim-build-proxy.<account>.workers.dev/merged/x/de/00000000-0000-0000-0000-000000000000/x.zim
-                              # 404 "expected ..." or "out of date": the worker answers
+python3 ../tools/langpack/webseed_smoke.py --site https://streetzim.web.app --region <region> \
+    --webseed https://streetzim-build-proxy.<account>.workers.dev
+                              # after the first publish: the live torrents' pieces through the worker
 ```
 
 Then:
@@ -62,18 +118,22 @@ Then:
 1. `ops/langpack/host-env.sh` (or the environment of the ship run):
    `LANGPACK_WEBSEED=https://streetzim-build-proxy.<account>.workers.dev`.
    `ops/langpack/ship_packs.sh` then writes a torrent per language entry
-   (`<L>.torrent`, `<L>.ws.json`, `ws-*.bin`) beside the recipes; site_check.py
-   checks them and they are sealed and published with the recipes
-   (`ops/langpack/publish_site.sh`, then the site deploy). The page shows a
-   "Torrent" link per language.
+   (`<L>.torrent`, `<L>.ws.json`, `ws-*.bin`) beside the recipes;
+   site_check.py checks them (every piece, the webseed origin against
+   `LANGPACK_WEBSEED`, the ETags, the subrequest bound) and they are sealed and
+   published with the recipes (`ops/langpack/publish_site.sh`, then the site
+   deploy). If only the torrent files fail the check, ship_packs.sh strips
+   them and publishes the recipes without. The page shows a "Torrent" link
+   per language.
 2. Optionally `web/build/build-config.js`:
    `window.STREETZIM_BUILD_PROXY = 'https://streetzim-build-proxy.<account>.workers.dev'`,
    so the /build/ page's own range requests go through this worker instead
    of the preview proxy.
 
 Switch off: `MERGED = "0"` (the webseed and direct downloads) or `OFF = "1"`
-(everything) under `[vars]` in `wrangler.toml`, then `npx wrangler deploy`;
-or `npx wrangler delete`. Torrents keep working wherever peers seed them.
+(everything) under `[vars]`, then `npx wrangler deploy` — requests are still
+counted; `workers_dev = false` or `npx wrangler delete` stops that. Torrents
+keep working wherever peers seed them.
 
 The webseed origin is written into each torrent: moving the worker to
 another origin means running `lang_torrents.py` again (new torrent files;

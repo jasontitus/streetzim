@@ -60,6 +60,26 @@ def free_port() -> int:
     return p
 
 
+def ia_etag(path: str) -> str:
+    """archive.org's ETag for a file: "<mtime hex>-<size hex>"."""
+    st = os.stat(path)
+    return '"%x-%x"' % (int(st.st_mtime), st.st_size)
+
+
+def write_ia_cache(files: dict[str, str], out_dir: str):
+    """ia-<item>.json metadata (name, size, mtime) for the stand-in's files, as
+    lang_torrents.py --ia-cache reads it."""
+    os.makedirs(out_dir, exist_ok=True)
+    items: dict[str, list] = {}
+    for key, path in files.items():
+        item, name = key.split("/", 1)
+        st = os.stat(path)
+        items.setdefault(item, []).append({"name": name, "size": str(st.st_size), "mtime": str(int(st.st_mtime))})
+    for item, fl in items.items():
+        with open(os.path.join(out_dir, f"ia-{item}.json"), "w") as fh:
+            json.dump({"metadata": {"identifier": item}, "files": fl}, fh)
+
+
 def ranged_server(files: dict[str, str], site_dir: str, region: str, counter: dict):
     """One handler class for both stand-ins (archive.org and the site)."""
     class H(http.server.BaseHTTPRequestHandler):
@@ -68,10 +88,13 @@ def ranged_server(files: dict[str, str], site_dir: str, region: str, counter: di
         def log_message(self, *a):
             pass
 
-        def _send_file(self, path: str):
+        def _send_file(self, path: str, etag: str | None = None):
             size = os.path.getsize(path)
             rng = self.headers.get("Range")
             m = re.match(r"^bytes=(\d+)-(\d*)$", rng or "")
+            ir = self.headers.get("If-Range")
+            if m and ir and ir != etag:            # archive.org: another version -> the whole file
+                m = None
             if m:
                 a = int(m.group(1))
                 b = min(int(m.group(2)) if m.group(2) else size - 1, size - 1)
@@ -88,6 +111,8 @@ def ranged_server(files: dict[str, str], site_dir: str, region: str, counter: di
                 self.send_response(200)
             self.send_header("Content-Length", str(b - a + 1))
             self.send_header("Accept-Ranges", "bytes")
+            if etag:
+                self.send_header("ETag", etag)
             self.end_headers()
             if self.command == "HEAD":
                 return
@@ -113,9 +138,12 @@ def ranged_server(files: dict[str, str], site_dir: str, region: str, counter: di
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+            etag = None
             if u.startswith("/node/"):
                 counter["node"] += 1
                 p = files.get(u[len("/node/"):])
+                if p and os.path.isfile(p):
+                    etag = ia_etag(p)
             elif u.startswith(f"/build/recipes/{region}/"):
                 counter["site"] += 1
                 name = u.rsplit("/", 1)[1]
@@ -127,7 +155,7 @@ def ranged_server(files: dict[str, str], site_dir: str, region: str, counter: di
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            self._send_file(p)
+            self._send_file(p, etag)
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

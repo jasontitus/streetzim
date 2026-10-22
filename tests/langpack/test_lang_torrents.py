@@ -37,6 +37,7 @@ def synth(tmp: Path, *, base_len=1_600_000, pack_len=700_000, slot=(600_000, 200
     rnd = random.Random(seed)
     base = bytes(rnd.getrandbits(8) for _ in range(base_len))
     pack = bytes(rnd.getrandbits(8) for _ in range(pack_len))
+    tmp.mkdir(parents=True, exist_ok=True)
     bpath, ppath = tmp / "osm-testland-2026-10-13.zim", tmp / "osm_testland_wiki-de_2026-10-13.zim"
     bpath.write_bytes(base)
     ppath.write_bytes(pack)
@@ -110,7 +111,8 @@ def test_full_torrent_is_the_merged_file(tmp_path):
     assert info[b"length"] == len(s["merged"]) and info[b"piece length"] == plen
     assert info[b"pieces"] == pieces_of(s["merged"], plen)
     assert t[b"url-list"] == [f"{WEBSEED}/merged/testland/de/{s['recipe']['uuid']}/osm_de_testland_2026-10-13.zim".encode()]
-    assert [x[0].decode() for x in t[b"announce-list"]] == bt.TRACKERS
+    assert [x[0].decode() for x in t[b"announce-list"]] == lt.LANG_TRACKERS
+    assert not any(b"openbittorrent" in x[0] for x in t[b"announce-list"])
     assert res["infohash"] == hashlib.sha1(bt.bencode(info)).hexdigest()
 
 
@@ -139,6 +141,8 @@ def test_index_reproduces_the_bytes_and_coalesces_short_runs(tmp_path):
     kinds = [p[2] for p in ix["parts"]]
     assert kinds == ["x", "s", "x", "s", "s", "x"], kinds
     assert len(ix["parts"]) <= 8 and len(json.dumps(ix)) < 4096
+    # cold isolate: index 1 + 3 blobs + base 2 (redirect) + base 1 + pack 2
+    assert ix["subrequests"]["whole"] == 1 + 3 + 2 + 1 + 2 and ix["remote_min"] == lt.REMOTE_MIN
 
 
 def test_blobs_split_at_blob_max(tmp_path, monkeypatch):
@@ -157,7 +161,7 @@ def test_reused_base_hashes_equal_full_hashing(tmp_path):
     bt.build_torrent("https://archive.org/download/streetzim-testland/" + s["base"].name,
                      str(tmp_path / "base.torrent"), local_path=str(s["base"]))
     res = run(s, base_torrent=str(tmp_path / "base.torrent"))
-    assert res["reused"] > 0 and not res["md5_checked"], res
+    assert res["reused"] > 0 and res["md5_checked"] and "verified" in res["reuse"], res
     assert res["hashed_bytes"] < full["hashed_bytes"]
     assert lt.bdecode((s["site"] / "de.torrent").read_bytes())[b"info"] == lt.bdecode(full_t)[b"info"]
     assert res["infohash"] == full["infohash"]
@@ -310,6 +314,8 @@ def test_reusable_pieces_only_inside_identity_base_parts():
                                  [80, 20, "s", "de", 80]]}
     assert lt.reusable_pieces(ix, 10) == {1, 2, 3, 4, 5}
     assert lt.reusable_pieces(ix, 20) == {1, 2}                   # [20, 40) and [40, 60); [0, 20) starts before the part
+    ix2 = {"size": 100, "parts": [[0, 10, "x", "a", 0], [10, 45, "s", "base", 10], [55, 45, "x", "b", 0]]}
+    assert lt.reusable_pieces(ix2, 10) == {1, 2, 3, 4}            # [50, 60) ends past the part (55)
     ix["parts"][1] = [10, 50, "s", "base", 11]                    # not at its own offset
     assert lt.reusable_pieces(ix, 10) == set()
 
@@ -413,7 +419,8 @@ def test_site_check_fails_bad_torrent_files(tsite, tmp_path, tamper):
         ix["size"] += 1
         (s / "de.ws.json").write_text(json.dumps(ix))
     rc, lines = _site_check(tsite, s)
-    assert rc != 0 and any("torrent" in ln or "ws.json" in ln or "blob" in ln for ln in lines), lines
+    fails = [ln for ln in lines if ln.startswith("FAIL")]
+    assert rc != 0 and fails and all(ln.startswith("FAIL TORRENT ") for ln in fails), lines
 
 
 def test_strip_removes_every_torrent_file_and_field(tmp_path):
@@ -440,3 +447,252 @@ def test_reuse_needs_the_same_piece_length(tmp_path):
     res = run(s, base_torrent=str(tmp_path / "b2.torrent"))
     assert res["reused"] == 0 and "piece length" in res["reuse"], res
     assert res["infohash"] == full["infohash"]
+
+
+def test_a_base_torrent_wrong_in_one_piece_is_not_used(tmp_path):
+    """Plan review H1: the base torrent must match the local base in EVERY
+    piece (a stale one from an earlier viewer patch differs in a few)."""
+    s = synth(tmp_path)
+    full = run(s)
+    data = bytearray(s["base"].read_bytes())
+    plen = bt.auto_piece_size(len(s["merged"]))
+    data[4 * plen + 7] ^= 1                                       # piece 4 differs (one of the reused ones)
+    info = {"name": s["base"].name, "piece length": plen, "length": len(data), "pieces": pieces_of(bytes(data), plen)}
+    (tmp_path / "stale.torrent").write_bytes(bt.bencode({"announce": "x", "info": info}))
+    res = run(s, base_torrent=str(tmp_path / "stale.torrent"))
+    assert res["reused"] == 0 and "piece 4 does not match" in res["reuse"], res
+    assert res["infohash"] == full["infohash"]
+
+
+def test_a_truncated_base_torrent_is_not_used(tmp_path):
+    s = synth(tmp_path)
+    data = s["base"].read_bytes()
+    plen = bt.auto_piece_size(len(s["merged"]))
+    info = {"name": s["base"].name, "piece length": plen, "length": len(data), "pieces": pieces_of(data, plen)[:-20]}
+    (tmp_path / "short.torrent").write_bytes(bt.bencode({"announce": "x", "info": info}))
+    res = run(s, base_torrent=str(tmp_path / "short.torrent"))
+    assert res["reused"] == 0 and "wrong number of pieces" in res["reuse"], res
+
+
+def test_dense_short_runs_get_a_higher_remote_threshold(tmp_path, monkeypatch):
+    """Plan review M2: 100 runs of 300 KB, each followed by 8 inline bytes, would
+    be 100 archive.org parts and 100 blobs at 256 KiB; the entry is rebuilt
+    with a higher threshold until a request fits the subrequest limit."""
+    s = synth(tmp_path, base_len=40_000_000, pack_len=300_000, slot=(39_000_000, 100_000))
+    r = json.loads((s["site"] / "de.json").read_text())
+    base = s["base"].read_bytes()
+    segs, content = [], bytearray()
+    for i in range(100):
+        off = 1_000_000 + i * 310_000
+        segs.append({"src": "base", "off": off, "len": 300_000})
+        content += base[off:off + 300_000]
+        sep = bytes([i % 256]) * 8
+        segs.append({"src": "inline", "len": 8, "data": base64.b64encode(sep).decode(), "sha256": hashlib.sha256(sep).hexdigest()})
+        content += sep
+    md5 = hashlib.md5(content).hexdigest()
+    segs.append({"src": "md5"})
+    r.update(segments=segs, size=len(content) + 16, md5=md5, file_md5=hashlib.md5(bytes(content) + bytes.fromhex(md5)).hexdigest())
+    (s["site"] / "de.json").write_text(json.dumps(r))
+    at256 = lt.build_index(r, s["region"], str(s["base"]), s["packs"], "de", WEBSEED, lt.REMOTE_MIN)[0]
+    assert at256["subrequests"]["whole"] > lt.SUBREQ_LIMIT
+    res = run(s)
+    assert res["remote_min"] == 1 << 20 and res["subrequests"]["whole"] <= lt.SUBREQ_LIMIT, res
+    assert res["subrequests"]["window16m"] <= res["subrequests"]["whole"]
+    monkeypatch.setattr(lt, "SUBREQ_LIMIT", 2)
+    with pytest.raises(lt.TorrentError, match="subrequests"):
+        run(s)
+
+
+def test_costs_counts_the_worst_window():
+    M = 1 << 20
+    ix = {"size": 64 * M, "parts": [[0, M, "x", "a", 0], [M, 20 * M, "s", "base", 0],
+                                     [21 * M, M, "x", "b", 0], [22 * M, 42 * M, "s", "de", 0]]}
+    c = lt.costs(ix)
+    assert c["whole"] == 1 + 2 + 2 + 2
+    assert c["window16m"] == 1 + 1 + 2 + 2          # [20 MiB, 36 MiB): base, blob b, de
+    # the worst window starts at a part boundary, not at a multiple of 16 MiB
+    ix2 = {"size": 32 * M, "parts": [[0, 15 * M, "s", "base", 0], [15 * M, M, "x", "b", 0],
+                                      [16 * M, M, "x", "c", 0], [17 * M, 15 * M, "s", "de", 0]]}
+    assert lt.subrequests(ix2, 0, 16 * M - 1) == 4 and lt.subrequests(ix2, 16 * M, 32 * M - 1) == 4
+    assert lt.costs(ix2)["window16m"] == 5          # [15 MiB, 31 MiB): b, c, de
+
+
+def test_verify_entry_checks_the_subrequest_bound(tmp_path, monkeypatch):
+    s = synth(tmp_path)
+    assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED]) == 0
+    region = json.loads((s["site"] / "region.json").read_text())
+    assert lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"]) == []
+    monkeypatch.setattr(lt, "SUBREQ_LIMIT", 5)                      # a stricter worker: the published index no longer fits
+    fails = lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"])
+    assert any("subrequests" in f for f in fails), fails
+
+
+def test_etags_from_the_metadata_cache(tmp_path):
+    s = synth(tmp_path)
+    ia = tmp_path / "ia"
+    ia.mkdir()
+    (ia / "ia-streetzim-testland.json").write_text(json.dumps({"metadata": {"identifier": "streetzim-testland"}, "files": [
+        {"name": s["base"].name, "size": str(s["base"].stat().st_size), "mtime": "1792287864", "md5": "x"}]}))
+    (ia / "ia-streetzim-testland-lang.json").write_text(json.dumps({"files": [{"name": s["pack"].name, "size": "700000"}]}))
+    etags = lt.load_etags(str(ia))
+    assert etags == {("streetzim-testland", s["base"].name): '"6ad42478-186a00"'}
+    res = lt.torrent_for(str(s["site"] / "de.json"), s["region"], "de", str(s["base"]), s["packs"], WEBSEED, etags=etags)
+    assert res["etags"] == 1
+    ix = json.loads((s["site"] / "de.ws.json").read_text())
+    assert ix["sources"]["base"]["etag"] == '"6ad42478-186a00"' and "etag" not in ix["sources"]["de"]
+    region = s["region"] | {"menu": [{"lang": "de", "recipe": "recipes/testland/de.json", "torrent": "recipes/testland/de.torrent",
+                                      "infohash": res["infohash"]}]}
+    assert lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"], etags=etags) == []
+    newer = dict.fromkeys(etags, '"6ad42479-186a00"')               # the base re-uploaded since
+    assert lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"], etags=newer)
+    assert lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"],
+                           expected_origin="https://elsewhere.example")
+
+
+@pytest.mark.parametrize("case", ["base_size", "region_base", "pack_url_file", "size"])
+def test_build_index_refuses_inconsistent_inputs(tmp_path, case):
+    s = synth(tmp_path)
+    r = json.loads((s["site"] / "de.json").read_text())
+    region = json.loads(json.dumps(s["region"]))
+    base = str(s["base"])
+    if case == "base_size":
+        other = tmp_path / "other" / s["base"].name
+        other.parent.mkdir()
+        other.write_bytes(s["base"].read_bytes()[:-1])
+        base = str(other)
+    elif case == "region_base":
+        region["base"]["url"] = "{proxy}/streetzim-testland/osm-testland-2026-10-14.zim"
+    elif case == "pack_url_file":
+        r["packs"]["de"]["url"] = "{proxy}/streetzim-testland-lang/osm_testland_wiki-fr_2026-10-13.zim"
+    else:
+        r["size"] += 1
+    with pytest.raises(lt.TorrentError):
+        lt.build_index(r, region, base, s["packs"], "de", WEBSEED)
+
+
+@pytest.mark.parametrize("ws", ["ftp://host.example", "https://", "host.example", "https://h.example/x"])
+def test_main_refuses_a_webseed_that_is_not_an_origin(tmp_path, ws):
+    s = synth(tmp_path)
+    assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", ws]) == 1
+
+
+def test_a_partial_run_keeps_the_other_entries(tmp_path):
+    s = synth(tmp_path)
+    fr = json.loads((s["site"] / "de.json").read_text())
+    fr.update(uuid="518f0e4d-684b-55b8-a110-d06933e1a0eb", file_name="osm_fr_testland_2026-10-13", name="osm_fr_testland")
+    (s["site"] / "fr.json").write_text(json.dumps(fr))
+    for name in ("region.json", "index.json"):
+        doc = json.loads((s["site"] / name).read_text())
+        r = doc["regions"][0] if "regions" in doc else doc
+        r["menu"].append({"lang": "fr", "recipe": "recipes/testland/fr.json"})
+        (s["site"] / name).write_text(json.dumps(doc))
+    args = [str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED]
+    assert lt.main(args) == 0
+    before = json.loads((s["site"] / "region.json").read_text())["menu"]
+    assert lt.main(args + ["--langs", "de"]) == 0
+    after = json.loads((s["site"] / "region.json").read_text())["menu"]
+    assert after[1]["torrent"] == before[1]["torrent"] and after[1]["infohash"] == before[1]["infohash"]
+    assert (s["site"] / "fr.torrent").exists() and (s["site"] / "fr.ws.json").exists()
+
+
+def test_a_wrong_blob_on_disk_is_rewritten(tmp_path):
+    s = synth(tmp_path)
+    run(s)
+    ix = json.loads((s["site"] / "de.ws.json").read_text())
+    f = s["site"] / next(iter(ix["blobs"].values()))["file"]
+    good = f.read_bytes()
+    f.write_bytes(bytes([good[0] ^ 1]) + good[1:])                 # same size, other bytes
+    run(s)
+    assert f.read_bytes() == good
+
+
+def test_verify_entry_catches_a_tampered_name_or_middle_piece(tmp_path):
+    """Every field and every piece is checked, not a sample: the torrent's
+    name, and a piece in the middle (with a consistent infohash)."""
+    for what in ("name", "middle"):
+        s = synth(tmp_path / what)
+        assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path / what), "--webseed", WEBSEED]) == 0
+        region = json.loads((s["site"] / "region.json").read_text())
+        t = lt.bdecode((s["site"] / "de.torrent").read_bytes())
+        if what == "name":
+            t[b"info"][b"name"] = b"osm_de_testland_2026-10-14.zim"
+        else:
+            p = bytearray(t[b"info"][b"pieces"])
+            k = len(p) // 20 // 2
+            p[20 * k] ^= 1
+            t[b"info"][b"pieces"] = bytes(p)
+        ih = hashlib.sha1(bt.bencode(t[b"info"])).hexdigest()
+        region["menu"][0]["infohash"] = ih
+        ix = json.loads((s["site"] / "de.ws.json").read_text())
+        ix["infohash"] = ih
+        (s["site"] / "de.ws.json").write_text(json.dumps(ix))
+        (s["site"] / "de.torrent").write_bytes(bt.bencode(t))
+        fails = lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"])
+        assert fails and all(f.startswith("TORRENT de: ") for f in fails), (what, fails)
+
+
+@pytest.mark.parametrize("out,want", [
+    ("FAIL TORRENT de: blob x missing\nSUMMARY 9/10 checks pass -> FAIL\n", True),
+    ("FAIL TORRENT de: x\nFAIL TORRENT stray files no menu entry names: []\n", True),
+    ("FAIL TORRENT de: x\nFAIL de: base chunk sha256 != local base\n", False),
+    ("FAIL de: verdict missing or not all_pass\n", False),
+    ("SUMMARY 10/10 checks pass -> OK\n", False),
+])
+def test_only_torrent_failures(tmp_path, out, want):
+    assert lt.only_torrent_failures(out) is want
+    f = tmp_path / "check.out"
+    f.write_text(out)
+    assert lt.main(["x", "--only-torrent-failures", str(f)]) == (0 if want else 1)
+
+
+def test_webseed_smoke_against_the_local_worker(tmp_path):
+    """tools/langpack/webseed_smoke.py through build-proxy/serve-local.mjs and
+    stand-ins for archive.org and the site (all on 127.0.0.1): passes, and
+    fails once a blob on the site is not the one the index names."""
+    import socket
+    import subprocess
+    import time
+    from tools.langpack import webseed_e2e, webseed_smoke
+    node = os.environ.get("NODE") or shutil.which("node")
+    if not node:
+        pytest.skip("no node")
+    s = synth(tmp_path)
+    assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED]) == 0
+    files = {f"streetzim-testland/{s['base'].name}": str(s["base"]),
+             f"streetzim-testland-lang/{s['pack'].name}": str(s["pack"])}
+    counter = {"download": 0, "node": 0, "site": 0}
+    srv = webseed_e2e.ranged_server(files, str(s["site"]), "testland", counter)
+    port = srv.server_address[1]
+    wport = webseed_e2e.free_port()
+    env = {**os.environ, "SITE_ORIGIN": f"http://127.0.0.1:{port}", "UPSTREAM": f"http://127.0.0.1:{port}/download/"}
+    w = subprocess.Popen([node, str(Path(lt.ROOT) / "build-proxy" / "serve-local.mjs"), str(wport)], env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            try:
+                socket.create_connection(("127.0.0.1", wport), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        args = ["--site", f"http://127.0.0.1:{port}", "--region", "testland", "--webseed", WEBSEED,
+                "--via", f"http://127.0.0.1:{wport}", "--pieces", "4"]
+        assert webseed_smoke.main(args) == 0
+        assert webseed_smoke.main(args[:4] + ["--webseed", "https://other.example"] + args[6:]) == 1
+        ix = json.loads((s["site"] / "de.ws.json").read_text())
+        f = s["site"] / ix["blobs"][ix["parts"][0][3]]["file"]           # the header blob (piece 0)
+        f.write_bytes(bytes([f.read_bytes()[0] ^ 1]) + f.read_bytes()[1:])
+        w.terminate()
+        w.wait(timeout=10)
+        w = subprocess.Popen([node, str(Path(lt.ROOT) / "build-proxy" / "serve-local.mjs"), str(wport)], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            try:
+                socket.create_connection(("127.0.0.1", wport), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        assert webseed_smoke.main(args) == 1
+    finally:
+        w.terminate()
+        w.wait(timeout=10)
+        srv.shutdown()

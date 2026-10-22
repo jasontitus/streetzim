@@ -302,8 +302,17 @@ rm -rf "$STG" && mkdir -p "$OUT"
 if [ -n "${LANGPACK_WEBSEED:-}" ]; then
   BT=$ROOT/web/torrents/$REGION.torrent
   BTA=(); [ -f "$BT" ] && BTA=(--base-torrent "$BT")
-  "${LOW[@]}" "$PY" "$TL/lang_torrents.py" "$OUT" --base "$BASE" --packs-dir "$PACKS" \
-    --webseed "$LANGPACK_WEBSEED" "${BTA[@]}" >> "$LOG" 2>&1
+  # the base's and the packs' archive.org metadata: their ETags go in the index
+  mkdir -p "$W/ia-cache"
+  if [ -n "${SHIP_IA_FETCH---ia-fetch}" ]; then
+    for it in "streetzim-$REGION" "$ITEM"; do
+      "$IA" metadata "$it" > "$W/ia-cache/ia-$it.json.tmp" 2>/dev/null && mv -f "$W/ia-cache/ia-$it.json.tmp" "$W/ia-cache/ia-$it.json" \
+        || rm -f "$W/ia-cache/ia-$it.json.tmp"
+    done
+  fi
+  TLIM=(); command -v prlimit > /dev/null && TLIM=(prlimit --as=24000000000 --)
+  "${LOW[@]}" timeout "${SHIP_TORRENT_TIMEOUT:-7200}" "${TLIM[@]}" "$PY" "$TL/lang_torrents.py" "$OUT" --base "$BASE" \
+    --packs-dir "$PACKS" --webseed "$LANGPACK_WEBSEED" --ia-cache "$W/ia-cache" "${BTA[@]}" >> "$LOG" 2>&1
   TRC=$?
   case $TRC in
     0) say "language torrents: $(ls "$OUT" | grep -c '\.torrent$') (webseed $LANGPACK_WEBSEED)" ;;
@@ -316,6 +325,15 @@ fi
   --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
 CRC=$?
 cat "$STG.check" >> "$LOG"
+if [ $CRC != 0 ] && "$PY" "$TL/lang_torrents.py" "$OUT" --only-torrent-failures "$STG.check"; then
+  # only the torrent files failed: publish the recipes without them
+  say "site_check.py: only torrent checks failed; stripping the torrent files and checking again"
+  "$PY" "$TL/lang_torrents.py" "$OUT" --strip >> "$LOG" 2>&1 || { say "could not strip the torrent files"; exit 1; }
+  "${LOW[@]}" "$PY" "$TL/site_check.py" "$STG" --recipes-dir "$OUT" --base "$BASE" --packs-dir "$PACKS" \
+    --ia-cache "$W/ia-cache" ${SHIP_IA_FETCH---ia-fetch} ${SHIP_PROBE_URLS---probe-urls} > "$STG.check" 2>&1
+  CRC=$?
+  cat "$STG.check" >> "$LOG"
+fi
 if [ $CRC != 0 ]; then
   say "site_check.py FAILED (the log says which check): nothing replaced, nothing to publish ($STG kept)"
   exit 1

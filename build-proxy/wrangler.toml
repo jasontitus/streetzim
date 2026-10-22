@@ -1,14 +1,29 @@
 # Cloudflare Workers config for the StreetZim build worker: the /build/ page's
 # range proxy and the language versions' webseed (README.md). Separate from
-# preview-proxy/ (streetzim-preview-proxy) so each has its own kill switch
-# and request budget.
+# preview-proxy/ (streetzim-preview-proxy) so each has its own switches; the
+# free plan's 100,000 requests a day are per ACCOUNT, shared by both.
 name = "streetzim-build-proxy"
 main = "worker.js"
 compatibility_date = "2026-01-01"
+# workers_dev = false   (with no route) is the only switch that stops requests
+#                        being counted at all; MERGED/OFF below still count them
 
 [vars]
 # where /build/recipes/<region>/<lang>.ws.json and its ws-*.bin blobs are published
 SITE_ORIGIN = "https://streetzim.web.app"
 UPSTREAM = "https://archive.org/download/"
+# /merged/ requests per UTC day before it answers 503 (still a request each),
+# so the webseed cannot use up the preview's share of the account's 100,000
+WEBSEED_DAILY_BUDGET = "50000"
 # MERGED = "0"   switches off /merged/ (the torrents' webseed and direct downloads)
-# OFF = "1"      switches off everything
+# OFF = "1"      switches off everything (1/true/yes/on, 0/false/no/off)
+
+# The daily meter, shared by all isolates (SQLite-backed Durable Objects are on
+# the free plan). Without this binding each isolate counts on its own.
+[[durable_objects.bindings]]
+name = "METER"
+class_name = "WebseedMeter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WebseedMeter"]
