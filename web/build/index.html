@@ -39,6 +39,15 @@
   button.big { display: block; width: 100%; font-size: 1.1rem; padding: 14px 18px; margin: 12px 0 4px; }
   button.big.attention { box-shadow: 0 0 0 4px var(--card), 0 0 0 7px var(--ok); }
   summary { cursor: pointer; color: var(--accent); }
+  /* a job under way: the button busy at once, one bar, the phase in words and numbers */
+  button.busy, button.busy:disabled { opacity: .9; cursor: progress; }
+  button.busy::before { content: ''; display: inline-block; width: 1em; height: 1em; margin-right: .5em; vertical-align: -.15em;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: szspin .8s linear infinite; }
+  @keyframes szspin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { button.busy::before { animation-duration: 3s; } }
+  #job { margin: 8px 0; }
+  #job .phase { font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; }
+  #job progress { display: block; margin: 6px 0 2px; }
   details[open] summary { margin-bottom: 8px; }
 </style>
 </head>
@@ -64,12 +73,16 @@
     <ul id="packs" class="dim"></ul>
     <p id="goHint" class="ok" hidden>Ready: press Download to start.</p>
     <button id="oneclick" class="big" disabled>Download</button>
+    <div id="job" hidden>
+      <p id="phase" class="phase"></p>
+      <progress id="prog" max="1" aria-label="Progress of the whole download and build"></progress>
+      <p id="elapsed" class="dim"></p>
+    </div>
     <p id="estimate" class="dim"></p>
     <p class="dim">Keep this tab open and the device awake until it finishes. Pausing the download for more than a minute, closing the tab or letting the device sleep stops it, and it starts over. On iPhone and iPad, keep Safari in front with the screen on.</p>
     <p id="packStatus"></p>
     <button id="packRetry" class="secondary" hidden>Try again</button>
     <button id="startDl" hidden>Start download</button>
-    <p><progress id="prog" value="0" max="1" aria-label="Build progress"></progress></p>
     <p id="status" class="dim"></p>
     <div id="save" hidden></div>
     <p id="milestone" class="sr-only" aria-live="polite"></p>

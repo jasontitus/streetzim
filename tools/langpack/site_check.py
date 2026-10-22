@@ -220,6 +220,8 @@ def main():
         need(m.get("gate_verdict", "").endswith(f"/{tag}/{L}.json"), f"{L}: gate_verdict {m.get('gate_verdict')} is not .../{tag}/{L}.json")
         tb = touched_bytes(r)
         need(m["download_bytes"] == sum(tb.values()), f"{L}: download_bytes {m['download_bytes']} != {sum(tb.values())}")
+        rsize = os.path.getsize(os.path.join(a.site, m["recipe"]))
+        need(m.get("recipe_bytes") == rsize, f"{L}: recipe_bytes {m.get('recipe_bytes')} != the recipe's {rsize}")
         why = over_budget(os.path.getsize(os.path.join(a.site, m["recipe"])), sum(tb.values()),
                           a.entry_budget, a.recipe_budget)
         need(why is None, f"{L}: {why}")

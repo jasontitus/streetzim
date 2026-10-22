@@ -10,6 +10,18 @@
 // --proxy-url: the page uses that range proxy (the real one in front of
 // archive.org, web/drive/preview-config.js) instead of the local stand-in
 // below; then no --item is needed and the "proxy" counts stay 0.
+//
+// Feedback (what a visitor sees after the click):
+//   --throttle DOWN_KBPS:UP_KBPS:LATENCY_MS  Chromium's network emulation
+//        (CDP Network.emulateNetworkConditions) for the page and its worker
+//   --watch-secs S   record every visible change of the job panel, the
+//        button and the status from the click on, for S seconds or until
+//        the build ends: "feedback": first_change_ms (click to the first
+//        change), max_gap_ms (longest time without any visible change),
+//        max_progress_gap_ms (without a change of the phase line or the bar)
+//   --feedback-only  stop after the watch (the build is abandoned): PASS when
+//        the first change came within 200 ms and no gap reached 1.5 s
+//   --viewport WxH (default 1280x900)   --shots DIR  a screenshot per phase
 // Two local servers stand in for the site and the range proxy:
 //   page  http://localhost:P1/  WEB_DIR, with /build/recipes/ = RECIPES_DIR and
 //         /drive/preview-config.js naming the proxy below (the one place the
@@ -46,6 +58,12 @@ const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
 const EXPECT = opt('--expect', 'pass');
 const PROXY_URL = opt('--proxy-url', '');
+const THROTTLE = opt('--throttle', '');
+const WATCH = +opt('--watch-secs', '0');
+const FEEDBACK_ONLY = argv.includes('--feedback-only');
+const [VW, VH] = opt('--viewport', '1280x900').split('x').map(Number);
+const SHOTS = opt('--shots', '');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CORRUPT = (() => {
   const c = opt('--corrupt'); if (!c) return null;
   const m = /^([^/]+)\/([^@]+)@(\d+)$/.exec(c); if (!m) throw new Error('--corrupt ITEM/FILE@OFFSET');
@@ -152,6 +170,14 @@ async function runOne(L) {
   const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L });
   await ctx.addInitScript(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }); });
   const pg = await ctx.newPage();
+  await pg.setViewportSize({ width: VW, height: VH });
+  if (THROTTLE) {
+    const [down, up, lat] = THROTTLE.split(':').map(Number);
+    const cdp = await ctx.newCDPSession(pg);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: lat || 0,
+      downloadThroughput: down * 1000 / 8, uploadThroughput: (up || down) * 1000 / 8 });
+  }
   const log = [];
   pg.on('console', (m) => log.push(`${m.type()}: ${m.text()}`));
   pg.on('pageerror', (e) => log.push(`pageerror: ${e.message}`));
@@ -170,7 +196,55 @@ async function runOne(L) {
   const snap = () => ({ ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
                         items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
                         files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) });
-  let beforeBuild = null;                     // what the proxy served before Build was pressed
+  let beforeBuild = null, feedback = null;    // what the proxy served before Build was pressed; the watch
+  // every visible change from the click on (page time), and the click itself
+  await pg.evaluate(() => {
+    window.__vis = []; window.__prog = []; window.__progText = []; window.__clickAt = null;
+    document.addEventListener('click', () => { if (window.__clickAt === null) window.__clickAt = performance.now(); }, true);
+    const q = (s) => document.querySelector(s);
+    const progSig = () => [q('#phase') && q('#phase').textContent, q('#prog') && q('#prog').getAttribute('value'),
+                           q('#job') && q('#job').hidden].join('|');
+    const sig = () => [progSig(), q('#elapsed') && q('#elapsed').textContent, q('#oneclick').textContent,
+                       q('#oneclick').className, q('#go') && q('#go').textContent, q('#status').textContent].join('|');
+    let last = sig(), lastP = progSig();
+    new MutationObserver(() => {
+      if (window.__clickAt === null) return;
+      const now = performance.now(), s = sig(), p = progSig();
+      if (s !== last) { last = s; window.__vis.push(now); }
+      if (p !== lastP) { lastP = p; window.__prog.push(now); window.__progText.push(p.slice(0, 160)); }
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  const phases = [];
+  let shotN = 0;
+  const shot = async (tag) => {
+    if (!SHOTS) return;
+    fs.mkdirSync(SHOTS, { recursive: true });
+    await pg.screenshot({ path: path.join(SHOTS, `${L}-${VW}x${VH}-${String(++shotN).padStart(2, '0')}-${tag}.png`), fullPage: false });
+  };
+  // after the click: the phases seen (a screenshot each), until the watch ends or the build does
+  const watch = async () => {
+    const tEnd = Date.now() + WATCH * 1000;
+    let seen = null;
+    while (Date.now() < tEnd) {
+      const st = await pg.evaluate(() => ({ phase: document.querySelector('#job') ? document.querySelector('#job').dataset.phase || '' : '',
+                                            status: document.querySelector('#status').textContent }));
+      if (st.phase && st.phase !== seen) { seen = st.phase; phases.push(st.phase); await shot(st.phase); }
+      if (/^(Done|Stopped|Not started)/.test(st.status)) { await shot('end'); break; }
+      await sleep(150);
+    }
+    return pg.evaluate(() => {
+      const c = window.__clickAt, now = performance.now();
+      const gaps = (ts) => { let m = 0, prev = c; for (const t of [...ts, now]) { m = Math.max(m, t - prev); prev = t; } return Math.round(m); };
+      // where the longest wait for the phase line or the bar was: the line before it, and after
+      let gi = -1, gm = -1, prev = c;
+      window.__prog.forEach((t, i) => { if (t - prev > gm) { gm = t - prev; gi = i; } prev = t; });
+      const around = gi >= 0 ? { at_s: Math.round((window.__prog[gi] - c) / 100) / 10, before: window.__progText[gi - 1] || null,
+                                  after: window.__progText[gi] } : null;
+      return { first_change_ms: window.__vis.length ? Math.round(window.__vis[0] - c) : null, max_gap_ms: gaps(window.__vis),
+               max_progress_gap_ms: gaps(window.__prog), longest_progress_gap: around, changes: window.__vis.length,
+               watched_s: Math.round((now - c) / 1000) };
+    });
+  };
   if (MODE === 'file') {
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
@@ -183,11 +257,22 @@ async function runOne(L) {
     if (ready !== 'ready') throw new Error(`Build never enabled: ${ready}`);
     beforeBuild = snap();
     await pg.click('#go');
+    if (WATCH) feedback = await watch();
   } else {
     await pg.waitForFunction(() => !document.querySelector('#oneclick').disabled, null, { timeout: 60000 });
     await pg.waitForTimeout(1200);           // the page ignores a key press within 1 s of being ready (not a click; to be safe)
     beforeBuild = snap();
     await pg.click('#oneclick');
+    if (WATCH) feedback = await watch();
+  }
+  if (FEEDBACK_ONLY) {
+    const fb = feedback || {};
+    const res = { lang: L, mode: MODE, viewport: `${VW}x${VH}`, throttle: THROTTLE, feedback: fb, phases,
+                  pass: fb.first_change_ms !== null && fb.first_change_ms < 200 && fb.max_gap_ms < 1500 };
+    fs.writeFileSync(path.join(OUT, `feedback-${L}-${VW}x${VH}.json`), JSON.stringify(res, null, 1));
+    console.log(JSON.stringify(res));
+    await Promise.race([ctx.close().catch(() => {}), sleep(10000)]);
+    return res.pass;
   }
   const status = await pg.waitForFunction(() => {
     const t = document.querySelector('#status').textContent;
@@ -217,9 +302,11 @@ async function runOne(L) {
     ? /^(Stopped|Not started)/.test(String(status)) && !res.md5
     : res.md5 === recipe.file_md5 && res.bytes === recipe.size;
   res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
+  if (feedback) { res.feedback = feedback; res.phases = phases; }
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
   console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
                                md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, proxy_before_build: beforeBuild,
+                               feedback: res.feedback, phases: res.phases,
                                langOption: shown.langOption }));
   await ctx.close();
   return res.pass;

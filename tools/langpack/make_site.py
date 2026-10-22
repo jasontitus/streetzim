@@ -155,6 +155,8 @@ def main():
                           "articles": base_articles, "bytes": 0, "in_base": True})
         menu.append({"lang": L, "label": NATIVE.get(L, L), "recipe": f"{a.recipe_prefix}{L}.json",
                      "size": recipe["size"], "download_bytes": sum(tb.values()), "name": recipe["name"],
+                     # the recipe file's size: the page shows how much of it has come
+                     "recipe_bytes": os.path.getsize(path),
                      "file_name": recipe["file_name"], "md5": recipe["md5"], "packs": plist,
                      "gate_verdict": os.path.relpath(gatelib.verdict_path(a.base, L), gatelib.work_dir())})
         rows.append({"L": L, "packs": packs, "size": recipe["size"], "download_bytes": sum(tb.values()),
