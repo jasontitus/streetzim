@@ -1979,7 +1979,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
     var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
     var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
     totalDist += distM;
-    segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
+    // cls: the road class (driving mode tells an exit from an on-ramp by it).
+    segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags, cls: cls });
 
     var fromCoords = await graph.nodeCoordsE7(sourceNode);
     var toCoords = await graph.nodeCoordsE7(n);
@@ -2009,12 +2010,15 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
         && roads[roads.length - 1].nameIdx === s.nameIdx
         && roads[roads.length - 1].flags === s.flags) {
       roads[roads.length - 1].distM += s.distM;
+      roads[roads.length - 1].cls1 = s.cls;
     } else {
       roads.push({
         nameIdx: s.nameIdx,
         name: graph.getName(s.nameIdx),
         distM: s.distM,
         flags: s.flags,
+        cls0: s.cls,   // the road class where the road starts / ends
+        cls1: s.cls,
       });
     }
   }
@@ -2116,9 +2120,10 @@ function concatenateLegs(legs) {
       // doesn't announce "continue on X" onto the road it's already on.
       if (last && last.nameIdx === road.nameIdx && last.flags === road.flags) {
         last.distM += road.distM;
+        last.cls1 = road.cls1;
       } else {
         roads.push({ nameIdx: road.nameIdx, name: road.name,
-                     distM: road.distM, flags: road.flags });
+                     distM: road.distM, flags: road.flags, cls0: road.cls0, cls1: road.cls1 });
       }
     }
     distance += leg.distance;

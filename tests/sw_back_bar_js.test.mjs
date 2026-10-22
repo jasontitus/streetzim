@@ -68,6 +68,10 @@ await ok('right-to-left languages: the words in their direction, the arrow point
   assert.ok(api.backToMapText('it').startsWith('&#8592; '));
 });
 
+await ok('Romansh and Swiss German maps get the German bar, as the viewer falls back', () => {
+  for (const l of ['rm', 'rm-CH', 'gsw']) assert.strictEqual(api.backToMapText(l), '&#8592; ' + api.BACK_TO_MAP.de, l);
+});
+
 await ok('a bar that does not say "Back to map" is left as it is', () => {
   const other = BUILT.replace('&#8592; Back to map', 'Karte');
   assert.ok(run(other, 'de').includes('onclick="x">Karte</a>'));

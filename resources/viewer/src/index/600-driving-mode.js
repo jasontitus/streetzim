@@ -21,11 +21,28 @@
     return (Math.atan2(y, x) * toDeg + 360) % 360;
   }
 
+  // Which way a link road goes, from the road classes around it
+  // (class_access ordinals, docs/formats.md: motorway 1, trunk 3, primary
+  // 5, secondary 7, tertiary 9, residential 11, …, track 15; lower is
+  // bigger): 'on' when it joins a bigger road (onto a motorway, from a
+  // trunk road too), 'exit' when it leads to a road of the same size or
+  // smaller (off a motorway, a motorway-to-motorway interchange), '' when
+  // a class is unknown (graphs before SZRG v4, a route that ends on the
+  // link). fromCls: the road before the link, toCls: the first road after
+  // it that is not a link (neither is a link, so no link ordinal compares).
+  function szLinkKind(fromCls, toCls) {
+    var a = fromCls & 0x1F, b = toCls & 0x1F;
+    if (!a || !b || a > 15 || b > 15) return '';   // 1..15: motorway … track
+    return b < a ? 'on' : 'exit';
+  }
+
   // Augment a route with data the HUD needs:
   //   cumM[i]  — distance from start to coords[i] (meters)
-  //   turns[]  — { distM, coordIdx, nameIdx, flags, fromFlags } for each
-  //              road-name-or-flags change. flags = road you're entering,
-  //              fromFlags = road you're leaving (bit 0 roundabout, bit 1 link).
+  //   turns[]  — { distM, coordIdx, nameIdx, flags, fromFlags, toCls, fromCls }
+  //              for each road-name-or-flags change. flags = road you're
+  //              entering, fromFlags = road you're leaving (bit 0 roundabout,
+  //              bit 1 link); toCls / fromCls their road classes (where the
+  //              road entered starts, where the one left ends).
   function augmentRouteForDriving(route) {
     var coords = route.coords;
     var cumM = new Float64Array(coords.length);
@@ -53,7 +70,9 @@
         coordIdx: ci,
         nameIdx: roads[r + 1].nameIdx,
         flags: roads[r + 1].flags || 0,
-        fromFlags: roads[r].flags || 0
+        fromFlags: roads[r].flags || 0,
+        toCls: roads[r + 1].cls0 || 0,
+        fromCls: roads[r].cls1 || 0
       });
     }
     return {
@@ -499,8 +518,25 @@
                                       : szT('drive.exit_roundabout', 'exit roundabout');
           arrowEl.textContent = '↱';
         } else if (enteringLink) {
-          streetEl.textContent = name ? szT('drive.ramp_onto', 'take ramp onto {road}', { road: name })
-                                      : szT('drive.ramp', 'take ramp');
+          // Exit or on-ramp from the classes of the roads around the link:
+          // the one before it and the first after it that is no link.
+          var afterCls = 0;
+          for (var t = 0; t < state.route.turns.length; t++) {
+            var tt = state.route.turns[t];
+            if (tt.distM <= nextTurn.distM) continue;
+            if (!(tt.flags & 2)) { afterCls = tt.toCls || 0; break; }
+          }
+          var kind = szLinkKind(nextTurn.fromCls || 0, afterCls);
+          if (kind === 'exit') {
+            streetEl.textContent = name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })
+                                        : szT('drive.exit_ramp', 'take exit');
+          } else if (kind === 'on') {
+            streetEl.textContent = name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })
+                                        : szT('drive.on_ramp', 'take ramp');
+          } else {
+            streetEl.textContent = name ? szT('drive.ramp_onto', 'take ramp onto {road}', { road: name })
+                                        : szT('drive.ramp', 'take ramp');
+          }
           arrowEl.textContent = '↗';
         } else {
           streetEl.textContent = name ? szT('drive.onto', 'onto {road}', { road: name })
@@ -530,9 +566,10 @@
       if (proj.offMeters > preset.offM) {
         if (!state.offRouteSince) state.offRouteSince = Date.now();
         if (Date.now() - state.offRouteSince > preset.offMs) {
-          // One value with its unit, so "120 m" stays in that order in a
-          // right-to-left table (szLtr); metres whatever the unit choice.
-          setStatus(szT('drive.off_route', 'Off route ({dist})', { dist: szLtr(Math.round(proj.offMeters) + ' m') }),
+          // One value with its unit, in the reader's units, so "120 m" stays
+          // in that order in a right-to-left table (formatDistanceLocalized
+          // returns an szLtr run).
+          setStatus(szT('drive.off_route', 'Off route ({dist})', { dist: formatDistanceLocalized(proj.offMeters, unit) }),
                     { showReroute: true });
         }
       } else {

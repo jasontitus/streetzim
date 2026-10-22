@@ -850,6 +850,16 @@ await ok('labels: country > city > town > region > POI > village > suburb; rank 
   }
 });
 
+await ok('labels: a map language outside the tile list (Romansh) labels the same way', () => {
+  // No 21-language list in the viewer: the label field asks for name:<lang>
+  // whatever the code; Switzerland's tiles are to carry name:rm.
+  const L = layerMap(load().makeStyle({ ...NO_CLIP, language: 'rm', baseLanguage: 'en', regionLanguages: ['rm'] }));
+  const f = JSON.stringify(L['place-city'].layout['text-field']);
+  assert.ok(f.includes('"name:rm"'), f);
+  const de = JSON.stringify(layerMap(load().makeStyle({ ...NO_CLIP, language: 'de', baseLanguage: 'en' }))['place-city'].layout['text-field']);
+  assert.ok(de.includes('"name:de"') && !de.includes('name:rm'), de);
+});
+
 await ok('icons: every mapped icon has a Maki path and a colour group; none unused', () => {
   const { _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP } = load();
   const used = new Set(Object.values(_SZ_POI_ICON));

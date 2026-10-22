@@ -123,10 +123,10 @@
        overlap in place. Measured on a loaded ZIM, not a fatal-error page.
 
        --sz-attr-w: #attr-btn's width in the UI language ("À propos" is
-       77 px; 120-map-init-and-style.js publishes it), 71 px until then:
-       145 = 64 + 71 + 10. */
+       77 px; 120-map-init-and-style.js publishes it), 71 px until then;
+       82 = 64 (its right) + 10 (#info's left) + an 8 px gap. */
     box-sizing: border-box;
-    max-width: min(250px, calc(100vw - 74px - var(--sz-attr-w, 71px)));
+    max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)));
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
@@ -1105,6 +1105,10 @@
      entertainment", joined into one left-to-right run with no gap. */
   html[dir="rtl"] .search-result-name, html[dir="rtl"] .search-result-native,
   html[dir="rtl"] .search-result-type { unicode-bidi: isolate; }
+  /* A field that code emptied (the search ×, Clear route) keeps the
+     dir="auto" its text gave it (szAutoDir): its placeholder stays on the
+     right all the same. */
+  html[dir="rtl"] input[dir="auto"]:placeholder-shown { direction: rtl; unicode-bidi: isolate; }
   html[dir="rtl"] #controls button { text-align: right; }
   html[dir="rtl"] .wiki-item { border-left: none; border-right: 3px solid transparent; }
   html[dir="rtl"] .wiki-item:hover { border-right-color: var(--accent); }

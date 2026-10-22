@@ -501,7 +501,10 @@ if (!window.__szUnsupported) fetchConfig(1)
       document.querySelector('#info h3').textContent = config.name;
     }
     if (config.buildDate) {
-      document.querySelector('#info p').textContent = szT('info.map_data', 'Map data: {date}', { date: config.buildDate });
+      // A translated UI writes the month as About does (_szMonth: Intl, so
+      // Persian in its own calendar); English keeps the build's "2026/10".
+      document.querySelector('#info p').textContent = szT('info.map_data', 'Map data: {date}',
+        { date: SZ_I18N ? _szMonth(config.buildDate) : config.buildDate });
     }
     // PWA only: a way back to the picker from an installed app, whose
     // standalone launch skips it (docs/mobile-browser-review.md §B5).

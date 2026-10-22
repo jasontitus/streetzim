@@ -539,7 +539,9 @@
       var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
       var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
       totalDist += distM;
-      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
+      // cls: the road class, so driving mode can tell a link that leaves a
+      // motorway (an exit) from one that joins it (600 szLinkKind).
+      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags, cls: cls });
 
       var fromCoords = await graph.nodeCoordsE7(sourceNode);
       var toCoords = await graph.nodeCoordsE7(n);
@@ -568,8 +570,10 @@
           && roads[roads.length - 1].nameIdx === s.nameIdx
           && roads[roads.length - 1].flags === s.flags) {
         roads[roads.length - 1].distM += s.distM;
+        roads[roads.length - 1].cls1 = s.cls;
       } else {
-        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags });
+        // cls0 / cls1: the class where the road starts / ends.
+        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags, cls0: s.cls, cls1: s.cls });
       }
     }
 

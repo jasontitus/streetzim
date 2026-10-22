@@ -28,10 +28,16 @@ Why this order (2026-10-21/22):
   Thessaloniki from z6 to z8: 2 of 16 checks (2 cities × z6–z9 × English
   and Greek) showed the city on osm-greece, 16 of 16 now.
 - **POIs win over villages and neighbourhoods**, as they always had. With
-  the neighbourhoods on top, Athens at z14 lost a fifth of its POIs (51
-  placed with the old order, 41 with neighbourhoods on top, 54 now) and a
+  the neighbourhoods on top, Athens at z14 lost a fifth of its POIs, and a
   neighbourhood label hid Saint Francis Memorial Hospital in San Francisco.
   Suburbs share the neighbourhoods' layer, so they lose to POIs too.
+
+  POIs placed at Athens z14 (37.975, 23.735) in a 390×844 phone viewport,
+  counted with `queryRenderedFeatures` once the map was idle: 51 with the
+  order before 2026-10-21, 41 with neighbourhoods above POIs, 54 now. The
+  code reviewer's run of the same view counted 56 / 45 / 58; the counts
+  move by a few between runs (tile timing, the label sort), the ratios do
+  not. San Francisco z14 (37.7895, -122.4153), same viewport: 51 / 38 / 49.
 
 `tests/viewer_style_js.test.mjs` pins the order and the sort key.
 

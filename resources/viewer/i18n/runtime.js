@@ -19,6 +19,10 @@ var SZ_NUM_LANG = 'en';     // the locale numbers and dates are formatted in
 // Right-to-left languages: the page gets <html dir="rtl"> (and its CSS
 // mirrors the panels) when the UI is in one of them.
 var SZ_RTL_LANGS = { ar: 1, fa: 1, he: 1, ur: 1, ps: 1, ckb: 1, yi: 1, dv: 1, sd: 1, ug: 1 };
+// A language without a table of its own shows another its readers read,
+// rather than English: Romansh and Swiss German readers read German. Each
+// step is tried in turn (rm -> de); extend it here.
+var SZ_UI_FALLBACK = { rm: 'de', gsw: 'de' };
 
 // The tables are inlined compressed (tools/build_i18n.py encode_tables):
 // { v: 2, k: KEYS, t: { lang: TEXTS }, m: { lang: settings } }, where KEYS
@@ -188,7 +192,13 @@ function szSetUiLanguage(lang, search) {
   if (base !== 'en' && !SZ_I18N_PSEUDO) {
     try {
       var el = document.getElementById('sz-i18n');
-      SZ_I18N = el ? szTableFrom(JSON.parse(el.textContent), base) : null;
+      var block = el ? JSON.parse(el.textContent) : null;
+      // This language's table, else the fallback chain's (SZ_UI_FALLBACK).
+      for (var hops = 0; base && base !== 'en' && hops < 5; hops++) {
+        SZ_I18N = szTableFrom(block, base);
+        if (SZ_I18N || !Object.prototype.hasOwnProperty.call(SZ_UI_FALLBACK, base)) break;
+        base = SZ_UI_FALLBACK[base];
+      }
     } catch (e) { SZ_I18N = null; }
   }
   SZ_UI_LANG = SZ_I18N ? base : 'en';
@@ -210,6 +220,14 @@ function szSetUiLanguage(lang, search) {
   } catch (e) {}
   return SZ_UI_LANG;
 }
+// An arrow key as a step along a row or carousel: +1 to the next item, -1
+// to the previous, 0 for any other key. Right to left, the first item is on
+// the right, so ArrowLeft moves on; Down / Up always move on / back.
+function szArrowStep(key) {
+  var next = SZ_UI_RTL ? 'ArrowLeft' : 'ArrowRight', prev = SZ_UI_RTL ? 'ArrowRight' : 'ArrowLeft';
+  return key === next || key === 'ArrowDown' ? 1 : key === prev || key === 'ArrowUp' ? -1 : 0;
+}
+
 // In a right-to-left UI a text field takes the direction of what is typed
 // into it (dir="auto": "Athens" from the left), and the page's again once
 // it is empty, so an Arabic placeholder stays on the right.

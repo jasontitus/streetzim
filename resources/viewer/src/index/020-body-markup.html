@@ -50,7 +50,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 <div id="preview-banner" hidden>
   <span><span data-i18n="preview.lead">Online preview of</span> <b id="preview-banner-name"></b><span class="long"><span data-i18n="preview.streamed_from">, streamed from</span>
     <span id="preview-banner-host"></span> <span data-i18n="preview.download_better">&mdash; the downloaded file is
-    faster and works offline</span></span>.<span id="preview-banner-bytes"></span><span id="preview-banner-note"></span></span>
+    faster and works offline</span></span><span id="preview-banner-end" data-i18n-code>.</span><span id="preview-banner-bytes"></span><span id="preview-banner-note"></span></span>
   <a class="dl" id="preview-banner-download" href="#" rel="noopener" data-i18n-code>Download</a>
   <button id="preview-banner-close" type="button" title="Hide" aria-label="Hide" data-i18n-title="preview.hide" data-i18n-aria-label="preview.hide">&times;</button>
 </div>
@@ -112,6 +112,10 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
         try { host = new URL(r.url).host; } catch (err) {}
         document.getElementById('preview-banner-name').textContent = r.name || szT('preview.this_map', 'this map');
         document.getElementById('preview-banner-host').textContent = host;
+        // The full stop the language uses (the Find page's status_sentence:
+        // "।" in Hindi, "。" in Japanese and Chinese, none in Thai).
+        document.getElementById('preview-banner-end').textContent =
+          szT('places.status_sentence', '{text}.', { text: '' });
         var mb = r.sizeBytes ? r.sizeBytes / 1048576 : 0;
         dl.textContent = szT('preview.download', 'Download') +
           (mb >= 1024 ? ' (' + szLtr(szFixed(mb / 1024, 1) + ' GB') + ')' :

@@ -612,4 +612,98 @@ await ok('szInflate refuses a distance past the output; UTF-8 of every length de
   assert.deepStrictEqual(api.szUnpack(packed), text);
 });
 
+await ok('arrow keys follow the reading direction: the carousel and travel-mode handlers, run', () => {
+  const PARTS = `${REPO}/resources/viewer/src/index`;
+  const carousel = /\nfunction _findResultsKeydown\(e\) \{[\s\S]*?\n\}/.exec(fs.readFileSync(`${PARTS}/200-find-results-view.js`, 'utf8'))[0];
+  const travel = /travelRow\.addEventListener\('keydown', (function\(e\) \{[\s\S]*?\n    \})\);/.exec(fs.readFileSync(`${PARTS}/500-routing-panel.js`, 'utf8'))[1];
+  for (const [lang, rtl] of [['he', true], ['de', false]]) {
+    const run = new Function('document', 'window', RUNTIME + `
+      var scrolled = [], modes = [], focused = [];
+      var _findResultsState = { strip: {}, items: [1, 2, 3, 4], active: 1 };
+      function _scrollCarouselTo(i) { scrolled.push(i); }
+      function _hidePlaceDetail() {} function clearFindResults() {} function _showPlaceDetail() {}
+      ${carousel}
+      var routingModes = ['drive', 'walk', 'bike'], travelMode = 'walk';
+      function setTravelMode(m) { modes.push(m); }
+      var travelBtns = { drive: { focus: function() { focused.push('drive'); } },
+                         walk: { focus: function() {} }, bike: { focus: function() { focused.push('bike'); } } };
+      var travelKey = ${travel};
+      return { szSetUiLanguage: szSetUiLanguage, carousel: _findResultsKeydown, travel: travelKey,
+               scrolled: scrolled, modes: modes, focused: focused };`)(
+      { documentElement: {}, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
+    run.szSetUiLanguage(lang, '');
+    const key = (k) => ({ key: k, target: { tagName: 'DIV' }, preventDefault() {} });
+    run.carousel(key('ArrowLeft')); run.carousel(key('ArrowRight')); run.carousel(key('ArrowDown')); run.carousel(key('ArrowUp'));
+    // From card 1: left moves on in RTL (to 2), back in LTR (to 0).
+    assert.deepStrictEqual(run.scrolled, rtl ? [2, 0, 2, 0] : [0, 2, 2, 0], lang);
+    run.travel(key('ArrowLeft')); run.travel(key('ArrowRight')); run.travel(key('x'));
+    // From walk: left is bike (next) in RTL, drive (previous) in LTR.
+    assert.deepStrictEqual(run.modes, rtl ? ['bike', 'drive'] : ['drive', 'bike'], lang);
+    assert.deepStrictEqual(run.focused, rtl ? ['bike', 'drive'] : ['drive', 'bike'], lang);
+  }
+});
+
+await ok('a language without a table falls back along SZ_UI_FALLBACK (rm -> de), not straight to English', () => {
+  const mk = () => {
+    const docEl = {};
+    const api = new Function('document', 'window', RUNTIME + `
+      return { szSetUiLanguage: szSetUiLanguage, szT: szT, setFallback: function(m) { SZ_UI_FALLBACK = m; },
+               get lang() { return SZ_UI_LANG; } };`)(
+      { documentElement: docEl, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
+    return { api, docEl };
+  };
+  for (const tag of ['rm', 'RM', 'rm-CH', 'gsw']) {
+    const { api, docEl } = mk();
+    assert.strictEqual(api.szSetUiLanguage(tag, ''), 'de', tag);
+    assert.strictEqual(docEl.lang, 'de', tag);   // the UI text is German
+    assert.strictEqual(api.szT('routing.clear', 'Clear route'), DE['routing.clear'], tag);
+  }
+  // No table and no fallback: English. ?uilang=rm also falls back.
+  let r = mk(); assert.strictEqual(r.api.szSetUiLanguage('sw', ''), 'en');
+  r = mk(); assert.strictEqual(r.api.szSetUiLanguage('en', '?uilang=rm'), 'de');
+  // Data-driven, and a cycle in the map cannot hang the page.
+  r = mk(); r.api.setFallback({ xx: 'yy', yy: 'xx' }); assert.strictEqual(r.api.szSetUiLanguage('xx', ''), 'en');
+  r = mk(); r.api.setFallback({ xx: 'fr' }); assert.strictEqual(r.api.szSetUiLanguage('xx', ''), 'fr');
+  r = mk(); r.api.setFallback({}); assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'en');
+});
+
+await ok('link roads: an exit or an on-ramp from the classes of the roads around them', () => {
+  const src = fs.readFileSync(`${REPO}/resources/viewer/src/index/600-driving-mode.js`, 'utf8');
+  const fn = /\n  function szLinkKind\(fromCls, toCls\) \{[\s\S]*?\n  \}/.exec(src)[0];
+  const szLinkKind = new Function(fn + '; return szLinkKind;')();
+  // class ordinals (docs/formats.md): motorway 1, trunk 3, primary 5,
+  // secondary 7, tertiary 9, residential 11, service 14
+  const cases = [
+    [1, 7, 'exit'],     // motorway -> secondary: leave the motorway
+    [1, 1, 'exit'],     // motorway -> motorway: an interchange is an exit
+    [3, 11, 'exit'],    // trunk -> residential
+    [7, 1, 'on'],       // secondary -> motorway: an on-ramp
+    [11, 3, 'on'],      // residential -> trunk
+    [5, 7, 'exit'],     // primary -> secondary (smaller)
+    [9, 5, 'on'],       // tertiary -> primary (bigger)
+    [5, 5, 'exit'],     // primary -> primary
+    [3, 1, 'on'],       // trunk -> motorway: joining the motorway
+    [1, 3, 'exit'],     // motorway -> trunk: leaving it
+    [15, 14, 'on'],     // track -> service
+    [14, 15, 'exit'],
+    [0, 1, ''],         // unknown before (graph without classes)
+    [1, 0, ''],         // unknown after (the route ends on the link)
+    [16, 1, ''],        // a path is no road
+  ];
+  for (const [a, b, want] of cases) assert.strictEqual(szLinkKind(a, b), want, `${a} -> ${b}`);
+  // The HUD picks the cue by it, and every engine hands driving mode the classes.
+  assert.match(src, /var kind = szLinkKind\(nextTurn\.fromCls \|\| 0, afterCls\);/);
+  assert.match(src, /toCls: roads\[r \+ 1\]\.cls0 \|\| 0,\n\s+fromCls: roads\[r\]\.cls1 \|\| 0/);
+  for (const f of ['src/index/530-routing-astar.js', 'src/index/540-routing-worker-bridge.js', 'routing-worker.js']) {
+    const t = fs.readFileSync(`${REPO}/resources/viewer/${f}`, 'utf8');
+    assert.match(t, /cls0: s\.cls,?\s*(\/\/[^\n]*\n\s*)?cls1: s\.cls/, f);
+    assert.match(t, /\.cls1 = s\.cls;/, f);
+  }
+  // every table has the two cues and the neutral one for an unknown direction
+  for (const lang of ALL) for (const k of ['drive.exit_ramp', 'drive.exit_ramp_onto', 'drive.on_ramp', 'drive.on_ramp_onto', 'drive.ramp'])
+    assert.ok(TABLES[lang][k], `${lang} ${k}`);
+  assert.strictEqual(DE['drive.exit_ramp'], 'Ausfahrt nehmen');
+  assert.strictEqual(DE['drive.on_ramp_onto'], 'Auffahrt auf {road}');
+});
+
 console.log(`${pass} passed`);

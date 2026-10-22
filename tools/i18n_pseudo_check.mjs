@@ -343,6 +343,20 @@ try {
     // Arabic, Persian, Hebrew: right to left (runtime.js SZ_RTL_LANGS).
     const rtl = RTL.includes(lang);
     check((v.dir === 'rtl') === rtl, `${lang}: <html dir> ${rtl ? 'rtl' : 'not rtl'}`, v.dir);
+    if (rtl) {
+      // A field follows what is typed into it (dir="auto"), and once the ×
+      // has emptied it its placeholder is right to left again.
+      await page.click('#search-input', { clickCount: 3 });
+      await page.type('#search-input', 'Athens', { delay: 10 });
+      const typed = await page.evaluate(() => { const i = document.getElementById('search-input');
+        return [i.getAttribute('dir'), getComputedStyle(i).direction]; });
+      await page.evaluate(() => document.getElementById('search-clear').click());
+      await sleep(200);
+      const cleared = await page.evaluate(() => { const i = document.getElementById('search-input');
+        return [i.value, getComputedStyle(i).direction]; });
+      check(typed[0] === 'auto' && typed[1] === 'ltr' && cleared[0] === '' && cleared[1] === 'rtl',
+            `${lang}: search field direction typed / cleared`, JSON.stringify({ typed, cleared }));
+    }
     check(v.clear === T['routing.clear'] && v.about === T['about.button'], `${lang}: static markup`,
           JSON.stringify([v.clear, v.about]));
     check(v.note && v.note[0] === true && v.note[1] === T['common.machine_translated'],
@@ -361,6 +375,17 @@ try {
   for (const lang of LANGS) {
     await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
+    // The map-name box keeps an 8 px gap to the About button, whose width
+    // (in this language) the page publishes as --sz-attr-w.
+    await sleep(300);
+    const about = await page.evaluate(() => {
+      const b = document.getElementById('attr-btn'), i = document.getElementById('info');
+      i.querySelector('h3').textContent = 'A map name long enough to reach the About button, and more';
+      const rb = b.getBoundingClientRect(), ri = i.getBoundingClientRect();
+      return { w: b.offsetWidth, v: getComputedStyle(document.documentElement).getPropertyValue('--sz-attr-w').trim(),
+               gap: Math.round(rb.left - ri.right) };
+    });
+    check(about.v === about.w + 'px' && about.gap >= 8, `${lang}: map name clear of the About button at 320 px`, JSON.stringify(about));
     const hud = await page.evaluate(() => {
       const h = document.getElementById('drive-hud');
       h.style.display = 'block';

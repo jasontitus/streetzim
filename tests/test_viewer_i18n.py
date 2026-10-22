@@ -140,16 +140,21 @@ def test_the_pages_carry_the_right_to_left_rules() -> None:
                  'html[dir="rtl"] #sz-fatal ul { padding-left: 0; padding-right: 20px; }',
                  # not RTL: About fits a 390 px phone; #info keeps clear of the About button
                  'max-width: 536px; width: calc(100% - 40px); box-sizing: border-box;',
-                 'max-width: min(250px, calc(100vw - 74px - var(--sz-attr-w, 71px)));',
-                 # the HUD reroute button leaves the status beside it half the row
-                 'flex: 0 0 auto; max-width: 50%;'):
+                 'max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)));',
+                 # the HUD reroute button leaves the status beside it half the row, a
+                 # longer label cut with an ellipsis
+                 'flex: 0 0 auto; max-width: 50%;\n'
+                 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;',
+                 # a field emptied by code keeps its placeholder on the right
+                 'html[dir="rtl"] input[dir="auto"]:placeholder-shown { direction: rtl; unicode-bidi: isolate; }'):
         assert rule in idx, rule
     # every html[dir="rtl"] selector in the parts is in the list above
     css = "".join(p.read_text(encoding="utf-8") for p in sorted(PARTS.glob("0*.html"))
                   if p.name != build_i18n.PART_OUT.name)
-    assert css.count('html[dir="rtl"]') == 23, css.count('html[dir="rtl"]')
+    assert css.count('html[dir="rtl"]') == 24, css.count('html[dir="rtl"]')
     for rule in ('html[dir="rtl"] #near-clear { right:auto; left:6px; }',
-                 'html[dir="rtl"] #near-input { padding:8px 12px 8px 28px; }'):
+                 'html[dir="rtl"] #near-input { padding:8px 12px 8px 28px; }',
+                 'html[dir="rtl"] input[dir="auto"]:placeholder-shown { direction:rtl; unicode-bidi:isolate; }'):
         assert rule in plc, rule
     for page, src in (("index.html", idx), ("places.html", plc)):
         for token in ("SZ_RTL_LANGS", "function szLtr", "\\u2068", "root.dir = 'rtl'"):
@@ -162,7 +167,10 @@ def test_numbers_reach_a_sentence_as_one_isolated_value() -> None:
     # "(m 120)", the pair swapped. The code passes one szLtr value instead,
     # so no table can get it wrong (review of 6e12a1a).
     drive = (PARTS / "600-driving-mode.js").read_text(encoding="utf-8")
-    assert "{ dist: szLtr(Math.round(proj.offMeters) + ' m') }" in drive
+    # in the reader's units, through the HUD's formatter, which returns szLtr runs
+    assert "{ dist: formatDistanceLocalized(proj.offMeters, unit) }" in drive
+    fmt = drive.split("function formatDistanceLocalized(", 1)[1].split("\n  }", 1)[0]
+    assert fmt.count("return szLtr(") == 6, fmt
     plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
     assert "{ coords: szLtr(lat.toFixed(3) + ', ' + lon.toFixed(3)) }" in plc
     banner = (PARTS / "020-body-markup.html").read_text(encoding="utf-8")
@@ -193,14 +201,29 @@ def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
     ("210-place-detail-sheet.js", "leadIcon.style.cssText = SZ_UI_RTL ? 'margin-left:6px;' : 'margin-right:6px;';"),
     # nearby rows align with the text
     ("240-on-map-find-ui.js", "'text-align:' + (SZ_UI_RTL ? 'right' : 'left') + '; font:inherit;'"),
-    # arrow keys follow the reading direction (carousel, travel modes)
-    ("200-find-results-view.js", "var next = SZ_UI_RTL ? 'ArrowLeft' : 'ArrowRight', prev = SZ_UI_RTL ? 'ArrowRight' : 'ArrowLeft';"),
-    ("500-routing-panel.js", "var fwd = SZ_UI_RTL ? 'ArrowLeft' : 'ArrowRight', back = SZ_UI_RTL ? 'ArrowRight' : 'ArrowLeft';"),
+    # an exit says "take exit", an on-ramp "take ramp onto" (szLinkKind)
+    ("600-driving-mode.js", "if (kind === 'exit') {\n"
+     "            streetEl.textContent = name ? szT('drive.exit_ramp_onto', 'take exit toward {road}', { road: name })\n"
+     "                                        : szT('drive.exit_ramp', 'take exit');\n"
+     "          } else if (kind === 'on') {\n"
+     "            streetEl.textContent = name ? szT('drive.on_ramp_onto', 'take ramp onto {road}', { road: name })\n"
+     "                                        : szT('drive.on_ramp', 'take ramp');"),
+    # a translated UI writes the "Map data" month as About does (Persian calendar)
+    ("120-map-init-and-style.js", "{ date: SZ_I18N ? _szMonth(config.buildDate) : config.buildDate });"),
+    # the preview banner ends its sentence as the language does (hi "।")
+    ("020-body-markup.html", "szT('places.status_sentence', '{text}.', { text: '' });"),
     # the About button's width, published for #info's max-width
     ("120-map-init-and-style.js", "document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');"),
 ])
 def test_right_to_left_code_paths(part: str, code: str) -> None:
     assert code in (PARTS / part).read_text(encoding="utf-8"), part
+
+
+def test_the_hindi_sentence_end_is_the_danda() -> None:
+    # The preview banner takes its full stop from places.status_sentence.
+    tables = lang_tables()
+    assert tables["hi"]["places.status_sentence"] == "{text}।"
+    assert tables["th"]["places.status_sentence"] == "{text}"
 
 
 def test_the_find_page_searches_an_edited_label_without_isolates() -> None:

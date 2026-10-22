@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-23072c8f72';
+const SHELL_CACHE = 'streetzim-drive-shell-26af2f5eea';
 
 const SHELL_URLS = [
   './',
@@ -465,10 +465,14 @@ const BACK_TO_MAP = {
 // Right-to-left: the words in their own direction, the arrow pointing
 // back toward the line's start, which is on the right.
 const BACK_TO_MAP_RTL = { ar: 1, fa: 1, he: 1 };
+// A language without words of its own takes another its readers read, as
+// the viewer does (runtime.js SZ_UI_FALLBACK): Romansh and Swiss German, German.
+const BACK_TO_MAP_FALLBACK = { rm: 'de', gsw: 'de' };
 const BACK_TO_MAP_EN = '&#8592; Back to map';
 function backToMapText(lang) {
   const l = typeof lang === 'string' ? lang.toLowerCase() : '';
-  const b = BACK_TO_MAP[l] ? l : l.split('-')[0];
+  let b = BACK_TO_MAP[l] ? l : l.split('-')[0];
+  if (!BACK_TO_MAP[b] && BACK_TO_MAP_FALLBACK[b]) b = BACK_TO_MAP_FALLBACK[b];
   const t = BACK_TO_MAP[b];
   if (!t) return BACK_TO_MAP_EN;
   return BACK_TO_MAP_RTL[b] ? '<span dir="rtl">&#8594; ' + t + '</span>' : '&#8592; ' + t;

@@ -486,8 +486,9 @@
       var isRound = graph.edgeIsRoundabout(ei);
       var isLink  = graph.edgeIsLink(ei);
       var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
+      var cls = graph.edgeClassAccess ? graph.edgeClassAccess(ei) & 0x1F : 0;
       totalDist += distM;
-      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
+      segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags, cls: cls });
 
       var fromLat = nodesScaled[p * 2] / 1e7;
       var fromLon = nodesScaled[p * 2 + 1] / 1e7;
@@ -518,8 +519,10 @@
           roads[roads.length - 1].nameIdx === s.nameIdx &&
           roads[roads.length - 1].flags === s.flags) {
         roads[roads.length - 1].distM += s.distM;
+        roads[roads.length - 1].cls1 = s.cls;
       } else {
-        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags });
+        // cls0 / cls1: the road class where the road starts / ends (600 szLinkKind).
+        roads.push({ nameIdx: s.nameIdx, distM: s.distM, flags: s.flags, cls0: s.cls, cls1: s.cls });
       }
     }
 
