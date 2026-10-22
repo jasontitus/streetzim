@@ -134,7 +134,12 @@ python3 ../tools/langpack/webseed_smoke.py --site http://127.0.0.1:<stand-in> --
 (`tools/langpack/webseed_e2e.py`'s `ranged_server` is the stand-in for
 archive.org and the site.) Checked 2026-10-22 on Greece: every piece of two
 torrents, their MD5s, a libtorrent webseed-only download, and the meter with
-WEBSEED_DAILY_BUDGET=3 (3 answers, then 503s).
+WEBSEED_DAILY_BUDGET=5 (5 answers, then 503s; a restart with the same
+`--persist-to` keeps the count, the 20 s tail report included). Through a
+fault-injecting proxy in front of the archive.org stand-in: archive.org 500s
+and a 200 with the same ETag answer 503 with Retry-After and leave the
+version usable; another ETag answers 404 "out of date", which that version
+(not the other languages) keeps until the 10 minutes are up.
 
 ## Deploy (by hand, once)
 
