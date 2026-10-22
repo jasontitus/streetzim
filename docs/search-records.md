@@ -129,20 +129,36 @@ Latin name already).
   and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides);
   not streets or addresses.
 - **Which names:** in the order of the languages; a name equal to `n`
-  is left out (the viewer shows `n` then); one equal to `nn` is kept, so a
-  French visitor sees "Genève". At most 100 characters.
+  is left out (the viewer shows `n` then); one equal to `nn` is written as
+  `""`, which stands for `nn`, so a French visitor sees "Genève" and a Greek
+  one "Αθήνα" without the record repeating it (Greece: 7,984 `el`
+  entries). At most 100 characters.
+- **Languages:** the tile languages, plus the region languages when the
+  map's `regionLanguages` row is short (at most `REGION_TILE_ROW_MAX`, 7,
+  the tiles' rule); a continent's 38 add none.
 - **Index:** under every name, like `nn` (more prefix keys per record).
 - **Viewer:** matched by any of them; a result on a map shown in a
   second language (`SZ_LANG2`, a merged language-pack ZIM) shows `ln[lang]`
-  first, beside `nn` (or `n` when that is the same): "Genf · Genève". The
-  Find page matches them too.
+  first (`""`: `nn`), beside `nn` (or `n` when that is the same): "Genf ·
+  Genève". The Find page matches them too.
 - **Off:** `STREETZIM_SEARCH_LN=0`, or any map that is not language-ready
   (no `tileLanguages`): no `ln`, byte for byte as before.
-- **Size** (Switzerland, 2.3 M records, 22 languages): 4,957 of 85,837
-  cross-refs carry names, 3,086 records get `ln` (place 1,308, admin 753,
-  peak 484, poi 407, water 131), search chunk bytes +0.4%, tier-c chunks
-  +2.4%, the place category file +0.9%. Continent maps: see the step-2
-  caps (`LN_TYPES` TODO in `streetzim/zim_writer.py`).
+- **Caps:** `STREETZIM_SEARCH_LN_TYPES` (record types) and
+  `STREETZIM_SEARCH_LN_LANGUAGES` (keeps only these languages; read by both
+  the extraction and the writer) for a map near its search budget.
+- **Size**, measured on the regions' real inputs (box, not outline):
+
+  | | records | with `ln` | chunk bytes | tier-c chunks | place category | new 2-char keys |
+  |---|---|---|---|---|---|---|
+  | Switzerland (22 languages, with admin) | 2.3 M | 3,086 | +0.4% | +2.4% | +0.9% | +294 |
+  | Greece (21) | 1.07 M | 10,343 | +1.5% | +9.2% | +9.8% | +227 |
+  | Poland (21) | 2.95 M | 26,268 | +1.7% | +9.0% | +4.9% | +289 |
+
+  The new keys are mostly the first letters of CJK, Hangul and kana names
+  (manifest ~18 B each: +4-5 KB per country), which a continent's places
+  share; Europe's manifest (4.03 MB of `validate_zim.py`'s 4 MiB) is
+  estimated at +30-50 KB. Cross-ref names cost 23-233 B per cross-ref in
+  memory (Poland 14 MB); the extraction time is unchanged.
 - **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)

@@ -350,6 +350,13 @@ ok('a result shows the name in the map\'s second language', () => {
   assert.deepStrictEqual(V._szShownNames({ n: 'Zurich' }, 'de'), ['Zurich', '']);
   // An inherited key is not a name.
   assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: {} }, 'constructor'), ['X', '']);
+  // "" stands for the record's own-script name (the writer does not repeat it).
+  const ATHENS = { n: 'Athens', nn: 'Αθήνα', ln: { el: '', de: 'Athen' } };
+  assert.deepStrictEqual(V._szShownNames(ATHENS, 'el'), ['Αθήνα', 'Athens']);
+  assert.deepStrictEqual(V._szShownNames(ATHENS, 'de'), ['Athen', 'Αθήνα']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: { el: '' } }, 'el'), ['X', '']);
+  assert.deepStrictEqual(V._szLnNames(ATHENS), ['Athen']);
+  assert.ok(score(Object.assign({ t: 'place' }, ATHENS), 'αθηνα') >= 0);
 });
 
 // A tapped label in the map's second language ("Genf") finds its record

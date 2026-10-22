@@ -11,6 +11,7 @@ use) -> ISO 639-3 (the ZIM ``Language`` metadata, openZIM's rule).
 """
 from __future__ import annotations
 
+import os
 import re
 
 ISO639_3 = {
@@ -151,15 +152,27 @@ def osm_names(tags: dict, languages) -> dict[str, str]:
 def search_languages(tile_langs, region_langs) -> list[str]:
     """The languages a language-ready map's search records name places in
     (``ln``, docs/search-records.md): its tile languages, then its region's
-    own languages that are not among them. Empty without tile languages: a
-    build that is not language-ready writes no ``ln``. English never: the
-    record's ``n`` is already the English / Latin name."""
+    own languages that are not among them when its row is short
+    (REGION_TILE_ROW_MAX, the tiles' rule: Europe's 38 add none). Empty
+    without tile languages: a build that is not language-ready writes no
+    ``ln``. English never: the record's ``n`` is already the English /
+    Latin name."""
     if not tile_langs:
         return []
+    region = list(region_langs or [])
+    if len(region) > REGION_TILE_ROW_MAX:
+        region = []
     out: list[str] = []
-    for lang in list(tile_langs) + list(region_langs or []):
+    for lang in list(tile_langs) + region:
         if lang != "en" and lang not in out:
             out.append(lang)
+    # A cap for a map whose search data is near its budget (Europe's
+    # manifest): STREETZIM_SEARCH_LN_LANGUAGES keeps only these, in this
+    # order. Read here, so the extraction and the writer agree.
+    only = os.environ.get("STREETZIM_SEARCH_LN_LANGUAGES")
+    if only is not None:
+        keep = set(_codes(only))
+        out = [x for x in out if x in keep]
     return out
 
 

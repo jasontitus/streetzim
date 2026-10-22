@@ -6618,13 +6618,14 @@ function _szRecordNames(rec) {
 
 // The name a result shows first, and the one beside it: in a map shown in
 // another language `lang` (SZ_LANG2), the record's name in it when it has
-// one ("Genf"), beside its own-script name ("Genève"), or its name when
-// that is the same ("Genève · Geneva" in French); otherwise its name and
-// own-script name, as always.
+// one ("Genf"; "" stands for its own-script name `nn`), beside its
+// own-script name ("Genève"), or its name when that is the same
+// ("Genève · Geneva" in French); otherwise its name and own-script name,
+// as always.
 function _szShownNames(rec, lang) {
   var mine = lang && rec && rec.ln && typeof rec.ln === 'object'
     && Object.prototype.hasOwnProperty.call(rec.ln, lang) && typeof rec.ln[lang] === 'string'
-    ? rec.ln[lang] : '';
+    ? (rec.ln[lang] || (typeof rec.nn === 'string' ? rec.nn : '')) : '';
   if (mine) {
     var nat = (typeof rec.nn === 'string' && rec.nn) ? rec.nn : '';
     var other = nat && nat !== mine ? nat : String(rec.n || '');

@@ -230,10 +230,14 @@ def _title_text(text):
 # Record types that name places in the visitor's language (`ln`): what a
 # visitor looks up by its name in their own language. Streets and addresses
 # are left out (their names are rarely translated, and they are most of a
-# map's records). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides.
-# TODO(search-ln step 2): caps for continent-size maps (search-data
-# manifest budget, cloud/validate_zim.py SEARCH_MANIFEST_FAIL_MB; leaf
-# sizes): fewer types or languages there, decided from measurements.
+# map's records). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides;
+# STREETZIM_SEARCH_LN_LANGUAGES caps the languages (streetzim.languages
+# .search_languages). Measured (docs/search-records.md): Poland's search
+# chunks +1.7% and 289 new 2-character keys (manifest ~+5 KB), Greece's
+# +1.5% and 227; the new keys are mostly CJK, Hangul and kana first
+# letters, which a continent shares, so Europe's manifest (4.03 MB of
+# validate's 4 MiB) is estimated at +30-50 KB. Use the switches if a map
+# nears the budget.
 LN_TYPES = frozenset({"place", "admin", "airport", "peak", "park", "water", "poi"})
 # A name longer than this is a description or a tagging error, not a name.
 LN_MAX_CHARS = 100
@@ -265,23 +269,24 @@ def localized_names(feat, wiki, languages, types=None):
     languages, an admin area's relation) else its wiki cross-ref's (the OSM
     object feature_wiki matched, extract_wiki_tags_pbf(languages=)), in the
     order of ``languages``. A name the record already shows as ``n`` is left
-    out (the viewer falls back to ``n``); others are kept even when they
-    equal ``nn``, so a French visitor sees "Genève" as such. Only for
-    ``types`` (default LN_TYPES)."""
+    out (the viewer falls back to ``n``); one equal to its own-script name
+    ``nn`` is written as "" ("the name is nn": a French visitor sees
+    "Genève", a Greek one "Αθήνα", without the record repeating it). Only
+    for ``types`` (default LN_TYPES)."""
     if not languages or feat.get("type") not in (types if types is not None else LN_TYPES):
         return {}
     own = feat.get("names") or {}
     ref = (wiki or {}).get("names") or {}
     if not own and not ref:
         return {}
-    shown = shown_names(feat)[0]
+    shown, native, _latin = shown_names(feat)
     out = {}
     for lang in languages:
         v = own.get(lang) or ref.get(lang)
         if isinstance(v, str):
             v = v.strip()
             if v and v != shown and len(v) <= LN_MAX_CHARS:
-                out[lang] = v
+                out[lang] = "" if v == native else v
     return out
 
 

@@ -56,6 +56,21 @@ def test_search_languages():
     assert L.search_languages(["ar", "de"], ["el", "en", "de"]) == ["ar", "de", "el"]
     # Not language-ready: none, whatever the region speaks.
     assert L.search_languages([], ["el"]) == [] and L.search_languages(None, None) == []
+    # A long row (a continent's) adds none, as for the tiles.
+    europe = ["ru", "de", "fr", "en", "it", "es", "pl", "uk", "ro", "nl", "hu"]
+    assert len(europe) > L.REGION_TILE_ROW_MAX
+    assert L.search_languages(["de", "fr"], europe) == ["de", "fr"]
+    assert L.search_languages(["de"], europe[:L.REGION_TILE_ROW_MAX]) == [
+        "de", "ru", "fr", "it", "es", "pl"]
+
+
+def test_the_languages_switch(monkeypatch):
+    monkeypatch.setenv("STREETZIM_SEARCH_LN_LANGUAGES", "ru, zh,de")
+    assert L.search_languages(["de", "fr", "ru", "zh"], ["rm"]) == ["de", "ru", "zh"]
+    monkeypatch.setenv("STREETZIM_SEARCH_LN_LANGUAGES", "")
+    assert L.search_languages(["de", "fr"], None) == []
+    monkeypatch.delenv("STREETZIM_SEARCH_LN_LANGUAGES")
+    assert L.search_languages(["de", "fr"], None) == ["de", "fr"]
 
 
 def test_the_build_asks_for_the_tile_and_region_languages(monkeypatch):
@@ -84,8 +99,11 @@ def test_the_writer_reads_the_languages_from_map_config(monkeypatch):
 
 # --- the record -----------------------------------------------------------
 
+GENEVA_LN = dict(GENEVA_NAMES, fr="")    # Genève is the record's nn
+
+
 def test_names_from_the_matched_object():
-    assert W.localized_names(geneva(), GENEVA_REF, LANGS) == GENEVA_NAMES
+    assert W.localized_names(geneva(), GENEVA_REF, LANGS) == GENEVA_LN
 
 
 def test_the_order_is_the_languages_order():
@@ -95,7 +113,7 @@ def test_the_order_is_the_languages_order():
 def test_the_features_own_names_win():
     feat = dict(geneva(), names={"de": "Genf (Stadt)", "zh": "日内瓦"})
     assert W.localized_names(feat, GENEVA_REF, LANGS) == {
-        "de": "Genf (Stadt)", "fr": "Genève", "it": "Ginevra", "ru": "Женева", "zh": "日内瓦"}
+        "de": "Genf (Stadt)", "fr": "", "it": "Ginevra", "ru": "Женева", "zh": "日内瓦"}
 
 
 def test_a_name_the_record_shows_is_left_out_but_its_native_name_is_kept():
@@ -103,8 +121,9 @@ def test_a_name_the_record_shows_is_left_out_but_its_native_name_is_kept():
     ref = {"wikidata": "Q72", "names": {"de": "Zürich", "fr": "Zurich", "it": "Zurigo"}}
     # fr equals n exactly: dropped; de differs only by an accent: kept.
     assert W.localized_names(feat, ref, LANGS) == {"de": "Zürich", "it": "Zurigo"}
-    # Genève equals nn, and a French visitor still sees it.
-    assert W.localized_names(geneva(), GENEVA_REF, ["fr"]) == {"fr": "Genève"}
+    # Genève equals nn: "" (the viewer shows nn), so a French visitor still
+    # sees it, and the record does not repeat it.
+    assert W.localized_names(geneva(), GENEVA_REF, ["fr"]) == {"fr": ""}
 
 
 def test_only_for_the_types_a_visitor_looks_up_by_name():
@@ -180,7 +199,7 @@ def test_indexed_under_its_names_in_other_languages(tmp_path):
     assert [r["n"] for r in _chunk(tmp_path, "gi")] == ["Geneva"]
     assert [r["n"] for r in _chunk(tmp_path, next(iter(prefixes_for("Женева"))))] == ["Geneva"]
     [g] = _chunk(tmp_path, "gi")
-    assert g["ln"] == GENEVA_NAMES
+    assert g["ln"] == GENEVA_LN
     [m] = _chunk(tmp_path, "ma")
     assert m["ln"] == {"de": "Mailand", "ru": "Милан"}
 
