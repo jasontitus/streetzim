@@ -270,6 +270,16 @@ fails, an entry over the per-entry budget: more than `LANGPACK_ENTRY_BUDGET`
 (2 GiB) of packs to download, or a recipe over `LANGPACK_RECIPE_BUDGET`
 (32 MiB).
 
+**Continent maps get no language entries in v1.** A search pack indexes
+every page of the base, so it grows with the map: Greece 56 MB, Italy
+~175 MB, Iberia ~238 MB, Europe ~2.76 GB of indexes alone. A continent's
+entries are over the 2 GiB budget and `make_site.py` refuses them (listed
+in `refused.json`); maps up to about 5 GB come first, continents after a
+measured design. Indexing the base's pages by title only is no way out: on
+Greece it saves 14% (the base's share of a search pack 36.8 → 28.7 MB;
+most of it is the title index of its 64,457 pages, which the base's own
+suggestions need).
+
 ## In production
 
 Every published map gets packs for the **core languages**, the tiles'
