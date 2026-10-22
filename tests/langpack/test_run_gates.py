@@ -27,13 +27,14 @@ for _cmd in ("bash", "curl", "ss", "setsid"):
 KIWIX_STUB = r'''
 import http.server, json, os, sys
 port = int(sys.argv[sys.argv.index("--port") + 1])
+addr = sys.argv[sys.argv.index("--address") + 1] if "--address" in sys.argv else "0.0.0.0"
 books = [a for a in sys.argv[1:] if a.endswith(".zim")]
 # what the disk held when this server started (the gates must stream: one merged file at a time)
 log = os.environ.get("KIWIX_STUB_LOG")
 if log:
     merged = os.path.join(os.environ["LANGPACK_WORK"], "merged")
     with open(log, "a") as fh:
-        fh.write(json.dumps({"books": [os.path.basename(b) for b in books],
+        fh.write(json.dumps({"books": [os.path.basename(b) for b in books], "address": addr,
                              "merged_dir": sorted(os.listdir(merged))}) + "\n")
 xml = "<feed>" + "".join(f"<entry><title>x</title><link href=\"/content/{b.rsplit('/', 1)[-1][:-4].lower()}\"/></entry>"
                          for b in books) + "</feed>"
@@ -44,7 +45,7 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(404); self.end_headers()
     def log_message(self, *a): pass
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+http.server.HTTPServer((addr, port), H).serve_forever()
 '''
 
 NODE_STUB = r'''#!/bin/bash
@@ -149,6 +150,8 @@ def test_one_merged_file_at_a_time(gates: SimpleNamespace) -> None:
     for r in rows[1:]:
         assert r["merged_dir"] == r["books"], r
     assert sorted(os.listdir(gates.work / "merged")) == []
+    # nothing is served beyond the host itself: kiwix-serve listens on 127.0.0.1 only
+    assert {r["address"] for r in rows} == {"127.0.0.1"}, rows
 
 
 def test_keep_merged_and_search_as_advisory(gates: SimpleNamespace, tmp_path: Path) -> None:
