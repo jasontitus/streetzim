@@ -413,7 +413,8 @@
       resultsEl.style.display = 'none';
       var lat = m.item.a;
       var lon = m.item.o;
-      var label = szFirstName(m.item.n);
+      // The name the row shows (in the map's second language, _szShownNames).
+      var label = szFirstName(_szShownNames(m.item, SZ_LANG2)[0]);
       if (target === 'origin') setOriginFromLatLon(lat, lon, label);
       else setDestFromLatLon(lat, lon, label);
       inputEl.blur();
@@ -434,7 +435,7 @@
 
           var nameSpan = document.createElement('div');
           nameSpan.className = 'routing-result-name';
-          nameSpan.textContent = szFirstName(m.item.n);
+          nameSpan.textContent = szFirstName(_szShownNames(m.item, SZ_LANG2)[0]);
           textCol.appendChild(nameSpan);
 
           // Secondary line: location (e.g. "Sacramento, California") + type,
@@ -500,7 +501,9 @@
     }
     inputEl.addEventListener('input', function() {
       clearTimeout(timer);
-      var q = inputEl.value.trim();
+      // Without the bidi isolates a right-to-left UI wraps a picked point's
+      // coordinates in (coordLabel, szLtr), should the reader edit them.
+      var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
       if (q.length < 2) { resultsEl.style.display = 'none'; return; }
       if (!map._queryPlaces) return;
       timer = setTimeout(function() {

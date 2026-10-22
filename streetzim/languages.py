@@ -11,6 +11,7 @@ use) -> ISO 639-3 (the ZIM ``Language`` metadata, openZIM's rule).
 """
 from __future__ import annotations
 
+import os
 import re
 
 ISO639_3 = {
@@ -25,29 +26,48 @@ ISO639_3 = {
     "id": "ind", "ms": "msa", "tl": "tgl", "hi": "hin", "bn": "ben",
     "ur": "urd", "ta": "tam", "te": "tel", "mr": "mar", "ne": "nep",
     "ar": "ara", "fa": "fas", "he": "heb", "sw": "swa", "am": "amh",
+    # Switzerland's fourth national language (its tiles carry name:rm;
+    # a Romansh language-pack ZIM needs the metadata code).
+    "rm": "roh",
 }
 
-# The other two-letter codes of cloud/region-languages.tsv: a region's own
-# languages get Wikipedia packs (tools/langpack/), whose metadata needs the
-# ISO 639-3 code. A three-letter code is ISO 639-3 already (iso639_3).
+# Other regions' own languages that a short-row map's tiles and search
+# records carry (default_tile_languages): codes --tile-languages accepts and
+# ZIM metadata can name (iso639_3), but no --language build is made in them
+# (check, the CLI's --language choices and offliner-definition.json:
+# ISO639_3 only). The contract: check() = ISO639_3; iso639_3() and
+# tile_languages() = ISO639_3 | REGION_ISO639_3 (docs/language-ready.md).
 REGION_ISO639_3 = {
-    "aa": "aar", "af": "afr", "ak": "aka", "as": "asm", "av": "ava", "ay": "aym", "az": "aze",
-    "bi": "bis", "bm": "bam", "bo": "bod", "bs": "bos", "ce": "che", "dv": "div", "dz": "dzo",
-    "ee": "ewe", "ff": "ful", "fj": "fij", "fy": "fry", "gn": "grn", "gu": "guj", "ha": "hau",
-    "ht": "hat", "hy": "hye", "ig": "ibo", "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik",
-    "kk": "kaz", "km": "khm", "kn": "kan", "kr": "kau", "ks": "kas", "ku": "kur", "ky": "kir",
-    "lb": "ltz", "lg": "lug", "ln": "lin", "lo": "lao", "mg": "mlg", "mh": "mah", "mk": "mkd",
-    "ml": "mal", "mn": "mon", "mt": "mlt", "my": "mya", "na": "nau", "nd": "nde", "nr": "nbl",
-    "ny": "nya", "om": "orm", "or": "ori", "os": "oss", "pa": "pan", "ps": "pus", "qu": "que",
-    "rm": "roh", "rn": "run", "rw": "kin", "sc": "srd", "sd": "snd", "sg": "sag", "si": "sin",
-    "sn": "sna", "so": "som", "sq": "sqi", "ss": "ssw", "st": "sot", "su": "sun", "tg": "tgk",
-    "ti": "tir", "tk": "tuk", "tn": "tsn", "ts": "tso", "tt": "tat", "ty": "tah", "uz": "uzb",
-    "ve": "ven", "wo": "wol", "xh": "xho", "yo": "yor", "za": "zha", "zu": "zul",
+    "sq": "sqi", "mk": "mkd", "bs": "bos", "cnr": "cnr", "lb": "ltz",
+    "fy": "fry", "sc": "srd", "az": "aze", "ku": "kur", "glk": "glk",
+    "mzn": "mzn", "mn": "mon", "za": "zha", "tt": "tat", "ce": "che",
+    "ht": "hat", "jam": "jam", "pap": "pap", "qu": "que", "gn": "grn",
+    "ay": "aym", "haw": "haw", "esu": "esu", "zgh": "zgh", "kab": "kab",
+    "ty": "tah", "rar": "rar",
+}
+
+# Language packs only (tools/langpack/, streetzim/wiki_pack.py): the other
+# two-letter codes of cloud/region-languages.tsv, whose Wikipedia packs need
+# an ISO 639-3 code in their metadata. Not tile or build languages: only
+# pack_iso639_3() reads this table, so check(), iso639_3() and
+# tile_languages() keep the contract above.
+PACK_ISO639_3 = {
+    "aa": "aar", "af": "afr", "ak": "aka", "as": "asm", "av": "ava", "bi": "bis", "bm": "bam",
+    "bo": "bod", "dv": "div", "dz": "dzo", "ee": "ewe", "ff": "ful", "fj": "fij", "gu": "guj",
+    "ha": "hau", "hy": "hye", "ig": "ibo", "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik",
+    "kk": "kaz", "km": "khm", "kn": "kan", "kr": "kau", "ks": "kas", "ky": "kir", "lg": "lug",
+    "ln": "lin", "lo": "lao", "mg": "mlg", "mh": "mah", "ml": "mal", "mt": "mlt", "my": "mya",
+    "na": "nau", "nd": "nde", "nr": "nbl", "ny": "nya", "om": "orm", "or": "ori", "os": "oss",
+    "pa": "pan", "ps": "pus", "rn": "run", "rw": "kin", "sd": "snd", "sg": "sag", "si": "sin",
+    "sn": "sna", "so": "som", "ss": "ssw", "st": "sot", "su": "sun", "tg": "tgk", "ti": "tir",
+    "tk": "tuk", "tn": "tsn", "ts": "tso", "uz": "uzb", "ve": "ven", "wo": "wol", "xh": "xho",
+    "yo": "yor", "zu": "zul",
 }
 
 # Right-to-left scripts: the viewer's layout is left-to-right; labels and
-# search results still render correctly (MapLibre's RTL plugin).
-RTL = frozenset({"ar", "fa", "he", "ur"})
+# search results still render correctly (MapLibre's RTL plugin). Gilaki
+# and Mazandarani (Iran's tiles) are written in Arabic script too.
+RTL = frozenset({"ar", "fa", "he", "ur", "glk", "mzn"})
 
 
 # Wikipedia editions whose code is not the language's ISO 639-1 code.
@@ -76,28 +96,42 @@ ZIM_LANGUAGE_ALIASES = {"nb": {"nob", "nor"}, "no": {"nob", "nor"}, "ms": {"msa"
 def zim_matches(lang: str, zim_language: str) -> bool:
     """Whether a ZIM's Language metadata ("fra", "eng,fra") includes
     ``lang``."""
-    want = ZIM_LANGUAGE_ALIASES.get(lang, set()) | {iso639_3(lang)}
+    want = ZIM_LANGUAGE_ALIASES.get(lang, set()) | {pack_iso639_3(lang)}
     return bool(want & {x.strip() for x in zim_language.split(",") if x.strip()})
 
 
 def iso639_3(lang: str) -> str:
-    if lang in ISO639_3:
-        return ISO639_3[lang]
-    if lang in REGION_ISO639_3:
-        return REGION_ISO639_3[lang]
-    if re.fullmatch(r"[a-z]{3}", lang):     # ISO 639-3 already (ceb, hil, ...)
-        return lang
-    try:
-        return ISO639_3[lang]
-    except KeyError:
+    """The ISO 639-3 code of a build or region language (ISO639_3,
+    REGION_ISO639_3)."""
+    code = ISO639_3.get(lang) or REGION_ISO639_3.get(lang)
+    if code is None:
         raise ValueError(
-            f"unsupported language {lang!r}: one of {', '.join(sorted(ISO639_3))}") from None
+            f"unsupported language {lang!r}: one of "
+            f"{', '.join(sorted(set(ISO639_3) | set(REGION_ISO639_3)))}")
+    return code
+
+
+def pack_iso639_3(lang: str) -> str:
+    """The ISO 639-3 code of a Wikipedia pack's language: iso639_3(), else
+    PACK_ISO639_3, else a three-letter code as it is (ceb, hil: ISO 639-3
+    already). Language packs only; builds and tiles use iso639_3()."""
+    try:
+        return iso639_3(lang)
+    except ValueError:
+        if lang in PACK_ISO639_3:
+            return PACK_ISO639_3[lang]
+        if re.fullmatch(r"[a-z]{3}", lang):
+            return lang
+        raise
 
 
 def check(lang: str | None) -> str:
-    """The language code a build uses ("en" when none is given)."""
+    """The language code a build uses ("en" when none is given): one of
+    ISO639_3."""
     lang = (lang or "en").strip().lower()
-    iso639_3(lang)
+    if lang not in ISO639_3:
+        raise ValueError(
+            f"unsupported language {lang!r}: one of {', '.join(sorted(ISO639_3))}")
     return lang
 
 
@@ -109,6 +143,82 @@ MATRIX_TILE_LANGUAGES = ("ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "
                          "ko", "nl", "pl", "pt", "ru", "th", "tr", "uk", "vi", "zh")
 
 
+# A map whose row in cloud/region-languages.tsv lists at most this many
+# languages (a country, or a few: Switzerland's de,fr,it,rm, the Baltics,
+# the Balkans' seven) carries all of them in its tiles besides the matrix
+# (default_tile_languages), so its own minority and national languages
+# label the map and name its search records (Romansh in Graubünden). A
+# longer row (Europe's 38, Africa's 31, the Indian subcontinent's 22) adds
+# none: dozens of languages per continent map, each mostly unlabelled.
+REGION_TILE_ROW_MAX = 7
+
+
+def default_tile_languages(region_langs) -> list[str]:
+    """The name:xx languages a language-ready map's tiles carry by default:
+    the matrix, plus the region's own languages when its row is short
+    (REGION_TILE_ROW_MAX), sorted (tile_languages). A code the matrix
+    lacks must be in ISO639_3 or REGION_ISO639_3
+    (tests/test_region_languages.py checks the table)."""
+    region = [x for x in (region_langs or []) if x != "en"]
+    extra = ([x for x in region if x not in MATRIX_TILE_LANGUAGES]
+             if len(list(region_langs or [])) <= REGION_TILE_ROW_MAX else [])
+    return tile_languages(",".join(list(MATRIX_TILE_LANGUAGES) + extra))
+
+
+def first_name(value: object) -> str:
+    """The first non-empty name of an OSM ";" list, trimmed: the tile
+    profile's FirstName ("洛杉矶;洛杉磯" -> "洛杉矶")."""
+    if not isinstance(value, str):
+        return ""
+    for part in value.split(";"):
+        part = part.strip()
+        if part:
+            return part
+    return ""
+
+
+def osm_names(tags: dict, languages) -> dict[str, str]:
+    """{lang: name} of OSM's name:<lang> tags for ``languages``, chosen as
+    the tile profile writes name:<lang> (resources/tilemaker/
+    process-openmaptiles.lua LangName): the first of a ";" list, and for zh
+    name:zh-Hans (Simplified) when OSM has it. Languages without one are
+    left out."""
+    out: dict[str, str] = {}
+    for lang in languages:
+        v = first_name(tags.get("name:zh-Hans")) if lang == "zh" else ""
+        v = v or first_name(tags.get(f"name:{lang}"))
+        if v:
+            out[lang] = v
+    return out
+
+
+def search_languages(tile_langs, region_langs) -> list[str]:
+    """The languages a language-ready map's search records name places in
+    (``ln``, docs/search-records.md): its tile languages, then its region's
+    own languages that are not among them when its row is short
+    (REGION_TILE_ROW_MAX, the tiles' rule: Europe's 38 add none). Empty
+    without tile languages: a build that is not language-ready writes no
+    ``ln``. English never: the record's ``n`` is already the English /
+    Latin name."""
+    if not tile_langs:
+        return []
+    region = list(region_langs or [])
+    if len(region) > REGION_TILE_ROW_MAX:
+        region = []
+    out: list[str] = []
+    for lang in list(tile_langs) + region:
+        if lang != "en" and lang not in out:
+            out.append(lang)
+    # A cap for a map whose search data is near its budget (Europe's
+    # manifest): STREETZIM_SEARCH_LN_LANGUAGES keeps only these, in this
+    # order. Read here, so the extraction and the writer agree.
+    only = os.environ.get("STREETZIM_SEARCH_LN_LANGUAGES")
+    if only is not None:
+        keep = set(_codes(only))
+        out = [x for x in out if x in keep]
+    return out
+
+
 def _codes(text: str) -> list[str]:
     return [c for c in re.split(r"[\s,]+", text.strip().lower()) if c]
 
@@ -116,7 +226,8 @@ def _codes(text: str) -> list[str]:
 def tile_languages(text: str) -> list[str]:
     """The name:xx languages ``text`` ("de,fr", "fr de") asks tiles to carry,
     as STREETZIM_TILE_LANGUAGES and map-config ``tileLanguages`` hold them:
-    codes a build can be made in, sorted, once each. English is refused (the
+    codes a build can be made in, or a region language (REGION_ISO639_3),
+    sorted, once each. English is refused (the
     tiles always carry it as name:latin), and so is an empty list."""
     langs = sorted(set(_codes(text)))
     if not langs:

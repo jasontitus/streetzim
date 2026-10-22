@@ -14,9 +14,10 @@
 //    bracketed or carry no letters, unless the row is listed in MIXED.
 // 2. German (?uilang=de): <html lang>, and fixed elements read de.json;
 //    no "translated by machine" note (German is reviewed).
-// 3. Every machine-translated table (th, zh, es, fr, ja, ko, el: the
-//    tables with "_machine": true in resources/viewer/i18n): the same, and
-//    the machine-translation note shows in About and on the Find page.
+// 3. Every machine-translated table (the tables with "_machine": true in
+//    resources/viewer/i18n: all but German): the same, the machine-
+//    translation note shows in About and on the Find page, and Arabic,
+//    Persian and Hebrew pages are dir="rtl".
 // 4. Every table: the navigation HUD's row (arrow, distance and street,
 //    fullscreen, exit) fits a 320 px phone with room for the distance.
 //
@@ -39,6 +40,7 @@ const DE = table('de');
 const LANGS = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
   .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
 const MACHINE = LANGS.filter((l) => table(l)._machine === true);
+const RTL = ['ar', 'fa', 'he'];
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
 const ORIGIN = pt(process.env.ORIGIN, '43.7396,7.4246');
@@ -306,6 +308,7 @@ try {
   // #mt-note (both data-i18n-machine).
   const viewerState = () => page.evaluate(() => ({
     lang: document.documentElement.lang,
+    dir: document.documentElement.dir,
     clear: document.getElementById('routing-clear').textContent,
     about: document.getElementById('attr-btn').textContent,
     note: (() => { const n = document.getElementById('about-mt');
@@ -313,6 +316,7 @@ try {
   }));
   const findState = () => page.evaluate(() => ({
     title: document.querySelector('header h1').textContent,
+    dir: document.documentElement.dir,
     note: (() => { const n = document.getElementById('mt-note');
       return n ? [getComputedStyle(n).display !== 'none', n.textContent] : null; })(),
   }));
@@ -336,6 +340,23 @@ try {
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
     const v = await viewerState();
     check(v.lang === tag, `${lang}: <html lang="${tag}">`, v.lang);
+    // Arabic, Persian, Hebrew: right to left (runtime.js SZ_RTL_LANGS).
+    const rtl = RTL.includes(lang);
+    check((v.dir === 'rtl') === rtl, `${lang}: <html dir> ${rtl ? 'rtl' : 'not rtl'}`, v.dir);
+    if (rtl) {
+      // A field follows what is typed into it (dir="auto"), and once the ×
+      // has emptied it its placeholder is right to left again.
+      await page.click('#search-input', { clickCount: 3 });
+      await page.type('#search-input', 'Athens', { delay: 10 });
+      const typed = await page.evaluate(() => { const i = document.getElementById('search-input');
+        return [i.getAttribute('dir'), getComputedStyle(i).direction]; });
+      await page.evaluate(() => document.getElementById('search-clear').click());
+      await sleep(200);
+      const cleared = await page.evaluate(() => { const i = document.getElementById('search-input');
+        return [i.value, getComputedStyle(i).direction]; });
+      check(typed[0] === 'auto' && typed[1] === 'ltr' && cleared[0] === '' && cleared[1] === 'rtl',
+            `${lang}: search field direction typed / cleared`, JSON.stringify({ typed, cleared }));
+    }
     check(v.clear === T['routing.clear'] && v.about === T['about.button'], `${lang}: static markup`,
           JSON.stringify([v.clear, v.about]));
     check(v.note && v.note[0] === true && v.note[1] === T['common.machine_translated'],
@@ -344,6 +365,7 @@ try {
     await page.waitForFunction((t) => document.documentElement.lang === t, { timeout: 30000 }, tag).catch(() => {});
     const f = await findState();
     check(f.title === T['places.title'], `${lang}: Find page`, f.title);
+    check((f.dir === 'rtl') === rtl, `${lang}: Find page <html dir>`, f.dir);
     check(f.note && f.note[0] === true && f.note[1] === T['common.machine_translated'],
           `${lang}: machine-translation note on the Find page`, JSON.stringify(f.note));
   }
@@ -353,6 +375,17 @@ try {
   for (const lang of LANGS) {
     await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
+    // The map-name box keeps an 8 px gap to the About button, whose width
+    // (in this language) the page publishes as --sz-attr-w.
+    await sleep(300);
+    const about = await page.evaluate(() => {
+      const b = document.getElementById('attr-btn'), i = document.getElementById('info');
+      i.querySelector('h3').textContent = 'A map name long enough to reach the About button, and more';
+      const rb = b.getBoundingClientRect(), ri = i.getBoundingClientRect();
+      return { w: b.offsetWidth, v: getComputedStyle(document.documentElement).getPropertyValue('--sz-attr-w').trim(),
+               gap: Math.round(rb.left - ri.right) };
+    });
+    check(about.v === about.w + 'px' && about.gap >= 8, `${lang}: map name clear of the About button at 320 px`, JSON.stringify(about));
     const hud = await page.evaluate(() => {
       const h = document.getElementById('drive-hud');
       h.style.display = 'block';

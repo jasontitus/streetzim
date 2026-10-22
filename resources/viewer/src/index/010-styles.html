@@ -120,9 +120,13 @@
        border-box, because max-width caps the CONTENT box by default: with
        padding 3px 8px the 175px cap still rendered a 191px border box
        (right edge 201 vs #attr-btn's left edge 198), leaving 3px of the
-       overlap in place. Measured on a loaded ZIM, not a fatal-error page. */
+       overlap in place. Measured on a loaded ZIM, not a fatal-error page.
+
+       --sz-attr-w: #attr-btn's width in the UI language ("À propos" is
+       77 px; 120-map-init-and-style.js publishes it), 71 px until then;
+       82 = 64 (its right) + 10 (#info's left) + an 8 px gap. */
     box-sizing: border-box;
-    max-width: min(250px, calc(100vw - 145px));
+    max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)));
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
@@ -478,7 +482,7 @@
   #attr-dialog {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     background: #fff; border-radius: var(--radius); padding: 24px 28px;
-    max-width: 480px; width: calc(100% - 40px);
+    max-width: 536px; width: calc(100% - 40px); box-sizing: border-box;
     max-height: calc(var(--app-height, 100vh) * 0.8); overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     font-family: var(--ui-font);
@@ -809,8 +813,12 @@
     align-items: center; justify-content: space-between; gap: 8px;
   }
   #drive-status.visible { display: flex; }
+  /* At most half the row, so the status beside it ("Off route (120 m)")
+     keeps room at 320 px; a longer label is cut with an ellipsis. */
   #drive-reroute-btn {
-    flex: 0 0 auto; font: inherit; font-weight: 600;
+    flex: 0 0 auto; max-width: 50%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font: inherit; font-weight: 600;
     padding: 6px 10px; border-radius: 5px; border: none;
     background: #2563eb; color: #fff; cursor: pointer;
   }
@@ -1081,6 +1089,46 @@
     html.sz-dark .maplibregl-ctrl button .maplibregl-ctrl-icon,
     html.sz-dark .maplibregl-ctrl-attrib-button { filter: none; }
     html.sz-dark .sz-home-btn svg, html.sz-dark .sz-theme-btn svg { fill: #333; }
+  }
+  /* --- Right-to-left UI (ar, fa, he: runtime.js gives <html dir="rtl">) ---
+     Text, flex rows and scroll rails follow dir by themselves; these rules
+     mirror what is placed with left/right. The map controls keep their
+     corners (MapLibre's columns, #controls, About, the panels at the left):
+     right-to-left map apps keep them too, and moved they would collide.
+     Numbers, distances and coordinates are isolated LTR runs (szLtr). */
+  html[dir="rtl"] #search-input { padding: 10px 14px 10px 36px; }
+  html[dir="rtl"] #search-clear { right: auto; left: 10px; }
+  html[dir="rtl"] .search-result-native { margin-left: 0; margin-right: 4px; }
+  html[dir="rtl"] .search-result-type { margin-left: 0; margin-right: 6px; }
+  /* Each part of a result row its own run: an untranslated Latin type
+     (an Overture category) after a Latin name read "Acropolisarts and
+     entertainment", joined into one left-to-right run with no gap. */
+  html[dir="rtl"] .search-result-name, html[dir="rtl"] .search-result-native,
+  html[dir="rtl"] .search-result-type { unicode-bidi: isolate; }
+  /* A field that code emptied (the search ×, Clear route) keeps the
+     dir="auto" its text gave it (szAutoDir): its placeholder stays on the
+     right all the same. */
+  html[dir="rtl"] input[dir="auto"]:placeholder-shown { direction: rtl; unicode-bidi: isolate; }
+  html[dir="rtl"] #controls button { text-align: right; }
+  html[dir="rtl"] .wiki-item { border-left: none; border-right: 3px solid transparent; }
+  html[dir="rtl"] .wiki-item:hover { border-right-color: var(--accent); }
+  html[dir="rtl"] #wiki-panel-close { margin-left: 0; margin-right: 8px; }
+  html[dir="rtl"] #attr-dialog #about-notice {
+    border-left: none; padding-left: 0; border-right: 3px solid var(--accent); padding-right: 8px;
+  }
+  html[dir="rtl"] #attr-close { right: auto; left: 14px; }
+  html[dir="rtl"] #routing-panel.minimized #routing-expand-hint { margin-left: 0; margin-right: 8px; }
+  html[dir="rtl"] .routing-results { left: 0; right: 18px; }
+  /* The scale bar is "3000 ft" whatever the language. */
+  html[dir="rtl"] .maplibregl-ctrl-scale { direction: ltr; }
+  @media (max-height: 500px) {
+    html[dir="rtl"] #controls button + button { border-left: none; border-right: 1px solid var(--border); }
+    html[dir="rtl"] .sz-home-group button + button { border-left: none; border-right: 1px solid #ddd; }
+  }
+  @media (pointer: coarse) {
+    html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }
+    html[dir="rtl"] #wiki-panel-close { margin: -14px 0 -12px -12px; }
+    html[dir="rtl"] #search-clear { right: auto; left: 0; }
   }
 </style>
 </head>

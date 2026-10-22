@@ -45,7 +45,7 @@ from pathlib import Path
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from streetzim.languages import iso639_3  # noqa: E402
+from streetzim.languages import pack_iso639_3  # noqa: E402
 from tools.langpack.gatelib import md5_file  # noqa: E402
 from tools.langpack.merge_zim import peak_rss_mb  # noqa: E402
 
@@ -238,9 +238,9 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
     tmp = out + ".tmp"
     if os.path.exists(tmp):
         os.remove(tmp)
-    with Creator(Path(tmp)).config_indexing(True, iso639_3(lang)) as c:
+    with Creator(Path(tmp)).config_indexing(True, pack_iso639_3(lang)) as c:
         for k, v in (("Name", f"osm_{region}_search-{lang}"), ("Title", f"{region} search ({lang})"[:30]),
-                     ("Language", iso639_3(lang)),
+                     ("Language", pack_iso639_3(lang)),
                      ("Description", f"Search indexes for a StreetZim map of {region}"[:80]),
                      ("Creator", "OpenStreetMap, Wikipedia"), ("Publisher", "StreetZim"),
                      ("Date", datetime.date.today().isoformat())):

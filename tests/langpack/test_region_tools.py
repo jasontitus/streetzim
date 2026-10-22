@@ -276,7 +276,7 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
         return {}, {"qids": 2, "asked": 2, "requests": 1, "missing": 0 if done else 1, "complete": done}
     monkeypatch.setattr(wiki_pack, "wikidata_text", text)
     monkeypatch.setattr(prefetch.time, "sleep", lambda s: None)
-    monkeypatch.setattr(prefetch, "iso639_3", lambda lg: lg)
+    monkeypatch.setattr(prefetch, "pack_iso639_3", lambda lg: lg)
     rc = prefetch.main(["base.zim", "--langs", "de,el", "--cache", str(tmp_path), "--text-rounds", "3"])
     assert rc == 0 and calls["text"] == ["de", "el", "el"]
     assert ("de", "redirect") in calls["dump"]
@@ -307,7 +307,7 @@ def test_prefetch_asks_wikidata_once_for_every_pack_language(tmp_path: Path, mon
         asked.append(len(batch))
         return {q: {"labels": {c: {"value": f"{q}-{c}"} for c in codes}} for q in batch}
     monkeypatch.setattr(wiki_pack, "api_fetcher", lambda log: fetch)
-    monkeypatch.setattr(prefetch, "iso639_3", lambda lg: lg)
+    monkeypatch.setattr(prefetch, "pack_iso639_3", lambda lg: lg)
     assert prefetch.main(["base.zim", "--langs", "de,rm", "--cache", str(tmp_path), "--text-rounds", "1"]) == 0
     assert asked == [50, 50, 20], asked
     rm = [json.loads(x) for x in (tmp_path / "wikidata-text" / "rm.jsonl").read_text().splitlines()]

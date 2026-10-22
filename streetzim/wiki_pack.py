@@ -74,7 +74,7 @@ from cloud.wiki_articles import (
     article_url,
     clean_article_html,
 )
-from streetzim.languages import iso639_3, kiwix_zim_code, wiki_code, zim_matches
+from streetzim.languages import pack_iso639_3, kiwix_zim_code, wiki_code, zim_matches
 
 PREFIX = "~w/{lang}/"
 TITLE_MAX_UTF16 = 30        # docs/language-matrix.md: Title <= 30 UTF-16 units
@@ -1132,7 +1132,7 @@ def build_pack(base_path: str | os.PathLike[str], *, lang: str, source: str | os
         raise ValueError(f"region id {region!r}: lower-case letters, digits, - and _")
     t0 = time.time()
     lang = lang.strip().lower()
-    iso3 = iso639_3(lang)
+    iso3 = pack_iso639_3(lang)
     prefix = PREFIX.format(lang=lang)
     built = date or datetime.date.today().isoformat()
     src = SourceZim(source)
@@ -1352,8 +1352,8 @@ def check_pack(path: str | os.PathLike[str], lang: str,
         problems.append(f"Title {title!r}: {utf16_len(title)} UTF-16 units")
     if not desc or len(desc) > DESCRIPTION_MAX:
         problems.append(f"Description {desc!r}: {len(desc)} characters")
-    if meta("Language") != iso639_3(lang):
-        problems.append(f"Language {meta('Language')!r}, not {iso639_3(lang)}")
+    if meta("Language") != pack_iso639_3(lang):
+        problems.append(f"Language {meta('Language')!r}, not {pack_iso639_3(lang)}")
     if not re.fullmatch(r"osm_[a-z0-9_-]+_wiki-" + re.escape(lang), meta("Name")):
         problems.append(f"Name {meta('Name')!r}")
     for k in ("Date", "Creator", "Publisher"):
@@ -1474,7 +1474,7 @@ def main(argv: list[str] | None = None) -> int:
     from streetzim.paths import cache_root
     lang = args.lang.strip().lower()
     try:
-        iso639_3(lang)
+        pack_iso639_3(lang)
     except ValueError as e:
         print(f"build_wiki_pack: {e}", file=sys.stderr)
         return 2

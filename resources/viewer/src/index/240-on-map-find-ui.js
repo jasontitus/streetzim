@@ -782,7 +782,7 @@ function _nearbyRow(map, entry, isLast) {
     'display:flex; align-items:center; gap:10px; width:100%;'
     + 'padding:10px 12px; background:var(--szd-surface, #fff); cursor:pointer;'
     + 'border:none;' + (isLast ? '' : 'border-bottom:1px solid var(--szd-line, #f0f0f0);')
-    + 'text-align:left; font:inherit;'
+    + 'text-align:' + (SZ_UI_RTL ? 'right' : 'left') + '; font:inherit;'
   );
   row.addEventListener('mouseenter', function() {
     row.style.background = 'var(--szd-surface-hover, #f5f9ff)';

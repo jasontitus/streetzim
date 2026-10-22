@@ -34,7 +34,8 @@ function slice(src, from, to) {
   return src.slice(a, b);
 }
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
-  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM };')();
+  '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM,' +
+  ' _szRecordNames, _szLnNames, _szShownNames, _szVisitorLangs };')();
 // The viewer's normalizeText (300-search.js, initSearch): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -86,7 +87,7 @@ ok('other types score as before the admin block', () => {
   assert.strictEqual(score({ n: 'Rue du Lac', t: 'street' }, 'lac'), 11);
   assert.strictEqual(score({ n: 'Rue du Lac', t: 'street' }, 'du rue'), 22);
   assert.strictEqual(score({ n: 'Rue du Lac', t: 'street' }, 'of lac'), -1);
-  assert.deepStrictEqual(V._szSearchForms(SHOP, norm), ['arlington']);
+  assert.deepStrictEqual(Array.from(V._szSearchForms(SHOP, norm)), ['arlington']);
 });
 
 ok('the stream filter lets admin forms through', () => {
@@ -200,18 +201,23 @@ ok('selectResult measures the chrome with the results list closed, and the camer
     ? { getBoundingClientRect: () => ({ bottom: resultsEl.style.display === 'none' ? 110 : 415 }) } : null) };
   const map = fakeMap(390, 430);
   const fitCalls = [];
+  const pinned = [];
   const selectResult = new Function('lastSearchMatches', 'resultsEl', 'input', 'map', 'document',
     '_szAdminCamera', 'SZ_ADMIN_ZOOM', '_szFitAdminBox', '_szFlyToClear', 'placeSearchPin',
+    '_szShownNames', 'SZ_LANG2',
     body + '\nreturn selectResult;')(
     [{ item: ATLANTA }], resultsEl, input, map, doc, V._szAdminCamera, V.SZ_ADMIN_ZOOM,
     (m, b, top, z) => { fitCalls.push(top); V._szFitAdminBox(m, b, top, z); },
-    () => { throw new Error('an area must not take the point path'); }, () => {});
+    () => { throw new Error('an area must not take the point path'); },
+    (m, lat, lon, name) => pinned.push(name), V._szShownNames, '');
   const attrs = { 'data-idx': '0', 'data-lat': String(ATLANTA.a), 'data-lon': String(ATLANTA.o),
                   'data-type': 'admin', 'data-name': 'Atlanta' };
   selectResult({ getAttribute: (k) => attrs[k] });
   assert.deepStrictEqual(fitCalls, [110]);
   assert.strictEqual(resultsEl.style.display, 'none');
   assert.ok(input.blurred);
+  // The pin's popup and its Directions label take the name the row showed.
+  assert.deepStrictEqual(pinned, ['Atlanta']);
   assert.strictEqual(map.moved && map.moved.kind, 'fit');
   assert.strictEqual(map.moved.opts.padding.top, 130);
 });
@@ -258,7 +264,6 @@ ok('Find page and Kiwix pages agree on the fitted zoom', () => {
   assert.strictEqual(js, py);
 });
 
-console.log(`\n${pass} passed`);
 
 ok('an area wins over the place record at its point (same name and point)', () => {
   const place = { n: 'Monaco', t: 'place', s: 'country', a: 43.73235, o: 7.42768 };
@@ -313,3 +318,180 @@ ok('labels follow the build language', () => {
   assert.strictEqual(LBL.of({ name: '東京タワー', name_int: 'Tokyo Tower' }), '東京タワー');   // OpenFreeMap
   LBL.set('en');
 });
+
+// Search in the visitor's language: `ln` names (docs/search-records.md).
+const GENEVA = { n: 'Geneva', nn: 'Genève', t: 'place', s: 'city',
+                 ln: { de: 'Genf', fr: 'Genève', it: 'Ginevra', ru: 'Женева' } };
+const GENF_SHOP = { n: 'Genfer Uhren', t: 'poi', s: 'watches' };
+ok('a record answers to its names in other languages', () => {
+  assert.ok(score(GENEVA, 'Genf') >= 0 && score(GENEVA, 'ginevra') >= 0 && score(GENEVA, 'женева') >= 0);
+  assert.ok(V._szFormsContain(GENEVA, norm('Ginevra'), norm));
+  assert.ok(!V._szFormsContain({ n: 'Geneva', t: 'place' }, norm('Ginevra'), norm));
+  assert.ok(P.matchesName(GENEVA, 'Genf') && P.matchesName(GENEVA, 'Женева'));
+  assert.ok(!P.matchesName({ n: 'Geneva', t: 'place' }, 'Genf'));
+  // The city ranks above a shop whose name starts with the query.
+  assert.deepStrictEqual(rank([GENF_SHOP, GENEVA], 'Genf'), ['Geneva/place', 'Genfer Uhren/poi']);
+});
+ok('an admin area answers to its names in other languages', () => {
+  const CANTON = { n: 'Geneva', t: 'admin', s: 'canton', al: 4, ln: { de: 'Genf' } };
+  assert.ok(score(CANTON, 'Genf') >= 0 && score(CANTON, 'Kanton Genf') < 0);
+  assert.ok(score(CANTON, 'genf canton') >= 0);
+  assert.ok(P.matchesName(CANTON, 'genf'));
+});
+ok('the names in other languages, each once, in order', () => {
+  assert.deepStrictEqual(V._szLnNames(GENEVA), ['Genf', 'Genève', 'Ginevra', 'Женева']);
+  assert.deepStrictEqual(V._szRecordNames(GENEVA), ['Geneva', 'Genève', 'Genf', 'Ginevra', 'Женева']);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x', ln: 'Genf' }), []);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x', ln: { de: 3, fr: '', it: 'a', rm: 'a' } }), ['a']);
+  assert.deepStrictEqual(V._szLnNames({ n: 'x' }), []);
+});
+ok('a result shows the name in the map\'s second language', () => {
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'de'), ['Genf', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'fr'), ['Genève', 'Geneva']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, 'ja'), ['Geneva', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames(GENEVA, ''), ['Geneva', 'Genève']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'Zurich', ln: { de: 'Zürich' } }, 'de'), ['Zürich', 'Zurich']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'Zurich' }, 'de'), ['Zurich', '']);
+  // An inherited key is not a name.
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: {} }, 'constructor'), ['X', '']);
+  // "" stands for the record's own-script name (the writer does not repeat it).
+  const ATHENS = { n: 'Athens', nn: 'Αθήνα', ln: { el: '', de: 'Athen' } };
+  assert.deepStrictEqual(V._szShownNames(ATHENS, 'el'), ['Αθήνα', 'Athens']);
+  assert.deepStrictEqual(V._szShownNames(ATHENS, 'de'), ['Athen', 'Αθήνα']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: { el: '' } }, 'el'), ['X', '']);
+  assert.deepStrictEqual(V._szLnNames(ATHENS), ['Athen']);
+  assert.ok(score(Object.assign({ t: 'place' }, ATHENS), 'αθηνα') >= 0);
+});
+
+// A tapped label is looked up by its local name (szLabelOf: the record's
+// n, nn or nl), never by a name in another language (window.
+// __streetzimLookupPlace, 300-search.js).
+{
+  const a = HTML.indexOf('  window.__streetzimLookupPlace = function(name, lat, lon) {');
+  const b = HTML.indexOf('\n  };\n', a);
+  assert.ok(a > 0 && b > a);
+  const make = new Function('manifest', 'getPrefixes', 'streamFilterChunks', 'normalizeText',
+    '_haversineMetersStrip', 'window',
+    HTML.slice(a, b + 5) + '\nreturn window.__streetzimLookupPlace;');
+  const lookup = make({}, () => Object.assign(['ge'], { targeted: true }),
+    () => Promise.resolve([Object.assign({ a: 46.2, o: 6.15 }, GENEVA)]), norm, () => 10, {});
+  const byN = await lookup('Geneva', 46.2, 6.15);
+  const byNn = await lookup('Genève', 46.2, 6.15);
+  const byLn = await lookup('Ginevra', 46.2, 6.15);
+  ok('a label is looked up by its local name, not by ln', () => {
+    assert.strictEqual(byN && byN.n, 'Geneva');
+    assert.strictEqual(byNn && byNn.n, 'Geneva');
+    assert.strictEqual(byLn, null);
+  });
+}
+
+// A merged Romansh map: the UI falls back to German (runtime.js
+// SZ_UI_FALLBACK), while labels and search names stay Romansh (SZ_LANG2).
+ok('Romansh: German UI, Romansh search names', () => {
+  assert.strictEqual(SZ_UI_FALLBACK.rm, 'de');
+  const CHUR = { n: 'Chur', t: 'place', s: 'town', ln: { rm: 'Cuira', it: 'Coira' } };
+  assert.deepStrictEqual(V._szShownNames(CHUR, 'rm'), ['Cuira', 'Chur']);
+  assert.ok(score(CHUR, 'Cuira') >= 0 && score(CHUR, 'coira') >= 0);
+});
+
+// Ranking: a name in another language than the visitor's (ln) finds its
+// place but gets no exact-match bonus (_szTextScore's visitor languages).
+// The reviewer's cases from Switzerland's records.
+function scoreAs(item, query, visitor) {
+  const q = norm(query);
+  return V._szTextScore(item, q, q.split(/\s+/).filter((w) => w), norm, visitor);
+}
+const ILANZ = { n: 'Ilanz', t: 'place', s: 'town', ln: { rm: 'Glion', it: 'Ilanz' } };
+const GLION = { n: 'Glion', t: 'place', s: 'village' };
+const ALTSTADT = { n: 'Altstadt', t: 'place', s: 'suburb', ln: { fr: 'Vieille Ville' } };
+const VIEILLE = { n: 'Vieille Ville', t: 'place', s: 'neighbourhood' };
+const BERN = { n: 'Bern', t: 'place', s: 'city', ln: { fr: 'Berne', it: 'Berna' } };
+const BERNE_LOC = { n: 'Berne', t: 'place', s: 'locality' };
+const CHUR = { n: 'Chur', t: 'place', s: 'town', ln: { fr: 'Coire', rm: 'Cuira' } };
+const COIRE_LOC = { n: 'Coire', t: 'place', s: 'locality' };
+const MURTEN = { n: 'Murten', t: 'place', s: 'town', ln: { fr: 'Morat' } };
+const MORAT_LOC = { n: 'Morat', t: 'place', s: 'hamlet' };
+const top = (items, q, visitor) => items.map((it) => [scoreAs(it, q, visitor), it.n])
+  .sort((x, y) => y[0] - x[0])[0][1];
+ok('a name in a language the visitor does not read does not outrank a place of that name', () => {
+  assert.strictEqual(top([ILANZ, GLION], 'Glion', ['en']), 'Glion');
+  assert.strictEqual(top([ALTSTADT, VIEILLE], 'Vieille Ville', ['de']), 'Vieille Ville');
+  assert.strictEqual(top([CHUR, COIRE_LOC], 'Coire', ['en']), 'Coire');
+  // ... but a Romansh, French visitor gets the town; the big city wins anyway.
+  assert.strictEqual(top([ILANZ, GLION], 'Glion', ['rm']), 'Ilanz');
+  assert.strictEqual(top([ALTSTADT, VIEILLE], 'Vieille Ville', ['fr']), 'Altstadt');
+  assert.strictEqual(top([CHUR, COIRE_LOC], 'Coire', ['fr', 'en']), 'Chur');
+  assert.strictEqual(top([MURTEN, MORAT_LOC], 'Morat', ['fr']), 'Murten');
+  assert.strictEqual(top([BERN, BERNE_LOC], 'Berne', ['en']), 'Bern');
+  assert.strictEqual(top([GENEVA, GENF_SHOP], 'Genf', ['en']), 'Geneva');
+  // The record's own names keep the bonus whatever the visitor reads.
+  assert.ok(scoreAs(GLION, 'Glion', []) === scoreAs(GLION, 'Glion', ['rm']));
+  assert.strictEqual(scoreAs(ILANZ, 'Ilanz', ['en']), scoreAs(ILANZ, 'Ilanz', ['it']));
+});
+ok('the visitor reads the map\'s second language, the UI\'s, the one asked for and the device\'s', () => {
+  const VL = new Function('SZ_LANG2', 'SZ_UI_LANG', 'SZ_UI_ASKED', 'navigator',
+    slice(HTML, 'function _szVisitorLangs()', '\n// The normalized texts') + '\nreturn _szVisitorLangs();');
+  assert.deepStrictEqual(VL('rm', 'de', 'rm', undefined), ['rm', 'de']);
+  // The UI asked in Romansh, shown in German, on a map with no second language.
+  assert.deepStrictEqual(VL('', 'de', 'rm', undefined), ['de', 'rm']);
+  assert.deepStrictEqual(VL('', 'en', 'en', { languages: ['fr-CH', 'de', 'fr'] }), ['en', 'fr', 'de']);
+  assert.deepStrictEqual(VL('', 'en', 'en', { language: 'it-IT' }), ['en', 'it']);
+  assert.deepStrictEqual(VL(undefined, undefined, undefined, undefined), []);
+  // A French phone on an English map: "Coire" is Chur, "Morat" Murten.
+  const fr = VL('', 'en', 'en', { languages: ['fr-FR'] });
+  assert.strictEqual(top([CHUR, COIRE_LOC], 'Coire', fr), 'Chur');
+  assert.strictEqual(top([MURTEN, MORAT_LOC], 'Morat', fr), 'Murten');
+});
+ok('forms carry the language of a name that only ln gives', () => {
+  const f = V._szSearchForms({ n: 'Ilanz', t: 'place', ln: { rm: 'Glion', it: 'Ilanz', de: 'Glion' } }, norm);
+  assert.deepStrictEqual(Array.from(f), ['ilanz', 'glion']);
+  assert.deepStrictEqual(f.lang, [null, ['rm', 'de']]);
+  const a = V._szSearchForms({ n: 'Geneva', t: 'admin', s: 'canton', ln: { de: 'Genf' } }, norm);
+  assert.deepStrictEqual(Array.from(a), ['geneva', 'geneva canton', 'canton of geneva', 'genf', 'genf canton', 'canton of genf']);
+  assert.deepStrictEqual(a.lang, [null, null, null, ['de'], ['de'], ['de']]);
+  // Cached on the record, out of its JSON.
+  const r = { n: 'X', t: 'poi', ln: { de: 'Y' } };
+  assert.strictEqual(V._szSearchForms(r, norm), V._szSearchForms(r, norm));
+  assert.strictEqual(JSON.stringify(r), '{"n":"X","t":"poi","ln":{"de":"Y"}}');
+});
+
+// A merged German map (SZ_LANG2 de): the pin and its Directions label say
+// "Genf", as the result row did.
+ok('a pick on a merged map pins the name the row showed', () => {
+  const SEARCH = fs.readFileSync(`${REPO}/resources/viewer/src/index/300-search.js`, 'utf8');
+  const body = slice(SEARCH, '  function selectResult(el) {', '\n  // Input handler with debounce');
+  const pinned = [];
+  const rec = Object.assign({ a: 46.2, o: 6.15 }, GENEVA);
+  const doc = { getElementById: () => ({ getBoundingClientRect: () => ({ bottom: 110 }) }) };
+  const sel = (lang) => new Function('lastSearchMatches', 'resultsEl', 'input', 'map', 'document',
+    '_szAdminCamera', 'SZ_ADMIN_ZOOM', '_szFitAdminBox', '_szFlyToClear', 'placeSearchPin',
+    '_szShownNames', 'SZ_LANG2', body + '\nreturn selectResult;')(
+    [{ item: rec }], { style: {} }, { blur() {} }, fakeMap(390, 844), doc, V._szAdminCamera,
+    V.SZ_ADMIN_ZOOM, () => {}, () => {}, (m, lat, lon, name) => pinned.push(name), V._szShownNames, lang);
+  const attrs = { 'data-idx': '0', 'data-lat': '46.2', 'data-lon': '6.15', 'data-type': 'place',
+                  'data-name': 'Geneva' };
+  sel('de')({ getAttribute: (k) => attrs[k] });
+  sel('')({ getAttribute: (k) => attrs[k] });
+  assert.deepStrictEqual(pinned, ['Genf', 'Geneva']);
+});
+ok('shown names: never the same name twice, never a non-string', () => {
+  assert.deepStrictEqual(V._szShownNames({ n: 'Genève', ln: { fr: 'Genève' } }, 'fr'), ['Genève', '']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', ln: { de: 3 } }, 'de'), ['X', '']);
+  assert.deepStrictEqual(V._szShownNames({ n: 'X', nn: 'Y', ln: { de: ['Z'] } }, 'de'), ['X', 'Y']);
+});
+ok('the Find page matches part of a name in another language', () => {
+  assert.ok(P.matchesName(GENEVA, 'Ginev') && P.matchesName(GENEVA, 'nevr'));
+  assert.ok(!P.matchesName(GENEVA, 'Ginevrax'));
+});
+
+// A spelling several languages share keeps them all: Lucerne's "Lucerna"
+// (es, it, rm) is the city for an Italian or a Romansh visitor.
+ok('a name keeps every language that spells it so', () => {
+  const LUCERNE = { n: 'Lucerne', nn: 'Luzern', t: 'place', s: 'town', ln: { es: 'Lucerna', it: 'Lucerna', rm: 'Lucerna', fr: '' } };
+  const LUCERNA = { n: 'Lucerna', t: 'place', s: 'village' };
+  for (const l of ['es', 'it', 'rm']) assert.strictEqual(top([LUCERNE, LUCERNA], 'Lucerna', [l]), 'Lucerne', l);
+  assert.strictEqual(top([LUCERNE, LUCERNA], 'Lucerna', ['en']), 'Lucerna');
+  assert.deepStrictEqual(V._szLnNames(LUCERNE), ['Lucerna']);
+});
+
+console.log(`\n${pass} passed`);

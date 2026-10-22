@@ -53,13 +53,13 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~693 KB (2026-10-14: built without comments, below; nine UI tables are ~190 KB of it, [i18n.md](i18n.md)) | 1.5x |
-| places.html | 256 KB | ~227 KB (2026-10-14: + UI strings and the nine tables, ~100 KB) | 1.15x |
-| routing-worker.js | 128 KB | ~68 KB | 1.9x |
+| index.html | 1 MB | ~664 KB (2026-10-22: built without comments, below; 22 UI tables, stored compressed, are ~160 KB of it, [i18n.md](i18n.md)) | 1.5x |
+| places.html | 256 KB | ~216 KB (2026-10-22: + UI strings and the 22 compressed tables, ~85 KB) | 1.2x |
+| routing-worker.js | 128 KB | ~93 KB (93,383 B) | 1.4x |
 
-The UI tables have used up most of the headroom: the next one needs a smaller
-encoding of the tables or larger slots, which a published ZIM only gets from a
-full re-pack ([i18n.md](i18n.md#adding-a-language)).
+The UI tables had used up most of the headroom; since 2026-10-21 they are
+stored compressed, and 22 take less than nine did as plain JSON
+([i18n.md](i18n.md#adding-a-language)).
 
 Three guards keep a viewer from outgrowing its slots:
 

@@ -632,12 +632,12 @@ def test_pick_source_finds_kiwixs_bokmal_zim_for_no(tmp_path: Path) -> None:
 def test_region_languages_have_iso639_3_codes() -> None:
     """Every region language can label a pack (Language metadata): Romansh for
     Switzerland, Armenian, three-letter codes as they are."""
-    from streetzim.languages import iso639_3
-    assert (iso639_3("rm"), iso639_3("hy"), iso639_3("ceb"), iso639_3("no")) == ("roh", "hye", "ceb", "nor")
+    from streetzim.languages import pack_iso639_3
+    assert (pack_iso639_3("rm"), pack_iso639_3("hy"), pack_iso639_3("ceb"), pack_iso639_3("no")) == ("roh", "hye", "ceb", "nor")
     import csv
     rows = [r for r in csv.reader(open(Path(__file__).resolve().parent.parent / "cloud" / "region-languages.tsv"),
                                   delimiter="\t") if r and not r[0].startswith("#")]
     for _rid, langs in rows:
         for lg in langs.split(","):
-            assert len(iso639_3(lg)) == 3, lg
+            assert len(pack_iso639_3(lg)) == 3, lg
     assert dict(rows)["switzerland"] == "de,fr,it,rm"

@@ -173,3 +173,81 @@ def test_main_applies_the_languages(coz, monkeypatch):
     with pytest.raises(Stop):
         coz.main(["--tile-languages", "de,ar", "--region-languages", "el", "--bbox", "0,0,1,1"])
     assert seen["env"] == "ar,de"
+
+
+# ---- a region's own languages in its tiles (default_tile_languages) --------
+
+def test_every_row_gives_tile_languages():
+    """Every short row's own languages are codes a tile list accepts
+    (ISO639_3), so no region's ML tiles stop on its table row."""
+    for rid, text in _rows(TABLE):
+        langs = L.default_tile_languages(text.split(","))
+        assert set(L.MATRIX_TILE_LANGUAGES) <= set(langs), rid
+        assert "en" not in langs and langs == sorted(langs), rid
+
+
+def test_switzerland_carries_romansh():
+    rows = dict(_rows(TABLE))
+    for rid in ("switzerland", "switzerland-light", "switzerland-nosat", "switzerland-nosat-z13"):
+        assert rows[rid] == "de,fr,it,rm", rid
+        langs = L.default_tile_languages(rows[rid].split(","))
+        assert sorted(set(langs) - set(L.MATRIX_TILE_LANGUAGES)) == ["rm"], rid
+
+
+@pytest.mark.parametrize("rid, extra", [("baltics", ["et", "lt", "lv"]), ("greece", []),
+                                        ("balkans", ["bs", "cnr", "hr", "mk", "sl", "sq", "sr"]),
+                                        ("europe", []), ("africa", []),
+                                        ("indian-subcontinent", [])])
+def test_the_row_cap(rid, extra):
+    langs = L.default_tile_languages(dict(_rows(TABLE))[rid].split(","))
+    assert sorted(set(langs) - set(L.MATRIX_TILE_LANGUAGES)) == extra
+
+
+def test_default_tile_languages_rule():
+    M = list(L.MATRIX_TILE_LANGUAGES)
+    assert L.default_tile_languages(None) == sorted(M)
+    assert L.default_tile_languages(["de", "rm", "en"]) == sorted(M + ["rm"])
+    seven = ["rm", "sq", "mk", "bs", "lb", "fy", "sc"]
+    assert L.default_tile_languages(seven) == sorted(M + seven)
+    assert L.default_tile_languages(seven + ["az"]) == sorted(M)
+    with pytest.raises(ValueError):
+        L.default_tile_languages(["qqq"])
+
+
+# ---- a region language outside the matrix, end to end ----------------------
+
+def test_romansh_from_the_tiles_to_map_config_to_ln(coz, monkeypatch):
+    """--tile-languages with rm (Switzerland's tiles): accepted, asked of the
+    tile profile, recorded in map-config, and search records name places in
+    it (ln)."""
+    from streetzim import zim_writer as W
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    tiles = ",".join(L.default_tile_languages(["de", "fr", "it", "rm"]))
+    args = _args(coz, "--tile-languages", tiles, "--region-languages", "de,fr,it,rm")
+    assert "rm" in os.environ["STREETZIM_TILE_LANGUAGES"].split(",")
+    mc = _map_config(coz, args)
+    assert "rm" in mc["tileLanguages"] and mc["regionLanguages"] == ["de", "fr", "it", "rm"]
+    langs = W.search_ln_languages(mc)
+    assert "rm" in langs and "en" not in langs
+    chur = {"name": "Chur", "type": "place", "subtype": "town", "lat": 46.85, "lon": 9.53,
+            "names": {"rm": "Cuira", "it": "Coira"}}
+    assert W.search_record(chur, None, langs)["ln"] == {"it": "Coira", "rm": "Cuira"}
+
+
+def test_a_region_language_is_a_tile_language_but_not_a_build_language():
+    assert L.iso639_3("rm") == "roh" and L.check("rm") == "rm"   # Romansh: both
+    assert L.tile_languages("lb,de") == ["de", "lb"] and L.iso639_3("lb") == "ltz"
+    with pytest.raises(ValueError):
+        L.check("lb")
+    with pytest.raises(ValueError):
+        L.tile_languages("de,qqq")
+
+
+def test_romansh_is_a_build_language_luxembourgish_only_a_tile_language(coz):
+    assert _args(coz, "--language", "rm").language == "rm"
+    with pytest.raises(ValueError):
+        _args(coz, "--language", "lb")
+    # The packaged CLI's --language choices: the build languages.
+    from streetzim.cli import build_parser
+    choices = next(a.choices for a in build_parser()._actions if "--language" in a.option_strings)
+    assert "rm" in choices and "lb" not in choices
