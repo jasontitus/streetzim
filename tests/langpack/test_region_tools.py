@@ -161,7 +161,20 @@ def test_the_cap_fails_closed(tmp_path: Path) -> None:
         assert [d["lang"] for d in m["dropped"]] == ["rm"], m
     from tools.langpack.region_meta import registry_tier
     assert (registry_tier("switzerland"), registry_tier("europe"), registry_tier("balkans"),
-            registry_tier("switzerland-de"), registry_tier(None)) == ("country", "continent", "multi-country", None, None)
+            registry_tier("switzerland-de"), registry_tier(None)) == ("country", "continent", "multi-country", "country", None)
+
+
+def test_a_variant_takes_its_parents_tier(tmp_path: Path) -> None:
+    """Re-review: the German Swiss maps (switzerland-de*) are not in
+    cloud/regions.tsv; with the cap failing closed they lost Romansh. A
+    variant takes its parent region's tier: switzerland's, a country."""
+    from tools.langpack.region_meta import registry_tier
+    assert [registry_tier(x) for x in ("switzerland-de", "switzerland-de-ost", "europe-north-x", "nowhere-de")] == \
+        ["country", "country", "continent", None]
+    cfg = {"name": "Deutschschweiz", "hasWikiArticles": True, "regionLanguages": ["de", "fr", "it", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg)
+    m = _meta(b, _wiki(tmp_path, ["de", "fr", "it", "rm", "en"]), "en", None, "--region", "switzerland-de")
+    assert m["tier"] == "country" and m["region_langs"] == ["de", "fr", "it", "rm"] and not m["dropped"], m
 
 
 def test_region_meta_non_english_base_needs_english(tmp_path: Path) -> None:

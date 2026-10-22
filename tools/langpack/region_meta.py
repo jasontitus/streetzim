@@ -62,16 +62,24 @@ REGISTRY = os.path.join(ROOT, "cloud", "regions.tsv")
 
 def registry_tier(region: str | None, path: str = REGISTRY) -> str | None:
     """The region's tier in cloud/regions.tsv (continent, multi-country,
-    country, us-region, local), or None for a region not in it."""
+    country, us-region, local), or None for a region not in it. A variant
+    the registry does not list takes its parent's: the id without its last
+    "-part", then the next ("switzerland-de" and "switzerland-de-ost" are
+    switzerland's, a country)."""
     if not region:
         return None
+    tiers: dict[str, str] = {}
     try:
         for line in open(path, encoding="utf-8"):
             f = line.rstrip("\n").split("\t")
-            if not line.startswith("#") and len(f) > 3 and f[0] == region:
-                return f[3]
+            if not line.startswith("#") and len(f) > 3:
+                tiers.setdefault(f[0], f[3])
     except OSError:
         return None
+    parts = region.split("-")
+    for n in range(len(parts), 0, -1):
+        if "-".join(parts[:n]) in tiers:
+            return tiers["-".join(parts[:n])]
     return None
 
 
