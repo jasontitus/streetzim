@@ -297,7 +297,7 @@ def test_an_admin_relation_carries_its_names(tmp_path):
     [plain] = A.extract_admin_areas(path, geonames=False)
     assert "names" not in plain
     [named] = A.extract_admin_areas(path, geonames=False, languages=["de", "it", "ru"])
-    assert named["names"] == {"de": "Genf", "it": "Ginevra"}
+    assert named["lnames"] == {"de": "Genf", "it": "Ginevra"} and "names" not in named
     rec = W.search_record(named, None, ["de", "it"])
     assert rec["ln"] == {"de": "Genf", "it": "Ginevra"}
 
@@ -338,7 +338,7 @@ def test_appended_admin_areas_carry_their_names(tmp_path):
     jsonl = tmp_path / "search.jsonl"
     assert A.append_admin_areas(pbf, str(jsonl), languages=["de"]) == 1
     [area] = [json.loads(x) for x in jsonl.read_text(encoding="utf-8").splitlines()]
-    assert area["names"] == {"de": "Genf"}
+    assert area["lnames"] == {"de": "Genf"}
 
 
 class _Item:
@@ -586,16 +586,29 @@ def test_point_of_each_geometry():
 
 
 @pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
-def test_two_objects_with_one_key_keep_the_one_with_more_names(tmp_path):
+def test_one_key_goes_to_the_first_object_a_node_before_a_building(tmp_path):
     from streetzim.addresses import extract_name_tags_pbf
     body = (" <node id='1' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
             "<tag k='name:de' v='Ilanz'/></node>\n"
             " <node id='2' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
             "<tag k='name:de' v='Ilanz'/><tag k='name:it' v='Ilanz'/><tag k='name:ru' v='Иланц'/></node>\n"
-            " <node id='3' version='1' lat='46.7739' lon='9.2051'><tag k='name' v='Glion'/>"
-            "<tag k='name:fr' v='Ilanz'/></node>\n")
+            " <node id='3' version='1' lat='46.77389' lon='9.20509'/>\n"
+            " <node id='4' version='1' lat='46.77391' lon='9.20509'/>\n"
+            " <node id='5' version='1' lat='46.77391' lon='9.20511'/>\n"
+            " <way id='10' version='1'><nd ref='3'/><nd ref='4'/><nd ref='5'/><nd ref='3'/>"
+            "<tag k='building' v='yes'/><tag k='name' v='Glion'/><tag k='name:fr' v='Bâtiment'/></way>\n")
     refs = extract_name_tags_pbf(_osm(tmp_path, body), ["de", "fr", "it", "ru"], precut=True)
-    assert refs == {("glion",) + VCELL: {"names": {"de": "Ilanz", "it": "Ilanz", "ru": "Иланц"}}}
+    assert refs[("glion",) + VCELL] == {"names": {"de": "Ilanz"}}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_a_bus_stop_node_keeps_its_names(tmp_path):
+    """Roads are left out (ways tagged highway), a stop is a node."""
+    from streetzim.addresses import extract_name_tags_pbf
+    body = (" <node id='1' version='1' lat='46.7739' lon='9.2051'><tag k='highway' v='bus_stop'/>"
+            "<tag k='name' v='Glion, staziun'/><tag k='name:de' v='Ilanz, Bahnhof'/></node>\n")
+    refs = extract_name_tags_pbf(_osm(tmp_path, body), ["de"], precut=True)
+    assert refs == {("glion, staziun",) + VCELL: {"names": {"de": "Ilanz, Bahnhof"}}}
 
 
 def test_a_record_whose_names_fold_to_two_objects_gets_none(tmp_path):
@@ -618,3 +631,120 @@ def test_the_wrapper_takes_another_search_cache():
                                      env=env, capture_output=True, text=True).stdout
     assert run({"PATH": "/usr/bin:/bin"}) == "/storage/streetzim/world-data/regions/switzerland.search.jsonl"
     assert run({"PATH": "/usr/bin:/bin", "STREETZIM_SEARCH_CACHE": "/x/ml.search.jsonl"}) == "/x/ml.search.jsonl"
+
+
+# --- the review of 3ac3688..72274ae -----------------------------------------
+
+def test_an_admin_areas_names_do_not_rename_it_in_another_language():
+    """Admin names are `lnames`, which localize_feature (a build in another
+    language) leaves alone: Moscow Oblast keeps its name and gets no
+    English "native" name; its record still carries ln."""
+    from streetzim.search_extract import localize_feature
+    area = {"name": "Moscow Oblast", "type": "admin", "subtype": "oblast", "lat": 55.5, "lon": 37.5,
+            "admin_level": 4, "osm": "r51490", "lnames": {"ru": "Московская область", "de": "Oblast Moskau"}}
+    out = localize_feature(dict(area), "ru")
+    assert out.get("display_name", "Moscow Oblast") == "Moscow Oblast"
+    assert out.get("display_native") in (None, "Moscow Oblast")
+    assert W.search_record(area, None, ["de", "ru"])["ln"] == {"de": "Oblast Moskau", "ru": "Московская область"}
+
+
+def test_in_another_languages_build_ln_leaves_out_the_name_shown():
+    """A de build shows Geneva as "Genf" (display_name): ln de, equal to
+    what the record shows, is left out; the raw name does not count."""
+    feat = dict(geneva(), display_name="Genf", display_native="Genève", display_latin="Geneva")
+    assert W.localized_names(feat, GENEVA_REF, ["de", "it"]) == {"it": "Ginevra"}
+
+
+def test_the_types_switch_reaches_the_streaming_pass(tmp_path, monkeypatch):
+    monkeypatch.setenv("STREETZIM_SEARCH_LN_TYPES", "place")
+    poi = {"name": "Musée d'ethnographie", "type": "poi", "subtype": "museum", "lat": GLAT, "lon": GLON,
+           "names": {"de": "Ethnographisches Museum"}}
+    _bucket(tmp_path, [geneva() | {"names": {"de": "Genf"}}, poi], {}, ["de"])
+    assert [r.get("ln") for r in _chunk(tmp_path, "ge")] == [{"de": "Genf"}]
+    assert all("ln" not in r for r in _chunk(tmp_path, "mu"))
+
+
+def test_an_empty_types_switch_means_none(monkeypatch):
+    monkeypatch.setenv("STREETZIM_SEARCH_LN_TYPES", "")
+    assert W._ln_types() == frozenset()
+    assert W.localized_names(geneva(), GENEVA_REF, ["de"], W._ln_types()) == {}
+
+
+def test_a_name_of_exactly_the_limit_is_kept():
+    ok = "x" * W.LN_MAX_CHARS
+    assert W.localized_names(geneva(), {"names": {"de": ok, "it": ok + "y"}}, ["de", "it"]) == {"de": ok}
+
+
+def test_an_admin_record_takes_no_names_from_the_lookup(tmp_path):
+    area = {"name": "Geneva", "type": "admin", "subtype": "canton", "lat": GLAT, "lon": GLON,
+            "admin_level": 4, "osm": "r1702419", "lnames": {"de": "Genf"}}
+    lookup = {("geneva",) + GCELL: {"names": {"de": "Genf (Ort)", "it": "Ginevra"}}}
+    _search_bucket_with(tmp_path, [area], {}, ["de", "it"], lookup)
+    [a] = _chunk(tmp_path, "ge")
+    assert a["ln"] == {"de": "Genf"}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_wiki_objects_tied_on_tags_keep_the_first(tmp_path):
+    from streetzim.addresses import extract_wiki_tags_pbf
+    body = (f" <node id='1' version='1' lat='{GLAT}' lon='{GLON}'><tag k='name' v='Genève'/>"
+            "<tag k='wikidata' v='Q71'/></node>\n"
+            f" <node id='2' version='1' lat='{GLAT}' lon='{GLON}'><tag k='name' v='Genève'/>"
+            "<tag k='wikidata' v='Q11917'/><tag k='name:de' v='Kanton Genf'/></node>\n")
+    refs = extract_wiki_tags_pbf(_osm(tmp_path, body), precut=True, languages=["de"])
+    [v] = refs.values()
+    # The first stays, and the other item's names are not its.
+    assert v == {"wikidata": "Q71"}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_the_winner_keeps_its_own_names_and_never_another_items(tmp_path):
+    from streetzim.addresses import extract_wiki_tags_pbf
+    body = (f" <node id='1' version='1' lat='{GLAT}' lon='{GLON}'><tag k='name' v='Genève'/>"
+            "<tag k='wikidata' v='Q71'/><tag k='name:de' v='Genf (Knoten)'/></node>\n"
+            f" <node id='2' version='1' lat='{GLAT - 0.00001}' lon='{GLON - 0.00001}'/>\n"
+            f" <node id='3' version='1' lat='{GLAT + 0.00001}' lon='{GLON + 0.00001}'/>\n"
+            f" <node id='4' version='1' lat='{GLAT}' lon='{GLON}'><tag k='name' v='Genève'/>"
+            "<tag k='wikidata' v='Q999'/><tag k='name:it' v='Altro'/></node>\n"
+            " <way id='10' version='1'><nd ref='2'/><nd ref='1'/><nd ref='3'/>"
+            "<tag k='name' v='Genève'/><tag k='wikipedia' v='fr:Genève'/><tag k='wikidata' v='Q71'/>"
+            "<tag k='name:de' v='Genf'/></way>\n")
+    refs = extract_wiki_tags_pbf(_osm(tmp_path, body), precut=True, languages=["de", "it"])
+    [v] = refs.values()
+    # The way (both tags) wins with its own names, not the node's.
+    assert v == {"wikipedia": "fr:Genève", "wikidata": "Q71", "names": {"de": "Genf"}}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_names_of_another_item_are_never_adopted(tmp_path):
+    from streetzim.addresses import extract_wiki_tags_pbf
+    body = (f" <node id='1' version='1' lat='{GLAT}' lon='{GLON}'><tag k='name' v='Genève'/>"
+            "<tag k='wikidata' v='Q11917'/><tag k='name:de' v='Kanton Genf'/></node>\n"
+            f" <node id='2' version='1' lat='{GLAT - 0.00001}' lon='{GLON - 0.00001}'/>\n"
+            f" <node id='3' version='1' lat='{GLAT + 0.00001}' lon='{GLON + 0.00001}'/>\n"
+            " <way id='10' version='1'><nd ref='2'/><nd ref='1'/><nd ref='3'/>"
+            "<tag k='name' v='Genève'/><tag k='wikipedia' v='fr:Genève'/><tag k='wikidata' v='Q71'/></way>\n")
+    refs = extract_wiki_tags_pbf(_osm(tmp_path, body), precut=True, languages=["de"])
+    [v] = refs.values()
+    assert v == {"wikipedia": "fr:Genève", "wikidata": "Q71"}
+    # ... while a loser of the same item gives them (L1 only narrows).
+    body2 = body.replace("Q11917", "Q71")
+    (tmp_path / "t.osm").unlink()
+    [v2] = extract_wiki_tags_pbf(_osm(tmp_path, body2), precut=True, languages=["de"]).values()
+    assert v2["names"] == {"de": "Kanton Genf"}
+
+
+@pytest.mark.skipif(not shutil.which("osmium"), reason="osmium CLI not on PATH")
+def test_boundary_relations_stay_out_of_the_names_lookup(tmp_path):
+    """Roads and boundary relations are dropped before the export (their
+    geometries were most of it); admin areas carry their own names."""
+    pytest.importorskip("osmium")
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_admin_areas import Osm, square
+    from streetzim.addresses import extract_name_tags_pbf
+    o = Osm()
+    o.way(1, square(9.0, 46.6, 9.4, 46.9))
+    o.rel(1, [("w", 1, "outer")], {"name": "Surselva", "admin_level": "6", "name:de": "Surselva (Bezirk)"})
+    o.node(9.2051, 46.7739, {"name": "Glion", "place": "town", "name:de": "Ilanz"}, nid=50)
+    refs = extract_name_tags_pbf(o.write(tmp_path / "b.osm"), ["de"], precut=True)
+    assert [k[0] for k in refs] == ["glion"]

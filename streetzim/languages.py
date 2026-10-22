@@ -34,7 +34,9 @@ ISO639_3 = {
 # Other regions' own languages that a short-row map's tiles and search
 # records carry (default_tile_languages): codes --tile-languages accepts and
 # ZIM metadata can name (iso639_3), but no --language build is made in them
-# (check, the CLI's --language choices: ISO639_3 only).
+# (check, the CLI's --language choices and offliner-definition.json:
+# ISO639_3 only). The contract: check() = ISO639_3; iso639_3() and
+# tile_languages() = ISO639_3 | REGION_ISO639_3 (docs/language-ready.md).
 REGION_ISO639_3 = {
     "sq": "sqi", "mk": "mkd", "bs": "bos", "cnr": "cnr", "lb": "ltz",
     "fy": "fry", "sc": "srd", "az": "aze", "ku": "kur", "glk": "glk",

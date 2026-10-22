@@ -987,8 +987,10 @@ await ok('names with several values: search rows and the Find page show the firs
   assert.match(search, /var shown = _szShownNames\(m, SZ_LANG2\);/);
   assert.match(search, /function _szPlacePopupDOM\(lat, lon, name, enrich\) \{\s*enrich = enrich \|\| \{\};\s*name = szFirstName\(name\);/);
   const pickers = fs.readFileSync(`${PARTS_DIR}/550-routing-pickers.js`, 'utf8');
-  assert.match(pickers, /var label = szFirstName\(m\.item\.n\);/);
-  assert.match(pickers, /nameSpan\.textContent = szFirstName\(m\.item\.n\);/);
+  // The routing fields show the row's name (_szShownNames: its name in the
+  // map's second language when it has one), cut at a ";".
+  assert.match(pickers, /var label = szFirstName\(_szShownNames\(m\.item, SZ_LANG2\)\[0\]\);/);
+  assert.match(pickers, /nameSpan\.textContent = szFirstName\(_szShownNames\(m\.item, SZ_LANG2\)\[0\]\);/);
   const sheet = fs.readFileSync(`${PARTS_DIR}/210-place-detail-sheet.js`, 'utf8');
   assert.match(sheet, /setDest\(r\.a, r\.o, szFirstName\(r\.n\) \|\| ''\)/);
   const places = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');

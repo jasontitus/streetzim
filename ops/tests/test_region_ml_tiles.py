@@ -1315,3 +1315,12 @@ def test_an_unknown_code_in_a_short_row_stops_before_docker(host):
     with pytest.raises(SystemExit):
         _load().make("hispaniola", "hispaniola", BOX)
     assert _calls(host) == []
+
+
+def test_an_unreadable_region_table_stops_before_docker(host, monkeypatch):
+    """A table that cannot be read stops the step (never silently the
+    matrix alone, which would drop a region's own languages)."""
+    monkeypatch.setenv("STREETZIM_REGION_LANGUAGES", str(host / "no-such-table.tsv"))
+    with pytest.raises(SystemExit):
+        _load().make("hispaniola", "hispaniola", BOX)
+    assert _calls(host) == []

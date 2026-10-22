@@ -1043,7 +1043,8 @@ def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
     out (search records of streets carry no `ln`). The search records'
     `ln` takes these after the feature's own and its wiki cross-ref's
     (zim_writer.localized_names, feature_wiki with names_link). Two
-    objects with one key: the one with more names."""
+    objects with one key: the first in osmium's export order (nodes, ways,
+    areas)."""
     print("  Extracting names in other languages from OSM data...")
     if not languages:
         return {}
@@ -1064,8 +1065,15 @@ def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
         names_pbf = os.path.join(tmp, "names.osm.pbf")
         subprocess.run(["osmium", "tags-filter", source_pbf, *keys,
                         "-o", names_pbf, "--overwrite"], check=True)
+        # Roads and boundary relations out before the export: their
+        # geometries are most of it (the Balkans' 860 MB) and no search
+        # record takes their names (admin areas carry their own). A bus
+        # stop is a node (highway=bus_stop) and stays.
+        kept_pbf = os.path.join(tmp, "names-kept.osm.pbf")
+        subprocess.run(["osmium", "tags-filter", "-i", names_pbf, "w/highway", "r/boundary",
+                        "-o", kept_pbf, "--overwrite"], check=True)
         names_geojson = os.path.join(tmp, "names.geojsonseq")
-        subprocess.run(["osmium", "export", names_pbf, "-f", "geojsonseq",
+        subprocess.run(["osmium", "export", kept_pbf, "-f", "geojsonseq",
                         "-o", names_geojson, "--overwrite"], check=True)
         lookup = {}
         with open(names_geojson, encoding="utf-8") as fin:
@@ -1090,8 +1098,11 @@ def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
                 if pt is None:
                     continue
                 key = (name.lower(), int(round(pt[0] * 1e4)), int(round(pt[1] * 1e4)))
-                existing = lookup.get(key)
-                if existing is None or len(names) > len(existing["names"]):
+                # One key, two objects: the first in the export's order,
+                # nodes before ways before areas, so the node a place, peak,
+                # stop or POI is in OSM (what its tile feature sits on) over
+                # a building or an area of its name.
+                if key not in lookup:
                     lookup[key] = OsmRef(osm_kind(props, feat["geometry"].get("type")), names=names)
         print(f"    Indexed {len(lookup)} objects with names in other languages")
         return lookup
@@ -1102,6 +1113,14 @@ def extract_name_tags_pbf(pbf_path, languages, bbox=None, precut=False):
 def _wiki_tag_count(entry):
     """How many of the two wiki tags a cross-ref entry has."""
     return ("wikipedia" in entry) + ("wikidata" in entry)
+
+
+def _same_item(a, b):
+    """Whether two cross-ref entries link the same item: the same Q-ID,
+    else (neither has one) the same Wikipedia title."""
+    if a.get("wikidata") or b.get("wikidata"):
+        return a.get("wikidata") == b.get("wikidata")
+    return a.get("wikipedia") == b.get("wikipedia")
 
 
 def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False, languages=None):
@@ -1201,15 +1220,18 @@ def extract_wiki_tags_pbf(pbf_path, bbox=None, precut=False, languages=None):
                 # the same name but only one has both tags). Only the two
                 # wiki tags count, so `languages` never changes which object
                 # wins; its names, else the other object's, go with it.
+                # Names go to the other object only when both link the same
+                # item (_same_item): a tunnel's names never name the road.
                 existing = lookup.get(key)
                 if existing is None or len(entry) > _wiki_tag_count(existing):
                     if names:
                         entry["names"] = names
-                    elif existing is not None and existing.get("names"):
+                    elif (existing is not None and existing.get("names")
+                          and _same_item(existing, entry)):
                         entry["names"] = existing["names"]
                     lookup[key] = entry
                     count += 1
-                elif names and not existing.get("names"):
+                elif names and not existing.get("names") and _same_item(existing, entry):
                     existing["names"] = names
                 if count % 50000 == 0 and count:
                     print(f"\r    Indexed {count} wiki cross-refs...", end="", flush=True)

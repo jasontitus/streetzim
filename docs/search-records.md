@@ -133,13 +133,25 @@ Latin name already).
   from the names lookup: every OSM object with a `name:<lang>` in the
   languages, roads left out (`extract_name_tags_pbf`), matched the same
   way by name and ~11 m cell, where objects agree when they carry the
-  same names (`names_link`). That reaches villages, hamlets, peaks,
+  same names (`names_link`); one key goes to the first object in osmium's
+  export order (nodes, ways, areas), and roads and boundary relations are
+  dropped before the export. That reaches villages, hamlets, peaks,
   streams, stations and POIs with no wiki tag (Switzerland: +5,509
   records, Ilanz → Glion). `STREETZIM_SEARCH_LN_NAMES=0` leaves the lookup
   out.
 - **Which records:** `place`, `admin`, `airport`, `peak`, `park`, `water`
-  and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides);
-  not streets or addresses.
+  and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides,
+  an empty value meaning none); not streets or addresses. An admin area's
+  names travel as `lnames` (not `names`, which a build in another language
+  shows as the record's name); a salvage build (`--skip-address-extract`)
+  keeps the admin rows, and so the `lnames`, of the build whose search
+  cache it reuses. Admin records never take names from the names lookup.
+- **Ranking (viewer):** a name in another language than the visitor's
+  (the map's second language `SZ_LANG2` and the UI's) finds its place but
+  gets no exact-match bonus: "Glion" is the village Glion before Ilanz
+  (Romansh Glion), while "Genf" still finds Geneva and a French visitor's
+  "Coire" Chur. The pin, its popup and the routing fields show the name
+  the result row showed.
 - **Which names:** in the order of the languages; a name equal to `n`
   is left out (the viewer shows `n` then); one equal to `nn` is written as
   `""`, which stands for `nn`, so a French visitor sees "Genève" and a Greek
@@ -181,6 +193,14 @@ Latin name already).
   2,333 from wiki objects alone. It costs a full extraction (Switzerland
   2,911 s, mostly assigning location context), so it suits a single
   country; `build-region-fast.sh` takes it as `STREETZIM_SEARCH_CACHE`.
+  Its features are the region tiles', not the world tiles': Switzerland's
+  had 7.8% more POIs (a station's bays and stop positions, each a POI of
+  the same name: "Luzern Bahnhof" 22 times) until extraction merged
+  same-name stops and water features within 100 m
+  (`search_extract.merge_near_duplicates`; `STREETZIM_NEAR_DUP=0` leaves
+  them): bus stops 82,846 -> 54,203 (the world-tile cache: 53,039), lakes
+  8,141 -> 7,948, "Luzern Bahnhof" 6; no place, peak or park is touched,
+  and no name is lost but a spelling that differs only in case.
 - **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)

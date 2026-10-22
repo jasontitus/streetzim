@@ -326,7 +326,7 @@ def _ln_types():
 def localized_names(feat, wiki, languages, types=None, named=None):
     """`ln` of a search record: {lang: name} for ``languages``, from the
     feature's own name:<lang> (``names``: tiles extracted with those
-    languages, an admin area's relation), else its wiki cross-ref's (the OSM
+    languages; ``lnames``: an admin area's relation), else its wiki cross-ref's (the OSM
     object feature_wiki matched, extract_wiki_tags_pbf(languages=)), else
     ``named``'s (its names lookup entry, extract_name_tags_pbf), in the
     order of ``languages``. A name the record already shows as ``n`` is left
@@ -336,7 +336,9 @@ def localized_names(feat, wiki, languages, types=None, named=None):
     for ``types`` (default LN_TYPES)."""
     if not languages or feat.get("type") not in (types if types is not None else LN_TYPES):
         return {}
-    own = feat.get("names") or {}
+    # An admin area's are `lnames` (admin_areas: not `names`, which a
+    # build in another language would show as the area's name).
+    own = feat.get("names") or feat.get("lnames") or {}
     ref = (wiki or {}).get("names") or {}
     more = (named or {}).get("names") or {}
     if not own and not ref and not more:
