@@ -249,10 +249,17 @@ and never reads them from the base. So:
 - the merged UUID follows the inputs' MD5s (`derive_uuid`), so a new viewer
   is a new book for Kiwix;
 - a patched base keeps its recipes' `fingerprint` (everything but the slots
-  and the UUID/checksum they change), and `run_gates.sh` with `RESUME=1`
-  gives such an entry a **light gate**: recipe = merge, verify and the
-  browser checks again, zimcheck, route, kiwix-serve and Kiwix search carried
-  from the last passing verdict (`evidence.light_gate`). `ship_packs.sh` on a
+  and the UUID/checksum they change: the base's masked chunk hashes, the
+  packs' chunk hashes, the metadata, map-config, the merger version and a
+  hash of every byte the merger generates, `generated_sha256`), and
+  `run_gates.sh` with `RESUME=1` gives such an entry a **light gate** when
+  the last passing verdict has that fingerprint and checked another base
+  MD5 (a base really patched): recipe = merge, verify, zimcheck (its link
+  checks read the viewer's HTML; 28 s on Greece) and the browser checks
+  again, route, kiwix-serve and Kiwix search carried from that verdict
+  (`evidence.light_gate`; compose_verdicts.py checks both conditions again).
+  A merger change, a pack or a base byte outside the slots changed: the
+  full gate. `ship_packs.sh` on a
   patched base therefore rebuilds no pack, sends nothing, and only
   regenerates, light-gates and re-seals the recipes; until it has, the
   live-MD5 rule keeps the region off `/build/`.
@@ -273,9 +280,10 @@ fails, an entry over the per-entry budget: more than `LANGPACK_ENTRY_BUDGET`
 **Continent maps get no language entries in v1.** A search pack indexes
 every page of the base, so it grows with the map: Greece 56 MB, Italy
 ~175 MB, Iberia ~238 MB, Europe ~2.76 GB of indexes alone. A continent's
-entries are over the 2 GiB budget and `make_site.py` refuses them (listed
-in `refused.json`); maps up to about 5 GB come first, continents after a
-measured design. Indexing the base's pages by title only is no way out: on
+entries are over the 2 GiB budget, so `ship_packs.sh` refuses a continent
+(and any base over `SHIP_MAX_BASE_GB`, 8) in its first step, before any
+download or build (exit 4); maps up to about 5 GB come first, continents
+after a measured design. Indexing the base's pages by title only is no way out: on
 Greece it saves 14% (the base's share of a search pack 36.8 → 28.7 MB;
 most of it is the title index of its 64,457 pages, which the base's own
 suggestions need).
@@ -290,7 +298,8 @@ ZIM in `WIKI_SRC`. A language without one is skipped and logged; a region
 language without one is left out of the region's languages, since every
 menu entry would need its pack. A continent or multi-country map (its tier
 in `cloud/regions.tsv`; any tier but country, local and us-region, and a
-region the registry does not list) keeps its `REGION_PACKS_MAX` (3) most spoken
+region the registry does not list; a variant it does not list takes its
+parent's tier: `switzerland-de` is switzerland's) keeps its `REGION_PACKS_MAX` (3) most spoken
 languages with a Wikipedia ZIM, the base's own not counted
 (`cloud/region-languages.tsv` lists them by speakers: Europe 38, Africa
 31), so its entries stay within a browser's memory; the others stay on the
@@ -355,8 +364,13 @@ it on archive.org) logs each step in PDT to
 
 Exits: 0 ready to publish; 6 listing pending; 2 another run holds the
 region's lock or a pack build lock; 3 `SHIP_SKIP_UPLOAD=1` stopped after the
-gates (nothing published); 1 anything else. Light and ultralight maps are
-refused (no Wikipedia in them).
+gates (nothing published); 4 a map v1 gives no packs: a continent
+(`cloud/regions.tsv`) or a base over `SHIP_MAX_BASE_GB` (8), refused in step
+1 before any download, pack build or gate; 5 nothing publishable: every
+entry with a Wikipedia pack that passed its gates is over the per-entry
+budget (each refusal logged as `REFUSED <lang>: ...` before anything is
+sent; the previous site files stay); 1 anything else. Light and ultralight
+maps are refused (no Wikipedia in them).
 
 `publish_site.sh REGION` refuses a folder that is not exactly the sealed
 one, puts it at `web/build/recipes/<REGION>/` with one atomic exchange and
