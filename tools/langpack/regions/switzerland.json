@@ -1,0 +1,32 @@
+{
+ "base_lang": "en",
+ "city": {
+  "qid": "Q72",
+  "lon": 8.54104,
+  "lat": 47.37445,
+  "zoom": 9
+ },
+ "search": {
+  "native": {
+   "q": "Zürich",
+   "expect": "Zürich"
+  },
+  "english": {
+   "q": "Zurich",
+   "expect": "Zürich"
+  },
+  "map_lang": {
+   "de": {"q": "Zürich", "expect": "Zürich"},
+   "fr": {"q": "Zurich", "expect": "Zürich"},
+   "it": {"q": "Zurigo", "expect": "Zürich"},
+   "rm": {"q": "Turitg", "expect": "Zürich"},
+   "ar": {"q": "زيورخ", "expect": "Zürich"},
+   "ja": {"q": "チューリッヒ", "expect": "Zürich"}
+  }
+ },
+ "route": {
+  "src": "47.3779,8.5403",
+  "dst": "47.4115,8.5441"
+ },
+ "named_qids": "Q72,Q70"
+}
