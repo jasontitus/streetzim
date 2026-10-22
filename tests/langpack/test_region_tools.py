@@ -189,6 +189,29 @@ def test_region_meta_titles_from_the_wikidata_cache(tmp_path: Path) -> None:
     assert m["titles"] == {"de": "Testlandia", "ja": "OSM - Testland", "en": "OSM - Testland"}
 
 
+def test_the_region_is_found_by_another_name_or_its_id(tmp_path: Path) -> None:
+    """Switzerland: the map is "Switzerland and the Alps", the country record
+    "Schweiz/Suisse/Svizzera/Svizra" (also called Switzerland): found through
+    the region id, so every entry's title is the country's name in its
+    language (the dry run titled all 23 "OSM - Switzerland and the Alps")."""
+    cache = tmp_path / "cache"
+    (cache / "wikidata-text").mkdir(parents=True)
+    for lg, label in (("de", "Schweiz"), ("rm", "Svizra"), ("ja", "スイス")):
+        (cache / "wikidata-text" / f"{lg}.jsonl").write_text(json.dumps(["Q39", label, ""]) + "\n")
+    admin = [{"n": "Liechtenstein", "s": "country", "q": "Q347", "alt": ["Principality of Liechtenstein"]},
+             {"n": "Schweiz/Suisse/Svizzera/Svizra", "s": "country", "q": "Q39", "alt": ["Switzerland", "Swiss Confederation"]}]
+    cfg = {"name": "Switzerland and the Alps", "hasWikiArticles": True, "regionLanguages": ["de", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg, admin)
+    w = _wiki(tmp_path, ["de", "rm", "ja", "en"])
+    m = _meta(b, w, "de,ja,en", cache, "--region", "switzerland")
+    assert m["region_qid"] == "Q39", m
+    assert (m["titles"]["de"], m["titles"]["rm"], m["titles"]["ja"]) == ("Schweiz", "Svizra", "スイス"), m["titles"]
+    # an alt name equal to the map's name counts too; no region id, no other match: none
+    cfg2 = dict(cfg, name="Swiss Confederation")
+    assert _meta(_base(tmp_path / "b2.zim", PLACES, GEO, cfg2, admin), w, "de", cache)["region_qid"] == "Q39"
+    assert _meta(b, w, "de", cache)["region_qid"] is None
+
+
 def _region_dir(root: Path, rid: str, title: str, menu: bool = True) -> None:
     d = root / rid
     d.mkdir(parents=True)
@@ -234,7 +257,7 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(wiki_pack, "load_titles", lambda lg, q, c, **k: {"Q1": "T"})
     monkeypatch.setattr(wiki_pack, "api_fetcher", lambda log: "fetcher")
 
-    def text(qids, lg, c, fetch=None, log=None):
+    def text(qids, lg, c, fetch=None, langs=(), log=None):
         calls["text"].append(lg)
         done = lg == "de" or calls["text"].count(lg) >= 2       # el completes on its second round
         return {}, {"qids": 2, "asked": 2, "requests": 1, "missing": 0 if done else 1, "complete": done}
@@ -247,9 +270,35 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
     # a language whose dumps fail: exit 1 (its text complete)
     assert prefetch.main(["base.zim", "--langs", "zz", "--cache", str(tmp_path), "--text-rounds", "1"]) == 1
     # text that never completes: exit 1 (its dumps fine)
-    monkeypatch.setattr(wiki_pack, "wikidata_text", lambda q, lg, c, fetch=None, log=None:
+    monkeypatch.setattr(wiki_pack, "wikidata_text", lambda q, lg, c, fetch=None, langs=(), log=None:
                         ({}, {"qids": 2, "asked": 2, "requests": 1, "missing": 1, "complete": False}))
     assert prefetch.main(["base.zim", "--langs", "de", "--cache", str(tmp_path), "--text-rounds", "2"]) == 1
+
+
+def test_prefetch_asks_wikidata_once_for_every_pack_language(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A region language outside the default label languages (Romansh) is
+    in the first pass: 120 Q-IDs are 3 requests, not 3 more on rm's turn
+    (Switzerland asked Wikidata twice for 67,954 Q-IDs, ~22 min each)."""
+    from streetzim import wiki_pack
+    from tools.langpack import prefetch
+
+    class B:
+        uuid, qids = "u", [f"Q{i}" for i in range(1, 121)]
+    monkeypatch.setattr(wiki_pack, "read_base", lambda *a, **k: B())
+    monkeypatch.setattr(wiki_pack, "build_title_map", lambda lg, c, **k: None)
+    monkeypatch.setattr(wiki_pack, "fetch_dump", lambda lg, table, c, **k: None)
+    monkeypatch.setattr(wiki_pack, "load_titles", lambda lg, q, c, **k: {})
+    asked: list[int] = []
+
+    def fetch(batch, codes):
+        asked.append(len(batch))
+        return {q: {"labels": {c: {"value": f"{q}-{c}"} for c in codes}} for q in batch}
+    monkeypatch.setattr(wiki_pack, "api_fetcher", lambda log: fetch)
+    monkeypatch.setattr(prefetch, "iso639_3", lambda lg: lg)
+    assert prefetch.main(["base.zim", "--langs", "de,rm", "--cache", str(tmp_path), "--text-rounds", "1"]) == 0
+    assert asked == [50, 50, 20], asked
+    rm = [json.loads(x) for x in (tmp_path / "wikidata-text" / "rm.jsonl").read_text().splitlines()]
+    assert len(rm) == 120 and rm[0][1] == "Q1-rm", rm[:2]
 
 
 def test_prefetch_refuses_an_unknown_language(tmp_path: Path) -> None:

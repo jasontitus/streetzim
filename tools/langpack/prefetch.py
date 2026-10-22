@@ -60,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     log = wiki_pack.log_stderr
     base = wiki_pack.read_base(a.base, cache, log)
     qids = base.qids
+    # every pack language's labels in one pass: the default list lacks a
+    # region language such as rm, whose turn then asked Wikidata again for
+    # every Q-ID (Switzerland: 1,360 more requests, ~22 min)
+    text_langs = list(dict.fromkeys([*wiki_pack.TEXT_LANGS, *langs]))
     ok = True
     for lg in langs:
         t0 = time.time()
@@ -73,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             ok = False
         complete = False
         for r in range(max(1, a.text_rounds)):
-            _, st = wiki_pack.wikidata_text(qids, lg, cache, fetch=wiki_pack.api_fetcher(log), log=log)
+            _, st = wiki_pack.wikidata_text(qids, lg, cache, fetch=wiki_pack.api_fetcher(log), langs=text_langs, log=log)
             complete = bool(st["complete"]) and not st["missing"]
             row["text"] = {k: st.get(k) for k in ("qids", "asked", "requests", "missing", "complete")}
             if complete:
