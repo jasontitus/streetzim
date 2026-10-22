@@ -563,6 +563,38 @@ def test_verify_entry_checks_the_subrequest_bound(tmp_path, monkeypatch):
     assert any("subrequests" in f for f in fails), fails
 
 
+def test_creation_date_is_the_newest_source_mtime_and_reruns_write_the_same_bytes(tmp_path, monkeypatch):
+    """A re-ship on the same published files rewrites no torrent byte: the
+    creation date is the newest archive.org mtime of the sources (none
+    without ETags), never the clock."""
+    import time
+    s = synth(tmp_path)
+    tp = s["site"] / "de.torrent"
+    clock = iter(range(1_900_000_000, 1_900_000_100, 7))
+    monkeypatch.setattr(time, "time", lambda: next(clock))
+    run(s)
+    plain = tp.read_bytes()
+    assert b"creation date" not in plain
+    run(s)
+    assert tp.read_bytes() == plain
+    etags = {("streetzim-testland", s["base"].name): '"%x-%x"' % (1792287864, s["base"].stat().st_size),
+             ("streetzim-testland-lang", s["pack"].name): '"%x-%x"' % (1792300000, s["pack"].stat().st_size)}
+    res = run(s, etags=etags)
+    dated = tp.read_bytes()
+    assert lt.bdecode(dated)[b"creation date"] == 1792300000       # the pack, the newer of the two
+    run(s, etags=etags)
+    assert tp.read_bytes() == dated
+    assert lt.bdecode(plain)[b"info"] == lt.bdecode(dated)[b"info"]
+    only_base = {k: v for k, v in etags.items() if k[0] == "streetzim-testland"}
+    run(s, etags=only_base | {("streetzim-testland-lang", s["pack"].name): 'W/"7fffffff-1"'})
+    assert lt.bdecode(tp.read_bytes())[b"creation date"] == 1792287864
+    region = s["region"] | {"menu": [{"lang": "de", "recipe": "recipes/testland/de.json",
+                                      "torrent": "recipes/testland/de.torrent", "infohash": res["infohash"]}]}
+    run(s, etags=etags)
+    assert lt.verify_entry(str(s["site"]), region, region["menu"][0], s["recipe"], str(s["base"]), s["packs"],
+                           etags=etags) == []
+
+
 def test_etags_from_the_metadata_cache(tmp_path):
     s = synth(tmp_path)
     ia = tmp_path / "ia"

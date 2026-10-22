@@ -301,7 +301,10 @@ the file the page builds (so a visitor who built it can seed it; same
 infohash), with the piece length `ops/cloud/build_torrent.py` picks for that
 size, the trackers in `LANG_TRACKERS` (archive.org's two, which count peers
 of any infohash, and open UDP trackers that answered; DHT works too) and one
-BEP 19 webseed, `URL/merged/<region>/<L>/<recipe uuid>/<file>.zim`. That URL
+BEP 19 webseed, `URL/merged/<region>/<L>/<recipe uuid>/<file>.zim`. Its
+creation date is the newest archive.org mtime among its sources (left out
+when `--ia-cache` has none), so a rerun on the same published files writes
+the same torrent bytes. That URL
 is the build worker (`build-proxy/`, Cloudflare Workers), which serves the
 language version virtually: no merged file is stored anywhere, and nothing
 is served from the build host.

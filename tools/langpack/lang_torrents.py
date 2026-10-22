@@ -15,7 +15,10 @@ region.json, index.json). For every menu entry it writes, next to the recipe:
                 can seed it). Piece length as ops/cloud/build_torrent.py
                 chooses for that size; trackers LANG_TRACKERS (and DHT); the
                 BEP 19 webseed (url-list) is
-                URL/merged/<region>/<L>/<recipe uuid>/<file_name>.zim
+                URL/merged/<region>/<L>/<recipe uuid>/<file_name>.zim;
+                its creation date is the newest archive.org mtime of its
+                sources (none without --ia-cache), so a rerun on the same
+                published files writes the same bytes
   <L>.ws.json   the worker's segment index (streetzim-webseed/1, a few KB):
                 the merged file as parts, each either a byte range of one
                 archive.org file (the base, a pack, the search pack; with its
@@ -86,6 +89,7 @@ INDEX_FORMAT = "streetzim-webseed/1"
 REMOTE_MIN = 256 << 10       # shorter base/pack segments are served from blobs (the ladder's first step)
 BLOB_MAX = 4 << 20           # a blob is fetched whole by the worker and kept in memory
 BLOB_RE = re.compile(r"^ws-[0-9a-f]{32}\.bin$")
+ETAG_RE = re.compile(r'^"([0-9a-f]+)-[0-9a-f]+"$')    # archive.org: "<mtime hex>-<size hex>"
 ITEM_RE = re.compile(r"^streetzim-[a-z0-9-]+$")
 FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.zim$")
 REGION_RE = re.compile(r"^[a-z0-9-]+$")
@@ -484,6 +488,15 @@ def verified_base_pieces(path: str, base_path: str, base_file: str, base_size: i
     return _VERIFIED[key]
 
 
+def creation_date(index: dict) -> int | None:
+    """The newest archive.org mtime among the index's sources (from their
+    ETags): the same published files give the same torrent bytes on a rerun
+    (a re-ship rewrites nothing unchanged). None when no source has one."""
+    ts = [int(m.group(1), 16) for x in index["sources"].values()
+          if (m := ETAG_RE.match(x.get("etag") or ""))]
+    return max(ts) if ts else None
+
+
 def make_torrent(index: dict, pieces: bytes, plen: int) -> tuple[bytes, str]:
     info = {"name": index["file"], "piece length": plen, "pieces": pieces, "length": index["size"]}
     torrent = {
@@ -491,12 +504,14 @@ def make_torrent(index: dict, pieces: bytes, plen: int) -> tuple[bytes, str]:
         "announce-list": [[t] for t in LANG_TRACKERS],
         "comment": f"streetzim — {index['file']} ({index['region']}, {index['lang']})",
         "created by": "streetzim/lang_torrents.py",
-        "creation date": int(time.time()),
         "info": info,
         # BEP 19: the build worker serves this file virtually from the base
         # and packs on archive.org, so it downloads with no peer online.
         "url-list": [index["webseed"]],
     }
+    when = creation_date(index)
+    if when is not None:
+        torrent["creation date"] = when
     return bencode(torrent), hashlib.sha1(bencode(info)).hexdigest()
 
 
