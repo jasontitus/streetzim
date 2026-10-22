@@ -413,7 +413,8 @@
       resultsEl.style.display = 'none';
       var lat = m.item.a;
       var lon = m.item.o;
-      var label = szFirstName(m.item.n);
+      // The name the row shows (in the map's second language, _szShownNames).
+      var label = szFirstName(_szShownNames(m.item, SZ_LANG2)[0]);
       if (target === 'origin') setOriginFromLatLon(lat, lon, label);
       else setDestFromLatLon(lat, lon, label);
       inputEl.blur();
@@ -434,7 +435,7 @@
 
           var nameSpan = document.createElement('div');
           nameSpan.className = 'routing-result-name';
-          nameSpan.textContent = szFirstName(m.item.n);
+          nameSpan.textContent = szFirstName(_szShownNames(m.item, SZ_LANG2)[0]);
           textCol.appendChild(nameSpan);
 
           // Secondary line: location (e.g. "Sacramento, California") + type,

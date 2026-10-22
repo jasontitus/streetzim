@@ -4,7 +4,8 @@
 The world tiles (world-data/world-tiles-v3.mbtiles) carry English and each
 place's own name only (name:latin, name_int). A language-ready build needs
 name:xx for the matrix languages too (streetzim.languages
-MATRIX_TILE_LANGUAGES, or $STREETZIM_TILE_LANGUAGES), so this cuts them from
+MATRIX_TILE_LANGUAGES, plus a short-row region's own languages,
+default_tile_languages; or $STREETZIM_TILE_LANGUAGES), so this cuts them from
 the region's own extract with tilemaker:
 
 - from an image CI published for main (ghcr.io/jasontitus/streetzim:sha-<12
@@ -188,13 +189,37 @@ def parse_bbox(bbox):
     return w, s, e, n
 
 
-def languages():
-    from streetzim import languages as L
-    text = os.environ.get("STREETZIM_TILE_LANGUAGES") or ",".join(L.MATRIX_TILE_LANGUAGES)
+def region_row(rid):
+    """The region's own languages, from cloud/region-languages.tsv in this
+    checkout ($STREETZIM_REGION_LANGUAGES names another table: tests);
+    None when it has no row."""
+    table = os.environ.get("STREETZIM_REGION_LANGUAGES") or os.path.join(
+        CODE, "cloud", "region-languages.tsv")
     try:
-        return L.tile_languages(text)
+        with open(table, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#") or "\t" not in line:
+                    continue
+                k, v = line.rstrip("\n").split("\t", 1)
+                if k == rid:
+                    return [x for x in v.split(",") if x]
+    except OSError as e:
+        fail(f"cannot read {table}: {e}")
+    return None
+
+
+def languages(rid=None):
+    """$STREETZIM_TILE_LANGUAGES, else the matrix plus, for a region whose
+    row lists few languages, its own (streetzim.languages
+    .default_tile_languages: Switzerland adds Romansh)."""
+    from streetzim import languages as L
+    text = os.environ.get("STREETZIM_TILE_LANGUAGES")
+    try:
+        if text:
+            return L.tile_languages(text)
+        return L.default_tile_languages(region_row(rid) if rid else None)
     except ValueError as e:
-        fail(f"STREETZIM_TILE_LANGUAGES: {e}")
+        fail(f"tile languages{' of ' + rid if rid and not text else ''}: {e}")
 
 
 def timeout_for(pbf):
@@ -758,7 +783,8 @@ def check_tiles(path, langs, bbox):
 def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
     parse_bbox(bbox)
     io_class()
-    langs = languages()
+    # The extract's region decides them (a Light variant has its parent's).
+    langs = languages(src_id)
     profile = checkout_inputs()
     out_dir = os.path.abspath(out_dir or os.environ.get("STREETZIM_ML_OUT_DIR")
                               or os.path.join(ROOT, "world-data", "regions"))

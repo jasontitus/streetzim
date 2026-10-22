@@ -68,6 +68,7 @@
 // BEGIN sz-i18n-runtime
 // resources/viewer/i18n/runtime.js (comments there); docs/i18n.md
 var SZ_UI_LANG = 'en';      // the language the UI is shown in
+var SZ_UI_ASKED = 'en';     // the language asked for (map-config, ?uilang=) before any fallback
 var SZ_I18N = null;         // its table, or null for English
 var SZ_I18N_PSEUDO = false; // ?uilang=qps: every string as [text], to find misses
 var SZ_UI_RTL = false;      // the UI language is written right to left
@@ -223,6 +224,7 @@ function szSetUiLanguage(lang, search) {
   var m = /[?&]uilang=([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)?)/.exec(String(search || ''));
   if (m) lang = m[1];
   var base = String(lang || 'en').toLowerCase().split('-')[0];
+  SZ_UI_ASKED = base;
   SZ_I18N_PSEUDO = base === 'qps';
   SZ_I18N = null;
   if (base !== 'en' && !SZ_I18N_PSEUDO) {
@@ -2133,6 +2135,9 @@ function matchesName(rec, q) {
   // The name in its own script (cloud/search_shards.record_names).
   if (typeof rec.nn === 'string' && rec.nn && foldText(rec.nn).includes(ql)) return true;
   if (typeof rec.nl === 'string' && rec.nl && foldText(rec.nl).includes(ql)) return true;
+  // Its names in other languages (`ln`: "Genf" for Geneva).
+  if (rec.ln && typeof rec.ln === 'object'
+      && Object.values(rec.ln).some((v) => typeof v === 'string' && v && foldText(v).includes(ql))) return true;
   // An administrative area (t: 'admin') also answers to its other names
   // and to "<name> <type>" / "<type> of <name>" ("City of Alexandria"),
   // as in the map's search box (index.html, admin-search).

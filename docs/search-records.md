@@ -26,6 +26,7 @@ Optional keys (absent when empty):
 |---|---|
 | `nn` | OSM's own `name` when `n` is another (usually English) name: `"北京大学"` beside `n` `"Peking University"`. From the tiles' `name` (OpenFreeMap) or `name_int` (StreetZim's tilemaker, written when OSM's `name` differs from `name:latin`); the first of a `;` list; left out when it has under 2 characters, equals `n` once folded, or one contains the other |
 | `nl` | a build in another language (`--language`): the English / Latin name when it differs from `n` and `nn` (`n` is then OSM's `name:<language>`, else the place's own name) |
+| `ln` | names in other languages, `{lang: name}`, on a language-ready map (map-config `tileLanguages`): `{"de": "Genf", "it": "Ginevra", "ru": "Женева"}` for Geneva. [Below](#names-in-other-languages-ln) |
 | `w` | Wikipedia title from the OSM `wikipedia` tag, for example `en:Lincoln_Memorial` |
 | `wsrc` | `"wd"` when `w` was backfilled from the Wikidata Q-ID instead |
 | `q` | Wikidata Q-ID |
@@ -44,9 +45,18 @@ first piece that has one); else whose `name` is its own-script name
 (`nn`), where every piece of a merged street that has such an object
 must link the same article; else, likewise, an object whose name equals
 either once folded (accents off; the first of a `;` list), as for `n`
-"Poznan" and OSM's `name` "Poznań" (`feature_wiki` in
-`streetzim/zim_writer.py`). An administrative area's are its relation's
-own (below). Records written by `_add_search_in_memory` (small builds and
+"Poznan" and OSM's `name` "Poznań"; else, by those names, an object of
+the record's own sort (a place for a place, a peak, water, a road or
+rail line for a street, a railway station for a station, nothing for
+a bus stop, an information board or an address,
+anything else but stops, stations and boards for the rest) in one of
+the 8 grid cells around its point, when every such object found there
+and in the 16 cells beyond links the same article (`feature_wiki` in
+`streetzim/zim_writer.py`). A tile's point is within a metre of the OSM
+node, but on either side of a cell edge: Zurich's record is in the cell
+north of its node's. In the record's own cell the sort is not asked, as
+before the cells around were. An administrative area's are its relation's own
+(below). Records written by `_add_search_in_memory` (small builds and
 tests) get no `w`/`q` except an administrative area's.
 
 Readers must ignore keys they don't know.
@@ -96,7 +106,8 @@ Wikipedia cross-references key on it. The map labels follow the same rule
 
 Every name of a record is indexed and matched the same way
 (`record_names` in `cloud/search_shards.py`, `_szRecordNames` in the
-viewer): `n`, the native-script `nn`, `nl`, and an admin area's `alt`. Kiwix
+viewer): `n`, the native-script `nn`, `nl`, an admin area's `alt`, and
+the names in other languages `ln`. Kiwix
 pages are titled with both names ("Haidian · 海淀区"); libzim's title
 index matches CJK text by n-gram, so Kiwix also finds them by any part
 ("淀区"). The map viewer matches by word prefix: "北京" finds 北京大学,
@@ -105,6 +116,111 @@ index matches CJK text by n-gram, so Kiwix also finds them by any part
 Extraction writes `<features>.schema` (`{"search_schema": 2}`) beside its
 output. A `--search-cache` without it predates `nn`, and the build warns
 that native-script names will be missing.
+
+## Names in other languages (`ln`)
+
+On a language-ready map ([language-ready.md](language-ready.md)), a
+German visitor types "Genf" and finds Geneva, an Italian "Ginevra", a
+Romansh "Cuira" (Chur). The record carries the place's names in the map's
+search languages: its tile languages, then its region languages
+(map-config `tileLanguages`, `regionLanguages`;
+`streetzim.languages.search_languages`), never `en` (`n` is the English /
+Latin name already).
+
+- **Source:** OSM's `name:<lang>` as the tile profile writes it (the first
+  of a `;` list; for `zh`, `name:zh-Hans` when there is one;
+  `streetzim.languages.osm_names`), from the feature's own `names`
+  (search features extracted with `STREETZIM_TILE_LANGUAGES`; an admin
+  area's relation), else from the OSM object its wiki cross-ref matched
+  (`extract_wiki_tags_pbf(languages=…)`, same match as `w`/`q` above), else
+  from the names lookup: every OSM object with a `name:<lang>` in the
+  languages, roads left out (`extract_name_tags_pbf`), matched the same
+  way by name and ~11 m cell, where objects agree when they carry the
+  same names (`names_link`); one key goes to the first object in osmium's
+  export order (nodes, ways, areas), and roads and boundary relations are
+  dropped before the export. That reaches villages, hamlets, peaks,
+  streams, stations and POIs with no wiki tag (Switzerland: +5,509
+  records, Ilanz → Glion). `STREETZIM_SEARCH_LN_NAMES=0` leaves the lookup
+  out.
+- **Which records:** `place`, `admin`, `airport`, `peak`, `park`, `water`
+  and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides,
+  an empty value meaning none); not streets or addresses. An admin area's
+  names travel as `lnames` (not `names`, which a build in another language
+  shows as the record's name); a salvage build (`--skip-address-extract`)
+  keeps the admin rows, and so the `lnames`, of the build whose search
+  cache it reuses. Admin records never take names from the names lookup.
+- **Ranking (viewer):** a name only in other languages than the
+  visitor's finds its place but gets no exact-match bonus: "Glion" is the
+  village Glion before Ilanz (Romansh Glion), while "Genf" still finds
+  Geneva and a French visitor's "Coire" Chur. The visitor reads the map's
+  second language (`SZ_LANG2`), the UI's, the one the UI was asked in
+  before any fallback (`SZ_UI_ASKED`: rm, shown in German) and the
+  device's (`navigator.languages`); a spelling several languages share
+  keeps them all (Lucerne's "Lucerna": es, it, rm). For ranking only:
+  display follows `SZ_LANG2`, the UI map-config. The pin, its popup and
+  the routing fields show the name the result row showed.
+- **Near-duplicates:** the search pass merges same-name stops (bus,
+  railway, aerialway, ferry terminal) and water features within 100 m
+  (`zim_writer.near_duplicate_plan`, a pre-pass), after the Wikipedia and
+  names matching (`feature_wiki_tier`: own cell, neighbouring cell,
+  ambiguous, none): it keeps one member per article the members link
+  (members linking different articles never merge), the one matched in
+  its own cell before one from next door, one with names before one
+  without, then the one nearest the cluster's mean; a member whose match
+  was ambiguous links nothing and so vetoes nothing; one member per other
+  set of names in other languages no kept member has, unless it is the
+  only one and the kept members lack names, which then take it. Dropped
+  members are skipped before the geo-index and the counts. Extraction
+  leaves them. `STREETZIM_NEAR_DUP=0` turns it off. On Switzerland's
+  production cache it merges 47,048 records and loses no article, Q-ID or
+  name in another language.
+- **Which names:** in the order of the languages; a name equal to `n`
+  is left out (the viewer shows `n` then); one equal to `nn` is written as
+  `""`, which stands for `nn`, so a French visitor sees "Genève" and a Greek
+  one "Αθήνα" without the record repeating it (Greece: 7,984 `el`
+  entries). At most 100 characters.
+- **Languages:** the tile languages, plus the region languages when the
+  map's `regionLanguages` row is short (at most `REGION_TILE_ROW_MAX`, 7,
+  the tiles' rule); a continent's 38 add none.
+- **Index:** under every name, like `nn` (more prefix keys per record).
+- **Viewer:** matched by any of them; a result on a map shown in a
+  second language (`SZ_LANG2`, a merged language-pack ZIM) shows `ln[lang]`
+  first (`""`: `nn`), beside `nn` (or `n` when that is the same): "Genf ·
+  Genève". The Find page matches them too.
+- **Off:** `STREETZIM_SEARCH_LN=0`, or any map that is not language-ready
+  (no `tileLanguages`): no `ln`, byte for byte as before.
+- **Caps:** `STREETZIM_SEARCH_LN_TYPES` (record types) and
+  `STREETZIM_SEARCH_LN_LANGUAGES` (keeps only these languages; read by both
+  the extraction and the writer) for a map near its search budget.
+- **Size**, measured on the regions' real inputs (box, not outline):
+
+  | | records | with `ln` | chunk bytes | tier-c chunks | place category | new 2-char keys |
+  |---|---|---|---|---|---|---|
+  | Switzerland (22 languages, with admin) | 2.3 M | 3,086 | +0.4% | +2.4% | +0.9% | +294 |
+  | Switzerland, with the names lookup (≈, two runs combined) | 2.3 M | 8,595 | ≈+0.8% | ≈+3.1% | | ≈+356 |
+  | Greece (21) | 1.07 M | 10,343 | +1.5% | +9.2% | +9.8% | +227 |
+  | Poland (21) | 2.95 M | 26,268 | +1.7% | +9.0% | +4.9% | +289 |
+
+  The new keys are mostly the first letters of CJK, Hangul and kana names
+  (manifest ~18 B each: +4-5 KB per country), which a continent's places
+  share; Europe's manifest (4.03 MB of `validate_zim.py`'s 4 MiB) is
+  estimated at +30-50 KB. Cross-ref names cost 23-233 B per cross-ref in
+  memory (Poland 14 MB); the extraction time is unchanged.
+- **A search cache from the region's own multilingual tiles** (search
+  features extracted with `STREETZIM_TILE_LANGUAGES` set to the tiles'
+  `.langs`: every feature carries its own `names`) reaches about twice as
+  many records again, lines and polygons included: Switzerland 14,889
+  non-admin records with `ln` (rivers and streams 4,548, villages 1,260,
+  peaks 765; Romansh on 671), against 7,842 with the names lookup and
+  2,333 from wiki objects alone. It costs a full extraction (Switzerland
+  2,911 s, mostly assigning location context), so it suits a single
+  country; `build-region-fast.sh` takes it as `STREETZIM_SEARCH_CACHE`.
+  Its features are the region tiles', not the world tiles': Switzerland's
+  had 7.8% more POIs (a station's bays and stop positions, each a POI of
+  the same name: "Luzern Bahnhof" 22 times), which the search pass's
+  near-duplicate merge (above) brings back to the world-tile cache's
+  (bus stops 82,846 -> about 54,000; world tiles 53,039).
+- **Kiwix pages** (titles, Xapian) do not carry `ln` yet.
 
 ## Administrative areas (`t: "admin"`)
 

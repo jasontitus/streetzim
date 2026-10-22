@@ -46,10 +46,38 @@ var SZ_TYPE_BONUS = { admin: 25, place: 20, airport: 15, peak: 10, park: 10, wat
 var SZ_PLACE_SUB_BONUS = { city: 200, county: 80, region: 60, town: 30,
                            suburb: 10, village: 8, neighbourhood: 4 };
 
+// A record's names in other languages (`ln`, {lang: name}: "Genf",
+// "Ginevra" for Geneva) as [name, [langs]] pairs, each name once with every
+// language that spells it so (Lucerne: "Lucerna" es, it, rm), in the
+// record's order. "" stands for `nn` and adds no name of its own.
+function _szLnPairs(rec) {
+  var out = [], seen = [];
+  var ln = rec && rec.ln;
+  if (!ln || typeof ln !== 'object') return out;
+  for (var k in ln) {
+    if (!Object.prototype.hasOwnProperty.call(ln, k) || typeof ln[k] !== 'string' || !ln[k]) continue;
+    var at = seen.indexOf(ln[k]);
+    if (at < 0) { seen.push(ln[k]); out.push([ln[k], [k]]); }
+    else out[at][1].push(k);
+  }
+  return out;
+}
+function _szLnNames(rec) {
+  var p = _szLnPairs(rec), out = [];
+  for (var i = 0; i < p.length; i++) out.push(p[i][0]);
+  return out;
+}
+
 // A record's names (cloud/search_shards.record_names): its name, its name
-// in its own script `nn` ("北京大学" beside "Peking University"), and an
-// admin area's other names.
+// in its own script `nn` ("北京大学" beside "Peking University"), an
+// admin area's other names, and its names in other languages `ln`.
 function _szRecordNames(rec) {
+  var names = _szOwnNames(rec);
+  var ln = _szLnNames(rec);
+  for (var i = 0; i < ln.length; i++) if (names.indexOf(ln[i]) < 0) names.push(ln[i]);
+  return names;
+}
+function _szOwnNames(rec) {
   var names = [rec.n];
   if (typeof rec.nn === 'string' && rec.nn) names.push(rec.nn);
   // A build in another language: the English / Latin name too.
@@ -57,24 +85,84 @@ function _szRecordNames(rec) {
   return Array.isArray(rec.alt) ? names.concat(rec.alt) : names;
 }
 
-// The normalized texts a record answers to: its names; for an admin area
-// also "<name> <type>" and "<type> of <name>".
-function _szSearchForms(rec, norm) {
-  if (rec.t !== 'admin') {
-    var plain = [norm(String(rec.n || ''))];
-    if (typeof rec.nn === 'string' && rec.nn) plain.push(norm(rec.nn));
-    if (typeof rec.nl === 'string' && rec.nl) plain.push(norm(rec.nl));
-    return plain;
+// The name a result shows first, and the one beside it: in a map shown in
+// another language `lang` (SZ_LANG2), the record's name in it when it has
+// one ("Genf"; "" stands for its own-script name `nn`), beside its
+// own-script name ("Genève"), or its name when that is the same
+// ("Genève · Geneva" in French); otherwise its name and own-script name,
+// as always. The pin, its popup and the routing fields show the first.
+function _szShownNames(rec, lang) {
+  var mine = lang && rec && rec.ln && typeof rec.ln === 'object'
+    && Object.prototype.hasOwnProperty.call(rec.ln, lang) && typeof rec.ln[lang] === 'string'
+    ? (rec.ln[lang] || (typeof rec.nn === 'string' ? rec.nn : '')) : '';
+  if (mine) {
+    var nat = (typeof rec.nn === 'string' && rec.nn) ? rec.nn : '';
+    var other = nat && nat !== mine ? nat : String(rec.n || '');
+    return [mine, other !== mine ? other : ''];
   }
-  var names = _szRecordNames(rec);
-  var label = rec.s ? norm(String(rec.s)) : '';
+  return [String(rec.n || ''), (typeof rec.nn === 'string' && rec.nn) ? rec.nn : ''];
+}
+
+// The languages a visitor reads here, for ranking only: the map's second
+// language (SZ_LANG2, a merged language-pack map), the UI's (SZ_UI_LANG),
+// the one the UI was asked in before any fallback (SZ_UI_ASKED: rm, shown
+// in German), and the device's (navigator.languages, base codes: a French
+// phone on an English map). A name in another language (`ln`) still finds
+// its place, but does not count as typing the place's own name
+// (_szTextScore). Display stays SZ_LANG2's, the UI map-config's.
+function _szVisitorLangs() {
   var out = [];
-  for (var i = 0; i < names.length; i++) {
-    var h = norm(String(names[i] || ''));
-    if (!h) continue;
-    out.push(h);
-    if (label) { out.push(h + ' ' + label); out.push(label + ' of ' + h); }
+  function add(l) {
+    if (typeof l !== 'string' || !l) return;
+    l = l.toLowerCase().split('-')[0];
+    if (l && out.indexOf(l) < 0) out.push(l);
   }
+  if (typeof SZ_LANG2 === 'string') add(SZ_LANG2);
+  if (typeof SZ_UI_LANG === 'string') add(SZ_UI_LANG);
+  if (typeof SZ_UI_ASKED === 'string') add(SZ_UI_ASKED);
+  try {
+    var nav = typeof navigator !== 'undefined' ? navigator : null;
+    var list = nav && nav.languages && nav.languages.length ? nav.languages : (nav && nav.language ? [nav.language] : []);
+    for (var i = 0; i < list.length; i++) add(list[i]);
+  } catch (e) {}
+  return out;
+}
+
+// The normalized texts a record answers to: its names; for an admin area
+// also "<name> <type>" and "<type> of <name>". The list's `lang` gives
+// each form's languages when it comes from `ln` only (null for the
+// record's own names). Kept on the record (not enumerable): a search
+// re-scores the cached chunks' records at every keystroke.
+function _szSearchForms(rec, norm) {
+  var c = rec.__szf;
+  if (c && c.norm === norm) return c.forms;
+  var out = [], langs = [];
+  var label = rec.t === 'admin' && rec.s ? norm(String(rec.s)) : '';
+  function add(name, lang) {
+    var h = norm(String(name || ''));
+    if (!h) return;
+    if (lang && out.indexOf(h) >= 0) return;   // also an own name: that one counts
+    out.push(h); langs.push(lang);
+    if (label) {
+      out.push(h + ' ' + label); langs.push(lang);
+      out.push(label + ' of ' + h); langs.push(lang);
+    }
+  }
+  if (rec.t !== 'admin') {
+    add(rec.n, null);
+    if (typeof rec.nn === 'string' && rec.nn) add(rec.nn, null);
+    if (typeof rec.nl === 'string' && rec.nl) add(rec.nl, null);
+  } else {
+    var own = _szOwnNames(rec);
+    for (var i = 0; i < own.length; i++) add(own[i], null);
+  }
+  var lnp = _szLnPairs(rec);
+  for (var j = 0; j < lnp.length; j++) add(lnp[j][0], lnp[j][1]);
+  out.lang = langs;
+  try {
+    Object.defineProperty(rec, '__szf', { value: { norm: norm, forms: out },
+                                          enumerable: false, configurable: true, writable: true });
+  } catch (e) {}
   return out;
 }
 
@@ -116,15 +204,27 @@ function _szFormsContain(rec, qNorm, norm) {
 
 // Text score before proximity, or -1 when the record does not match: every
 // query word must appear in the name (an admin area may skip "of", "de", ...).
-function _szTextScore(item, q, words, norm) {
+// A name in other languages only, none of them the visitor's (`ln`;
+// visitor: _szVisitorLangs), gets no bonus for an exact match: "Glion" is
+// the village Glion before Ilanz (Romansh Glion), "Vieille Ville" a
+// neighbourhood of that name before an Altstadt, while "Genf" still finds
+// Geneva and a French visitor's "Coire" Chur.
+function _szForeign(langs, mine) {
+  if (!langs) return false;
+  for (var i = 0; i < langs.length; i++) if (mine.indexOf(langs[i]) >= 0) return false;
+  return true;
+}
+function _szTextScore(item, q, words, norm, visitor) {
   var forms = _szSearchForms(item, norm);
+  var langs = forms.lang || [];
+  var mine = visitor || _szVisitorLangs();
   var admin = item.t === 'admin';
   var best = -1;
   for (var f = 0; f < forms.length; f++) {
     var name = forms[f];
     var textScore = _szWordsScore(name, words, admin);
     if (textScore < 0) continue;
-    if (name === q) textScore += 50;
+    if (name === q && !_szForeign(langs[f], mine)) textScore += 50;
     if (name.indexOf(q) === 0) textScore += 25;
     if (textScore > best) best = textScore;
   }
@@ -1017,13 +1117,15 @@ var SEARCH_SHARDS = (function () {
       var label = rawLabel ? szPlaceType(rawLabel) : '';
       var loc = m.l ? ' &middot; ' + escapeHtml(m.l) : '';
       var distLabel = matches[j].dist ? ' &middot; ' + escapeHtml(matches[j].dist) : '';
+      // In the map's second language when the record has a name in it (`ln`).
+      var shown = _szShownNames(m, SZ_LANG2);
       html += '<div class="search-result" data-idx="' + j +
         '" data-lat="' + m.a + '" data-lon="' + m.o + '" data-type="' + m.t +
         '" data-name="' + escapeHtml(m.n) + '">' +
         // Names shown cut at a ";" (130, szFirstName); data-name keeps
         // the record's value for the lookups.
-        '<span class="search-result-name">' + escapeHtml(szFirstName(m.n)) +
-        (m.nn ? ' <span class="search-result-native">' + escapeHtml(szFirstName(m.nn)) + '</span>' : '') +
+        '<span class="search-result-name">' + escapeHtml(szFirstName(shown[0])) +
+        (shown[1] ? ' <span class="search-result-native">' + escapeHtml(szFirstName(shown[1])) + '</span>' : '') +
         '</span>' +
         '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
     }
@@ -1108,7 +1210,8 @@ var SEARCH_SHARDS = (function () {
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
     var type = el.getAttribute('data-type');
-    var name = el.getAttribute('data-name') || (item && item.n) || '';
+    // What the row showed first (its name in the map's second language).
+    var name = (item && _szShownNames(item, SZ_LANG2)[0]) || el.getAttribute('data-name') || '';
     var zoom = {place: 14, airport: 14, peak: 15, park: 15, water: 14, poi: 17, street: 16}[type] || 15;
     var adminCam = (item && item.t === 'admin') ? _szAdminCamera(item) : null;
     if (adminCam && adminCam.zoom) zoom = adminCam.zoom;

@@ -729,6 +729,88 @@ def _annotate_lines_batch(lines, type_order):
     return "".join(out), assigned, counts
 
 
+# Near-duplicates: one stop mapped as many (a station's bays, its stop
+# positions and platforms, each a POI of the same name metres apart; a
+# region's own tiles carry them all: Switzerland's "Luzern Bahnhof" 22
+# times within 250 m), and a lake's name repeated by its pieces. The search
+# pass merges them (zim_writer.near_duplicate_plan), after the Wikipedia
+# and names matching, so the member that links an article is the one kept;
+# extraction leaves them. Within NEAR_DUP_M of each other, features of one
+# of these kinds with the same name and subtype form a cluster. Places,
+# peaks and parks are never merged.
+NEAR_DUP_M = 100.0
+NEAR_DUP_POI = frozenset({"bus", "railway", "aerialway", "ferry_terminal"})
+
+
+def near_dup_group(feat):
+    """The group a feature merges within, or None: (lowercased name,
+    type, subtype) for a transit POI or a water feature."""
+    t = feat.get("type")
+    if t == "water" or (t == "poi" and feat.get("subtype") in NEAR_DUP_POI):
+        return (str(feat.get("name", "")).lower(), t, feat.get("subtype", ""))
+    return None
+
+
+def near_dup_line(line):
+    """Whether a features JSONL line may hold a near_dup_group feature (a
+    cheap test before parsing it)."""
+    return ('"water"' in line or '"bus"' in line or '"railway"' in line
+            or '"aerialway"' in line or '"ferry_terminal"' in line)
+
+
+def near_duplicate_clusters(points, metres=NEAR_DUP_M):
+    """Clusters of ``points`` [(index, group, lat, lon, ...)] that are
+    near-duplicates, each a list of two or more: within a group, points
+    sorted by position are taken in turn, and each not yet taken gathers
+    the untaken within ``metres`` of it. Deterministic whatever the input
+    order."""
+    import math
+    from collections import defaultdict
+    cell = metres / 111_320.0                     # degrees of latitude
+    by_group = defaultdict(list)
+    for p in points:
+        by_group[p[1]].append(p)
+    out = []
+    for group in by_group.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda p: (p[2], p[3], p[0]))
+        grid = defaultdict(list)
+        for p in group:
+            grid[(int(p[2] // cell), int(p[3] // cell))].append(p)
+        taken = set()
+        for p in group:
+            if p[0] in taken:
+                continue
+            k = math.cos(math.radians(p[2]))
+            gy, gx = int(p[2] // cell), int(p[3] // cell)
+            reach = max(1, int(math.ceil(1.0 / max(k, 0.05))))
+            members = []
+            for dy in (-1, 0, 1):
+                for dx in range(-reach, reach + 1):
+                    for q in grid.get((gy + dy, gx + dx), ()):
+                        if q[0] in taken:
+                            continue
+                        dlat = (q[2] - p[2]) * 111_320.0
+                        dlon = (q[3] - p[3]) * 111_320.0 * k
+                        if dlat * dlat + dlon * dlon <= metres * metres:
+                            members.append(q)
+            for q in members:
+                taken.add(q[0])
+            if len(members) > 1:
+                out.append(members)
+    return out
+
+
+def central_member(members):
+    """The member of a cluster nearest its mean (ties: the lowest index)."""
+    import math
+    k = math.cos(math.radians(members[0][2]))
+    mlat = sum(q[2] for q in members) / len(members)
+    mlon = sum(q[3] for q in members) / len(members)
+    return min(members, key=lambda q: ((q[2] - mlat) ** 2 + ((q[3] - mlon) * k) ** 2, q[0]))
+
+
 def _finish_features_streaming(raw_path, output_dir, n_unique):
     """Location-context + sort + write-out without holding every feature.
 

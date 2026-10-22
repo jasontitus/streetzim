@@ -54,7 +54,10 @@ fi
 MBTILES=/storage/streetzim/world-data/regions/${SRC_ID}.mbtiles
 
 PBF=/storage/streetzim/world-data/regions/${SRC_ID}.osm.pbf
-SEARCH=/storage/streetzim/world-data/regions/${SRC_ID}.search.jsonl
+# STREETZIM_SEARCH_CACHE: another search-feature cache, e.g. one extracted
+# from the region's multilingual tiles (names in every tile language, so
+# every place gets its search names in them: docs/search-records.md, ln).
+SEARCH=${STREETZIM_SEARCH_CACHE:-/storage/streetzim/world-data/regions/${SRC_ID}.search.jsonl}
 WD=/storage/streetzim/wikidata_cache
 TERRAIN=/storage/streetzim/terrain_cache
 LOWZ=/storage/streetzim/terrain_cache/dem_sources/world_dem_32k.tif

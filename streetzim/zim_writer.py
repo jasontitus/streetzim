@@ -110,15 +110,22 @@ def wiki_link(entry):
     return ("w", (entry.get("wikipedia") or "").replace(" ", "_"))
 
 
-def _one_link(hits):
+def names_link(entry):
+    """What a names lookup entry (addresses.extract_name_tags_pbf) stands
+    for, as wiki_link does for a cross-ref: its names, so two objects
+    with the same key agree only when they carry the same names."""
+    return tuple(sorted((entry.get("names") or {}).items()))
+
+
+def _one_link(hits, link=wiki_link):
     """The first of `hits` (cross-ref entries) when they all link to the
-    same article (wiki_link), else None."""
-    if hits and all(wiki_link(h) == wiki_link(hits[0]) for h in hits[1:]):
+    same article (wiki_link; `link` for another lookup), else None."""
+    if hits and all(link(h) == link(hits[0]) for h in hits[1:]):
         return hits[0]
     return None
 
 
-def wiki_folded_index(wiki_cross_refs):
+def wiki_folded_index(wiki_cross_refs, link=wiki_link):
     """The cross-ref lookup by folded name (cloud.search_shards.norm:
     accents off, lowercase), and by the first name of an OSM ";" list
     (search_extract.native_name keeps only that one): (folded name, lat
@@ -141,12 +148,12 @@ def wiki_folded_index(wiki_cross_refs):
             k = (nm, qlat, qlon)
             if k not in out:
                 out[k] = entry
-            elif out[k] is not None and wiki_link(out[k]) != wiki_link(entry):
+            elif out[k] is not None and link(out[k]) != link(entry):
                 out[k] = None
     return out
 
 
-def feature_wiki(feat, wiki_cross_refs, folded=None):
+def feature_wiki(feat, wiki_cross_refs, folded=None, link=wiki_link):
     """The wiki cross-ref entry of a search feature other than an admin
     area (those: admin_wiki), looked up at its point on the lookup's
     ~11 m grid and at each piece's point of a merged street
@@ -159,10 +166,36 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
       Tunnel's Q-ID on 68 ways OSM mis-tags; a record made only of those
       still links the tunnel);
     - else, with `folded` (wiki_folded_index), the entry its names fold
-      to, likewise none when two differ or a key is ambiguous.
-    None when nothing matches."""
+      to, likewise none when two differ or a key is ambiguous;
+    - else the same names, as they are and folded, in the 8 cells around
+      each of those, for an OSM object of the record's sort only, likewise
+      none when two differ, there or in the 16 cells beyond
+      (_neighbour_link).
+    None when nothing matches. `link`: what entries agree on (names_link
+    for the names lookup, extract_name_tags_pbf)."""
+    return feature_wiki_match(feat, wiki_cross_refs, folded, link)[0]
+
+
+def feature_wiki_match(feat, wiki_cross_refs, folded=None, link=wiki_link):
+    """(feature_wiki's entry, whether the cells around the feature's own
+    gave it): a geo-index row placed by a record's own cell beats one
+    placed from next door (_search_bucket)."""
+    entry, tier = feature_wiki_tier(feat, wiki_cross_refs, folded, link)
+    return entry, tier == TIER_NEAR
+
+
+# How feature_wiki_tier found what it found: in the record's own cell(s),
+# in a neighbouring cell, ambiguously (entries that link different
+# articles, a folded key two objects share: no entry), or nothing there.
+# Near-duplicate merging (near_duplicate_plan) tells these apart.
+TIER_OWN, TIER_NEAR, TIER_AMBIGUOUS, TIER_NONE = "own", "near", "ambiguous", "none"
+
+
+def feature_wiki_tier(feat, wiki_cross_refs, folded=None, link=wiki_link):
+    """(feature_wiki's entry, its tier: TIER_OWN, TIER_NEAR, TIER_AMBIGUOUS
+    with no entry, or TIER_NONE)."""
     if not wiki_cross_refs:
-        return None
+        return None, TIER_NONE
     pts = [(feat["lat"], feat["lon"])] + [tuple(p) for p in feat.get("_pts", ())]
     cells = [(int(round(plat * 1e4)), int(round(plon * 1e4))) for plat, plon in pts]
     names = wiki_match_names(feat)
@@ -170,23 +203,114 @@ def feature_wiki(feat, wiki_cross_refs, folded=None):
         for qlat, qlon in cells:
             wiki = wiki_cross_refs.get((nm, qlat, qlon))
             if wiki:
-                return wiki
+                return wiki, TIER_OWN
     hits = [w for nm in names[1:] for qlat, qlon in cells
             if (w := wiki_cross_refs.get((nm, qlat, qlon)))]
     if hits:
-        return _one_link(hits)
-    if not folded:
-        return None
-    from cloud.search_shards import norm
-    # norm of an ASCII name is its lower(), at a fraction of the cost.
-    keys = [(nm, qlat, qlon)
-            for nm in dict.fromkeys(n.lower() if n.isascii() else norm(n)
-                                    for n in (feat.get("name"), feat.get("name_native")) if n)
-            for qlat, qlon in cells]
-    hits = [folded[k] for k in keys if k in folded]
-    if any(h is None for h in hits):
-        return None
-    return _one_link(hits)
+        one = _one_link(hits, link)
+        return (one, TIER_OWN) if one else (None, TIER_AMBIGUOUS)
+    folded_names = []
+    if folded:
+        from cloud.search_shards import norm
+        # norm of an ASCII name is its lower(), at a fraction of the cost.
+        folded_names = list(dict.fromkeys(n.lower() if n.isascii() else norm(n)
+                                          for n in (feat.get("name"), feat.get("name_native")) if n))
+        hits = [folded[k] for nm in folded_names for qlat, qlon in cells
+                if (k := (nm, qlat, qlon)) in folded]
+        if hits:
+            one = None if any(h is None for h in hits) else _one_link(hits, link)
+            return (one, TIER_OWN) if one else (None, TIER_AMBIGUOUS)
+    return _neighbour_tier(feat, names, folded_names, cells, wiki_cross_refs, folded, link)
+
+
+# The sorts of OSM object (addresses.osm_kind) a search record of each type
+# matches in a neighbouring cell (_neighbour_link); any other type: "other".
+# An address none.
+NEIGHBOUR_KINDS = {"place": ("place",), "peak": ("peak",), "water": ("water",),
+                   "street": ("street",), "addr": ()}
+# A POI by its subtype: a railway station takes only a station, a bus stop
+# and an information board nothing (the stop "Kurtheater" is not the
+# theatre, the guidepost "Wettingen" not its station, "Rathaus" not the town
+# hall; a stop next door is often tagged with its operator's or line's item,
+# not its own). An "other" object is never a stop, a station or a board.
+POI_NEIGHBOUR_KINDS = {"bus": (), "railway": ("station",), "information": ()}
+
+
+def neighbour_kinds(feat):
+    """The sorts of OSM object a search record takes from a neighbouring
+    cell (NEIGHBOUR_KINDS, POI_NEIGHBOUR_KINDS)."""
+    t = feat.get("type")
+    if t == "poi" and feat.get("subtype") in POI_NEIGHBOUR_KINDS:
+        return POI_NEIGHBOUR_KINDS[feat["subtype"]]
+    return NEIGHBOUR_KINDS.get(t, ("other",))
+
+
+# The 8 cells around a cell, and the 16 around those.
+_AROUND = tuple((dlat, dlon) for dlat in (-1, 0, 1) for dlon in (-1, 0, 1) if dlat or dlon)
+_BEYOND = tuple((dlat, dlon) for dlat in range(-2, 3) for dlon in range(-2, 3)
+                if max(abs(dlat), abs(dlon)) == 2)
+
+
+def _cells_around(cells, ring=_AROUND, skip=()):
+    """The cells at `ring`'s offsets around each of `cells` that are none
+    of them nor in `skip`, in order."""
+    if len(cells) == 1 and not skip:
+        qlat, qlon = cells[0]
+        return [(qlat + dlat, qlon + dlon) for dlat, dlon in ring]
+    own = set(cells).union(skip)
+    out = {}
+    for qlat, qlon in cells:
+        for dlat, dlon in ring:
+            c = (qlat + dlat, qlon + dlon)
+            if c not in own:
+                out[c] = None
+    return list(out)
+
+
+def _neighbour_link(feat, names, folded_names, cells, lookup, folded, link):
+    """_neighbour_tier's entry."""
+    return _neighbour_tier(feat, names, folded_names, cells, lookup, folded, link)[0]
+
+
+def _neighbour_tier(feat, names, folded_names, cells, lookup, folded, link):
+    """feature_wiki's last try, in the cells around the feature's own: the
+    entry its names find there (folded, with `folded`: that finds them as
+    they are too), whose OSM object is of the feature's sort
+    (NEIGHBOUR_KINDS, addresses.OsmRef.kind; an entry that does not know
+    it never matches here); none when two such differ (`link`) or a
+    folded key there is ambiguous. A tile's point of an OSM node is within
+    a metre of it, but a cell is 11 m: Zurich's record (47.37445075) is in
+    cell 473745, its node (47.3744489) in 473744. A building's POI is the
+    mean of its ring in the tile, its key here a corner of it (the closed
+    way's middle vertex). Taken from the 8 cells around only, but checked
+    against the 16 beyond them too: another object of the name and sort
+    there that links another article (the castle of Monolithos, two cells
+    from a ruin of its name tagged with the village; a second "Kaplica
+    grobowa") leaves the record with none."""
+    want = neighbour_kinds(feat)
+    if not want:
+        return None, TIER_NONE
+
+    def found(around):
+        if folded:
+            hits = [folded[k] for nm in folded_names for c in around if (k := (nm,) + c) in folded]
+            if any(h is None for h in hits):
+                return None
+        else:
+            hits = [e for nm in names for c in around if (e := lookup.get((nm,) + c))]
+        return [h for h in hits if getattr(h, "kind", None) in want]
+
+    around = _cells_around(cells)
+    hits = found(around)
+    if hits is None:
+        return None, TIER_AMBIGUOUS
+    if not hits:
+        return None, TIER_NONE
+    beyond = found(_cells_around(cells, _BEYOND, around))
+    if beyond is None:
+        return None, TIER_AMBIGUOUS
+    one = _one_link(hits + beyond, link)
+    return (one, TIER_NEAR) if one else (None, TIER_AMBIGUOUS)
 
 
 def admin_record_fields(feat):
@@ -225,6 +349,73 @@ def _title_text(text):
     import re
     out = "".join(" " if unicodedata.category(c) == "Cc" else c for c in text)
     return re.sub(r" {2,}", " ", out).strip()
+
+
+# Record types that name places in the visitor's language (`ln`): what a
+# visitor looks up by its name in their own language. Streets and addresses
+# are left out (their names are rarely translated, and they are most of a
+# map's records). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides;
+# STREETZIM_SEARCH_LN_LANGUAGES caps the languages (streetzim.languages
+# .search_languages). Measured (docs/search-records.md): Poland's search
+# chunks +1.7% and 289 new 2-character keys (manifest ~+5 KB), Greece's
+# +1.5% and 227; the new keys are mostly CJK, Hangul and kana first
+# letters, which a continent shares, so Europe's manifest (4.03 MB of
+# validate's 4 MiB) is estimated at +30-50 KB. Use the switches if a map
+# nears the budget.
+LN_TYPES = frozenset({"place", "admin", "airport", "peak", "park", "water", "poi"})
+# A name longer than this is a description or a tagging error, not a name.
+LN_MAX_CHARS = 100
+
+
+def search_ln_languages(map_config):
+    """The languages a build's search records name places in (`ln`): a
+    language-ready map's tile languages, then its region languages
+    (map-config tileLanguages / regionLanguages; streetzim.languages
+    .search_languages). Empty for any other map, or with
+    STREETZIM_SEARCH_LN=0."""
+    from streetzim.languages import search_languages
+    if os.environ.get("STREETZIM_SEARCH_LN", "1") == "0" or not map_config:
+        return []
+    return search_languages(map_config.get("tileLanguages"),
+                            map_config.get("regionLanguages"))
+
+
+def _ln_types():
+    env = os.environ.get("STREETZIM_SEARCH_LN_TYPES")
+    if env is None:
+        return LN_TYPES
+    return frozenset(t.strip() for t in env.split(",") if t.strip())
+
+
+def localized_names(feat, wiki, languages, types=None, named=None):
+    """`ln` of a search record: {lang: name} for ``languages``, from the
+    feature's own name:<lang> (``names``: tiles extracted with those
+    languages; ``lnames``: an admin area's relation), else its wiki cross-ref's (the OSM
+    object feature_wiki matched, extract_wiki_tags_pbf(languages=)), else
+    ``named``'s (its names lookup entry, extract_name_tags_pbf), in the
+    order of ``languages``. A name the record already shows as ``n`` is left
+    out (the viewer falls back to ``n``); one equal to its own-script name
+    ``nn`` is written as "" ("the name is nn": a French visitor sees
+    "Genève", a Greek one "Αθήνα", without the record repeating it). Only
+    for ``types`` (default LN_TYPES)."""
+    if not languages or feat.get("type") not in (types if types is not None else LN_TYPES):
+        return {}
+    # An admin area's are `lnames` (admin_areas: not `names`, which a
+    # build in another language would show as the area's name).
+    own = feat.get("names") or feat.get("lnames") or {}
+    ref = (wiki or {}).get("names") or {}
+    more = (named or {}).get("names") or {}
+    if not own and not ref and not more:
+        return {}
+    shown, native, _latin = shown_names(feat)
+    out = {}
+    for lang in languages:
+        v = own.get(lang) or ref.get(lang) or more.get(lang)
+        if isinstance(v, str):
+            v = v.strip()
+            if v and v != shown and len(v) <= LN_MAX_CHARS:
+                out[lang] = "" if v == native else v
+    return out
 
 
 def shown_names(feat):
@@ -861,6 +1052,7 @@ def _create_zim(
     routing_graph_path=None,
     routing_graph_chunk_mb=0,
     wiki_cross_refs=None,
+    ln_name_refs=None,
     address_count=0,
     overture_sources=None,
     overture_themes=None,
@@ -1116,6 +1308,7 @@ def _create_zim(
                     search_features=search_features,
                     wikidata_data=wikidata_data,
                     wiki_cross_refs=wiki_cross_refs, _bundled_set=_bundled_set,
+                    ln_name_refs=ln_name_refs,
                     split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                     split_find_chips=split_find_chips,
                     no_llm_bundle=no_llm_bundle, map_config=map_config,
@@ -1196,7 +1389,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                 split_hot_search_chunks_mb, split_find_chips, no_llm_bundle,
                 map_config, name, bbox, routing_graph_path, address_count,
                 overture_sources, overture_themes, xapian_mode, chunk_tmp,
-                overture_release=None, page_types=KIWIX_PAGE_TYPES, corpus=None):
+                overture_release=None, page_types=KIWIX_PAGE_TYPES, corpus=None,
+                ln_name_refs=None):
     """Search data: JSON chunks, category index, chips, streetzim-meta.json,
     overture-sources.json and the Kiwix pages (with --xapian=builder, their
     xapianbuilder documents go to `corpus`). The chunk files go to
@@ -1214,7 +1408,9 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            wikidata_data=wikidata_data,
                            wiki_cross_refs=wiki_cross_refs,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
-                           chunk_tmp=chunk_tmp, page_types=page_types)
+                           chunk_tmp=chunk_tmp, page_types=page_types,
+                           ln_languages=search_ln_languages(map_config),
+                           ln_name_refs=ln_name_refs)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
                             chunk_tmp=b.chunk_tmp, chunk_counts=b.chunk_counts,
@@ -1243,7 +1439,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
     elif search_features:
         _add_search_in_memory(creator, MapItem, search_features=search_features,
                               loc_lookup=loc_lookup, page_types=page_types,
-                              wiki_cross_refs=wiki_cross_refs, corpus=corpus)
+                              wiki_cross_refs=wiki_cross_refs, corpus=corpus,
+                              ln_languages=search_ln_languages(map_config))
 
 
 def _tile_credit(tile_metadata):
@@ -2335,10 +2532,12 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def search_record(feat, wiki=None):
+def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None):
     """The search record (docs/search-records.md) of search feature `feat`,
     as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
-    admin area, admin_wiki()), or None.
+    admin area, admin_wiki()), or None. `ln_languages` (search_ln_languages):
+    the record's names in those languages, `ln` (localized_names; `named`:
+    its names lookup entry).
 
     Canonical record shape consumed by mcpzim:
       n, t (type), s (subtype), a (lat), o (lon), l (location)
@@ -2366,6 +2565,10 @@ def search_record(feat, wiki=None):
         rec["nn"] = native
     if latin:
         rec["nl"] = latin
+    if ln_languages:
+        ln = localized_names(feat, wiki, ln_languages, ln_types, named)
+        if ln:
+            rec["ln"] = ln
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
         v = feat.get(ov_key)
         if v:
@@ -2383,9 +2586,90 @@ def search_record(feat, wiki=None):
     return rec
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES):
+def _geo_rank(feat, near):
+    """How well a search record places the article it links in the wiki
+    geo-index, lowest best: a city or town, then any record but a street,
+    then a street; within each, a match in its own cell before one from a
+    neighbouring cell (feature_wiki_match)."""
+    t = feat.get("type")
+    return (0 if t == "place" and feat.get("subtype") in ("city", "town") else 1,
+            1 if t == "street" else 0, 1 if near else 0)
+
+
+def near_duplicate_plan(search_features_path, match):
+    """The search pass's pre-pass over near-duplicate stops and water
+    features (search_extract.near_dup_group, near_duplicate_clusters):
+    (line indexes to drop, {kept index: names lookup entry it takes}).
+    `match(feat, type)` gives a feature's ((wiki cross-ref, tier), (names
+    lookup entry, tier)), as the search pass matches them
+    (feature_wiki_tier). A cluster keeps one member per article its members
+    link (wiki_link: members linking different articles never merge), the
+    one that matched in its own cell before one from next door, one with
+    names before one without, then the one nearest the mean; a member whose
+    own cell was ambiguous links nothing and so vetoes nothing. It keeps
+    one member per other set of names in other languages they carry (their
+    own or the lookup's) that no kept member has, unless it is the only
+    one and the kept members lack names: then they take it. With neither,
+    one member, nearest the mean. So no article and no name in another
+    language is lost, and a dropped duplicate never places a geo-index row
+    nor counts (it is skipped before both)."""
+    from streetzim.search_extract import (
+        central_member, near_dup_group, near_dup_line, near_duplicate_clusters)
+    points = []
+    with open(search_features_path, encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if not near_dup_line(line):
+                continue
+            feat = json.loads(line)
+            g = near_dup_group(feat)
+            if g is None:
+                continue
+            (wiki, wtier), (named, _ntier) = match(feat, feat.get("type", ""))
+            own = feat.get("names")
+            names = {"names": own} if own else named
+            points.append((i, g, feat["lat"], feat["lon"], wiki, named, names, wtier))
+    drop, takes = set(), {}
+    for members in near_duplicate_clusters(points):
+        keep = []
+        by_link = {}
+        for m in members:
+            if m[4]:
+                by_link.setdefault(wiki_link(m[4]), []).append(m)
+        for group in by_link.values():
+            mine = [m for m in group if m[7] == TIER_OWN] or group
+            keep.append(central_member([m for m in mine if m[6]] or mine))
+        have = {names_link(m[6]) for m in keep if m[6]}
+        chosen = {m[0] for m in keep}
+        by_names = {}
+        for m in members:
+            if m[0] not in chosen and m[6] and names_link(m[6]) not in have:
+                by_names.setdefault(names_link(m[6]), []).append(m)
+        bare = [m for m in keep if not m[6]]
+        if len(by_names) == 1 and bare:
+            # One set of names the kept members lack: they take it.
+            [group] = by_names.values()
+            for m in bare:
+                takes[m[0]] = group[0][6]
+        else:
+            for group in by_names.values():
+                keep.append(central_member(group))
+        if not keep:
+            keep.append(central_member(members))
+        kept = {m[0] for m in keep}
+        drop.update(m[0] for m in members if m[0] not in kept)
+    return drop, takes
+
+
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None, ln_name_refs=None):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
-    chunk files in `chunk_tmp`, plus the Xapian candidates file."""
+    chunk files in `chunk_tmp`, plus the Xapian candidates file.
+    `ln_languages`: search_ln_languages() of the build; `ln_name_refs`: the
+    names lookup (addresses.extract_name_tags_pbf), matched as the wiki
+    cross-refs are (feature_wiki, names_link)."""
+    _ln_t = _ln_types() if ln_languages else None
+    _name_refs = ln_name_refs if ln_languages else None
+    _name_folded = wiki_folded_index(_name_refs, names_link) if _name_refs else None
+    ln_added = 0
     xapian_types = page_types
 
     # Pass 1: stream JSONL -> per-prefix chunk files + xapian file
@@ -2424,6 +2708,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     # linearly today; see STREETZIM_CONSUMPTION.md).
     type_counts = {}
     wiki_fields_added = 0
+    wiki_geo_rank = {}  # title_us -> _geo_rank of the record that placed it
     wiki_geo = {}  # title_us -> [lat, lon, type]: geo-index for the
                    # viewer's nearby-Wikipedia list + markers (any zoom)
     cat_chunk_fds = {}
@@ -2445,10 +2730,33 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     # The cross-refs by folded name, for features whose names match none
     # as they are (feature_wiki).
     _wiki_folded = wiki_folded_index(wiki_cross_refs)
+
+    def _match(feat, t):
+        """((wiki cross-ref, tier), (names lookup entry, tier)) of a search
+        feature other than an admin area (feature_wiki_tier: by its search
+        or own-script name, at its point or a merged street's pieces', else
+        by a folded name, else in the cells around); the names lookup
+        likewise, for a record type that names places in other languages
+        (_ln_t)."""
+        wiki = feature_wiki_tier(feat, wiki_cross_refs, _wiki_folded)
+        named = (feature_wiki_tier(feat, _name_refs, _name_folded, link=names_link)
+                 if _name_refs and t in _ln_t else (None, TIER_NONE))
+        return wiki, named
+
+    # Near-duplicate stops and water features: the ones to leave out, and
+    # the names the kept ones take (near_duplicate_plan).
+    _nd_drop, _nd_takes = set(), {}
+    if os.environ.get("STREETZIM_NEAR_DUP", "1") != "0":
+        _nd_drop, _nd_takes = near_duplicate_plan(search_features_path, _match)
+        if _nd_drop:
+            print(f"    {len(_nd_drop)} near-duplicate stops and water features merged "
+                  "(same name within 100 m)", flush=True)
     print("    Streaming search features from disk...", flush=True)
     with open(xapian_path, "w") as xf:
         with open(search_features_path) as sf:
-            for line in sf:
+            for _i, line in enumerate(sf):
+                if _i in _nd_drop:
+                    continue
                 feat = json.loads(line)
                 total_features += 1
                 t = feat.get("type", "")
@@ -2462,24 +2770,30 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
 
                 # Enrich with wiki cross-refs if this POI has matching
                 # (name, coord) in the OSM-tag lookup built from the PBF.
-                wiki = None
+                wiki = named = None
+                wiki_near = False
                 if t == "admin":
                     # An admin area carries its relation's own tags; a
                     # name+point match could be another object (the place
-                    # node at the area's admin_centre).
+                    # node at the area's admin_centre). Its names are its
+                    # own (lnames), never the names lookup's.
                     wiki = admin_wiki(feat, wiki_cross_refs)
-                    if wiki:
-                        wiki_fields_added += 1
-                elif wiki_cross_refs:
-                    # By its search or own-script name, at its point or
-                    # a merged street's pieces', else by a folded name
-                    # (feature_wiki).
-                    wiki = feature_wiki(feat, wiki_cross_refs, _wiki_folded)
-                    if wiki:
-                        wiki_fields_added += 1
-
+                else:
+                    # The wiki cross-ref (feature_wiki_tier: in the record's
+                    # own cell, or from next door), and the names lookup
+                    # entry of an object without a wiki tag (a village, a
+                    # peak, a lake); a kept near-duplicate also takes the
+                    # dropped members' names (near_duplicate_plan).
+                    (wiki, _wtier), (named, _ntier) = _match(feat, t)
+                    wiki_near = _wtier == TIER_NEAR
+                    if named is None:
+                        named = _nd_takes.get(_i)
+                if wiki:
+                    wiki_fields_added += 1
                 # The record shape and its rounding: search_record.
-                rec = search_record(feat, wiki)
+                rec = search_record(feat, wiki, ln_languages, _ln_t, named)
+                if "ln" in rec:
+                    ln_added += 1
                 if wiki:
                     if wiki.get("wikipedia"):
                         # Geo-index: underscored title -> [lat, lon, type].
@@ -2493,14 +2807,16 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                         # Only index titles whose article was actually
                         # bundled (enwiki had a page) — else the viewer
                         # would list places that 404 on "Read full article".
-                        # The first feature places it, but any other kind
-                        # takes it from a street: a merged street's point is
-                        # one of its pieces', kilometres from the subject.
+                        # Placed by the best record that links it
+                        # (_geo_rank), the first of equals: a city or town
+                        # first, a street last (a merged street's point is
+                        # one of its pieces', kilometres from the subject),
+                        # a record's own cell before a neighbouring one.
+                        _rank = _geo_rank(feat, wiki_near)
                         if (_gt and _bundled_set is not None
                                 and _gt in _bundled_set
-                                and (_gt not in wiki_geo
-                                     or (wiki_geo[_gt][2] == "street"
-                                         and t != "street"))):
+                                and (_gt not in wiki_geo or _rank < wiki_geo_rank[_gt])):
+                            wiki_geo_rank[_gt] = _rank
                             # [lat, lon, type, qid, desc]. The short
                             # description is baked in so the viewer's
                             # nearby-Wikipedia list needs NO
@@ -2573,6 +2889,9 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
     del cat_chunk_fds
     if wiki_fields_added:
         print(f"    Enriched {wiki_fields_added} entries with wiki cross-refs")
+    if ln_languages:
+        print(f"    {ln_added} entries carry names in other languages (ln: "
+              f"{','.join(ln_languages)})")
 
     # Close all chunk file handles
     for fd in chunk_fds.values():
@@ -3227,10 +3546,13 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapian_path, total_fe
 
 def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                           page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None,
-                          corpus=None):
+                          corpus=None, ln_languages=None):
     """Search for an in-memory feature list (small builds and tests). Its
     Kiwix pages are written in every --xapian mode; `corpus`
-    (--xapian=builder) gets their xapianbuilder documents."""
+    (--xapian=builder) gets their xapianbuilder documents. `ln_languages`:
+    as _search_bucket's, from the features' own names only (this path
+    matches no wiki cross-refs but an admin area's)."""
+    _ln_t = _ln_types() if ln_languages else None
     print(f"    Adding {len(search_features)} search entries...")
 
     # Enrich with location if available
@@ -3265,6 +3587,10 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                     rec["wsrc"] = wiki["wikipedia_src"]
             if wiki.get("wikidata"):
                 rec["q"] = wiki["wikidata"]
+        if ln_languages:
+            _ln = localized_names(f, None, ln_languages, _ln_t)
+            if _ln:
+                rec["ln"] = _ln
         # Under its other names too, as _search_bucket does.
         from cloud.search_shards import record_names as _rn
         for prefix in sorted({_key(n) for n in _rn(rec)}):
