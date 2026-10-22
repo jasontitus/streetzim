@@ -42,7 +42,7 @@ from tools.langpack.gatelib import entry_verdict_ok, pack_gate_ok  # noqa: E402
 NATIVE = {"ar": "العربية", "de": "Deutsch", "el": "Ελληνικά", "en": "English", "es": "Español",
           "fa": "فارسی", "fr": "Français", "he": "עברית", "hi": "हिन्दी", "hy": "Հայերեն",
           "id": "Bahasa Indonesia", "it": "Italiano", "ja": "日本語", "ko": "한국어",
-          "nl": "Nederlands", "pl": "Polski", "pt": "Português", "ru": "Русский", "sv": "Svenska",
+          "nl": "Nederlands", "pl": "Polski", "pt": "Português", "rm": "Rumantsch", "ru": "Русский", "sv": "Svenska",
           "th": "ไทย", "tr": "Türkçe", "uk": "Українська", "vi": "Tiếng Việt", "zh": "中文"}
 
 

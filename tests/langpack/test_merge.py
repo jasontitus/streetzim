@@ -81,6 +81,8 @@ def test_a_romansh_pack_gates_and_merges(lp: SimpleNamespace, tmp_path: Path) ->
     r = tool("verify_merge.py", out, lp.base, rm, *_packs(lp, "de"), "--lang", "rm", "--region-langs", "de,rm",
              "--language-meta", "map")
     assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].endswith("PASS"), r.stdout[-2000:]
+    from tools.langpack.make_site import NATIVE
+    assert NATIVE["rm"] == "Rumantsch"                     # the menu's label, not "rm"
     listed = tmp_path / "m-list.zim"
     assert merge_zim.merge(str(lp.base), [str(rm), *_packs(lp, "de")], str(listed), "de",
                            region_langs=["de", "rm"])["metadata"]["Language"] == "deu,roh"
