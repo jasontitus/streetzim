@@ -177,6 +177,7 @@ class Source {
           if (got === this.hashes[k]) { this.cache.set(k, buf); this.inflight.delete(k); return buf; }
           if (!this.refetch || pass >= 1) throw new Error(`${this.name} chunk ${k} does not match the recipe (SHA-256 ${got.slice(0, 12)}…)`);
           this.net.hash_retries = (this.net.hash_retries || 0) + 1;
+          if (this.discard) this.discard(buf.length);     // counted once: downloaded again below
         }
       })());
     }
@@ -229,7 +230,9 @@ function httpReader(url, size, chunk, net, signal, onRetry, mem, kind = 'base') 
     return out;
   };
   const free = (u8) => { if (u8.byteLength === chunk && pool.length < kMax + 1) pool.push(u8); };
-  return { read, win, free };
+  // bytes of a chunk that failed its hash: out of the counts (it comes again)
+  const discard = (n) => { net[kind + '_bytes'] -= n; net.got_bytes -= n; };
+  return { read, win, free, discard };
 }
 
 // ---------------------------------------------------------------- run
@@ -248,6 +251,7 @@ async function run(o) {
   }
   const sources = { base: new Source('base file', recipe.base, http ? http.read : fileReader(o.baseFile, net), net) };
   sources.base.refetch = !!http;
+  if (http) sources.base.discard = http.discard;
   // network readers by source key: the base (one click) and every pack
   const readers = {};
   if (http) readers.base = http;
@@ -257,6 +261,7 @@ async function run(o) {
     readers['pack:' + id] = r;
     sources['pack:' + id] = new Source(`${id} pack`, p, r.read, net);
     sources['pack:' + id].refetch = true;
+    sources['pack:' + id].discard = r.discard;
   }
   let seeded = 0;
   for (const [id, sd] of Object.entries(o.seeds || {})) {
@@ -412,9 +417,9 @@ async function run(o) {
     await sink.open(recipe.size);
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
-      if (s.src === 'base') phase = 'map';
-      else if (s.src === 'md5') phase = 'verify';
-      else if (s.src && s.src.startsWith('pack:')) phase = 'packs';
+      if (s.src === 'md5') phase = 'verify';
+      else if (s.src === 'base' && phase !== 'map') phase = 'finishing';
+      else if (s.src && s.src.startsWith('pack:') && phase === 'map') phase = 'packs';
       let data;
       if (s.src === 'inline') {
         data = b64dec(s.data);

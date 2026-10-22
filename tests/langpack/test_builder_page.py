@@ -58,11 +58,26 @@ def test_one_click_and_from_my_copy(page: SimpleNamespace) -> None:
     assert rc == 0 and rows[0]["pass"] and rows[0]["proxy"]["items"].get("streetzim-testland", 0) == 0, rows
 
 
+def _monotonic(xs: list) -> bool:
+    from itertools import pairwise
+    return all(b >= a for a, b in pairwise(xs))
+
+
+PHASES = ["prepare", "plan", "check", "map", "copy", "packs", "finishing", "verify", "saving"]
+
+
 def test_a_corrupt_pack_saves_nothing(page: SimpleNamespace) -> None:
     pack = next(p.name for p in page.packs.glob("osm_testland_wiki-de_*.zim"))
     rc, rows = _e2e(page, "de", "net", "--corrupt", f"streetzim-testland-lang/{pack}@2000", "--expect", "fail")
     assert rc == 0 and rows[0]["pass"], rows
     assert rows[0]["status"].startswith("Not started: Wikipedia could not be downloaded"), rows
+    ui = rows[0]["ui"]
+    # the job ended: the button is itself again (review LOW: a mutant of jobEnd survived)
+    b = ui["oneclick"]
+    assert b["text"].startswith("Download") and "busy" not in b["cls"] and not b["disabled"] and b["ariaDisabled"] is None, b
+    assert ui["jobHidden"] is True and ui["langDisabled"] is False, ui
+    # the damaged check chunk was downloaded again from 0: the bar did not go back
+    assert ui["bar"] and _monotonic(ui["bar"]), ui["bar"]
 
 
 @pytest.mark.parametrize("throttle", ["20000:5000:20", "750:250:100"])     # 20 Mbit/s; 3G
@@ -81,6 +96,67 @@ def test_every_click_shows_progress_at_once(page: SimpleNamespace, throttle: str
     assert fb["max_gap_ms"] < 1500 and fb["max_progress_gap_ms"] < 1500, fb
     assert rows[0]["phases"] and rows[0]["phases"][-1] in ("saving", "verify", "packs", "map"), rows[0]["phases"]
     assert list(shots.glob("de-390x844-*.png")), list(shots.iterdir())
+
+
+def test_a_damaged_chunk_counts_once_and_nothing_goes_back(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
+    """Review LOWs: a pack chunk the worker gets damaged once is downloaded
+    again and its bytes count once (the packs' count never passes their
+    total); the phase never goes back (the tail's reads of the base are
+    "finishing", not "map" again); the bar never goes back; the busy button
+    keeps the focus (aria-disabled, not disabled)."""
+    env = {**ship.env, "LANGPACK_RECIPE_CHUNK": "4096"}
+    r = subprocess.run(["bash", str(ROOT / "ops" / "langpack" / "ship_packs.sh"), "testland", str(ship.base)],
+                       capture_output=True, text=True, timeout=900, env=env)
+    assert r.returncode == 0, r.stdout[-3000:]
+    rec = tmp_path / "recipes"
+    shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
+                          capture_output=True).returncode == 0
+    recipe = json.loads((rec / "testland" / "de.json").read_text())
+    pk = recipe["packs"]["de"]
+    first = min(s["off"] // pk["chunk"] for s in recipe["segments"] if s["src"] == "pack" and s["pack"] == "de")
+    p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
+    rc, rows = _e2e(p, "de", "net", "--corrupt", f"streetzim-testland-lang/{pk['file']}@{(first + 2) * pk['chunk'] + 100}",
+                    "--corrupt-times", "1", "--throttle", "2000:1000:20")      # long enough to look at the focus during it
+    assert rc == 0 and rows[0]["pass"], rows
+    ui = rows[0]["ui"]
+    assert ui["activeDuring"] == "oneclick" and ui["activeEnd"] == "oneclick", ui
+    assert all(x in PHASES for x in ui["phases"]) and _monotonic([PHASES.index(x) for x in ui["phases"]]), ui["phases"]
+    assert ui["bar"] and _monotonic(ui["bar"]), ui["bar"]
+    lp = ui["lastProgress"]
+    assert lp["packs"]["got"] <= lp["packs"]["size"] and lp["base"]["got"] <= lp["base"]["size"], lp
+
+
+def test_from_my_copy_says_less_and_more(page: SimpleNamespace) -> None:
+    """Review LOWs, "build from my copy": the live region #baseCheck says only
+    the step and the verdict (the recipe's byte count went to it, 1768
+    updates in 1.56 s); a retry of a damaged pack check is said; the busy
+    button says "Building…", not "Downloading…"."""
+    pack = next(p.name for p in page.packs.glob("osm_testland_wiki-de_*.zim"))
+    rc, rows = _e2e(page, "de", "file", "--corrupt", f"streetzim-testland-lang/{pack}@2000", "--corrupt-times", "1")
+    assert rc == 0 and rows[0]["pass"], rows
+    ui = rows[0]["ui"]
+    assert len(ui["baseCheckTexts"]) <= 3 and not any("build plan" in t for t in ui["baseCheckTexts"]), ui["baseCheckTexts"]
+    assert any("arrived damaged" in t for t in ui["packStatusTexts"]), ui["packStatusTexts"]
+    assert any(t.startswith("Building") for t in ui["buttonTexts"]), ui["buttonTexts"]
+    assert not any(t.startswith("Downloading") for t in ui["buttonTexts"]), ui["buttonTexts"]
+
+
+def test_an_error_in_the_page_ends_the_job(page: SimpleNamespace, tmp_path: Path) -> None:
+    """Review LOW: whatever throws after the click, the job ends (status
+    said, button itself again); a recipe without its packs list made
+    ensurePacks throw and left the page "Preparing…" for good."""
+    rec = tmp_path / "recipes-nopacks"
+    shutil.copytree(page.rec, rec)
+    rp = rec / "testland" / "de.json"
+    r = json.loads(rp.read_text())
+    del r["packs"]
+    rp.write_text(json.dumps(r))
+    p = SimpleNamespace(ship=page.ship, rec=rec, packs=page.packs, out=tmp_path / "out")
+    rc, rows = _e2e(p, "de", "net", "--expect", "fail", "--status-timeout-secs", "90")
+    assert rows and rows[0]["pass"] and rows[0]["status"].startswith(("Stopped", "Not started")), rows
+    b = rows[0]["ui"]["oneclick"]
+    assert "busy" not in b["cls"] and not b["disabled"] and b["text"].startswith("Download"), b
 
 
 def test_a_dead_browser_fails_fast(page: SimpleNamespace, tmp_path: Path) -> None:
