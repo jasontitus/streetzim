@@ -10,7 +10,9 @@ apps; kiwix-serve /suggest) and full-text results (kiwix-serve /search).
 Packs: N article titles of the ~w/<L>/ pack that no base entry carries
 (spread evenly over the pack's articles), asked both ways as python-libzim
 does: found when one of the first 10 suggestions, and one of the first 25
-full-text results (kiwix-serve's first page), is an entry under ~w/<L>/.
+full-text results (kiwix-serve's first page), is an entry under ~w/<L>/
+(full text only for a title libzim can index: no folded word over 64
+bytes, FULLTEXT_MAX_WORD).
 L is the map language, or (an entry whose language has no pack, e.g.
 English on an English base) the first pack in the file.
 
@@ -40,6 +42,17 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 SUGGEST_TOP, FULLTEXT_TOP, MERGED_TOP = 10, 25, 20
+# Xapian's TermGenerator drops a word over 64 bytes (its default
+# max_word_length, which libzim's full-text indexer keeps): a title with
+# such a word, folded (a long Thai name has no spaces: "ท่าอากาศยาน
+# นานาชาติเจนีวา" is one 66-byte word), cannot be found by full text in any
+# libzim file. Suggestions still find it (the title index allows longer).
+FULLTEXT_MAX_WORD = 64
+
+
+def fulltext_indexable(title: str) -> bool:
+    from tools.langpack.index_pack import fold
+    return all(len(w.encode("utf-8")) <= FULLTEXT_MAX_WORD for w in fold(title).split())
 
 
 def pack_langs(a) -> list[str]:
@@ -146,11 +159,14 @@ def main(argv: list[str] | None = None) -> int:
             ful = []
         rows.append({"title": t, "suggest": any(p.startswith(f"~w/{lang}/") for p in sug),
                      "fulltext": any(p.startswith(f"~w/{lang}/") for p in ful),
+                     "fulltext_indexable": fulltext_indexable(t),
                      "suggest_top": sug[:3], "fulltext_top": ful[:3]})
     out.update({"titles": len(rows), "suggest_found": sum(r["suggest"] for r in rows),
-                "fulltext_found": sum(r["fulltext"] for r in rows), "rows": rows})
+                "fulltext_found": sum(r["fulltext"] for r in rows),
+                "fulltext_unindexable": sum(not r["fulltext_indexable"] for r in rows), "rows": rows})
     out["base"] = parity(m, b, base_sample(a.base, a.base_n))
-    out["pass"] = (out["suggest_found"] == out["fulltext_found"] == len(rows)
+    out["pass"] = (out["suggest_found"] == len(rows)
+                   and all(r["fulltext"] for r in rows if r["fulltext_indexable"])
                    and out["base"]["merged_found"] == out["base"]["base_found"])
     print(json.dumps(out, ensure_ascii=False))
     return 0 if out["pass"] else 1

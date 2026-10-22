@@ -171,6 +171,26 @@ def test_a_non_latin_pack_is_found_by_full_text(sr: SimpleNamespace) -> None:
     assert out["base"]["base_found"] == out["base"]["merged_found"] and out["base"]["redirects"] == 2, out
 
 
+def test_a_title_libzim_cannot_index_is_not_required_by_full_text(sr: SimpleNamespace, tmp_path: Path) -> None:
+    """Switzerland's th entry: "ท่าอากาศยานนานาชาติเจนีวา" (Geneva airport) is
+    one 66-byte word folded, over Xapian's 64-byte word limit, so no libzim
+    full-text index can hold it; the gate still requires it by suggestion
+    and requires full text for the other titles."""
+    from tests.langpack import lpzims
+    th = tmp_path / sr.packs["th"].name
+    lpzims.write_pack(th, "th", sr.uuid, articles=[("อัลฟา", "อัลฟา"),
+                                                  ("ท่าอากาศยานนานาชาติเจนีวา", "ท่าอากาศยานนานาชาติเจนีวา")])
+    out = tmp_path / "osm_testland_search-de-th_2026-10-13_v.zim"
+    index_pack.build(str(sr.base), [str(sr.packs["de"]), str(th)], "th", "testland", str(out), None, log=lambda m: None)
+    merged = tmp_path / "m.zim"
+    assert tool("merge_zim.py", sr.base, sr.packs["de"], th, "--index", out, "-o", merged, "--lang", "th",
+                "--region", "testland").returncode == 0
+    r = tool("search_gate.py", merged, sr.base, "--lang", "th")
+    g = json.loads(r.stdout.strip().splitlines()[-1])
+    assert r.returncode == 0 and g["pass"], g
+    assert g["titles"] == g["suggest_found"] == 2 and g["fulltext_found"] == 1 and g["fulltext_unindexable"] == 1, g
+
+
 def test_the_gate_requires_the_bases_redirects(sr: SimpleNamespace, tmp_path: Path, monkeypatch) -> None:
     """Review S-1: a search pack without the base's redirects fails the
     search gate's base parity (the base suggests them, the merged file not)."""
