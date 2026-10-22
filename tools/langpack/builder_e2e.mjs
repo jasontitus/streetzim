@@ -133,8 +133,18 @@ async function md5File(p) {
   });
 }
 
-const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, headless: true,
-                                        downloadsPath: path.join(OUT, 'dl') });
+// The two servers keep node alive: whatever fails from here, end the
+// process (a browser that cannot start left it waiting forever).
+const quit = (code) => { page.close(); proxy.close(); process.exit(code); };
+process.on('unhandledRejection', (e) => { console.error('builder_e2e:', e && e.stack || e); quit(1); });
+let browser;
+try {
+  browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, headless: true,
+                                    downloadsPath: path.join(OUT, 'dl'), timeout: 120000 });
+} catch (e) {
+  for (const L of LANGS) console.log(JSON.stringify({ lang: L, mode: MODE, pass: false, error: 'browser: ' + String(e && e.message || e).slice(0, 300) }));
+  quit(1);
+}
 let allOk = true;
 async function runOne(L) {
   const t0 = Date.now();
@@ -223,6 +233,6 @@ for (const L of LANGS) {
     console.log(JSON.stringify({ lang: L, mode: MODE, pass: false, error: String(e && e.message || e).slice(0, 300) }));
   }
 }
-await browser.close();
-page.close(); proxy.close();
-process.exit(allOk ? 0 : 1);
+// a browser that died may never answer the close
+await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
+quit(allOk ? 0 : 1);
