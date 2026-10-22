@@ -189,7 +189,8 @@ async function runOne(L) {
   res.proxy_before_build = beforeBuild;
   res.proxy = { ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
                 refused: stats.proxyRefused - before.proxyRefused,
-                items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])) };
+                items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
+                files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) };
   res.secs = Math.round((Date.now() - t0) / 1000);
   res.pass = EXPECT === 'fail'
     ? /^(Stopped|Not started)/.test(String(status)) && !res.md5

@@ -250,11 +250,13 @@ and never reads them from the base. So:
 
 ## The browser holds no pack whole
 
-The page checks each pack's first and last chunk before Build (a missing or
-replaced pack stops the visitor before anything is saved); the worker
-streams every pack, the search pack included, in verified 16 MiB chunks
-through the range proxy during the build, like the base, with the same
-sliding window and buffer pool. `make_site.py` refuses, and `site_check.py`
+Before Build the page downloads and checks the first chunk the build needs
+from each pack (a missing or replaced pack stops the visitor before anything
+is saved) and keeps it, one chunk per pack, until Build moves it to the
+worker; the worker streams the rest of every pack, the search pack included,
+in verified 16 MiB chunks through the range proxy during the build, like the
+base, with the same sliding window and buffer pool. No chunk is downloaded
+twice, so a visitor downloads exactly the entry's `download_bytes` of packs. `make_site.py` refuses, and `site_check.py`
 fails, an entry over the per-entry budget: more than `LANGPACK_ENTRY_BUDGET`
 (2 GiB) of packs to download, or a recipe over `LANGPACK_RECIPE_BUDGET`
 (32 MiB).

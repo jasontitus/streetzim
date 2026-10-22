@@ -316,10 +316,12 @@
   // any more: the worker streams them during the build in verified 16 MiB
   // chunks, like the base, so no pack is ever held whole in memory. Before
   // Build is enabled the page checks that every pack is there and is the
-  // one the recipe names: its first and its last chunk are downloaded and
-  // checked against the recipe's SHA-256 (fetcher.js: stall timeout,
-  // resume, retries), so a missing or replaced pack stops the visitor
-  // before any save target is opened or any byte is written.
+  // one the recipe names: the first chunk the build needs from it is
+  // downloaded and checked against the recipe's SHA-256 (fetcher.js: stall
+  // timeout, resume, retries), so a missing or replaced pack stops the
+  // visitor before any save target is opened or any byte is written. That
+  // chunk is kept (one per pack) and moved to the worker at Build, so the
+  // check downloads nothing twice.
   // Range requests come from fetcher.js (shared with the worker): 30 s stall
   // timeout, resume from the first missing byte, laggards asked again,
   // backoff retries.
@@ -379,16 +381,25 @@
           }
         };
         await Promise.all(Array.from({ length: Math.min(PARALLEL, parts.length) }, () => lane().catch((e) => { ac.abort(); throw e; })));
-        if (hex(await crypto.subtle.digest('SHA-256', out)) === p.sha256[k]) return;
+        if (hex(await crypto.subtle.digest('SHA-256', out)) === p.sha256[k]) return out;
         if (pass >= 1) throw new FetchError('it arrived damaged twice (it does not match its checksum)', true);
         net.hash_retries++;
         got = 0; onProgress(got, 'a piece arrived damaged; downloading it again');
       }
     } finally { ac.abort(); outer.removeEventListener('abort', stop); }
   }
+  // The first chunk of pack `id` that the recipe reads.
+  const firstChunk = (rec, id) => {
+    let k = Infinity;
+    for (const s of rec.segments) if (s.src === 'pack' && s.pack === id) k = Math.min(k, Math.floor(s.off / rec.packs[id].chunk));
+    return k === Infinity ? 0 : k;
+  };
+  // Checked chunks waiting for the build: [url, size, chunk, its SHA-256] -> bytes
+  const packSeeds = new Map();
+  const seedKey = (p, k) => [p.url, p.size, k, p.sha256[k]].join('|');
   // Resolves true once every pack of the language is there and matches the
-  // recipe (its first and last chunks; false if one could not be had, or a
-  // newer call took over). Without force it waits for a right base file
+  // recipe (the first chunk the build needs; false if one could not be had,
+  // or a newer call took over). Without force it waits for a right base file
   // (the "build from my copy" path).
   async function ensurePacks(force) {
     if (!force && running) return false;   // a build's own download is running; leave it
@@ -404,6 +415,8 @@
     try { rec = await recipeFor(entry); } catch (e) { return false; }   // #notice says why
     if (seq !== packSeq) return false;
     const ids = Object.keys(rec.packs);
+    const keep = new Set(ids.map((id) => seedKey(rec.packs[id], firstChunk(rec, id))));
+    for (const k of [...packSeeds.keys()]) if (!keep.has(k)) packSeeds.delete(k);   // only this language's chunks stay
     const t0 = performance.now();
     net = newNet();
     const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round((entry.download_bytes || 0) / 1e6) };
@@ -412,13 +425,13 @@
     try {
       for (const id of ids) {
         const p = rec.packs[id], name = packName(id);
-        const last = p.sha256.length - 1;
-        for (const k of last > 0 ? [0, last] : [0]) {
-          out.textContent = `Checking ${name}…`;
-          await checkChunk(p, k, ac.signal, (got, note) => { if (note) out.textContent = `Checking ${name} — ${note}`; })
-            .catch((e) => { e.pack = name; throw e; });
-          if (seq !== packSeq) return false;     // the language changed meanwhile
-        }
+        const k = firstChunk(rec, id), key = seedKey(p, k);
+        if (packSeeds.has(key)) continue;
+        out.textContent = `Checking ${name}…`;
+        const buf = await checkChunk(p, k, ac.signal, (got, note) => { if (note) out.textContent = `Checking ${name} — ${note}`; })
+          .catch((e) => { e.pack = name; throw e; });
+        if (seq !== packSeq) return false;     // the language changed meanwhile
+        packSeeds.set(key, { k, buf });
       }
     } catch (e) {
       if (seq !== packSeq || e.name === 'AbortError') return false;
@@ -739,13 +752,14 @@
           $('prog').value = written / size;
           let text;
           if (closing && sinkInfo && sinkInfo.sink === 'sw') text = `All ${fmtMB(size)} built and checked; your browser is saving the rest`;
-          else if (d.base && d.base.got < d.base.size) {
+          else if (mode === 'net' && d.base && d.base.got < d.base.size) {
             // Speed over the last 30 s; time left from the average since the
             // first byte (the proxy's speed swings too much for the former).
             const left = d.base.size - d.base.got, bps = d.base.bps, avg = d.base.avg || bps;
             text = `Downloading the ${region.title} map: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)}` +
               (bps > 0 ? `, ${(bps / 1e6).toFixed(1)} MB/s` : '') + (avg > 0 && ms > 20000 ? `, about ${fmtDur(left / avg)} left` : '');
-          } else text = `${fmtMB(written)} of ${fmtMB(size)}`;
+          } else text = `${fmtMB(written)} of ${fmtMB(size)}` +
+            (d.base && d.base.got ? ` (Wikipedia: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)} downloaded)` : '');
           if (d.waiting) {
             const w = d.waiting / 1000;
             text = `Waiting for the connection… (${w < 120 ? Math.round(w) + ' s' : Math.round(w / 60) + ' min'} without data; ` +
@@ -763,12 +777,18 @@
         } else if (d.type === 'done') resolve(d.result);
       };
       worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
-      // The worker streams the packs itself (recipe.packs[id].url); nothing
-      // of them is held here.
+      // The worker streams the packs itself (recipe.packs[id].url). The
+      // chunk each pack's check downloaded moves to it (no copy, in both
+      // modes); a later build from the same page downloads it again.
+      const seeds = {}, moved = [];
+      for (const id of Object.keys(recipe.packs)) {
+        const key = seedKey(recipe.packs[id], firstChunk(recipe, id)), sd = packSeeds.get(key);
+        if (sd) { seeds[id] = sd; moved.push(sd.buf.buffer); packSeeds.delete(key); }
+      }
       worker.postMessage({ cmd: 'run', proto: 7, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, mem: MEM,
-                           packBytes: entry.download_bytes,
+                           packBytes: entry.download_bytes, seeds,
                            sink: sinkInfo ? sinkInfo.sink : 'later', handle: sinkInfo && sinkInfo.handle,
-                           port: sinkInfo && sinkInfo.port, fileName }, sinkInfo ? sinkInfo.transfer : []);
+                           port: sinkInfo && sinkInfo.port, fileName }, (sinkInfo ? sinkInfo.transfer : []).concat(moved));
     });
     worker.terminate();
     $('startDl').hidden = true;

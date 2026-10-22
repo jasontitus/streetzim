@@ -12,9 +12,11 @@
 // go out, appended as its last 16 bytes, and compared with the recipe's; so
 // is the MD5 of the whole file (recipe file_md5, what md5sum prints).
 //
-// In:  {cmd:'run', proto, recipe, baseFile | baseUrl,
+// In:  {cmd:'run', proto, recipe, baseFile | baseUrl, seeds?: {id: {k, buf}},
 //       sink: 'fsa'|'sw'|'opfs'|'later', handle?, port?, fileName}
-//      (recipe.packs[id].url: each pack's range URL, the page's proxy in it)
+//      (recipe.packs[id].url: each pack's range URL, the page's proxy in it;
+//      seeds: the chunk of each pack the page's check downloaded, checked
+//      again here and used, not downloaded twice)
 //      {cmd:'sink', sink, handle?, port?}   answers 'need-sink' when sink was 'later'
 // Out: {type:'need-sink'} once the base's first chunk (and its ZIM UUID) is
 //      checked, so nothing is saved before the base is known to be right;
@@ -256,7 +258,14 @@ async function run(o) {
     sources['pack:' + id] = new Source(`${id} pack`, p, r.read, net);
     sources['pack:' + id].refetch = true;
   }
-  const downloadSize = (http ? recipe.base.size : 0) + (o.packBytes || Object.values(recipe.packs).reduce((t, p) => t + p.size, 0));
+  let seeded = 0;
+  for (const [id, sd] of Object.entries(o.seeds || {})) {
+    const src = sources['pack:' + id];
+    if (!src || !sd || !(sd.buf instanceof Uint8Array) || !(sd.k >= 0 && sd.k < src.hashes.length)) continue;
+    const [a, b] = src.span(sd.k);
+    if (sd.buf.length === b - a && await sha256(sd.buf) === src.hashes[sd.k]) { src.cache.set(sd.k, sd.buf); seeded += sd.buf.length; }
+  }
+  const downloadSize = (http ? recipe.base.size : 0) + (o.packBytes || Object.values(recipe.packs).reduce((t, p) => t + p.size, 0)) - seeded;
 
   const last = recipe.segments[recipe.segments.length - 1];
   if (!last || last.src !== 'md5' || recipe.segments.filter((x) => x.src === 'md5').length !== 1) throw new Error('the recipe must end with the checksum');

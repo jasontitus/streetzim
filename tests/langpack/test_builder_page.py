@@ -115,9 +115,10 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
 
 
 def test_packs_stream_and_are_never_held_whole(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
-    """Plan review M-3: the page checks only each pack's first and last chunk
-    before Build; the worker streams the rest during the build, chunk by
-    verified chunk (a small chunk size here, so a pack spans many)."""
+    """Plan review M-3: the page checks only the first chunk the build needs
+    from each pack before Build and hands it to the worker; the worker
+    streams the rest during the build, chunk by verified chunk (a small chunk
+    size here, so a pack spans many), and nothing is downloaded twice."""
     env = {**ship.env, "LANGPACK_RECIPE_CHUNK": "4096"}
     r = subprocess.run(["bash", str(ROOT / "ops" / "langpack" / "ship_packs.sh"), "testland", str(ship.base)],
                        capture_output=True, text=True, timeout=900, env=env)
@@ -134,8 +135,11 @@ def test_packs_stream_and_are_never_held_whole(ship: SimpleNamespace, tmp_path: 
     assert rc == 0 and rows[0]["pass"], rows
     before = rows[0]["proxy_before_build"]["files"]
     probe = json.loads((rec / "index.json").read_text())["regions"][0]["probe"]["url"].rsplit("/", 1)[1]
+    files = rows[0]["proxy"]["files"]
     for k, pk in recipe["packs"].items():
-        # its first and last chunk (and, for the speed probe's file, the probe's 4 ranges)
-        assert before.get(pk["file"], 0) <= 2 + (4 if pk["file"] == probe else 0), (k, before, probe)
-    total = rows[0]["proxy"]["items"].get("streetzim-testland-lang", 0)
-    assert total >= sum(chunks.values()), (total, chunks)       # the rest streamed during the build
+        extra = 4 if pk["file"] == probe else 0                   # the speed probe's 4 ranges
+        touched = {c for s in recipe["segments"] if s["src"] == "pack" and s["pack"] == k
+                   for c in range(s["off"] // pk["chunk"], (s["off"] + s["len"] - 1) // pk["chunk"] + 1)}
+        # before Build: one chunk; in all: every chunk the recipe reads, once (one range each)
+        assert before.get(pk["file"], 0) == 1 + extra, (k, before, probe)
+        assert files.get(pk["file"], 0) == len(touched) + extra, (k, files.get(pk["file"]), len(touched), extra)
