@@ -77,7 +77,7 @@ def main():
         r = json.load(open(rp))
         menu = [json.loads(x) for x in read(f"{out}/menu.jsonl").splitlines() if x.strip()]
         ent = next((m for m in menu if m["L"] == L), {})
-        pack_md5 = {os.path.basename(f): md5_file(f) for f in ent.get("pack_files", [])}
+        pack_md5 = {os.path.basename(f): md5_file(f) for f in ent.get("pack_files", []) + [ent.get("index_file")] if f}
         vlog = read(f"{out}/{L}.verify.log")
         vm = re.search(r"SUMMARY (\d+)/(\d+) PASS", vlog)
         sm = smoke_ok(f"{out}/{L}.smoke.log")

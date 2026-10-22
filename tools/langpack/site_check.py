@@ -203,8 +203,9 @@ def main():
         tb = touched_bytes(r)
         need(m["download_bytes"] == sum(tb.values()), f"{L}: download_bytes {m['download_bytes']} != {sum(tb.values())}")
         ipacks = {p["lang"]: p for p in m["packs"] if not p.get("in_base")}
-        need(set(ipacks) == set(r["packs"]) and all(ipacks[x]["bytes"] == tb[x] and ipacks[x]["articles"] == r["packs"][x]["articles"]
-                                                    for x in ipacks), f"{L}: index packs[] != recipe packs")
+        wiki = {k: v for k, v in r["packs"].items() if v.get("kind") != "search"}    # the search pack is not listed
+        need(set(ipacks) == set(wiki) and all(ipacks[x]["bytes"] == tb[x] and ipacks[x]["articles"] == wiki[x]["articles"]
+                                              for x in ipacks), f"{L}: index packs[] != recipe packs")
         # verdict
         need(bool(v.get("all_pass")), f"{L}: verdict missing or not all_pass")
         need((v.get("recipe_md5"), v.get("recipe_uuid"), v.get("recipe_size"), v.get("recipe_file_md5"))

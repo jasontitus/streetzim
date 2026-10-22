@@ -13,10 +13,11 @@ is found by the suggestion search. L is the map language, or (an entry
 whose language has no pack, e.g. English on an English base) the first
 pack in the file.
 
-Prints one JSON line: {"lang", "titles", "suggest_found", "fulltext_found",
+A file with no pack passes (nothing to miss). Prints one JSON line:
+{"lang", "titles", "suggest_found", "fulltext_found",
 "rows": [{"title", "suggest", "fulltext", "suggest_top", "fulltext_top"}],
-"title_index", "fulltext_index", "pass"}. Exit 0 = PASS, 1 = FAIL, 2 = no
-pack article to sample.
+"title_index", "fulltext_index", "pass"}. Exit 0 = PASS, 1 = FAIL, 2 = packs
+but no pack-only article to sample.
 """
 from __future__ import annotations
 
@@ -63,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
                 titles.append(e.title)
     out: dict = {"lang": lang, "merged": Path(a.merged).name, "pack_only_titles": len(titles),
                  "title_index": bool(m.has_title_index), "fulltext_index": bool(m.has_fulltext_index)}
+    if not langs:
+        out.update({"titles": 0, "pass": True, "why": "no pack in this file: nothing for Kiwix to miss"})
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
     if not titles:
         out.update({"titles": 0, "pass": False, "why": f"no pack-only article under {pre}"})
         print(json.dumps(out, ensure_ascii=False))

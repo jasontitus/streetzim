@@ -110,9 +110,11 @@ def test_every_step_ran(lang: str, gates: SimpleNamespace) -> None:
     assert all(ok.values()), (ok, (out / f"{lang}.verify.log").read_text()[-2000:])
     # the stand-ins cannot route or answer kiwix-serve's search: those must FAIL, and so the verdict
     assert v["checks"]["route"] is False and v["checks"]["kiwix"] is False and v["all_pass"] is False
-    # Kiwix's search cannot find the pack articles (search_gate.py): required, so FAIL
-    assert v["checks"]["search"] is False and v["advisory"] == []
-    if lang != "en":            # the English entry of an English base carries no pack: nothing to sample
+    # no search pack here (run_gates.sh does not build them): Kiwix cannot find the pack articles
+    # (search_gate.py), a required check, so FAIL; the English entry of an English base carries
+    # no pack, so nothing is missed
+    assert v["checks"]["search"] is (lang == "en") and v["advisory"] == []
+    if lang != "en":
         assert v["evidence"]["search"]["titles"] >= 1 and v["evidence"]["search"]["suggest_found"] == 0
     assert v["zimcheck_version"] == "zim-tools 3.8.0"
     title = {"de": "Testland DE", "th": "Testland TH"}.get(lang)

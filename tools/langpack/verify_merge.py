@@ -24,7 +24,7 @@ from libzim.search import Query, Searcher  # noqa: E402
 from libzim.suggestion import SuggestionSearcher  # noqa: E402
 
 from tools.langpack.merge_zim import (ISO3, NO_U64, base_lineage, blob_of, derive_uuid,  # noqa: E402
-                       open_pack,
+                       open_index, open_pack,
                        parse_counter, strip_mime, utf16_units)
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
 
@@ -78,17 +78,20 @@ def main():
     ap.add_argument("--title")
     ap.add_argument("--queries", default="Vaduz,Schaan,Malbun")
     ap.add_argument("--json")
+    ap.add_argument("--index", help="the search pack whose indexes the merged file must carry")
     a = ap.parse_args()
     zm, zb = ZimReader(a.merged), ZimReader(a.base)
     am, ab = Archive(a.merged), Archive(a.base)
     packs = sorted((open_pack(p) for p in a.packs), key=lambda p: p.prefix)
     aps = [Archive(Path(p.path)) for p in packs]
+    ix = open_index(a.index) if a.index else None
 
     check("Archive.check() (MD5 + integrity)", am.check(), f"md5={am.checksum}")
     mmeta = {k.encode(): bytes(am.get_metadata(k)) for k in ("Name", "Title", "Language", "Flavour", "Description")
              if k in am.metadata_keys}
     mcfg_bytes = bytes(am.get_entry_by_path("map-config.json").get_item().content)
-    want_uuid = uuidlib.UUID(bytes=derive_uuid(zb.header.uuid, [p.uuid for p in packs], a.lang, mmeta, mcfg_bytes))
+    want_uuid = uuidlib.UUID(bytes=derive_uuid(zb.header.uuid, [p.uuid for p in packs] + ([ix.uuid] if ix else []),
+                                               a.lang, mmeta, mcfg_bytes))
     check("UUID derived (inputs + generated map-config/metadata, S3) and fresh",
           am.uuid == want_uuid and am.uuid not in [ab.uuid] + [x.uuid for x in aps], f"{am.uuid}")
     check("header: no v0 title list", zm.header.title_ptr_pos == NO_U64)
@@ -113,8 +116,8 @@ def main():
             if d.ns == C:
                 pkeys[d.key] = k
     gen_new = {(M, b"Flavour"), (M, b"Name"), (M, b"Title"), (M, b"Language")} - bkeys
-    expected = bkeys | set(pkeys) | gen_new
-    check("key set == base + pack C entries (+ generated metadata)", set(mkeys) == expected,
+    expected = bkeys | set(pkeys) | gen_new | ({(X, b"fulltext/xapian"), (X, b"title/xapian")} if ix else set())
+    check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)", set(mkeys) == expected,
           f"missing={len(expected - set(mkeys))} extra={sorted(set(mkeys) - expected)[:3]}")
     check("no pack M/X/W entry leaked", not any(k in pkeys for k in mkeys if k[0] != C))
 
@@ -252,9 +255,17 @@ def main():
             except Exception:  # noqa: BLE001
                 badr += 1
     check("every C redirect resolves", badr == 0, f"redirects={nred}")
-    xok = all(blob_of(zm, (X, n)) == blob_of(zb, (X, n)) for n in (b"fulltext/xapian", b"title/xapian"))
-    check("base Xapian databases kept (byte-identical)", xok and am.has_title_index == ab.has_title_index,
-          f"title={am.has_title_index} fulltext={am.has_fulltext_index}")
+    if ix is None:
+        xok = all(blob_of(zm, (X, n)) == blob_of(zb, (X, n)) for n in (b"fulltext/xapian", b"title/xapian"))
+        check("base Xapian databases kept (byte-identical)", xok and am.has_title_index == ab.has_title_index,
+              f"title={am.has_title_index} fulltext={am.has_fulltext_index}")
+    else:
+        xok = all(blob_of(zm, (X, n)) == blob_of(ix.z, (X, n)) for n in (b"fulltext/xapian", b"title/xapian"))
+        check("the search pack's Xapian databases replace the base's (byte-identical)",
+              xok and am.has_title_index and am.has_fulltext_index,
+              f"title={am.has_title_index} fulltext={am.has_fulltext_index} pack={os.path.basename(a.index)}")
+        lin = base_lineage(a.base, zb.header.uuid, check_md5=True)
+        check("the search pack was built for this base", ix.base_uuid in lin, f"{ix.base_uuid[:8]}")
 
     ss = SuggestionSearcher(am)
     for q in a.queries.split(","):

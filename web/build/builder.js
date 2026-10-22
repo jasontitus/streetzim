@@ -339,6 +339,7 @@
     };
   })();
   const packName = (id) => {
+    if (id === 'search') return 'the search index';      // the entry's search pack (Kiwix's search)
     const m = entry && entry.packs.find((p) => p.lang === id);
     return langName(id, m ? m.label.replace(/ Wikipedia$/, '') : id) + ' Wikipedia';
   };

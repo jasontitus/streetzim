@@ -129,11 +129,11 @@ browser_checks() {   # M L(base|lang)
     LL=$L; MODE=merged
     PF=$($PY -c 'import json,sys,os; r=json.load(open(sys.argv[1])); p=r["packs"].get(sys.argv[2]); print(os.path.join(sys.argv[3], p["file"]) if p else "-")' "$W/recipes/$TAG/$L.json" "$L" "$PACKS")
     # kiwix-serve: suggest, search, an article + pack.json per pack, catalog Title/Language
-      $PY - "$B" "$book" "$W/recipes/$TAG/$L.json" "$PACKS" "$OUT/catalog.xml" "$SEARCH" > "$OUT/$L.kiwix.json" 2>&1 <<'PY'
+      $PY - "$B" "$book" "$W/recipes/$TAG/$L.json" "$PACKS" "$OUT/catalog.xml" "$SEARCH" "$OUT/$L.search.json" > "$OUT/$L.kiwix.json" 2>&1 <<'PY'
 import json, os, re, sys, urllib.parse, urllib.request
 sys.path.insert(0, os.environ["LP_ROOT"])
 from tools.langpack.zimfmt import ZimReader
-B, book, rp, pd, cat, q = sys.argv[1:7]
+B, book, rp, pd, cat, q, sgj = sys.argv[1:8]
 r = json.load(open(rp))
 def get(u):
     try:
@@ -148,6 +148,8 @@ res["suggest"] = n; res["checks"]["suggest"] = n >= 1
 st, body = get(f"{B}/search?books.name={book}&pattern={urllib.parse.quote(q)}&format=xml")
 n = body.count(b"<item>"); res["search"] = {"status": st, "items": n}; res["checks"]["search"] = st == 200 and n >= 1
 for lang, p in r["packs"].items():
+    if p.get("kind") == "search":
+        continue
     z = ZimReader(os.path.join(pd, p["file"])); v1 = z.v1_listing()
     d = z.dirent_at(next(iter(z.iter_u32_blob(*v1))))
     st1, _ = get(f"{B}/content/{book}/{urllib.parse.quote(d.path.decode())}")
@@ -161,6 +163,22 @@ lang = (re.search(r"<language>(.*?)</language>", ent) or [None, None])[1]
 import html
 res["catalog"] = {"title": html.unescape(title or ""), "language": lang, "want_title": r["title"], "want_language": r["language"]}
 res["checks"]["catalog"] = html.unescape(title or "") == r["title"] and lang == r["language"]
+# pack-only titles (search_gate.py's sample) through kiwix-serve's /suggest and /search
+try:
+    rows = json.loads([x for x in open(sgj, encoding="utf-8") if x.startswith("{")][-1]).get("rows") or []
+except (OSError, ValueError, IndexError):
+    rows = []
+found = []
+for row in rows[:3]:
+    t = urllib.parse.quote(row["title"])
+    st, body = get(f"{B}/suggest?content={book}&term={t}&count=10")
+    sug = st == 200 and any(str(d.get("path", "")).startswith("~w/") for d in json.loads(body or b"[]"))
+    st, body = get(f"{B}/search?books.name={book}&pattern={t}&format=xml")
+    ful = st == 200 and b"/~w/" in body
+    found.append({"title": row["title"], "suggest": sug, "search": ful})
+res["pack_titles"] = found
+if rows:
+    res["checks"]["pack_titles_suggest"] = all(x["suggest"] for x in found)
 res["pass"] = all(res["checks"].values())
 print(json.dumps(res, ensure_ascii=False))
 PY
@@ -238,25 +256,30 @@ while read -r line <&3; do
   rm -f "$OUT/$L".*
   stamp "$L" > "$OUT/$L.stamp"
   mapfile -t P < <($PY -c 'import json,sys; [print(f) for f in json.loads(sys.argv[1])["pack_files"]]' "$line")
+  # the entry's search pack (index_pack.py; recipe2 menu found it), if any
+  IDX=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get("index_file") or "")' "$line")
+  IA=(); [ -n "$IDX" ] && IA=(--index "$IDX")
   M="$W/merged/m-$TAG-$L.zim"
   T=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TITLES" "$L"); TA=(); [ -n "$T" ] && TA=(--title "$T")
   wait_mem
-  $N $PY "$TL/merge_zim.py" "$BASE" "${P[@]}" -o "$M" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
+  $N $PY "$TL/merge_zim.py" "$BASE" "${P[@]}" "${IA[@]}" -o "$M" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
      --language-meta "$LANGUAGE_META" > "$OUT/$L.merge.json" 2>&1
-  $N $PY - "$W/recipes/$TAG/$L.json" "$BASE" "$M" "${P[@]}" > "$OUT/$L.same" 2>&1 <<'PY'
+  IDX="$IDX" $N $PY - "$W/recipes/$TAG/$L.json" "$BASE" "$M" "${P[@]}" > "$OUT/$L.same" 2>&1 <<'PY'
 import json, sys, os
 sys.path.insert(0, os.environ["LP_ROOT"])
 from tools.langpack.recipe2 import materialize
-from tools.langpack.merge_zim import open_pack
+from tools.langpack.merge_zim import SEARCH, open_pack
 r = json.load(open(sys.argv[1])); base, merged = sys.argv[2], sys.argv[3]
 packs = {open_pack(p).lang: p for p in sys.argv[4:]}
+if os.environ.get("IDX"):
+    packs[SEARCH] = os.environ["IDX"]
 tmp = merged + ".fromrecipe"
 materialize(r, base, packs, tmp)
 same = os.system(f"cmp -s '{tmp}' '{merged}'") == 0
 os.remove(tmp); print("PASS" if same else "FAIL")
 PY
   wait_mem
-  $N $PY "$TL/verify_merge.py" "$M" "$BASE" "${P[@]}" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
+  $N $PY "$TL/verify_merge.py" "$M" "$BASE" "${P[@]}" "${IA[@]}" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
      --language-meta "$LANGUAGE_META" --queries "$SEARCH" > "$OUT/$L.verify.log" 2>&1
   wait_mem
   zimcheck_merged "$M" "$OUT/$L.zimcheck.log"

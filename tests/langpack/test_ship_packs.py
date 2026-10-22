@@ -58,7 +58,8 @@ for line in menu.splitlines():
     e = json.loads(line); L = e["L"]
     r = json.load(open(os.path.join(work_dir(), "recipes", tag, f"{L}.json")))
     v = {"lang": L, "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
-         "recipe_file_md5": r.get("file_md5"), "packs": {os.path.basename(f): md5_file(f) for f in e["pack_files"]},
+         "recipe_file_md5": r.get("file_md5"),
+         "packs": {os.path.basename(f): md5_file(f) for f in e["pack_files"] + [e.get("index_file")] if f},
          "checks": {}, "all_pass": L not in fail}
     p = verdict_path(base, L); os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump(v, open(p, "w"))
@@ -172,7 +173,13 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
     assert len(ups) == 1 and ups[0]["item"] == "streetzim-testland-lang"
     sent = sorted(a for a in ups[0]["args"] if a.endswith(".zim"))
-    assert sent == [_pk(ship, x) for x in ("de", "fr", "th")]
+    # the packs and each entry's search pack (index_pack.py)
+    u8 = lpzims.read_uuid(ship.base)[:8]
+    assert sent == sorted([_pk(ship, x) for x in ("de", "fr", "th")]
+                          + [f"osm_testland_search-{x}_2026-10-21_{u8}.zim" for x in ("de", "fr", "th")])
+    rde_ = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
+    assert rde_["packs"]["search"]["kind"] == "search"
+    assert rde_["packs"]["search"]["url"] == f"{{proxy}}/streetzim-testland-lang/osm_testland_search-de_2026-10-21_{u8}.zim"
     for m in ("--metadata=mediatype:data", "--metadata=collection:opensource", "--metadata=language:deu",
               "--metadata=language:fra", "--metadata=language:tha"):
         assert m in ups[0]["args"], ups[0]["args"]

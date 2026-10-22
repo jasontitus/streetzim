@@ -17,9 +17,15 @@
   Title, Language, Flavour[, Description]), the pack dirents (cluster and
   MIME renumbered), the pointer entries for them, and the MD5.
 
+* An optional SEARCH PACK (index_pack.py: libzim's own indexes of the base's
+  pages and the packs' articles) gives the merged file its X/title/xapian and
+  X/fulltext/xapian, which replace the base's (those bytes stay, unused): Kiwix
+  searches through them. Its clusters are copied verbatim like a pack's; only
+  those two entries of it are carried over.
+
 Layout:
-  head | base [cs, d1) verbatim | pack 1..N clusters verbatim | merge cluster
-  | path ptrs | cluster ptrs | new dirents | md5
+  head | base [cs, d1) verbatim | pack 1..N clusters verbatim | search pack
+  clusters verbatim | merge cluster | path ptrs | cluster ptrs | new dirents | md5
 
 The emitter yields bytes or Ref(src, off, len) pieces; merge_zim writes them,
 recipe2.py turns the same stream into a streetzim-recipe/2 file, so the two
@@ -47,7 +53,7 @@ if ROOT not in sys.path:
 from tools.langpack.zimfmt import (  # noqa: E402
     HEADER, NO_U32, NO_U64, REDIRECT_MIME, U32, U64, Dirent, Header, ZimReader)
 
-MERGER_VERSION = "streetzim-merge/2.1"
+MERGER_VERSION = "streetzim-merge/2.2"      # 2.2: search packs
 MERGE_UUID_NS = uuidlib.UUID("6f1d3c52-2b9e-4f57-9a43-0d6f5e1c7a11")
 C, M, W, X = (ord(c) for c in "CMWX")
 KEY_V1 = (X, b"listing/titleOrdered/v1")
@@ -209,6 +215,7 @@ class Plan:
     layout: dict = field(default_factory=dict)
     meta: dict = field(default_factory=dict)
     timings: dict = field(default_factory=dict)
+    index: Pack | None = None                           # the search pack, if any
 
     def new_idx_base(self, i: int) -> int:
         return i - bisect.bisect_left(self.R, i) + bisect.bisect_right(self.A, i)
@@ -270,6 +277,26 @@ def derive_uuid(base_uuid: bytes, pack_uuids: list[bytes], lang: str, meta: dict
     return uuidlib.uuid5(MERGE_UUID_NS, src).bytes
 
 
+SEARCH = "search"                       # the search pack's key among a recipe's packs
+INDEX_KEYS = ((X, b"fulltext/xapian"), (X, b"title/xapian"))
+
+
+def open_index(path: str) -> Pack:
+    """A search pack (index_pack.py): its two Xapian indexes, and the base it
+    was built for (its sidecar, <path>.json)."""
+    z = ZimReader(path)
+    for k in INDEX_KEYS:
+        i = z.find(*k)
+        if i is None or z.dirent_at(i).is_redirect:
+            raise MergeError(f"{path}: no {k[1].decode()} (not a search pack)")
+    p = Pack(path, z, SEARCH, b"", z.header.uuid)
+    try:
+        p.base_uuid = str(json.load(open(path + ".json")).get("base_uuid", "")).replace("-", "").lower()
+    except (OSError, ValueError):
+        p.base_uuid = ""
+    return p
+
+
 def open_pack(path: str) -> Pack:
     z = ZimReader(path)
     prefixes = set()
@@ -298,7 +325,7 @@ def open_pack(path: str) -> Pack:
 def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str | None = None,
                title: str | None = None, description: str | None = None,
                language_meta: str = "list", region_langs: list[str] | None = None,
-               allow_foreign_packs: bool = False) -> Plan:
+               allow_foreign_packs: bool = False, index_path: str | None = None) -> Plan:
     t0 = time.perf_counter()
     base = ZimReader(base_path)
     bh = base.header
@@ -316,6 +343,10 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     for a, b in itertools.pairwise(packs):
         if b.prefix.startswith(a.prefix) or a.prefix == b.prefix:
             raise MergeError(f"pack prefixes not disjoint: {a.prefix} {b.prefix}")
+    index = open_index(index_path) if index_path else None
+    if index is not None and not allow_foreign_packs and index.base_uuid not in lineage:
+        raise MergeError(f"{os.path.basename(index.path)}: built for base {index.base_uuid or '(unknown)'}, "
+                         f"not this one ({bh.uuid.hex()})")
     Nb = bh.entry_count
     cache: dict[int, Dirent] = {}
 
@@ -379,6 +410,20 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
                     seen.add((d.cluster, d.blob))
                     km = strip_mime(p.z.mimes[d.mime])
                     pack_counts[km] = pack_counts.get(km, 0) + 1
+            entries.append(e)
+    if index is not None:
+        # the search pack's two indexes replace the base's; nothing else of it is carried
+        index.first_cluster = nxt
+        nxt += index.z.header.cluster_count
+        index.mime_map = [intern(m) for m in index.z.mimes]
+        index.region = cluster_region(index.z)
+        for k in INDEX_KEYS:
+            ki = index.z.find(*k)
+            assert ki is not None                 # open_index checked
+            d = index.z.dirent_at(ki)
+            assert d.cluster is not None and d.blob is not None
+            e = NewEntry(d.key, d.title_raw, d.parameter, False, index.mime_map[d.mime])
+            e.cluster, e.blob = d.cluster + index.first_cluster, d.blob
             entries.append(e)
     Cm = nxt                                       # merge cluster number
 
@@ -472,7 +517,7 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     Rs = sorted(R)
     A = [e.ins for e in entries]
     plan = Plan(base, packs, lang, mimes=mimes, entries=entries, A=A, R=Rs, override_of=override_of,
-                base_v1=base_v1, meta={k.decode(): v.decode() for k, v in meta.items()})
+                base_v1=base_v1, meta={k.decode(): v.decode() for k, v in meta.items()}, index=index)
     c_stable = all(a >= nC for j, a in enumerate(A) if entries[j].overrides is None) and \
         all(r in override_of for r in Rs)
     if not c_stable:
@@ -553,7 +598,7 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     if HEADER.size + len(mime_blob) > cs:
         raise MergeError("merged MIME list does not fit before the base's first cluster")
     pos = d1
-    for p in packs:
+    for p in packs + ([index] if index is not None else []):
         p.pos = pos
         pos += p.region[1] - p.region[0]
     mc = pos
@@ -572,7 +617,8 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     bm = base.find(*KEY_MAIN)
     if bm is not None:
         main = plan.new_idx_base(bm)
-    new_uuid = derive_uuid(bh.uuid, [p.uuid for p in packs], lang, final_meta, mapcfg)
+    new_uuid = derive_uuid(bh.uuid, [p.uuid for p in packs] + ([index.uuid] if index is not None else []),
+                           lang, final_meta, mapcfg)
     plan.header = Header(0x044D495A, 6, bh.minor, new_uuid, N, Cn, path_ptr_pos, NO_U64,
                          cluster_ptr_pos, HEADER.size, main, NO_U32, checksum_pos)
     plan.layout.update({
@@ -596,6 +642,8 @@ def pieces(plan: Plan) -> Iterator[bytes | Ref]:
     yield Ref("base", cs, L["base_dirents_end"] - cs)
     for k, p in enumerate(plan.packs):
         yield Ref(("pack", k), p.region[0], p.region[1] - p.region[0])
+    if plan.index is not None:
+        yield Ref(("index", 0), plan.index.region[0], plan.index.region[1] - plan.index.region[0])
     # merge cluster
     blobs = plan.blobs
     w, fmt = (8, U64) if L["merge_cluster_extended"] else (4, U32)
@@ -659,7 +707,7 @@ def pieces(plan: Plan) -> Iterator[bytes | Ref]:
     # cluster pointers
     yield Ref("base", bh.cluster_ptr_pos, 8 * bh.cluster_count)
     cp = bytearray()
-    for p in plan.packs:
+    for p in plan.packs + ([plan.index] if plan.index is not None else []):
         delta = p.pos - p.region[0]
         for o in p.z.iter_u64_table(p.z.header.cluster_ptr_pos, p.z.header.cluster_count):
             cp += U64.pack(o + delta)
@@ -669,8 +717,18 @@ def pieces(plan: Plan) -> Iterator[bytes | Ref]:
     yield b"".join(e.encode() for e in entries)
 
 
+def ref_path(plan: Plan, r: Ref) -> str:
+    """The input file a Ref reads: the base, a pack, or the search pack."""
+    if isinstance(r.src, str):
+        return plan.base.path
+    if r.src[0] == "index":
+        assert plan.index is not None
+        return plan.index.path
+    return plan.packs[r.src[1]].path
+
+
 def read_ref(plan: Plan, r: Ref, chunk: int = CHUNK) -> Iterator[bytes]:
-    path = plan.base.path if isinstance(r.src, str) else plan.packs[r.src[1]].path
+    path = ref_path(plan, r)
     fd = os.open(path, os.O_RDONLY)
     try:
         pos, end = r.off, r.off + r.n
@@ -716,7 +774,8 @@ def merge(base, packs, out, lang, **kw) -> dict:
     t2 = time.perf_counter()
     return {"output": out, "bytes": plan.layout["total"], "md5": digest.hex(),
             "uuid": str(uuidlib.UUID(bytes=plan.header.uuid)), "lang": lang,
-            "packs": [p.lang for p in plan.packs], "entries": plan.header.entry_count,
+            "packs": [p.lang for p in plan.packs], "search_pack": bool(plan.index),
+            "entries": plan.header.entry_count,
             "clusters": plan.header.cluster_count, "listing_entries": plan.listing_entries,
             "pack_fronts": len(plan.pack_front), "metadata": plan.meta,
             "generated_tail": plan.layout["generated_tail"], "plan_s": round(t1 - t0, 4),
@@ -739,9 +798,11 @@ def main(argv=None):
                     help="accept packs whose pack.json base_uuid is not this base or a recorded parent")
     ap.add_argument("--language-meta", choices=("list", "map"), default="list",
                     help="M/Language: list = L + pack languages (spec); map = L only")
+    ap.add_argument("--index", help="a search pack (index_pack.py) whose indexes replace the base's")
     a = ap.parse_args(argv)
     kw = {"region": a.region, "title": a.title, "description": a.description, "language_meta": a.language_meta,
-          "region_langs": [x for x in a.region_langs.split(",") if x], "allow_foreign_packs": a.allow_foreign_packs}
+          "region_langs": [x for x in a.region_langs.split(",") if x], "allow_foreign_packs": a.allow_foreign_packs,
+          "index_path": a.index}
     if a.plan_only:
         t = time.perf_counter()
         p = build_plan(a.base, a.packs, a.lang, **kw)

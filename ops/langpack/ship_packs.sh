@@ -15,7 +15,8 @@
 #   2. prefetch.py: SQL dumps, title maps and Wikidata text for those packs
 #      (network; the pack builds then run offline).
 #   3. build_packs.sh for every pack language without a gated pack for this
-#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done).
+#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done), then
+#      search_packs.py: a search pack per distinct pack set (index_pack.py).
 #   4. run_gates.sh, streamed (one merged file on disk at a time), RESUME=1:
 #      an entry whose verdict already passes for its recipe is not run again.
 #      The region file is tools/langpack/regions/<REGION>.json when there is
@@ -144,6 +145,14 @@ if [ -n "$TODO" ]; then
 else
   say "packs: all gated for this base already"
 fi
+
+# 3b. search packs: Kiwix's indexes of the base's pages and each entry's
+# packs (index_pack.py), one per distinct pack set; the gates require Kiwix
+# to find pack articles
+say "search packs"
+"${LOW[@]}" "${LIM[@]}" timeout 43200 "$PY" "$TL/search_packs.py" "$BASE" "$PACKS" --region "$REGION" \
+  --langs "$LANGS" --region-langs "$RL" --cache "$WP_CACHE" ${PACK_DATE:+--date "$PACK_DATE"} >> "$LOG" 2>&1 \
+  || say "search_packs.py rc=$? (an entry without its search pack fails the search gate)"
 
 # 4. gates
 RJ=$TL/regions/$REGION.json

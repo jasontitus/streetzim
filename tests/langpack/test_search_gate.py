@@ -41,6 +41,8 @@ def test_found_where_the_title_index_has_them(lp: SimpleNamespace) -> None:
     assert rc == 0 and out["pass"] and out["suggest_found"] == out["titles"] == 3, out
 
 
-def test_nothing_to_sample(lp: SimpleNamespace) -> None:
+def test_a_file_without_packs_passes(lp: SimpleNamespace) -> None:
+    """An entry with no pack (English on an English base without region
+    packs): the base's own indexes find everything in it."""
     rc, out = _gate(lp.base, lp.base)
-    assert rc == 2 and not out["pass"] and "no pack-only article" in out["why"]
+    assert rc == 0 and out["pass"] and "no pack in this file" in out["why"]
