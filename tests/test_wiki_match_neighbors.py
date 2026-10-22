@@ -178,10 +178,22 @@ def test_the_names_lookup_looks_around_too(tmp_path):
     ({"highway": "primary"}, "LineString", "street"),
     ({"railway": "rail"}, "LineString", "street"),
     ({"aerialway": "cable_car"}, "LineString", "street"),
-    ({"highway": "bus_stop"}, "Point", "other"),
-    ({"railway": "station"}, "Point", "other"),
+    ({"highway": "bus_stop"}, "Point", "stop"),
+    ({"highway": "crossing"}, "Point", "other"),
+    ({"railway": "level_crossing"}, "Point", "other"),
+    ({"public_transport": "stop_position", "highway": "primary"}, "Point", "stop"),
+    ({"public_transport": "platform", "railway": "platform"}, "LineString", "stop"),
+    ({"amenity": "bus_station"}, "LineString", "stop"),
+    ({"railway": "station"}, "Point", "station"),
+    ({"railway": "station", "building": "train_station"}, "LineString", "station"),
+    ({"railway": "tram_stop"}, "Point", "station"),
+    ({"railway": "tram_stop", "public_transport": "stop_position"}, "Point", "station"),
+    ({"railway": "stop", "public_transport": "platform"}, "Point", "station"),
+    ({"railway": "halt"}, "Point", "station"),
+    ({"building": "train_station"}, "LineString", "other"),
     ({"amenity": "clock"}, "Point", "other"),
-    ({"tourism": "information"}, "Point", "other"),
+    ({"tourism": "information"}, "Point", "information"),
+    ({"tourism": "information", "place": "locality"}, "Point", "place"),
     ({"building": "church"}, "LineString", "other"),
 ])
 def test_osm_kind(tags, gtype, kind):
@@ -211,7 +223,146 @@ def test_the_extractors_know_each_objects_sort(tmp_path):
         "</osm>\n", encoding="utf-8")
     wiki = extract_wiki_tags_pbf(str(osm), precut=True)
     assert {k[0] + "@" + str(k[1]): v.kind for k, v in wiki.items()} == {
-        "zürich@473744": "place", "zürich@473700": "other", "limmat@473700": "water"}
+        "zürich@473744": "place", "zürich@473700": "information", "limmat@473700": "water"}
     names = extract_name_tags_pbf(str(osm), ["rm"], precut=True)
     assert {k[0] + "@" + str(k[1]): v.kind for k, v in names.items()} == {
-        "zürich@473744": "place", "zürich@473700": "other", "limmat@473700": "water"}
+        "zürich@473744": "place", "zürich@473700": "information", "limmat@473700": "water"}
+
+
+# --- review of cbea330 ------------------------------------------------------
+
+def test_a_stop_takes_only_a_stop_and_a_station_only_a_station():
+    # The bus stop "Patras" beside Patras railway station; a stop of the
+    # station's name; the station record itself.
+    bus = {"name": "Patras", "type": "poi", "subtype": "bus", "lat": LAT, "lon": LON}
+    station = OsmRef("station", {"wikidata": "Q1"})
+    stop = OsmRef("stop", {"wikidata": "Q2"})
+    assert match(bus, {("patras",) + NEXT: station}) is None
+    assert match(bus, {("patras",) + NEXT: stop}) is stop
+    assert match(bus, {("patras",) + NEXT: OsmRef("other", {"wikidata": "Q3"})}) is None   # "Kurtheater"
+    rail = dict(bus, subtype="railway")
+    assert match(rail, {("patras",) + NEXT: station}) is station
+    assert match(rail, {("patras",) + NEXT: stop}) is None
+    assert match(rail, {("patras",) + NEXT: OsmRef("other", {"wikidata": "Q3"})}) is None
+
+
+def test_an_information_board_takes_nothing_and_gives_nothing():
+    board = {"name": "Wettingen", "type": "poi", "subtype": "information", "lat": LAT, "lon": LON}
+    for kind in ("station", "other", "information", "stop", "place"):
+        assert match(board, {("wettingen",) + NEXT: OsmRef(kind, {"wikidata": "Q1"})}) is None
+    theatre = {"name": "Kurtheater", "type": "poi", "subtype": "theatre", "lat": LAT, "lon": LON}
+    for kind in ("information", "stop", "station"):
+        assert match(theatre, {("kurtheater",) + NEXT: OsmRef(kind, {"wikidata": "Q1"})}) is None
+    assert match(theatre, {("kurtheater",) + NEXT: OsmRef("other", {"wikidata": "Q1"})}) == {"wikidata": "Q1"}
+
+
+def test_in_its_own_cell_the_sort_does_not_matter():
+    # As before the cells around were looked at: a same-cell match keeps.
+    bus = {"name": "Patras", "type": "poi", "subtype": "bus", "lat": LAT, "lon": LON}
+    station = OsmRef("station", {"wikidata": "Q1"})
+    assert match(bus, {("patras", 460000, 80000): station}) is station
+
+
+def test_the_cells_beyond_must_agree():
+    # A ruin of the castle's name two cells away tagged with the village;
+    # the castle itself next door.
+    castle = {"name": "Castle of Monolithos", "type": "poi", "subtype": "castle", "lat": LAT, "lon": LON}
+    near = OsmRef("other", {"wikipedia": "en:Monolithos,_Greece", "wikidata": "Q1"})
+    far = OsmRef("other", {"wikidata": "Q56450446"})
+    assert match(castle, {("castle of monolithos",) + NEXT: near,
+                          ("castle of monolithos", 460002, 80000): far}) is None
+    # The same article beyond, or another sort beyond: taken.
+    assert match(castle, {("castle of monolithos",) + NEXT: near,
+                          ("castle of monolithos", 460002, 80001): OsmRef("other", dict(near))}) is near
+    assert match(castle, {("castle of monolithos",) + NEXT: near,
+                          ("castle of monolithos", 460000, 79998): OsmRef("place", {"wikidata": "Q9"})}) is near
+    # Beyond alone: none; three cells away: not looked at.
+    assert match(castle, {("castle of monolithos", 460002, 80000): far}) is None
+    assert match(castle, {("castle of monolithos",) + NEXT: near,
+                          ("castle of monolithos", 460003, 80000): far}) is near
+
+
+def test_an_ambiguous_folded_key_beyond_matches_none():
+    poi = {"name": "Kaplica grobowa", "type": "poi", "lat": LAT, "lon": LON}
+    refs = {("kaplica grobowa",) + NEXT: OsmRef("other", {"wikidata": "Q1"}),
+            ("kaplica grobowa", 459998, 80000): OsmRef("other", {"wikidata": "Q1"}),
+            ("kapliča grobowa", 459998, 80000): OsmRef("other", {"wikidata": "Q2"})}
+    assert match(poi, refs) is None
+
+
+def test_a_disagreeing_own_cell_is_not_rescued_from_next_door():
+    clean = place({"wikidata": "Q72"})
+    # Its own-script name in its own cells: two articles.
+    feat = {"name": "Zurich", "name_native": "Züri", "type": "place", "lat": LAT, "lon": LON,
+            "_pts": [[LAT, LON], [46.1, 8.1]]}
+    refs = {("züri", 460000, 80000): place({"wikidata": "Q1"}),
+            ("züri", 461000, 81000): place({"wikidata": "Q2"}),
+            ("züri",) + NEXT: clean}
+    assert match(feat, refs) is None
+    # Folded in its own cell: ambiguous.
+    feat = {"name": "Zurich", "type": "place", "lat": LAT, "lon": LON}
+    refs = {("zürich", 460000, 80000): place({"wikidata": "Q1"}),
+            ("zúrich", 460000, 80000): place({"wikidata": "Q2"}),
+            ("zurich",) + NEXT: clean}
+    assert match(feat, refs) is None
+
+
+def test_a_poi_with_a_plain_entry_is_not_taken():
+    poi = {"name": "Roloi", "type": "poi", "lat": LAT, "lon": LON}
+    assert match(poi, {("roloi",) + NEXT: {"wikidata": "Q3"}}) is None
+
+
+def test_without_a_folded_index_every_name_looks_around():
+    feat = {"name": "Athens", "name_native": "Αθήνα", "type": "place", "lat": LAT, "lon": LON}
+    refs = {("αθήνα",) + NEXT: place({"wikidata": "Q1524"})}
+    assert W.feature_wiki(feat, refs) == {"wikidata": "Q1524"}
+
+
+def test_the_match_says_whether_it_came_from_next_door():
+    own = place({"wikidata": "Q1"})
+    feat = {"name": "Zurich", "type": "place", "lat": LAT, "lon": LON}
+    assert W.feature_wiki_match(feat, {("zurich", 460000, 80000): own}) == (own, False)
+    assert W.feature_wiki_match(feat, {("zurich",) + NEXT: own}) == (own, True)
+    assert W.feature_wiki_match(feat, {}) == (None, False)
+    assert W.feature_wiki_match(feat, {("x", 1, 2): own}) == (None, False)
+
+
+def _geo(tmp_path, feats, refs, bundled):
+    tmp_path.mkdir(exist_ok=True)
+    path = tmp_path / "search.jsonl"
+    path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in feats), encoding="utf-8")
+    (tmp_path / "chunks").mkdir()
+    return W._search_bucket(search_features_path=str(path), wikidata_data=None,
+                            wiki_cross_refs=refs, loc_lookup=None, _bundled_set=bundled,
+                            chunk_tmp=str(tmp_path / "chunks")).wiki_geo
+
+
+def test_a_city_places_its_article_over_an_earlier_namesake(tmp_path):
+    # São Paulo: a village in Pará tagged with the city's article comes
+    # first in the file; the city record places the row. A village of
+    # the name does not take it from a town either way round.
+    tags = {"wikipedia": "en:São_Paulo", "wikidata": "Q174"}
+    village = {"name": "São Paulo", "type": "place", "subtype": "village", "lat": -1.20432, "lon": -47.1584}
+    city = {"name": "São Paulo", "type": "place", "subtype": "city", "lat": -23.5506464, "lon": -46.6333848}
+    refs = {("são paulo", -12043, -471584): place(dict(tags)), ("são paulo",) + SPCELL: place(dict(tags))}
+    assert _geo(tmp_path, [village, city], refs, {"São_Paulo"})["São_Paulo"][:3] == [-23.55065, -46.63338, "place"]
+
+
+def test_an_own_cell_match_places_over_an_earlier_one_from_next_door(tmp_path):
+    tags = {"wikipedia": "en:Fira", "wikidata": "Q1"}
+    near = {"name": "Fira", "type": "poi", "subtype": "ferry_terminal", "lat": LAT, "lon": LON}
+    own = {"name": "Fira", "type": "poi", "subtype": "attraction", "lat": 46.1, "lon": 8.1}
+    refs = {("fira",) + NEXT: OsmRef("other", dict(tags)), ("fira", 461000, 81000): OsmRef("other", dict(tags))}
+    assert _geo(tmp_path, [near, own], refs, {"Fira"})["Fira"][:2] == [46.1, 8.1]
+
+
+def test_equal_records_keep_the_first(tmp_path):
+    tags = {"wikipedia": "en:Fira", "wikidata": "Q1"}
+    a = {"name": "Fira", "type": "poi", "lat": LAT, "lon": LON}
+    b = {"name": "Fira", "type": "poi", "lat": 46.1, "lon": 8.1}
+    refs = {("fira", 460000, 80000): OsmRef("other", dict(tags)), ("fira", 461000, 81000): OsmRef("other", dict(tags))}
+    assert _geo(tmp_path, [a, b], refs, {"Fira"})["Fira"][:2] == [LAT, LON]
+    # A street, even from its own cell, gives way to a record from next door.
+    street = {"name": "Fira", "type": "street", "lat": 46.1, "lon": 8.1}
+    refs[("fira",) + NEXT] = refs.pop(("fira", 460000, 80000))
+    assert _geo(tmp_path / "s", [street, a], refs, {"Fira"})["Fira"][:3] == [LAT, LON, "poi"]

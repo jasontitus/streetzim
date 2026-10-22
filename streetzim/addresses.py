@@ -985,8 +985,10 @@ def osm_kind(props, gtype):
     neighbouring cell (zim_writer.feature_wiki, NEIGHBOUR_KINDS): "water"
     (waterway, water, natural=water|bay|strait, place=sea|ocean, a
     reservoir), "peak" (natural=peak, volcano, hill, saddle, ridge...),
-    "place" (any other place=*), "street" (a road, rail or lift line, not
-    its stops) or "other"."""
+    "place" (any other place=*), "information" (tourism=information: a
+    board, a guidepost), "station" (a railway station, halt or tram stop),
+    "stop" (any other stop or platform, a bus station), "street" (a road,
+    rail or lift line) or "other"."""
     nat = props.get("natural")
     if (props.get("waterway") or props.get("water") or nat in ("water", "bay", "strait")
             or props.get("place") in ("sea", "ocean")
@@ -996,6 +998,14 @@ def osm_kind(props, gtype):
         return "peak"
     if props.get("place"):
         return "place"
+    if props.get("tourism") == "information":
+        return "information"
+    # A station first: a tram stop is also its stop position.
+    if props.get("railway") in ("station", "halt", "stop", "tram_stop"):
+        return "station"
+    if (props.get("highway") == "bus_stop" or props.get("amenity") == "bus_station"
+            or props.get("public_transport") in ("platform", "stop_position")):
+        return "stop"
     if gtype != "Point" and (props.get("highway") or props.get("railway")
                              or props.get("aerialway")):
         return "street"
