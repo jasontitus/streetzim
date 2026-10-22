@@ -70,3 +70,45 @@ def test_a_corrupt_base_chunk_stops_the_build(page: SimpleNamespace) -> None:
     assert rc == 0 and rows[0]["pass"], rows
     # the worker's chunk check stops it at the chunk, before the final MD5
     assert rows[0]["status"].startswith("Stopped") and "does not match the recipe" in rows[0]["status"], rows
+
+
+def test_a_copy_one_viewer_patch_old_still_builds(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
+    """Plan review B2: recipes made from a base whose viewer was patched in
+    place; the visitor's copy has the viewer before the patch. The page's
+    check of the copy and the worker's chunk checks skip the viewer slots
+    (the recipe carries them), so the copy builds the new file, byte for
+    byte; one-click from the patched base on the server too."""
+    from tests.langpack import lpzims
+    from tests.langpack.test_viewer_slots import V2, patch
+    old = tmp_path / "old" / "osm-testland-2026-10-13.zim"
+    old.parent.mkdir()
+    lpzims.write_base(old, slots=lpzims.VIEWER_V1)
+    base = tmp_path / "bases-s" / old.name
+    base.parent.mkdir()
+    patch(old, base, V2, tmp_path)
+    builder = tmp_path / "builder-s.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    import hashlib
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": base.name, "size": str(base.stat().st_size), "md5": hashlib.md5(base.read_bytes()).hexdigest()}]}))
+    r = subprocess.run(["bash", str(ROOT / "ops" / "langpack" / "ship_packs.sh"), "testland", str(base)],
+                       capture_output=True, text=True, timeout=900, env={**ship.env, "BUILDER": str(builder)})
+    assert r.returncode == 0, r.stdout[-3000:]
+    rec = tmp_path / "recipes"
+    shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
+                          capture_output=True).returncode == 0
+    p = SimpleNamespace(ship=SimpleNamespace(base=old), rec=rec, packs=ship.work / "packs" / base.name[:-4],
+                        out=tmp_path / "out")
+    rc, rows = _e2e(p, "de", "file")                    # --base: the OLD copy
+    assert rc == 0 and rows[0]["pass"], rows
+    p.ship = SimpleNamespace(base=base)
+    rc, rows = _e2e(p, "th", "net")                     # the server's (patched) base
+    assert rc == 0 and rows[0]["pass"], rows

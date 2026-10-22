@@ -23,7 +23,7 @@ from libzim.reader import Archive  # noqa: E402
 from libzim.search import Query, Searcher  # noqa: E402
 from libzim.suggestion import SuggestionSearcher  # noqa: E402
 
-from tools.langpack.merge_zim import (ISO3, NO_U64, base_lineage, blob_of, derive_uuid,  # noqa: E402
+from tools.langpack.merge_zim import (ISO3, NO_U64, base_lineage, blob_of, content_md5s, derive_uuid,  # noqa: E402
                        open_index, open_pack,
                        parse_counter, strip_mime, utf16_units)
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
@@ -91,7 +91,8 @@ def main():
              if k in am.metadata_keys}
     mcfg_bytes = bytes(am.get_entry_by_path("map-config.json").get_item().content)
     want_uuid = uuidlib.UUID(bytes=derive_uuid(zb.header.uuid, [p.uuid for p in packs] + ([ix.uuid] if ix else []),
-                                               a.lang, mmeta, mcfg_bytes))
+                                               a.lang, mmeta, mcfg_bytes,
+                                               content_md5s(a.base, [p.path for p in packs] + ([a.index] if ix else []))))
     check("UUID derived (inputs + generated map-config/metadata, S3) and fresh",
           am.uuid == want_uuid and am.uuid not in [ab.uuid] + [x.uuid for x in aps], f"{am.uuid}")
     check("header: no v0 title list", zm.header.title_ptr_pos == NO_U64)

@@ -272,7 +272,13 @@
     const n = b.sha256.length;
     for (const k of n > 1 ? [0, n - 1] : [0]) {
       const a = k * b.chunk;
-      const buf = await file.slice(a, Math.min(a + b.chunk, b.size)).arrayBuffer();
+      const buf = new Uint8Array(await file.slice(a, Math.min(a + b.chunk, b.size)).arrayBuffer());
+      // the viewer slots and the base's checksum are hashed zeroed (b.mask):
+      // a copy one viewer patch older or newer is still the right file
+      for (const [off, len] of b.mask || []) {
+        const lo = Math.max(off, a), hi = Math.min(off + len, a + buf.length);
+        if (lo < hi) buf.fill(0, lo - a, hi - a);
+      }
       if (hex(await crypto.subtle.digest('SHA-256', buf)) !== b.sha256[k]) return wrong;
     }
     return true;

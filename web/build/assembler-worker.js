@@ -140,10 +140,21 @@ class OpfsSink {                     // browser-private storage (folder lab-buil
 
 // ---------------------------------------------------------------- sources
 // Reads verified chunks of one source file: chunk k is bytes
-// [k*C, min((k+1)*C, size)), checked against recipe sha256[k].
+// [k*C, min((k+1)*C, size)), checked against recipe sha256[k]. A base's
+// desc.mask lists [offset, length] ranges (its viewer slots and its own
+// checksum) that the hashes were taken with zeroed: they are zeroed here
+// too before hashing (the recipe carries the slots inline and never reads
+// them from the base), so a copy one viewer patch older or newer passes.
+function maskChunk(buf, start, mask) {
+  const end = start + buf.length;
+  for (const [off, n] of mask || []) {
+    const lo = Math.max(off, start), hi = Math.min(off + n, end);
+    if (lo < hi) buf.fill(0, lo - start, hi - start);
+  }
+}
 class Source {
   constructor(name, desc, read, net) {
-    this.name = name; this.size = desc.size; this.C = desc.chunk; this.hashes = desc.sha256;
+    this.name = name; this.size = desc.size; this.C = desc.chunk; this.hashes = desc.sha256; this.mask = desc.mask || null;
     this.read = read; this.net = net; this.cache = new Map(); this.inflight = new Map();
     if (Math.ceil(this.size / this.C) !== this.hashes.length) throw new Error(`${name}: ${this.hashes.length} chunk hashes for ${this.size} bytes`);
   }
@@ -158,6 +169,7 @@ class Source {
         for (let pass = 0; ; pass++) {
           const buf = await this.read(a, b);
           if (buf.length !== b - a) throw new Error(`${this.name} chunk ${k}: ${buf.length} bytes, want ${b - a}`);
+          if (this.mask) maskChunk(buf, a, this.mask);
           const got = await sha256(buf);
           if (got === this.hashes[k]) { this.cache.set(k, buf); this.inflight.delete(k); return buf; }
           if (!this.refetch || pass >= 1) throw new Error(`${this.name} chunk ${k} does not match the recipe (SHA-256 ${got.slice(0, 12)}…)`);
@@ -251,6 +263,7 @@ async function run(o) {
     const key = s.src === 'base' ? 'base' : 'pack:' + s.pack;
     const src = sources[key];
     if (!src) throw new Error('recipe names an unknown source ' + key);
+    if (src.mask && src.mask.some(([o, n]) => s.off < o + n && o < s.off + s.len)) throw new Error('the recipe reads a masked viewer slot from the base');
     for (let off = s.off; off < s.off + s.len;) {
       const k = Math.floor(off / src.C), [a, b] = src.span(k);
       const end = Math.min(b, s.off + s.len);

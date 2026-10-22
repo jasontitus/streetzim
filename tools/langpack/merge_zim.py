@@ -53,7 +53,7 @@ if ROOT not in sys.path:
 from tools.langpack.zimfmt import (  # noqa: E402
     HEADER, NO_U32, NO_U64, REDIRECT_MIME, U32, U64, Dirent, Header, ZimReader)
 
-MERGER_VERSION = "streetzim-merge/2.2"      # 2.2: search packs
+MERGER_VERSION = "streetzim-merge/2.3"      # 2.2: search packs; 2.3: the inputs' MD5s in the UUID
 MERGE_UUID_NS = uuidlib.UUID("6f1d3c52-2b9e-4f57-9a43-0d6f5e1c7a11")
 C, M, W, X = (ord(c) for c in "CMWX")
 KEY_V1 = (X, b"listing/titleOrdered/v1")
@@ -265,16 +265,53 @@ def base_lineage(base_path: str, base_uuid: bytes, check_md5: bool = True) -> se
     return out
 
 
-def derive_uuid(base_uuid: bytes, pack_uuids: list[bytes], lang: str, meta: dict, mapcfg: bytes) -> bytes:
-    """The merged UUID: the input UUIDs, the map language, the merger version
-    AND a hash of the generated content (map-config.json and the metadata
-    values), so two merges that differ only in a title or a map-config field
-    get different UUIDs (review S3)."""
+def file_md5(path: str) -> str:
+    """The whole file's MD5 (what md5sum and archive.org print), cached on
+    disk under $LANGPACK_WORK/sha-cache by name, size, mtime and inode: a
+    60 GB base is read once, not once per merge."""
+    st = os.stat(path)
+    work = os.path.abspath(os.environ.get("LANGPACK_WORK") or "langpack-work")
+    cdir = os.path.join(work, "sha-cache")
+    key = os.path.join(cdir, f"{os.path.basename(path)}.{st.st_size}.{st.st_mtime_ns}.{st.st_ino}.md5")
+    try:
+        got = open(key).read().strip()
+        if re.fullmatch(r"[0-9a-f]{32}", got):
+            return got
+    except OSError:
+        pass
+    got = _md5_path(path)
+    try:
+        os.makedirs(cdir, exist_ok=True)
+        with open(key + ".tmp", "w") as fh:
+            fh.write(got)
+        os.replace(key + ".tmp", key)
+    except OSError:
+        pass
+    return got
+
+
+def derive_uuid(base_uuid: bytes, pack_uuids: list[bytes], lang: str, meta: dict, mapcfg: bytes,
+                contents: list[str] | None = None) -> bytes:
+    """The merged UUID: the input UUIDs, the map language, the merger version,
+    a hash of the generated content (map-config.json and the metadata values:
+    two merges that differ only in a title or a map-config field get
+    different UUIDs, review S3) AND the inputs' bytes (`contents`: the base's
+    and every pack's MD5): a base patched in place keeps its UUID, so
+    without its MD5 a merge with a new viewer would reuse the old merged
+    file's UUID, and Kiwix, which dedupes books by UUID, would keep showing
+    the old viewer (plan review B2)."""
     h = hashlib.sha256(mapcfg)
     for k in sorted(meta):
         h.update(b"\0" + k + b"=" + meta[k])
-    src = ":".join([base_uuid.hex()] + sorted(u.hex() for u in pack_uuids) + [lang, MERGER_VERSION, h.hexdigest()])
+    src = ":".join([base_uuid.hex()] + sorted(u.hex() for u in pack_uuids) + [lang, MERGER_VERSION, h.hexdigest()]
+                   + (["content"] + list(contents) if contents else []))
     return uuidlib.uuid5(MERGE_UUID_NS, src).bytes
+
+
+def content_md5s(base_path: str, pack_paths: list[str]) -> list[str]:
+    """derive_uuid's `contents`: the base's MD5, then the packs' (search pack
+    included), sorted."""
+    return [file_md5(base_path)] + sorted(file_md5(p) for p in pack_paths)
 
 
 SEARCH = "search"                       # the search pack's key among a recipe's packs
@@ -618,7 +655,8 @@ def build_plan(base_path: str, pack_paths: list[str], lang: str, *, region: str 
     if bm is not None:
         main = plan.new_idx_base(bm)
     new_uuid = derive_uuid(bh.uuid, [p.uuid for p in packs] + ([index.uuid] if index is not None else []),
-                           lang, final_meta, mapcfg)
+                           lang, final_meta, mapcfg,
+                           content_md5s(base_path, [p.path for p in packs] + ([index.path] if index is not None else [])))
     plan.header = Header(0x044D495A, 6, bh.minor, new_uuid, N, Cn, path_ptr_pos, NO_U64,
                          cluster_ptr_pos, HEADER.size, main, NO_U32, checksum_pos)
     plan.layout.update({

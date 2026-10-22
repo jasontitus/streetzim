@@ -55,11 +55,16 @@ from tools.langpack.zimfmt import ZimReader  # noqa: E402
 UA = {"User-Agent": "streetzim-site-check/1"}
 
 
-def chunks(path: str, C: int) -> list[str]:
+def chunks(path: str, C: int, mask: list | None = None) -> list[str]:
+    """SHA-256 per C-byte chunk, the mask's [off, len] ranges zeroed (a base's
+    viewer slots, recipe2.viewer_slots)."""
+    from tools.langpack.recipe2 import masked
     out = []
+    pos = 0
     with open(path, "rb") as fh:
         while b := fh.read(C):
-            out.append(hashlib.sha256(b).hexdigest())
+            out.append(hashlib.sha256(masked(b, pos, mask)).hexdigest())
+            pos += len(b)
     return out
 
 
@@ -214,8 +219,13 @@ def main():
         rb = r["base"]
         need((rb["file"], rb["size"], rb["uuid"]) == (b["file"], bsize, buuid), f"{L}: recipe base {rb['file']} {rb['uuid']} != local")
         if bch is None:
-            bch = chunks(a.base, rb["chunk"])
+            bch = chunks(a.base, rb["chunk"], rb.get("mask"))
         need(rb["sha256"] == bch, f"{L}: base chunk sha256 != local base")
+        from tools.langpack.recipe2 import viewer_slots
+        need(rb.get("slots", []) == viewer_slots(a.base), f"{L}: recipe viewer slots != the local base's")
+        need(not any(s["src"] == "base" and s["off"] < off + ln and off < s["off"] + s["len"]
+                     for s in r["segments"] for off, ln in rb.get("mask") or []),
+             f"{L}: a base segment reads a masked viewer slot")
         # segments
         tot, seg_ok = 0, True
         for i, s in enumerate(r["segments"]):

@@ -148,7 +148,7 @@ m.pieces = pc
     "UUID ignores the generated title/map-config (S3)": """
 import tools.langpack.merge_zim as m
 orig = m.derive_uuid
-m.derive_uuid = lambda b, ps, lang, meta, cfg: orig(b, ps, lang, {}, b"")
+m.derive_uuid = lambda b, ps, lang, meta, cfg, contents=None: orig(b, ps, lang, {}, b"", contents)
 """,
     "wrong MD5": """
 import tools.langpack.merge_zim as m, hashlib

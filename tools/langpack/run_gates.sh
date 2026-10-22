@@ -129,6 +129,8 @@ browser_checks() {   # M L(base|lang)
     LL=$L; MODE=merged
     PF=$($PY -c 'import json,sys,os; r=json.load(open(sys.argv[1])); p=r["packs"].get(sys.argv[2]); print(os.path.join(sys.argv[3], p["file"]) if p else "-")' "$W/recipes/$TAG/$L.json" "$L" "$PACKS")
     # kiwix-serve: suggest, search, an article + pack.json per pack, catalog Title/Language
+    # (carried over by a light gate)
+    [ "${LIGHT:-0}" = 1 ] || \
       $PY - "$B" "$book" "$W/recipes/$TAG/$L.json" "$PACKS" "$OUT/catalog.xml" "$SEARCH" "$OUT/$L.search.json" > "$OUT/$L.kiwix.json" 2>&1 <<'PY'
 import json, os, re, sys, urllib.parse, urllib.request
 sys.path.insert(0, os.environ["LP_ROOT"])
@@ -254,8 +256,32 @@ while read -r line <&3; do
     rm -f "$OUT/$L".*          # no logs: its verdict FAILS
     continue
   fi
+  # Light gate (RESUME=1): the last verdict passed for a recipe with the same
+  # fingerprint (recipe2.fingerprint: everything but the viewer slots and the
+  # UUID/MD5 they change), i.e. the base was patched in place
+  # (cloud/patch_viewer_inplace.py). Its checks that the viewer cannot change
+  # (zimcheck, route, kiwix-serve, Kiwix search) carry over; recipe = merge,
+  # verify and the browser checks run again.
+  LIGHT=0
+  if [ "$RESUME" = 1 ] && [ "${LIGHT_GATE:-1}" = 1 ] && $PY - "$BASE" "$L" "$W/recipes/$TAG/$L.json" > "$CT/light.json" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.gatelib import verdict_path
+base, L, rp = sys.argv[1:4]
+r = json.load(open(rp))
+try:
+    v = json.load(open(verdict_path(base, L)))
+except (OSError, ValueError):
+    sys.exit(1)
+ok = v.get("all_pass") and r.get("fingerprint") and v.get("fingerprint") == r["fingerprint"]
+if not ok:
+    sys.exit(1)
+json.dump(v, sys.stdout)
+PY
+  then LIGHT=1; echo "$L: the base changed only in its viewer slots: light gate (zimcheck, route, kiwix, search carried)"; fi
   rm -f "$OUT/$L".*
   stamp "$L" > "$OUT/$L.stamp"
+  [ $LIGHT = 1 ] && cp "$CT/light.json" "$OUT/$L.light.json"
   mapfile -t P < <($PY -c 'import json,sys; [print(f) for f in json.loads(sys.argv[1])["pack_files"]]' "$line")
   # the entry's search pack (index_pack.py; recipe2 menu found it), if any
   IDX=$($PY -c 'import json,sys; print(json.loads(sys.argv[1]).get("index_file") or "")' "$line")
@@ -283,10 +309,12 @@ PY
   $N $PY "$TL/verify_merge.py" "$M" "$BASE" "${P[@]}" "${IA[@]}" --lang "$L" --region-langs "$RL" --region "$REGION" "${TA[@]}" \
      --language-meta "$LANGUAGE_META" --queries "$SEARCH" > "$OUT/$L.verify.log" 2>&1
   wait_mem
-  zimcheck_merged "$M" "$OUT/$L.zimcheck.log"
-  $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
-  $N $PY "$TL/search_gate.py" "$M" "$BASE" --lang "$L" > "$OUT/$L.search.json" 2>&1
-  if [ -s "$M" ]; then serve "$M"; browser_checks "$M" "$L"; unserve; fi
+  if [ $LIGHT = 0 ]; then
+    zimcheck_merged "$M" "$OUT/$L.zimcheck.log"
+    $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
+    $N $PY "$TL/search_gate.py" "$M" "$BASE" --lang "$L" > "$OUT/$L.search.json" 2>&1
+  fi
+  if [ -s "$M" ]; then serve "$M"; LIGHT=$LIGHT browser_checks "$M" "$L"; unserve; fi
   [ "$KEEP" = 1 ] || rm -f "$M" "$M.fromrecipe"
 done 3< "$OUT/menu.jsonl"
 $PY "$TL/compose_verdicts.py" "$OUT" "$BASE" "$LANGS" | tee "$OUT/summary.txt"

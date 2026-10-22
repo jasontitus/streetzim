@@ -53,6 +53,11 @@ def smoke_ok(p):
     return bool(m and int(m.group(2)) == 0 and int(m.group(1)) > 0), (m.group(0) if m else "no result")
 
 
+# What a light gate carries over from the last passing verdict: the checks a
+# new viewer cannot change (it lives in three uncompressed slots of the base).
+CARRIED = ("zimcheck", "route", "kiwix", "search")
+
+
 def mark(b):
     return "PASS" if b else "FAIL"
 
@@ -96,9 +101,28 @@ def main():
             "ui": bool(uj.get("pass")),
             "smoke": sm[0],
         }
+        # light gate (run_gates.sh): the base changed only in its viewer slots;
+        # the checks the viewer cannot change come from the last passing
+        # verdict for a recipe with this fingerprint
+        light = {}
+        try:
+            light = json.load(open(f"{out}/{L}.light.json"))
+        except (OSError, ValueError):
+            light = {}
+        carried = []
+        if light:
+            same = bool(r.get("fingerprint")) and light.get("fingerprint") == r.get("fingerprint") and light.get("all_pass")
+            for k in CARRIED:
+                checks[k] = bool(same and (light.get("checks") or {}).get(k))
+                carried.append(k)
         checks.update(base_checks)
+        if carried:
+            evidence_light = {"from_recipe_md5": light.get("recipe_md5"), "carried": carried}
+        else:
+            evidence_light = None
         v = {"tag": tag, "lang": L, "recipe_md5": r["md5"], "recipe_uuid": r["uuid"], "recipe_size": r["size"],
-             "recipe_file_md5": r.get("file_md5"), "packs": pack_md5, "zimcheck_version": zver, "checks": checks,
+             "recipe_file_md5": r.get("file_md5"), "fingerprint": r.get("fingerprint"),
+             "packs": pack_md5, "zimcheck_version": zver, "checks": checks,
              "all_pass": all(ok for k, ok in checks.items() if k not in advisory), "advisory": advisory,
              "composed": datetime.datetime.now().isoformat(timespec="seconds"),
              "evidence": {"verify": vm.group(0) if vm else None, "smoke": sm[1],
@@ -110,7 +134,8 @@ def main():
                           "ui_article": ((uj.get("popup_article") or {}).get("article") or {}).get("path"),
                           "ui_search": [(uj.get(k) or {}).get("n") for k in ("search_native", "search_english")],
                           "ui_search_map_lang": (uj.get("search_map_lang") or {}).get("n"),
-                          "html_lang": (uj.get("html_lang") or {}).get("htmlLang")}}
+                          "html_lang": (uj.get("html_lang") or {}).get("htmlLang"),
+                          "light_gate": evidence_light}}
         vp = verdict_path(base, L)
         os.makedirs(os.path.dirname(vp), exist_ok=True)
         with open(vp, "w") as fh:

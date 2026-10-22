@@ -36,11 +36,13 @@ ARTICLES: dict[str, list[tuple[str, str]]] = {
 
 
 class _Item(Item):
-    def __init__(self, path: str, title: str, mime: str, data: bytes | str, front: bool = False):
+    def __init__(self, path: str, title: str, mime: str, data: bytes | str, front: bool = False,
+                 compress: bool | None = None):
         super().__init__()
         self._p, self._t, self._m = path, title, mime
         self._d = data.encode() if isinstance(data, str) else data
         self._front = front
+        self._compress = compress
 
     def get_path(self) -> str:
         return self._p
@@ -55,7 +57,10 @@ class _Item(Item):
         return StringProvider(self._d)
 
     def get_hints(self) -> dict[Any, bool]:
-        return {Hint.FRONT_ARTICLE: self._front}
+        h = {Hint.FRONT_ARTICLE: self._front}
+        if self._compress is not None:
+            h[Hint.COMPRESS] = self._compress
+        return h
 
 
 def _png() -> bytes:
@@ -75,9 +80,16 @@ def _page(title: str, depth: int, body: str = "") -> str:
             f"<a href='{back}'>map</a><h1>{title}</h1><p>{body or title}</p></body></html>")
 
 
+VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
+             "places.html": b"<html><body>places, viewer 1</body></html>",
+             "routing-worker.js": b"/* routing, viewer 1 */"}
+
+
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
-               extra: dict[str, Any] | None = None) -> str:
-    """The base; returns its UUID (hex). `extra`: more JSON entries {path: value}."""
+               extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None) -> str:
+    """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
+    `slots`: the three viewer files in fixed-size uncompressed slots
+    (cloud/viewer_slots.py), as published bases carry them."""
     with Creator(str(path)).config_indexing(False, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -85,7 +97,16 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                      ("Date", "2026-10-13")):
             c.add_metadata(k, v)
         c.add_illustration(48, _png())
-        c.add_item(_Item("index.html", "Testland", "text/html", "<html><body>map</body></html>", front=True))
+        if slots is None:
+            c.add_item(_Item("index.html", "Testland", "text/html", "<html><body>map</body></html>", front=True))
+        else:
+            if str(ROOT) not in __import__("sys").path:
+                __import__("sys").path.insert(0, str(ROOT))
+            from cloud.viewer_slots import pad_to_slot
+            for name, mime in (("index.html", "text/html"), ("places.html", "text/html"),
+                               ("routing-worker.js", "application/javascript")):
+                c.add_item(_Item(name, "Testland" if name == "index.html" else "", mime,
+                                 pad_to_slot(name, slots[name]), front=name == "index.html", compress=False))
         cfg = {"name": "Testland", "bounds": [19.0, 9.0, 22.0, 12.0]}
         if wiki:
             cfg["hasWikiArticles"] = True

@@ -462,3 +462,48 @@ def test_light_maps_get_no_packs(rid: str, refused: bool, ship: SimpleNamespace)
     assert ("is a light map" in r.stderr) is refused, r.stderr[-500:]
     if refused:
         assert r.returncode == 1
+
+
+def test_a_viewer_patch_regenerates_only_the_recipes(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """Plan review B2: after cloud/patch_viewer_inplace.py (same file name and
+    UUID, new viewer slots), a rerun builds no pack, no search pack and sends
+    nothing, and publishes new recipes: the new base MD5, a new merged UUID,
+    the same masked base hashes."""
+    from tests.langpack.test_viewer_slots import V2, patch
+    base = tmp_path / "bases-s" / "osm-testland-2026-10-13.zim"
+    base.parent.mkdir()
+    lpzims.write_base(base, slots=lpzims.VIEWER_V1)
+    builder = tmp_path / "builder-s.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+open(os.environ["FAKE_BUILD_LOG"], "a").write(a.lang + "\\n")
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    def listed(b: Path) -> None:
+        (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+            {"files": [{"name": b.name, "size": str(b.stat().st_size), "md5": _md5(b)}]}))
+    run = lambda: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True,  # noqa: E731
+                                 timeout=900, env={**ship.env, "BUILDER": str(builder)})
+    listed(base)
+    assert run().returncode == 0
+    site = ship.work / "site" / "testland" / "recipes" / "testland"
+    r1 = json.loads((site / "de.json").read_text())
+    reg1 = json.loads((site / "region.json").read_text())
+    builds, sends = _lines(ship.logs["build"]), _lines(ship.logs["ia"])
+    patch(base, tmp_path / "patched.zim", V2, tmp_path)
+    shutil.copy(tmp_path / "patched.zim", base)
+    listed(base)                                   # the round re-uploaded the patched base
+    r = run()
+    assert r.returncode == 0, r.stdout[-3000:]
+    assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends   # nothing rebuilt or sent
+    log = (ship.work / "logs" / f"ship-testland-{base.name[:-4]}.log").read_text()
+    assert "packs: all gated for this base already" in log
+    r2 = json.loads((site / "de.json").read_text())
+    reg2 = json.loads((site / "region.json").read_text())
+    assert r2["base"]["sha256"] == r1["base"]["sha256"] and r2["fingerprint"] == r1["fingerprint"]
+    assert r2["uuid"] != r1["uuid"] and r2["md5"] != r1["md5"]
+    assert reg2["base"]["md5"] == _md5(base) != reg1["base"]["md5"]

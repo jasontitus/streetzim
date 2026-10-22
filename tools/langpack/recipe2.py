@@ -20,6 +20,17 @@ Chunk hashes cover each WHOLE input file from offset 0 in 16 MiB chunks, so
 the browser can check any range it reads. materialize() checks every chunk a
 segment touches and every inline segment before writing it, recomputes the
 MD5 and requires it to equal the recipe's; nothing is trusted.
+
+Viewer slots (plan review B2): the base's three viewer files sit in
+fixed-size uncompressed slots that cloud/patch_viewer_inplace.py overwrites
+without changing anything else. The recipe carries them inline (from the
+base it was made from) and lists their ranges, and the base's own trailing
+checksum, as base.mask; the base's chunk hashes are taken with those ranges
+zeroed, and no base segment reads them. So a visitor's copy one viewer patch older (or newer) still builds
+the same file, and a patched base needs only new recipes: their
+"fingerprint" (everything that decides the merged bytes apart from the
+slots and the UUID/MD5 they change) stays the same, which run_gates.sh's
+light gate checks.
 """
 from __future__ import annotations
 
@@ -45,21 +56,62 @@ PROXY = "{proxy}"            # the builder page substitutes its range proxy
 _LAST_FILE_MD5: list[str | None] = [None]
 
 
-def chunk_hashes(path: str, chunk: int = CHUNK) -> list[str]:
-    """SHA-256 per chunk of the whole file, cached under $LANGPACK_WORK/sha-cache."""
+def masked(b: bytes, start: int, mask: list | None) -> bytes:
+    """b (the file's bytes from `start`) with the mask's ranges zeroed."""
+    if not mask:
+        return b
+    out = None
+    end = start + len(b)
+    for off, n in mask:
+        lo, hi = max(off, start), min(off + n, end)
+        if lo < hi:
+            if out is None:
+                out = bytearray(b)
+            out[lo - start:hi - start] = bytes(hi - lo)
+    return bytes(out) if out is not None else b
+
+
+def viewer_slots(base_path: str) -> list[dict]:
+    """The base's viewer slots (cloud/viewer_slots.py): [{"name", "off", "len"}]
+    by offset, for each viewer file stored as a slot (an uncompressed blob
+    ending in its slot marker and closer); [] for a base without slots."""
+    from cloud.viewer_slots import VIEWER_FILES, comment_delims, slot_needle
+    from tools.langpack.merge_zim import ZimReader
+    z = ZimReader(base_path)
+    out = []
+    for name in VIEWER_FILES:
+        i = z.find(ord("C"), name.encode())
+        if i is None:
+            continue
+        d = z.dirent_at(i)
+        if d.is_redirect or d.cluster is None or d.blob is None or z.cluster_info(d.cluster) & 0x0F not in (0, 1):
+            continue
+        off, n = z.raw_blob(d.cluster, d.blob)
+        blob = z.read_at(off, n)                 # at most 1 MB: the marker follows the content
+        if slot_needle(name) in blob and blob.endswith(comment_delims(name)[1]):
+            out.append({"name": name, "off": off, "len": n})
+    return sorted(out, key=lambda x: x["off"])
+
+
+def chunk_hashes(path: str, chunk: int = CHUNK, mask: list | None = None) -> list[str]:
+    """SHA-256 per chunk of the whole file (with the mask's [off, len] ranges
+    zeroed), cached under $LANGPACK_WORK/sha-cache."""
     st = os.stat(path)
     cdir = os.path.join(work_dir(), "sha-cache")
     os.makedirs(cdir, exist_ok=True)
-    key = os.path.join(cdir, f"{os.path.basename(path)}.{st.st_size}.{st.st_mtime_ns}.{chunk}.json")
+    mtag = ("." + hashlib.sha256(json.dumps(mask).encode()).hexdigest()[:12]) if mask else ""
+    key = os.path.join(cdir, f"{os.path.basename(path)}.{st.st_size}.{st.st_mtime_ns}.{chunk}{mtag}.json")
     if os.path.exists(key):
         return json.load(open(key))
     out = []
+    pos = 0
     with open(path, "rb", buffering=0) as fh:
         while True:
             b = fh.read(chunk)
             if not b:
                 break
-            out.append(hashlib.sha256(b).hexdigest())
+            out.append(hashlib.sha256(masked(b, pos, mask)).hexdigest())
+            pos += len(b)
     with open(key, "w") as fh:
         json.dump(out, fh)
     return out
@@ -73,6 +125,12 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
     t0 = time.perf_counter()
     plan = build_plan(base_path, pack_paths, lang, **kw)
     t_plan = time.perf_counter() - t0
+    slots = viewer_slots(base_path)
+    # masked: the viewer slots and, when the base has them, its own checksum
+    # (the last 16 bytes, which an in-place patch recomputes; no merge reads it)
+    mask = [[x["off"], x["len"]] for x in slots]
+    if slots:
+        mask.append([plan.base.header.checksum_pos, 16])
     segs: list[dict] = []
     pend = bytearray()
     fds = {}
@@ -88,11 +146,31 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
             fds[path] = os.open(path, os.O_RDONLY)
         return os.pread(fds[path], r.n, r.off)
 
-    for pc in pieces(plan):
-        if isinstance(pc, Ref):
+    def split(pc: Ref):
+        """A base range with the viewer slots cut out: (Ref, is_slot) pieces."""
+        if not isinstance(pc.src, str) or not mask:
+            yield pc, False
+            return
+        pos, end = pc.off, pc.off + pc.n
+        for off, n in mask:
+            lo, hi = max(off, pos), min(off + n, end)
+            if lo >= hi:
+                continue
+            if lo > pos:
+                yield Ref(pc.src, pos, lo - pos), False
+            yield Ref(pc.src, lo, hi - lo), True
+            pos = hi
+        if pos < end:
+            yield Ref(pc.src, pos, end - pos), False
+
+    for whole in pieces(plan):
+        if not isinstance(whole, Ref):
+            pend += whole
+            continue
+        for pc, is_slot in split(whole):
             if pc.n == 0:
                 continue
-            if pc.n < INLINE_MAX_REF:
+            if is_slot or pc.n < INLINE_MAX_REF:     # the viewer slots travel inline
                 pend += read(pc)
                 continue
             flush()
@@ -102,8 +180,6 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
                 segs.append({"src": "pack", "pack": SEARCH, "off": pc.off, "len": pc.n})
             else:
                 segs.append({"src": "pack", "pack": plan.packs[pc.src[1]].lang, "off": pc.off, "len": pc.n})
-        else:
-            pend += pc
     flush()
     segs.append({"src": "md5"})
     for fd in fds.values():
@@ -113,6 +189,7 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
             s["sha256"] = hashlib.sha256(s["data"]).hexdigest()
             s["data"] = base64.b64encode(s["data"]).decode()
     L = plan.layout
+    base_sha = chunk_hashes(base_path, mask=mask)
     recipe = {
         "format": FORMAT, "merger": MERGER_VERSION,
         "uuid": str(__import__("uuid").UUID(bytes=plan.header.uuid)),
@@ -126,7 +203,7 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
         "base": {"file": os.path.basename(os.path.realpath(base_path)), "size": os.path.getsize(base_path),
                  "uuid": plan.base.header.uuid.hex(),
                  "range": [L["cluster_start"], L["base_dirents_end"]], "chunk": CHUNK,
-                 "sha256": chunk_hashes(base_path)},
+                 "sha256": base_sha, "mask": mask, "slots": slots},
         "packs": {p.lang: {"file": os.path.basename(p.path), "uuid": p.uuid.hex(),
                            "url": ((url_overrides or {}).get(p.lang) or url_template).format(
                                file=os.path.basename(p.path), proxy=PROXY),
@@ -140,6 +217,7 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
                                    "url": url_template.format(file=os.path.basename(ix.path), proxy=PROXY),
                                    "size": os.path.getsize(ix.path), "chunk": CHUNK, "articles": 0,
                                    "sha256": chunk_hashes(ix.path)}
+    recipe["fingerprint"] = fingerprint(recipe, plan)
     # exact MD5: stream the recipe once (the same code path the browser follows)
     t1 = time.perf_counter()
     recipe["md5"] = materialize(recipe, base_path, plan_inputs(plan), out=None, trust_md5=False)
@@ -149,10 +227,27 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
              "segments": len(segs),
              "inline_segments": sum(1 for s in segs if s["src"] == "inline"),
              "inline_bytes": sum(s["len"] for s in segs if s["src"] == "inline"),
+             "slot_bytes": sum(x["len"] for x in slots),
              "base_bytes": sum(s["len"] for s in segs if s["src"] == "base"),
              "pack_bytes": sum(s["len"] for s in segs if s["src"] == "pack"),
              "generated_tail": L["generated_tail"], "size": L["total"]}
     return recipe, plan, stats
+
+
+def fingerprint(recipe: dict, plan: Plan) -> str:
+    """Everything that decides a merged file's bytes apart from the viewer
+    slots and what they change (the UUID, which follows the base's MD5, and
+    the checksum): the base's masked chunk hashes, size and slot ranges,
+    every pack's chunk hashes, the map language, the generated metadata and
+    map-config, the merger. A base patched in place (cloud/patch_viewer_inplace.py)
+    keeps it; anything else changes it."""
+    b = recipe["base"]
+    doc = {"base": [b["size"], b["mask"], b["sha256"]],
+           "packs": {k: [p["size"], p["sha256"]] for k, p in sorted(recipe["packs"].items())},
+           # the generated parts say the rest (title, language list, wikiPacks order)
+           "lang": recipe["map_language"], "meta": plan.meta, "mapcfg": plan.layout["mapcfg"].decode("utf-8", "replace"),
+           "merger": MERGER_VERSION}
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def plan_inputs(plan: Plan) -> dict[str, str]:
@@ -218,7 +313,8 @@ def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str]) -> s
 class ChunkReader:
     """Reads ranges of one input, checking each 16 MiB chunk against its hash once."""
 
-    def __init__(self, path: str, size: int, chunk: int, hashes: list[str], label: str):
+    def __init__(self, path: str, size: int, chunk: int, hashes: list[str], label: str, mask: list | None = None):
+        self.mask = mask
         self.fd = os.open(path, os.O_RDONLY)
         if os.fstat(self.fd).st_size != size:
             raise MergeError(f"{label}: size {os.fstat(self.fd).st_size} != recipe {size}")
@@ -231,7 +327,7 @@ class ChunkReader:
             return self.cache[1]
         b = os.pread(self.fd, self.chunk, k * self.chunk)
         if k not in self.verified:
-            if hashlib.sha256(b).hexdigest() != self.hashes[k]:
+            if hashlib.sha256(masked(b, k * self.chunk, self.mask)).hexdigest() != self.hashes[k]:
                 raise MergeError(f"{self.label}: chunk {k} fails its SHA-256")
             self.verified.add(k)
         self.cache = (k, b)
@@ -258,7 +354,7 @@ def materialize(recipe: dict, base_path: str, pack_paths: dict[str, str], out: s
     if recipe.get("format") != FORMAT:
         raise MergeError("not a streetzim-recipe/2")
     b = recipe["base"]
-    readers = {"base": ChunkReader(base_path, b["size"], b["chunk"], b["sha256"], "base")}
+    readers = {"base": ChunkReader(base_path, b["size"], b["chunk"], b["sha256"], "base", b.get("mask"))}
     for lang, p in recipe["packs"].items():
         readers[lang] = ChunkReader(pack_paths[lang], p["size"], p["chunk"], p["sha256"], f"pack {lang}")
     md5 = hashlib.md5(usedforsecurity=False)
@@ -273,6 +369,10 @@ def materialize(recipe: dict, base_path: str, pack_paths: dict[str, str], out: s
                     raise MergeError(f"inline segment at {n} fails its SHA-256")
                 parts = (data,)
             elif s["src"] == "base":
+                for off, ln in b.get("mask") or []:
+                    if s["off"] < off + ln and off < s["off"] + s["len"]:
+                        # masked bytes are not covered by the chunk hashes
+                        raise MergeError(f"base segment at {s['off']} reads the masked viewer slot at {off}")
                 parts = readers["base"].read(s["off"], s["len"])
             elif s["src"] == "pack":
                 parts = readers[s["pack"]].read(s["off"], s["len"])
