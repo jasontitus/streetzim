@@ -198,7 +198,7 @@ def test_zimcheck_without_a_verdict_runs_once_more(gates: SimpleNamespace, tmp_p
     assert r.returncode == 0, r.stderr[-2000:]
     assert int((tmp_path / "zc" / "runs").read_text()) == runs
     args = (tmp_path / "zc" / "runs.args").read_text().splitlines()
-    assert args[0] == "-A --threads=4" and (runs == 1 or args[1] == "-A --threads=1"), args
+    assert args[0] == "-A --threads=1" and (runs == 1 or args[1] == "-A --threads=1"), args
     v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
     assert v["checks"]["zimcheck"] is ok
 
