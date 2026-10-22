@@ -828,6 +828,38 @@ await ok('switch: places.html takes the same choice (?theme= > saved > OS)', () 
 // ========================================================================
 // 2. POI icons
 // ========================================================================
+await ok('labels: country > city > town > region > POI > village > suburb; rank orders a layer', () => {
+  // MapLibre places symbols from the top layer down, so a later layer wins a
+  // collision; inside one, a lower symbol-sort-key is placed first. Before
+  // 2026-10-21 the order was the reverse and Athens could lose to a village.
+  for (const cfg of [CONFIG, NO_CLIP]) {
+    const ids = load().makeStyle(cfg).layers.map((l) => l.id);
+    const at = (id) => { const i = ids.indexOf(id); assert.ok(i >= 0, id); return i; };
+    // A region (state) label under the cities: "Attica" hid Athens at z6.
+    // POIs over villages and neighbourhoods (place-suburb): a neighbourhood
+    // label hid Saint Francis Memorial Hospital (review of 6e12a1a).
+    const order = ['place-suburb', 'place-village', 'poi-label', 'place-state', 'place-town', 'place-city', 'place-country'];
+    for (let i = 1; i < order.length; i++) assert.ok(at(order[i - 1]) < at(order[i]), order[i - 1] + ' below ' + order[i]);
+    // Labels stay above every base layer and line label.
+    for (const id of ['road-label', 'water-label']) assert.ok(at(id) < at('place-suburb'), id);
+    const L = layerMap(load().makeStyle(cfg));
+    for (const id of order) {
+      assert.deepStrictEqual(L[id].layout['symbol-sort-key'], ['coalesce', ['get', 'rank'], 99], id);
+      assert.notStrictEqual(L[id].layout['text-allow-overlap'], true, id);
+    }
+  }
+});
+
+await ok('labels: a map language outside the tile list (Romansh) labels the same way', () => {
+  // No 21-language list in the viewer: the label field asks for name:<lang>
+  // whatever the code; Switzerland's tiles are to carry name:rm.
+  const L = layerMap(load().makeStyle({ ...NO_CLIP, language: 'rm', baseLanguage: 'en', regionLanguages: ['rm'] }));
+  const f = JSON.stringify(L['place-city'].layout['text-field']);
+  assert.ok(f.includes('"name:rm"'), f);
+  const de = JSON.stringify(layerMap(load().makeStyle({ ...NO_CLIP, language: 'de', baseLanguage: 'en' }))['place-city'].layout['text-field']);
+  assert.ok(de.includes('"name:de"') && !de.includes('name:rm'), de);
+});
+
 await ok('icons: every mapped icon has a Maki path and a colour group; none unused', () => {
   const { _SZ_MAKI, _SZ_POI_ICON, _SZ_POI_GROUP } = load();
   const used = new Set(Object.values(_SZ_POI_ICON));

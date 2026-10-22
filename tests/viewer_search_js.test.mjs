@@ -382,3 +382,12 @@ ok('a result shows the name in the map\'s second language', () => {
     assert.strictEqual(none, null);
   });
 }
+
+// A merged Romansh map: the UI falls back to German (runtime.js
+// SZ_UI_FALLBACK), while labels and search names stay Romansh (SZ_LANG2).
+ok('Romansh: German UI, Romansh search names', () => {
+  assert.strictEqual(SZ_UI_FALLBACK.rm, 'de');
+  const CHUR = { n: 'Chur', t: 'place', s: 'town', ln: { rm: 'Cuira', it: 'Coira' } };
+  assert.deepStrictEqual(V._szShownNames(CHUR, 'rm'), ['Cuira', 'Chur']);
+  assert.ok(score(CHUR, 'Cuira') >= 0 && score(CHUR, 'coira') >= 0);
+});

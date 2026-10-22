@@ -74,16 +74,17 @@ function szUnit() {
   return (m && m._streetzimUnit) || szReadUnit(_szStorage());
 }
 // 850 m / 1.4 km / 12 km, or 500 ft / 1.4 mi / 12 mi. Unit symbols lower case.
+// An isolated left-to-right run in a right-to-left UI (szLtr).
 function szFormatDistance(meters, unit) {
   if (meters == null || !isFinite(meters)) return '';
   if (unit === 'imperial') {
     var feet = meters * 3.28084;
-    if (feet < 1000) return Math.round(feet) + ' ft';
+    if (feet < 1000) return szLtr(Math.round(feet) + ' ft');
     var miles = meters / 1609.344;
-    return (miles < 10 ? szFixed(miles, 1) : Math.round(miles)) + ' mi';
+    return szLtr((miles < 10 ? szFixed(miles, 1) : Math.round(miles)) + ' mi');
   }
-  if (meters < 1000) return Math.round(meters) + ' m';
-  return szFixed(meters / 1000, meters < 10000 ? 1 : 0) + ' km';
+  if (meters < 1000) return szLtr(Math.round(meters) + ' m');
+  return szLtr(szFixed(meters / 1000, meters < 10000 ? 1 : 0) + ' km');
 }
 
 // A whole number of minutes as text: "25 min", "2 hr", "2 hr 5 min"

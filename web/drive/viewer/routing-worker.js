@@ -1974,12 +1974,8 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
       edgeCostWB(travel, sSpeedDist, classAccess);
       totalTime += _wbTime;
     }
-    var isRound = ((classAccess >>> 8) & 1) !== 0;
-    var cls = classAccess & 0x1F;
-    var isLink = (cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10);
-    var manFlags = (isRound ? 1 : 0) | (isLink ? 2 : 0);
     totalDist += distM;
-    segRev.push({ nameIdx: nameIdx, distM: distM, flags: manFlags });
+    segRev.push(szRouteSegment(nameIdx, distM, classAccess));
 
     var fromCoords = await graph.nodeCoordsE7(sourceNode);
     var toCoords = await graph.nodeCoordsE7(n);
@@ -2002,22 +1998,7 @@ async function findRouteSpatialAStar(startNode, endNode, highwayOnly,
 
   // Resolve road names so the main thread doesn't need access to the
   // names blob (which lives in the worker's index).
-  var roads = [];
-  for (var si = segRev.length - 1; si >= 0; si--) {
-    var s = segRev[si];
-    if (roads.length > 0
-        && roads[roads.length - 1].nameIdx === s.nameIdx
-        && roads[roads.length - 1].flags === s.flags) {
-      roads[roads.length - 1].distM += s.distM;
-    } else {
-      roads.push({
-        nameIdx: s.nameIdx,
-        name: graph.getName(s.nameIdx),
-        distM: s.distM,
-        flags: s.flags,
-      });
-    }
-  }
+  var roads = szRoadsFromSegments(segRev, function(i) { return graph.getName(i); });
 
   var coords = [];
   for (var sp = pathRev.length - 1; sp >= 0; sp--) {
@@ -2099,6 +2080,36 @@ async function findRouteSpatialTwoPass(startNode, endNode, ctx) {
   return concatenateLegs([legA, legB, legC]);
 }
 
+// A route segment from its edge: the maneuver flags driving mode reads
+// (bit 0 roundabout, bit 1 link road) and the road class (class_access bits
+// 0..4, docs/formats.md), by which it tells an exit from an on-ramp
+// (600 szLinkKind). A graph without class_access gives 0: no cue.
+function szRouteSegment(nameIdx, distM, classAccess) {
+  var cls = classAccess & 0x1F;
+  var isRound = ((classAccess >>> 8) & 1) !== 0;
+  var isLink = cls === 2 || cls === 4 || cls === 6 || cls === 8 || cls === 10;
+  return { nameIdx: nameIdx, distM: distM, flags: (isRound ? 1 : 0) | (isLink ? 2 : 0), cls: cls };
+}
+// Segments (collected end to start) to roads: consecutive segments with the
+// same name and flags are one road; cls0 / cls1 are its class where it
+// starts / ends. getName, when given, resolves the road's name.
+function szRoadsFromSegments(segRev, getName) {
+  var roads = [];
+  for (var si = segRev.length - 1; si >= 0; si--) {
+    var s = segRev[si];
+    var last = roads.length ? roads[roads.length - 1] : null;
+    if (last && last.nameIdx === s.nameIdx && last.flags === s.flags) {
+      last.distM += s.distM;
+      last.cls1 = s.cls;
+    } else {
+      var road = { nameIdx: s.nameIdx, distM: s.distM, flags: s.flags, cls0: s.cls, cls1: s.cls };
+      if (getName) road.name = getName(s.nameIdx);
+      roads.push(road);
+    }
+  }
+  return roads;
+}
+
 function concatenateLegs(legs) {
   var coords = [];
   var roads = [];
@@ -2116,9 +2127,10 @@ function concatenateLegs(legs) {
       // doesn't announce "continue on X" onto the road it's already on.
       if (last && last.nameIdx === road.nameIdx && last.flags === road.flags) {
         last.distM += road.distM;
+        last.cls1 = road.cls1;
       } else {
         roads.push({ nameIdx: road.nameIdx, name: road.name,
-                     distM: road.distM, flags: road.flags });
+                     distM: road.distM, flags: road.flags, cls0: road.cls0, cls1: road.cls1 });
       }
     }
     distance += leg.distance;

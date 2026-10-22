@@ -125,7 +125,7 @@ function _showPlaceDetail(map, r, idx) {
   );
   if (r.p) {
     info.appendChild(_detailFactRow(szT('place.phone', 'Phone'),
-      String(r.p), 'tel:' + String(r.p).replace(/\s+/g, '')));
+      szLtr(String(r.p)), 'tel:' + String(r.p).replace(/\s+/g, '')));
   }
   if (r.ws) {
     info.appendChild(_detailFactRow(szT('place.website', 'Website'),
@@ -140,7 +140,7 @@ function _showPlaceDetail(map, r, idx) {
   if (typeof r.a === 'number' && typeof r.o === 'number') {
     var coordRow = _detailFactRow(
       szT('place.coords', 'Coords'),
-      r.a.toFixed(5) + ', ' + r.o.toFixed(5),
+      szLtr(r.a.toFixed(5) + ', ' + r.o.toFixed(5)),
       null);
     info.appendChild(coordRow);
   }
@@ -224,7 +224,7 @@ function _detailActionBtn(label, emoji, primary, onClick) {
   var leadIcon = document.createElement('span');
   leadIcon.setAttribute('aria-hidden', 'true');
   leadIcon.textContent = emoji;
-  leadIcon.style.cssText = 'margin-right:6px;';
+  leadIcon.style.cssText = SZ_UI_RTL ? 'margin-left:6px;' : 'margin-right:6px;';
   var lab = document.createElement('span');
   lab.textContent = label;
   btn.appendChild(leadIcon);
@@ -401,8 +401,8 @@ function _populateWikipediaExtract(slot, wd) {
   // Compact facts row
   var facts = [];
   if (wd.p) facts.push([szT('place.fact_pop', 'Pop.'), _detailFmtNumber(wd.p)]);
-  if (wd.a) facts.push([szT('place.fact_area', 'Area'), szLocaleNum(wd.a) + ' km²']);
-  if (wd.e) facts.push([szT('place.fact_elev', 'Elev.'), szLocaleNum(wd.e) + ' m']);
+  if (wd.a) facts.push([szT('place.fact_area', 'Area'), szLtr(szLocaleNum(wd.a) + ' km²')]);
+  if (wd.e) facts.push([szT('place.fact_elev', 'Elev.'), szLtr(szLocaleNum(wd.e) + ' m')]);
   if (wd.c) facts.push([szT('place.fact_country', 'Country'), wd.c]);
   if (facts.length) {
     var grid = document.createElement('div');
