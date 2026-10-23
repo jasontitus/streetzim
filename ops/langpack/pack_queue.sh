@@ -73,8 +73,8 @@
 # Files, all in QUEUE_DIR ($LANGPACK_WORK/pack-queue): lock, since, queue.log
 # (PDT), status.tsv (region, state, zim, base key: uuid/md5 or uuid,
 # updated, retry after, note), published.tsv (region, uuid, md5, zim,
-# time), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
-# zim, base key), deploy-pending, stop (a file: nothing new starts, the
+# time, recipe scheme), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
+# zim, base key, recipe scheme; none: 1), deploy-pending, stop (a file: nothing new starts, the
 # running ones finish, then the queue ends; remove it before starting
 # again), ship-<region>.out. The round's files are only read (ROUND_TSV).
 #
@@ -146,6 +146,9 @@ SHIP=${QUEUE_SHIP:-$ROOT/ops/langpack/ship_packs.sh}
 POLL=${QUEUE_POLL_SECS:-300}
 RETRY=${QUEUE_RETRY_SECS:-1800}
 MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
+# The recipes' scheme: a map published under an older one ships again (ship_packs.sh redoes
+# only what changed). 2: each version's search pack is indexed in its own language (2026-10-23).
+SCHEME=2
 PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
@@ -190,7 +193,7 @@ if [ ! -s "$Q/since" ]; then
 fi
 SINCE=$(cat "$Q/since")
 touch "$STATUS" "$DONE"
-declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=()
+declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=()
 ANY_FAILED=0 STOP_SAID=
 # what a ship_packs.sh run starts from: the login basics, then production's settings
 SHIP_ENV=()
@@ -352,7 +355,14 @@ eligible() {  # region zim round-status
   fi
   md5=$(file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
   KEY=$uuid/$md5
-  grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE" && return 1     # published for this base already
+  # published for this base already, under this recipe scheme; under an older one: shipped again
+  # (ship_packs.sh redoes only what the scheme changes)
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t$SCHEME$" "$DONE" && return 1
+  if grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE"; then
+    case "$(state_of "$rid" "$KEY" | cut -f1)" in
+      published*) say "$rid: published under an older recipe scheme: shipped again for scheme $SCHEME (only the entries whose recipes change are redone)" ;;
+    esac
+  fi
   st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
   case "$state" in
     refused-*) return 1 ;;
@@ -432,10 +442,11 @@ start_ship() {  # region zim key
   say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
   ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
       ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
-    echo $? > "$Q/rc-$rid" ) 9>&- &
+    echo "$? $SCHEME" > "$Q/rc-$rid" ) 9>&- &
   pid=$!
-  RUN_PID[$rid]=$pid; RUN_START[$rid]=$(starttime "$pid"); RUN_ZIM[$rid]=$zim; RUN_KEY[$rid]=$3
-  echo "$pid ${RUN_START[$rid]:--} $zim $3" > "$Q/runs/$rid.tmp" && mv -f "$Q/runs/$rid.tmp" "$Q/runs/$rid"
+  RUN_PID[$rid]=$pid; RUN_START[$rid]=$(starttime "$pid"); RUN_ZIM[$rid]=$zim; RUN_KEY[$rid]=$3; RUN_SCHEME[$rid]=$SCHEME
+  # the recipe scheme the run ships under: a queue restarted with a newer one records this one
+  echo "$pid ${RUN_START[$rid]:--} $zim $3 $SCHEME" > "$Q/runs/$rid.tmp" && mv -f "$Q/runs/$rid.tmp" "$Q/runs/$rid"
 }
 
 # Exit 2, a killed run or one without an exit code: again after RETRY, a loud
@@ -457,10 +468,12 @@ again() {  # region zim key why
 
 # A run that ended: its outcome (publishing and deploying one at a time, here).
 finish() {  # region
-  local rid=$1 zim=${RUN_ZIM[$1]} key=${RUN_KEY[$1]} rc
+  local rid=$1 zim=${RUN_ZIM[$1]} key=${RUN_KEY[$1]} rc= scheme=
   wait "${RUN_PID[$rid]}" 2>/dev/null
-  rc=$(cat "$Q/rc-$rid" 2>/dev/null) || rc=
-  unset "RUN_PID[$rid]" "RUN_START[$rid]" "RUN_ZIM[$rid]" "RUN_KEY[$rid]"
+  # "<exit code> <scheme>"; a run started by a queue of before the schemes wrote the code alone: scheme 1
+  [ -e "$Q/rc-$rid" ] && read -r rc scheme < "$Q/rc-$rid"
+  scheme=${scheme:-${RUN_SCHEME[$rid]:-1}}
+  unset "RUN_PID[$rid]" "RUN_START[$rid]" "RUN_ZIM[$rid]" "RUN_KEY[$rid]" "RUN_SCHEME[$rid]"
   case $rc in 2|''|129|1[3-5][0-9]) ;; *) rm -f "$Q/again-$rid" ;; esac
   case $rc in
     0)
@@ -477,7 +490,7 @@ finish() {  # region
         else
           rm -f "$Q/partial-$rid"
           [ -z "$missing" ] || warn "$rid: published without $missing: their pack builds ran out of time $PARTIAL_MAX times"
-          printf '%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" >> "$DONE"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" "$scheme" >> "$DONE"
           set_state "$rid" published "$zim" "$key" - "${missing:+without $missing}"
           deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
         fi
@@ -552,8 +565,9 @@ for f in "$Q"/runs/*; do
   [ -f "$f" ] || continue
   case $f in *.tmp) rm -f "$f"; continue ;; esac
   rid=${f##*/}
-  read -r pid start zim key < "$f" || { rm -f "$f"; continue; }
-  RUN_PID[$rid]=$pid RUN_START[$rid]=$start RUN_ZIM[$rid]=$zim RUN_KEY[$rid]=$key
+  scheme=
+  read -r pid start zim key scheme < "$f" || { rm -f "$f"; continue; }
+  RUN_PID[$rid]=$pid RUN_START[$rid]=$start RUN_ZIM[$rid]=$zim RUN_KEY[$rid]=$key RUN_SCHEME[$rid]=${scheme:-1}
   if [ "$start" != - ] && alive "$rid"; then say "$rid: its ship_packs.sh run from before the restart is still going (pid $pid): counted"
   else say "$rid: its run from before the restart has ended: its outcome now"; fi
 done
