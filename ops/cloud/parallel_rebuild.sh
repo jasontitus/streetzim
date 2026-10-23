@@ -62,7 +62,10 @@
 #  * Refuses unless the driver, build-region-fast.sh and upload_validated.sh
 #    carry this runner's knobs (it must never fall back to a driver that
 #    would ignore its list and rebuild the round's own list), and records
-#    the checkout's HEAD: if HEAD moves during the round, nothing new starts.
+#    the checkout's HEAD: if the code changes during the round (any commit
+#    touching more than web/torrents, which every upload commits), nothing
+#    new starts. Logs the PATH and where ia, docker, osmium, firebase and
+#    node resolve.
 #  * Waits while sz-tests/rebuild-all/run.sh prepares its driver (it rewrites
 #    rebuild-old.tsv once, before "started driver").
 #  * Cuts the multilingual tiles of the first queue group one at a time in
@@ -88,6 +91,10 @@
 # <new file>`, `git revert` the "torrents: <id> -> <new file>" commit, then
 # `python3 web/generate.py --deploy` (the pre-round file is still in the item:
 # STREETZIM_KEEP_ZIMS=3).
+#
+# After the round (queue empty): `bash ops/cloud/parallel_rebuild.sh
+# --cleanup-wiki` removes the NVMe Wikipedia copy (refuses while a runner or
+# any reader is active).
 #
 # Logs: $PAR_STATE/run.out (PDT), $PAR_STATE/status.txt (a table with start,
 # end and duration in PDT, rewritten every poll), $PAR_STATE/logs/<id>.log.
@@ -139,6 +146,21 @@ PENDING_EVERY=${PAR_PENDING_EVERY:-600}
 DRIVER_PATH=${PAR_PATH:-$PATH}   # the drivers need docker, node, osmium and ia on it
 
 OUT=$STATE/run.out
+# --cleanup-wiki: after the round (queue empty), remove the NVMe copy of the
+# English Wikipedia ZIM. Refuses while a runner holds the lock or any process
+# has the copy open.
+if [ "${1:-}" = --cleanup-wiki ]; then
+  mkdir -p "$STATE"
+  exec 7> "$STATE/run.lock"
+  flock -n 7 || { echo "a parallel_rebuild.sh is running (it holds $STATE/run.lock); not removing the copy" >&2; exit 1; }
+  _d="$WIKI_DIR/$(basename "$WIKI_SRC")"
+  for _f in "$_d" "$_d.part"; do
+    if [ -e "$_f" ] && fuser -s "$_f" 2>/dev/null; then echo "$_f is open by a process; not removing it" >&2; exit 1; fi
+  done
+  rm -f "$_d" "$_d.part" "$_d.verified" "$_d.srcmd5"
+  rmdir "$WIKI_DIR" 2>/dev/null || true
+  echo "removed the NVMe Wikipedia copy ($_d)"; exit 0
+fi
 mkdir -p "$STATE/status" "$STATE/logs" "$STATE/lists" "$STATE/pids" "$STATE/env" "$STATE/pending" || exit 1
 say() { echo "$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z') $*" >> "$OUT"; }
 die() { say "FATAL: $*"; exit 1; }
@@ -166,11 +188,14 @@ for _k in BUILD_SCRATCH BUILD_WIKI_ZIM; do
   grep -q "$_k" "$(readlink -f "$WRAPPER")" 2>/dev/null || die "$WRAPPER has no $_k; not starting"
 done
 grep -q STREETZIM_KEEP_ZIMS "$(readlink -f "$UPLOADER")" 2>/dev/null || die "$UPLOADER has no STREETZIM_KEEP_ZIMS; not starting"
-head_now() {
-  if [ -n "${PAR_HEAD_CMD:-}" ]; then bash -c "$PAR_HEAD_CMD"; return; fi
-  git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown
+# Freeze on code, not on HEAD: every upload commits a torrent (web/torrents)
+# in this checkout, which must not stall the round. `git diff A B` compares
+# trees only (no index refresh, so no index lock).
+HEAD0=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "")
+code_moved() {
+  [ -n "$HEAD0" ] || return 1
+  ! git -C "$ROOT" diff --quiet "$HEAD0" HEAD -- . ':(exclude)web/torrents' 2>/dev/null
 }
-HEAD0=$(head_now)
 
 # ---- measurements (overridable for tests) ---------------------------------
 free_gb() {
@@ -510,7 +535,7 @@ can_start() {  # $1 region; prints why not, returns 1
   if [ "$PRECUT" = 1 ] && [[ " $PRECUT_GROUP " == *" $id "* ]] && [ "$(tiles_state "$id")" = pending ]; then
     echo "its tiles are being cut (one at a time, in the background)"; return 1
   fi
-  [ "$(head_now)" = "$HEAD0" ] || { echo "the checkout's HEAD moved from $HEAD0 during the round"; return 1; }
+  ! code_moved || { echo "the checkout's code changed since ${HEAD0:0:9} (outside web/torrents) during the round"; return 1; }
   if is_big "$id" && [ "$(big_running)" -ge "$BIG_MAX" ]; then echo "$BIG_MAX big regions already running"; return 1; fi
   free=$(free_gb); mem=$(mem_gb); proj=$(proj_gb "$id")
   [ -n "$free" ] && [ -n "$mem" ] || { echo "cannot read free space or memory"; return 1; }
@@ -561,6 +586,9 @@ wiki_copy() {
   size=$(stat -c %s "$WIKI_SRC" 2>/dev/null) || { say "wiki copy: no $WIKI_SRC; builds read /storage"; return; }
   mkdir -p "$WIKI_DIR" || { say "wiki copy: cannot create $WIKI_DIR"; return; }
   if wiki_ready; then say "wiki copy: using verified $dst"; return; fi
+  if [ -e "$dst.part" ] && fuser -s "$dst.part" 2>/dev/null; then
+    say "wiki copy: $dst.part is still open by another process (an earlier copy?); not starting another; builds read /storage"; return
+  fi
   rm -f "$dst" "$dst.part" "$dst.verified" "$dst.srcmd5"
   free=$(free_gb); need=$(( $(gib_up "$size") + NVME_MIN_GB + 50 ))
   if [ "${free:-0}" -lt "$need" ]; then say "wiki copy: NVMe free ${free} GiB < ${need}; builds read /storage"; return; fi
@@ -584,11 +612,13 @@ precut_order() {  # the first group's eligible regions in the order the workers 
   g=$(current_group); [ -n "$g" ] || return 0
   ids=$(awk -v want="$g" '/^## / {g++; next} /^[[:space:]]*(#|$)/ {next} (g+0) == want {print $1}' "$QUEUE" \
         | while read -r id; do eligible "$id" && echo "$id"; done)
+  # Each round: the small regions the other workers take next, then the
+  # large one worker 0 takes, so small maps never idle behind a big cut.
   echo "$ids" | awk -v w="$WORKERS" 'NF {a[n++] = $1} END {
-      i = 0; j = n - 1; small = (w > 1 ? w - 1 : 0)
+      i = 0; j = n - 1; small = (w > 1 ? w - 1 : 1)
       while (i <= j) {
-        if (w > 1) { print a[j--]; if (i > j) break }
-        for (k = 0; k < (w > 1 ? small : 1) && i <= j; k++) print a[i++]
+        for (k = 0; k < small && i <= j; k++) print a[i++]
+        if (w > 1 && i <= j) print a[j--]
       }}'
 }
 tiles_state() { local f; for f in ok skip fail; do [ -e "$STATE/tiles/$1.$f" ] && { echo "$f"; return; }; done; echo pending; }
@@ -638,11 +668,14 @@ pending_loop() {  # runs in the background until the runner exits
         "$IA" metadata "streetzim-$id" 2>/dev/null | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$zim" "$md5" || continue
       fi
       say "pending $id: archive.org lists $zim with md5 $md5; upload_validated.sh again"
+      local -a scrub=()
+      mapfile -t scrub < <(scrub_args)
       if [ -n "${PAR_FINISH_CMD:-}" ]; then
-        env FINISH_ID="$id" FINISH_ZIM="$zim" bash -c "$PAR_FINISH_CMD"; rc=$?
+        env "${scrub[@]}" PATH="$DRIVER_PATH" FINISH_ID="$id" FINISH_ZIM="$zim" STREETZIM_KEEP_ZIMS=3 \
+          bash -c "$PAR_FINISH_CMD"; rc=$?
       else
-        (cd "$ROOT" && flock .retrofit-upload.lock env PROJECT_DIR="$ROOT" TERRAIN_STRIPE_TOLERATE=10 STREETZIM_KEEP_ZIMS=3 \
-           bash "$UPLOADER" "$id" "$zim") >> "$STATE/logs/$id.log" 2>&1; rc=$?
+        (cd "$ROOT" && flock .retrofit-upload.lock env "${scrub[@]}" PATH="$DRIVER_PATH" PROJECT_DIR="$ROOT" \
+           TERRAIN_STRIPE_TOLERATE=10 STREETZIM_KEEP_ZIMS=3 bash "$UPLOADER" "$id" "$zim") >> "$STATE/logs/$id.log" 2>&1; rc=$?
       fi
       if [ "$rc" = 0 ]; then
         append_row "$id" uploaded "$zim"
@@ -665,20 +698,24 @@ pending_count() { local n=0 f; for f in "$STATE"/pending/*; do [ -f "$f" ] || co
 
 # ---- main ------------------------------------------------------------------
 say "parallel_rebuild.sh at HEAD ${HEAD0:0:9}: $WORKERS workers, scratch $SCRATCH, queue $(grep -cvE '^[[:space:]]*(#|$)' "$QUEUE") regions, driver $DRIVER"
+say "PATH for the drivers: $DRIVER_PATH"
+for _t in ia docker osmium firebase node; do say "  $_t -> $(PATH="$DRIVER_PATH" command -v "$_t" || echo 'NOT FOUND')"; done
 [ "${PAR_MEMWATCH_OFF:-0}" = 1 ] || { [ -f "$MEMWATCH" ] && setsid nohup bash "$MEMWATCH" $$ 7>&- > /dev/null 2>&1 < /dev/null & }
-pending_loop $$ 7>&- &
-PENDING_PID=$!
-trap 'kill $PENDING_PID 2>/dev/null' EXIT
+# Background jobs run in process groups of their own (job control on while
+# they start), so the exit trap can stop each with everything it started.
+BG_PGIDS=""
+bg_start() { set -m; "$@" 7>&- & BG_PGIDS="$BG_PGIDS $!"; set +m; }
+bg_stop() { local g; for g in $BG_PGIDS; do kill -- "-$g" 2>/dev/null || true; done; }
+trap bg_stop EXIT
+bg_start pending_loop $$
 while runsh_preparing; do say "waiting: sz-tests/rebuild-all/run.sh is preparing its driver"; sleep "$POLL" 7>&-; done
-BG_PIDS="$PENDING_PID"
-if [ "$WIKI_NVME" = 1 ]; then wiki_copy 7>&- & BG_PIDS="$BG_PIDS $!"; fi
+[ "$WIKI_NVME" != 1 ] || bg_start wiki_copy
 if [ "$PRECUT" = 1 ]; then
   PRECUT_GROUP=$(precut_order | tr '\n' ' ')
   rm -rf "$STATE/tiles"; mkdir -p "$STATE/tiles"
   say "tiles: cutting in this order: $PRECUT_GROUP"
-  precut 7>&- & BG_PIDS="$BG_PIDS $!"
+  bg_start precut
 fi
-trap 'kill $BG_PIDS 2>/dev/null' EXIT
 last_start=0
 blocked=""
 FAILED=""
@@ -690,19 +727,15 @@ while :; do
     [ "$(running)" -gt 0 ] || { say "STOP file: no build running; exiting"; break; }
     sleep "$POLL" 7>&-; continue
   fi
-  why=""; nxt=""
-  free_slot=-1
-  for ((k = 0; k < WORKERS; k++)); do [ -z "${S_PID[k]}" ] && { free_slot=$k; break; }; done
-  if [ "$free_slot" -ge 0 ]; then
-    nxt=$(pick_region "$free_slot") || nxt=""
-    if [ -z "$nxt" ]; then
-      pick_region "$free_slot" > /dev/null || true
-      if [ "$(running)" -eq 0 ] && [ -z "$WAITING_ON" ]; then
-        if [ "$(pending_count)" -gt 0 ]; then sleep "$POLL" 7>&-; continue; fi
-        say "queue done"; break
-      fi
-      sleep "$POLL" 7>&-; continue
-    fi
+  started=""; why=""; nxt=""; any_free=""; any_cand=""; WAITING_ALL=""
+  # Every free slot is offered its region in turn, so a slot whose region
+  # must wait (its tiles, a variant's parent) does not hold up the others.
+  for ((k = 0; k < WORKERS; k++)); do
+    [ -z "${S_PID[k]}" ] || continue
+    any_free=1
+    nxt=$(pick_region "$k") || nxt=""
+    if [ -z "$nxt" ]; then pick_region "$k" > /dev/null || true; WAITING_ALL="$WAITING_ALL$WAITING_ON"; continue; fi
+    any_cand=1
     if alone_running; then why="a region that runs alone is running"
     elif [[ "$ALONE" == *" $nxt "* ]] && [ "$(running)" -gt 0 ]; then why="$nxt runs alone: draining $(running) build(s)"
     elif runsh_preparing; then why="sz-tests/rebuild-all/run.sh is preparing its driver (rewrites rebuild-old.tsv)"
@@ -710,11 +743,18 @@ while :; do
     else why=$(can_start "$nxt") && why=""
     fi
     if [ -z "$why" ]; then
-      start_region "$free_slot" "$nxt" && last_start=$(date +%s)
-      blocked=""
-    elif [ "$why" != "$blocked" ] && [ "$why" != "spacing starts" ]; then
+      start_region "$k" "$nxt" && last_start=$(date +%s)
+      started=1; blocked=""; break
+    fi
+    if [ "$why" != "$blocked" ] && [ "$why" != "spacing starts" ]; then
       say "$nxt waits: $why"; blocked=$why
     fi
+  done
+  if [ -n "$any_free" ] && [ -z "$any_cand" ] && [ -z "$started" ] && [ "$(running)" -eq 0 ] && [ -z "$WAITING_ALL" ]; then
+    if [ "$(pending_count)" -gt 0 ]; then sleep "$POLL" 7>&-; continue; fi
+    say "queue done"
+    [ "$WIKI_NVME" != 1 ] || say "the round's queue is empty: free the NVMe Wikipedia copy with: bash $0 --cleanup-wiki"
+    break
   fi
   sleep "$POLL" 7>&-
 done

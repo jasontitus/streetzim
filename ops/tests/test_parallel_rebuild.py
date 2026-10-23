@@ -52,7 +52,6 @@ def _env(tmp: Path, **kw: str) -> dict[str, str]:
         "PAR_RUNSH_OUT": str(tmp / "run.out"),
         "PAR_RUNSH": str(tmp / "sz-tests" / "rebuild-all" / "run.sh"),
         "PAR_FREE_GB_CMD": f"cat {tmp}/free", "PAR_MEM_GB_CMD": f"cat {tmp}/mem",
-        "PAR_HEAD_CMD": f"cat {tmp}/head",
         "PAR_POLL": "0.2", "PAR_STAGGER": "0", "PAR_MEMWATCH_OFF": "1",
         "PAR_WORKERS": "2", "PAR_PORT_BASE": "19811", "PAR_CPUS_PER_WORKER": "2",
         "PAR_WIKI_NVME": "0", "PAR_PRECUT": "0", "PAR_PENDING_EVERY": "1",
@@ -78,7 +77,6 @@ def _setup(tmp: Path, queue: list[str] | str, *, free: int = 1000, mem: int = 10
     (tmp / "rebuild-old.tsv").write_text("id\tstatus\tzim\tfinished\n")
     (tmp / "free").write_text(f"{free}\n")
     (tmp / "mem").write_text(f"{mem}\n")
-    (tmp / "head").write_text("h1\n")
     (tmp / "variants.tsv").write_text("# id\tparent\tsatellite\tmax_zoom\n" + variants)
     (tmp / "regions.tsv").write_text("# id\tname\tbbox\n")
     for rid, size in (sizes or {}).items():
@@ -242,18 +240,51 @@ def test_memory_guard(tmp_path):
     assert "MemAvailable 10 GiB < 30" in (tmp_path / "state" / "run.out").read_text()
 
 
-def test_head_freeze(tmp_path):
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                   check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("what", ["torrent", "code"])
+def test_code_freeze_ignores_torrent_commits(tmp_path, what):
     _setup(tmp_path, ["a", "b"])
-    (tmp_path / "fake" / "a.sleep").write_text("3.0")
-    (tmp_path / "fake" / "b.sleep").write_text("3.0")
+    root = tmp_path / "root"
+    _git(root, "init", "-q")
+    (root / "ops").mkdir()
+    (root / "ops" / "x.sh").write_text("v1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    for rid in ("a", "b"):
+        (tmp_path / "fake" / f"{rid}.sleep").write_text("3.0")
     p = _bg(tmp_path, _env(tmp_path, PAR_WORKERS="1"))
     _wait_starts(tmp_path, 1)
-    (tmp_path / "head").write_text("h2\n")
-    out = _wait_log(tmp_path, "HEAD moved")
-    assert "HEAD moved from h1" in out
-    assert (tmp_path / "fake.log").read_text().count("start ") == 1
-    (tmp_path / "head").write_text("h1\n")
-    assert p.wait(timeout=30) == 0
+    if what == "torrent":
+        (root / "web" / "torrents").mkdir(parents=True)
+        (root / "web" / "torrents" / "a.torrent").write_text("t")
+    else:
+        (root / "ops" / "x.sh").write_text("v2\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", what)
+    if what == "torrent":
+        assert p.wait(timeout=60) == 0
+        assert _status(tmp_path, "b") == "uploaded"
+        assert "code changed" not in (tmp_path / "state" / "run.out").read_text()
+    else:
+        out = _wait_log(tmp_path, "code changed since")
+        assert "b waits: the checkout's code changed since" in out
+        assert (tmp_path / "fake.log").read_text().count("start ") == 1
+        p.kill()
+        p.wait()
+
+
+def test_logs_path_and_tools(tmp_path):
+    _setup(tmp_path, ["a"])
+    r = _run(tmp_path, _env(tmp_path, PAR_PATH="/usr/bin:/bin"))
+    assert r.returncode == 0
+    out = (tmp_path / "state" / "run.out").read_text()
+    assert "PATH for the drivers: /usr/bin:/bin" in out
+    for tool in ("ia", "docker", "osmium", "firebase", "node"):
+        assert f"  {tool} -> " in out
 
 
 def test_watchdog_pauses_newest_then_resumes(tmp_path):
@@ -339,7 +370,7 @@ def test_upload_pending_is_finished_once_listed(tmp_path):
     (tmp_path / "fake" / "a.status").write_text("upload-pending")
     (tmp_path / "root" / "osm-a-2026-10-23.zim").write_text("zim")
     env = _env(tmp_path, PAR_LISTED_CMD=f"[ -e {tmp_path}/listed ]",
-               PAR_FINISH_CMD=f"echo finish $FINISH_ID $FINISH_ZIM >> {tmp_path}/finish.log")
+               PAR_FINISH_CMD=f"echo finish $FINISH_ID $FINISH_ZIM zstd=${{ZSTD_CLEVEL-unset}} keep=$STREETZIM_KEEP_ZIMS >> {tmp_path}/finish.log")
     p = _bg(tmp_path, env)
     out = _wait_log(tmp_path, "listing pending")
     assert "the finisher will complete it" in out
@@ -347,7 +378,7 @@ def test_upload_pending_is_finished_once_listed(tmp_path):
     assert _status(tmp_path, "a") == "upload-pending"
     (tmp_path / "listed").write_text("")
     assert p.wait(timeout=60) == 0
-    assert (tmp_path / "finish.log").read_text().strip() == "finish a osm-a-2026-10-23.zim"
+    assert (tmp_path / "finish.log").read_text().strip() == "finish a osm-a-2026-10-23.zim zstd=unset keep=3"
     assert (tmp_path / "rebuild-old.tsv").read_text().splitlines()[-1].startswith(
         "a\tuploaded\tosm-a-2026-10-23.zim\t")
     assert _status(tmp_path, "a") == "uploaded"
@@ -532,15 +563,15 @@ def test_precut_first_group_in_pick_order_and_gates_each_build(tmp_path):
     assert r.returncode == 0
     lines = (tmp_path / "fake.log").read_text().splitlines()
     cuts = [line for line in lines if line.startswith("cut ")]
-    # worker 0 takes the largest (nopbf: no extract, left to its build), worker 1
-    # the smallest (a), then worker 0 v -- v cut with its parent's tiles
+    # nopbf has no extract (left to its build); v is cut with its parent's tiles
     assert [c.split()[1:3] for c in cuts] == [["a", "a"], ["v", "a"]]
     for rid in ("a", "v"):
         cut_i = next(i for i, line in enumerate(lines) if line.startswith(f"cut {rid} "))
         start_i = next(i for i, line in enumerate(lines) if line.startswith(f"start {rid} "))
         assert cut_i < start_i, f"{rid} built before its tiles"
     out = (tmp_path / "state" / "run.out").read_text()
-    assert "tiles nopbf: extract missing" in out and "tiles: cutting in this order: nopbf a v" in out
+    # the small region first, then the large one worker 0 takes
+    assert "tiles nopbf: extract missing" in out and "tiles: cutting in this order: a nopbf v" in out
     assert "cut x" not in (tmp_path / "fake.log").read_text()      # only the first group
 
 
@@ -721,3 +752,82 @@ def test_wiki_copy_that_fails_verification_is_not_used(tmp_path):
     assert not (tmp_path / "wiki" / "enwiki.zim").exists()
     assert not (tmp_path / "wiki" / "enwiki.zim.verified").exists()
     assert "wikizim=unset" in (tmp_path / "fake.log").read_text()
+
+
+def test_background_jobs_are_stopped_with_the_runner(tmp_path):
+    _setup(tmp_path, "## eu\na\n")
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\n")
+    regions = tmp_path / "root" / "world-data" / "regions"
+    regions.mkdir(parents=True)
+    (regions / "a.osm.pbf").write_text("pbf")
+    (tmp_path / "state" / "STOP").write_text("")
+    env = _env(tmp_path, PAR_PRECUT="1", PAR_PRECUT_CMD="sleep 30.4242")
+    r = _run(tmp_path, env)
+    assert r.returncode == 0
+    time.sleep(0.5)
+    left = subprocess.run(["pgrep", "-f", "^sleep 30.4242$"], capture_output=True, text=True).stdout.split()
+    assert left == []
+
+
+def test_no_second_wiki_copy_while_a_writer_holds_the_part_file(tmp_path):
+    _setup(tmp_path, ["a"])
+    src = tmp_path / "enwiki.zim"
+    src.write_bytes(b"x" * 1000)
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    part = wiki / "enwiki.zim.part"
+    holder = subprocess.Popen(["bash", "-c", f'exec 3>>"{part}"; sleep 30'])
+    try:
+        time.sleep(0.5)
+        env = _env(tmp_path, PAR_WIKI_NVME="1", PAR_WIKI_SRC=str(src), PAR_WIKI_DIR=str(wiki))
+        r = _run(tmp_path, env)
+        assert r.returncode == 0
+        assert "still open by another process" in (tmp_path / "state" / "run.out").read_text()
+        assert not (wiki / "enwiki.zim").exists() and part.exists()
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_cleanup_wiki_mode(tmp_path):
+    _setup(tmp_path, ["a"])
+    src = tmp_path / "enwiki.zim"
+    src.write_bytes(b"x" * 10)
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    (wiki / "enwiki.zim").write_bytes(b"x" * 10)
+    (wiki / "enwiki.zim.verified").write_text("10 1\n")
+    env = _env(tmp_path, PAR_WIKI_SRC=str(src), PAR_WIKI_DIR=str(wiki))
+    holder = subprocess.Popen(["bash", "-c", f'exec 3<"{wiki}/enwiki.zim"; sleep 30'])
+    try:
+        time.sleep(0.5)
+        r = subprocess.run(["bash", str(RUNNER), "--cleanup-wiki"], env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 1 and (wiki / "enwiki.zim").exists()
+    finally:
+        holder.kill()
+        holder.wait()
+    r = subprocess.run(["bash", str(RUNNER), "--cleanup-wiki"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0
+    assert not (wiki / "enwiki.zim").exists() and not (wiki / "enwiki.zim.verified").exists()
+
+
+def test_first_upload_gets_the_item_metadata():
+    text = (ROOT / "ops" / "cloud" / "upload_validated.sh").read_text()
+    assert '--metadata="mediatype:data" --metadata="collection:opensource" --metadata="title:streetzim-${id}"' in text
+
+
+def test_a_slot_waiting_for_its_tiles_does_not_hold_up_the_others(tmp_path):
+    _setup(tmp_path, "## eu\na\nbig\n")
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nbig\tB\t1,2,3,4\tcountry\n")
+    regions = tmp_path / "root" / "world-data" / "regions"
+    regions.mkdir(parents=True)
+    for rid in ("a", "big"):
+        (regions / f"{rid}.osm.pbf").write_text("pbf")
+    env = _env(tmp_path, PAR_PRECUT="1",
+               PAR_PRECUT_CMD=f'[ "$PRECUT_ID" = big ] && sleep 5; echo "cut $PRECUT_ID" >> {tmp_path}/fake.log')
+    r = _run(tmp_path, env)
+    assert r.returncode == 0
+    lines = (tmp_path / "fake.log").read_text().splitlines()
+    # worker 0 waits for big's tiles; worker 1 starts a meanwhile
+    assert lines.index(next(x for x in lines if x.startswith("start a "))) < lines.index("cut big")
+    assert lines.index("cut big") < lines.index(next(x for x in lines if x.startswith("start big ")))

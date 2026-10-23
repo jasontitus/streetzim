@@ -127,7 +127,13 @@ else
         fi
     fi
     # --checksum still skips it when the metadata above was stale.
-    if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum; then
+    # The metadata every streetzim-* item has (mediatype data, collection
+    # opensource, title = the identifier). archive.org applies it when the
+    # upload creates the item (a region's first publication: taiwan,
+    # east-polynesia, north-africa); for an existing item the values are the
+    # same ones it already carries.
+    if ! "$IA" upload "streetzim-${id}" "$(basename "$dated")" --retries 5 --checksum \
+            --metadata="mediatype:data" --metadata="collection:opensource" --metadata="title:streetzim-${id}"; then
         echo "FATAL ${id}: ia upload failed for $(basename "$dated") — nothing pruned, site not redeployed" >&2
         exit 3
     fi
