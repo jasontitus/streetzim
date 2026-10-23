@@ -41,6 +41,10 @@ unset _ops_real _ops_old
 #    path yield a truncated-but-valid PBF that nothing downstream notices.
 set -uo pipefail
 cd /storage/streetzim
+# One instance per worker under ops/cloud/parallel_rebuild.sh, which gives
+# each its own list, pid file, log and gate ports (defaults: the single
+# round's files and ports) and REBUILD_NO_SKIP=1 (it rebuilds regions this
+# file lists as uploaded; the runner keeps its own record of what it shipped).
 export TMPDIR=/storage/streetzim/tmp
 export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
 export LD_LIBRARY_PATH=/storage/streetzim/.browser-libs/ex/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
@@ -59,16 +63,17 @@ WORLD_SEARCH=/storage/streetzim/search_cache/world-2026-08-31.s2.jsonl
 REL=2026-08-19.0
 REGISTRY=/storage/streetzim/cloud/regions.tsv
 VARIANTS=/storage/streetzim/cloud/region-variants.tsv
-LOG=/storage/streetzim/rebuild-old.log
+LOG=${REBUILD_LOG:-/storage/streetzim/rebuild-old.log}
 TSV=/storage/streetzim/rebuild-old.tsv
 LOCK=/storage/streetzim/.retrofit-upload.lock
 PBFLOCK=/storage/streetzim/tmp/.regions-pbf.lock
-OV=9641; KW=9642
+OV=${REBUILD_OV_PORT:-9641}; KW=${REBUILD_KW_PORT:-9642}
 log(){ echo "[$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')] $*" | tee -a "$LOG"; }
-row(){ printf "%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$(date -Iseconds)" >> "$TSV"; }
+# Appends under a lock: parallel_rebuild.sh runs several instances at once.
+row(){ { flock -x 3; printf "%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$(date -Iseconds)" >> "$TSV"; } 3>> "$TSV.lock"; }
 [ -f "$TSV" ] || printf "id\tstatus\tzim\tfinished\n" > "$TSV"
 
-ORDER=$(cat /storage/streetzim/rebuild-old.list)
+ORDER=$(cat "${REBUILD_LIST:-/storage/streetzim/rebuild-old.list}")
 
 markers(){ "$PY" - "$1" <<'PYEOF'
 import sys
@@ -150,7 +155,7 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
 }
 
 # ---- wait for every heavy job already in flight -------------------------
-echo $$ > /storage/streetzim/.rebuild-old.pid
+echo $$ > "${REBUILD_PIDFILE:-/storage/streetzim/.rebuild-old.pid}"
 # Wait for the viewer rollout. Resolve by PID from its own pidfile,
 # never pgrep -f: this script's cmdline contains every string it searches for
 # (feedback_process_scan_self_match). Builds are CPU+IO bound and the host is
@@ -167,7 +172,9 @@ log "=== all prior jobs done; starting ${ORDER}"
 log "=== multilingual tiles (STREETZIM_ML_TILES): ${STREETZIM_ML_TILES:-0}"
 
 for ID in $ORDER; do
-  grep -qP "^$ID\t(uploaded|upload-pending)" "$TSV" 2>/dev/null && { log "skip $ID: done"; continue; }
+  if [ "${REBUILD_NO_SKIP:-0}" != 1 ]; then
+    grep -qP "^$ID\t(uploaded|upload-pending)" "$TSV" 2>/dev/null && { log "skip $ID: done"; continue; }
+  fi
   R=$(awk -F'\t' -v id="$ID" '$1==id' "$REGISTRY" | head -1)
   BBOX=$(echo "$R" | cut -f3); NAME=$(echo "$R" | cut -f2); TERM=$(echo "$R" | cut -f7)
   [ -n "$BBOX" ] || { log "skip $ID: no registry row"; row "$ID" no-registry "-"; continue; }
@@ -269,11 +276,13 @@ for ID in $ORDER; do
   #     otherwise.
   #   STAGE_MBTILES_NVME=0: the mbtiles here is the 107 GB world tile file;
   #     staging would copy it to the shared NVMe for every build, and the
-  #     wrapper's own notes call the speedup unproven.
+  #     wrapper's own notes call the speedup unproven. REBUILD_STAGE_MBTILES=1
+  #     (parallel_rebuild.sh, where the tiles are the region's own
+  #     <id>.ml.mbtiles, a few GB) stages them.
   TIER=$(echo "$R" | cut -f4)
   case "$TIER" in continent) WI=lead ;; *) WI=all ;; esac
   log "  build-region-fast.sh $ID (tier=$TIER wiki_images=$WI overture=$REL)"
-  if ! env OVERTURE_RELEASE="$REL" WIKI_IMAGES="$WI" STAGE_MBTILES_NVME=0 \
+  if ! env OVERTURE_RELEASE="$REL" WIKI_IMAGES="$WI" STAGE_MBTILES_NVME="${REBUILD_STAGE_MBTILES:-0}" \
        bash build-region-fast.sh "$ID" "$BBOX" "$NAME" >> "$LOG" 2>&1; then
     log "  BUILD FAILED"; row "$ID" build-failed "-"; continue
   fi

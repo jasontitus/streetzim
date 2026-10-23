@@ -24,7 +24,23 @@ unset _ops_real _ops_old
 
 set -euo pipefail
 cd /storage/streetzim
-export TMPDIR=/storage/streetzim/tmp
+# BUILD_SCRATCH (ops/cloud/parallel_rebuild.sh): a folder on a fast disk (the
+# shared NVMe) for everything this build writes and throws away -- TMPDIR and
+# create_zim's .<output>.building-* folder next to the output. The finished
+# ZIM is copied to BUILD_FINAL_DIR (default /storage/streetzim) under a
+# temporary name and renamed into place, so a half-copied file never carries
+# the final name. Unset: everything stays on /storage as before.
+# BUILD_FINAL_DIR / BUILD_LOG_DIR: where the ZIM and the build log end up
+# (default /storage/streetzim; a dry run points them elsewhere).
+BUILD_SCRATCH="${BUILD_SCRATCH:-}"
+FINAL_DIR="${BUILD_FINAL_DIR:-/storage/streetzim}"
+LOG_DIR="${BUILD_LOG_DIR:-/storage/streetzim}"
+if [ -n "$BUILD_SCRATCH" ]; then
+    mkdir -p "$BUILD_SCRATCH/tmp"
+    export TMPDIR="$BUILD_SCRATCH/tmp"
+else
+    export TMPDIR=/storage/streetzim/tmp
+fi
 export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
 mkdir -p "$TMPDIR"
 
@@ -82,11 +98,25 @@ PLACES=/storage/streetzim/overture_cache/places-${SRC_ID}-${OVERTURE_RELEASE}.pa
 # ~107 KB/article on California, +37% of the ZIM; lead ~12 KB, +4%).
 WIKI_ZIM=/storage/streetzim/wiki-src/wikipedia_en_all_maxi_2026-02.zim
 WIKI_ZIM_SIZE=123980647016
+# BUILD_WIKI_ZIM: a verified copy on a faster disk (parallel_rebuild.sh puts one
+# on the NVMe: the article bundling reads it at random). Used only when its
+# size matches; otherwise the /storage original, as before.
+if [ -n "${BUILD_WIKI_ZIM:-}" ]; then
+    if [ -f "$BUILD_WIKI_ZIM" ] && [ "$(stat -c%s "$BUILD_WIKI_ZIM")" = "$WIKI_ZIM_SIZE" ]; then
+        WIKI_ZIM="$BUILD_WIKI_ZIM"
+    else
+        echo "  BUILD_WIKI_ZIM=$BUILD_WIKI_ZIM is missing or the wrong size; using $WIKI_ZIM"
+    fi
+fi
 WIKI_IMAGES="${WIKI_IMAGES:-all}"
 WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${SRC_ID}_qid_titles.json
 
 OUT_FINAL=osm-${ID}-${TODAY}.zim
-LOG=/storage/streetzim/${ID}-rebuild-${TODAY}.log
+LOG=${LOG_DIR}/${ID}-rebuild-${TODAY}.log
+# Where the builder writes: next to the final file, or in BUILD_SCRATCH.
+OUT_PATH="$FINAL_DIR/$OUT_FINAL"
+OUT_BUILD="${BUILD_SCRATCH:+$BUILD_SCRATCH/}$OUT_FINAL"
+[ -n "$BUILD_SCRATCH" ] || OUT_BUILD="$OUT_PATH"
 
 if [ "$SRC_ID" != "$ID" ]; then
     for _f in "$MBTILES" "$PBF" "$SEARCH" "$ADDR" "$PLACES"; do
@@ -98,13 +128,18 @@ if [ "$SRC_ID" != "$ID" ]; then
 fi
 
 echo "=== build $ID FAST @ $(date -Iseconds) ==="
-echo "  bbox: $BBOX  out: $OUT_FINAL  log: $LOG"
+echo "  bbox: $BBOX  out: $OUT_PATH  log: $LOG"
+[ -z "$BUILD_SCRATCH" ] || echo "  scratch: $BUILD_SCRATCH (TMPDIR and the builder's output; copied to $FINAL_DIR when done)"
 echo "  overture release: $OVERTURE_RELEASE (addr=$([ -f "$ADDR" ] && echo yes || echo MISSING) places=$([ -f "$PLACES" ] && echo yes || echo MISSING))"
 echo
 
-if [ -f "$OUT_FINAL" ]; then
-    echo "ALREADY EXISTS: $OUT_FINAL — skipping" | tee -a "$LOG"
+if [ -f "$OUT_PATH" ]; then
+    echo "ALREADY EXISTS: $OUT_PATH — skipping" | tee -a "$LOG"
     exit 0
+fi
+if [ -n "$BUILD_SCRATCH" ] && [ -e "$OUT_BUILD" ]; then
+    echo "FATAL: $OUT_BUILD is already in the scratch folder (a dead build's?); refusing to build over it" >&2
+    exit 1
 fi
 
 # Cleanup, installed before the first step that needs it (the multilingual
@@ -112,9 +147,12 @@ fi
 STAGED_MBTILES=""
 ML_PID=""
 ML_OUT=""
+COPY_TMP=""
 cleanup_staged() {
     if [ -n "$STAGED_MBTILES" ]; then rm -f "$STAGED_MBTILES" 2>/dev/null || true; fi
     STAGED_MBTILES=""
+    if [ -n "$COPY_TMP" ]; then rm -f "$COPY_TMP" 2>/dev/null || true; fi
+    COPY_TMP=""
 }
 # A signal reaches the multilingual tile step too (it runs as a child we
 # wait for, so the trap runs at once): it removes its container and store
@@ -302,7 +340,7 @@ ARGS=(
     --split-hot-search-chunks-mb 10
     --split-find-chips
     --keep-temp
-    --output "$OUT_FINAL"
+    --output "$OUT_BUILD"
     # Fast-path flags (eliminate post-build repackage). The writer and
     # --xapian come from WRITER_FLAGS above.
     --no-llm-bundle
@@ -372,10 +410,28 @@ fi
 [ -n "${RAYON_NUM_THREADS:-}" ] && \
     echo "  pack: ${_pbf_gb} GB PBF -> RAYON_NUM_THREADS=$RAYON_NUM_THREADS (zstd $ZSTD_CLEVEL, output unchanged)"
 
-"$PY" "$SCRIPT" "${ARGS[@]}" 2>&1 | tee "$LOG"
+# -a: a same-day retry appends to the earlier attempt's log instead of erasing it.
+"$PY" "$SCRIPT" "${ARGS[@]}" 2>&1 | tee -a "$LOG"
+
+if [ "$OUT_BUILD" != "$OUT_PATH" ]; then
+    # Copy under a temporary name on the final filesystem, check the size,
+    # then rename: a kill mid-copy leaves only the temporary (removed by the
+    # EXIT trap), never a truncated file with the final name.
+    [ -s "$OUT_BUILD" ] || { echo "FATAL: the builder left no $OUT_BUILD" | tee -a "$LOG" >&2; exit 1; }
+    [ ! -e "$OUT_PATH" ] || { echo "FATAL: $OUT_PATH appeared during the build; not overwriting it" | tee -a "$LOG" >&2; exit 1; }
+    COPY_TMP="$FINAL_DIR/.$OUT_FINAL.copy-$$"
+    echo "=== copy $OUT_BUILD -> $OUT_PATH @ $(date -Iseconds) ===" | tee -a "$LOG"
+    cp "$OUT_BUILD" "$COPY_TMP"
+    [ "$(stat -c%s "$COPY_TMP")" = "$(stat -c%s "$OUT_BUILD")" ] \
+        || { echo "FATAL: the copy of $OUT_BUILD is short" | tee -a "$LOG" >&2; exit 1; }
+    mv -n "$COPY_TMP" "$OUT_PATH"
+    [ ! -e "$COPY_TMP" ] || { echo "FATAL: could not rename the copy to $OUT_PATH (it exists?)" | tee -a "$LOG" >&2; exit 1; }
+    COPY_TMP=""
+    rm -f "$OUT_BUILD"
+fi
 
 echo "=== validate @ $(date -Iseconds) ===" | tee -a "$LOG"
-"$PY" /storage/streetzim/cloud/validate_zim.py "$OUT_FINAL" 2>&1 | tee -a "$LOG" || \
+"$PY" /storage/streetzim/cloud/validate_zim.py "$OUT_PATH" 2>&1 | tee -a "$LOG" || \
     echo "(validate non-zero — review)" | tee -a "$LOG"
 
-echo "=== done $ID @ $(date -Iseconds), size: $(du -h "$OUT_FINAL" | cut -f1) ===" | tee -a "$LOG"
+echo "=== done $ID @ $(date -Iseconds), size: $(du -h "$OUT_PATH" | cut -f1) ===" | tee -a "$LOG"
