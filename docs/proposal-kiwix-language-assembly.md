@@ -8,15 +8,17 @@ maps.
 
 1. **Problem.** A StreetZim map in many languages is many full ZIMs of
    nearly the same bytes: Switzerland's 23 language versions are 70.4 GB
-   as separate files.
+   as separate files, but only 8.5 GB as shared parts (one base, 22
+   Wikipedia packs, 23 search packs).
 2. **Proposal.** Publish one multilingual base per region, small packs per
    language and a recipe per version; the Kiwix app downloads the parts it
    lacks and composes the version on the device. The result is an ordinary
    ZIM, byte for byte the file StreetZim tested.
-3. **Numbers.** The parts take 7 to 10 times less mirror space than the
-   files (Switzerland about 8.5 GB instead of 70.4 GB). A user who has the
-   base downloads 0.77-0.86 GB for another Swiss language instead of
-   3.03-3.12 GB.
+3. **Download size.** The multilingual Swiss map is 2.28 GB (the last
+   English-only build was 2.14 GB). A language version is 3.02-3.12 GB:
+   the map plus Wikipedia in Switzerland's four languages and the
+   visitor's, and Kiwix search in the visitor's language. A user who
+   already has the map downloads 0.74-0.84 GB for a language version.
 4. **The ask.** Does Kiwix want per-language versions beyond the
    multilingual base, and if so, which of the four options below?
 5. **Who builds what.** StreetZim: the format spec, test files, a C++
@@ -34,14 +36,38 @@ and one full-text index, each with one stemmer. Carrying every language's
 Wikipedia also makes every download bigger. A language version adds the
 articles and the search for one language.
 
-Storing every language version as its own file costs this:
+### Mirror space
 
-| region | versions | each version | all versions as files | as parts (base + packs) | files / parts |
-|---|---|---|---|---|---|
-| Switzerland | 23 | 3.03-3.12 GB | 70.4 GB | 8.5 GB | 8.3 |
-| Baltics | 22 | 1.27-1.32 GB | 28.2 GB | 4.2 GB | 6.8 |
-| Greece | 22 | 1.16-1.21 GB | 25.8 GB | 2.6 GB | 10.0 |
-| Iceland | 19 | 0.35-0.36 GB | 6.7 GB | 0.8 GB | 8.4 |
+| region | versions | all versions as files | as parts (base + packs) | files / parts |
+|---|---|---|---|---|
+| Switzerland | 23 | 70.4 GB | 8.5 GB | 8.3 |
+| Baltics | 22 | 28.2 GB | 4.2 GB | 6.8 |
+| Greece | 22 | 25.8 GB | 2.6 GB | 10.0 |
+| Iceland | 19 | 6.7 GB | 0.8 GB | 8.4 |
+
+### Download size
+
+| region | the map (base) | one language version | with the map already on the device |
+|---|---|---|---|
+| Switzerland | 2.28 GB | 3.02-3.12 GB | 0.74-0.84 GB |
+| Baltics | 0.98 GB | 1.27-1.32 GB | 0.30-0.34 GB |
+| Greece | 1.05 GB | 1.16-1.21 GB | 0.11-0.17 GB |
+| Iceland | 0.33 GB | 0.35-0.36 GB | 0.03 GB |
+
+What a Swiss download contains:
+
+| part | size | what it adds |
+|---|---|---|
+| English-only map (September 2026 build) | 2.14 GB | map with local names, routing, search and interface in English; English Wikipedia for the region |
+| **Multilingual map** (the base) | **2.28 GB** | the same, plus labels and search names in 22 languages (Romansh among them) and the interface in 23; English Wikipedia (16,005 articles) |
+| Wikipedia in Switzerland's languages | +0.56 GB | German (23,367 articles), French (14,267), Italian (15,175), Romansh (1,688); in every version |
+| Wikipedia in the visitor's language | +0-0.08 GB | e.g. Spanish 9,322 articles (67 MB), Chinese 10,069 (82 MB), Japanese 1,848 (17 MB) |
+| Kiwix search in the visitor's language | +0.19-0.20 GB | title and full-text index over the map and all those articles, stemmed in that language |
+| **A language version** | **3.02-3.12 GB** | an ordinary ZIM |
+
+A language version is about a third bigger than the map. Most of the extra
+is the region's own Wikipedias, which every version carries, and the search
+index in the visitor's language.
 
 ## How it works
 
@@ -56,7 +82,7 @@ A language version is made of:
   in order.
 
 ```
-language version (Swiss German, 3.03 GB)
+language version (Swiss German, 3.02 GB)
 ┌──────────┬─────────────────────────────┬─────────────────────┬──────────────┬─────┐
 │ new head │ base: clusters and entries, │ packs' clusters     │ new tables   │ MD5 │
 │  64 KiB  │ at their original offsets   │ (de fr it rm search)│ (~9 MB)      │     │
@@ -97,10 +123,10 @@ Switzerland, 23 languages.
 |---|---|---|---|---|---|
 | Base only (no per-language versions) | 2.3 GB | 2.3 GB | none | none | nothing new |
 | Prebuilt files | 70.4 GB | 3.0-3.1 GB | 3.0-3.1 GB | none | Zimfarm builds 23 files per region |
-| **Compose on download** (proposed) | 8.5 GB | 3.1 GB (base + packs) | 0.8-0.9 GB | the download step in each app, via libkiwix | Zimfarm builds the parts |
+| **Compose on download** (proposed) | 8.5 GB | 3.1 GB (base + packs) | 0.7-0.8 GB | the download step in each app, via libkiwix | Zimfarm builds the parts |
 | **Relay** | 8.5 GB, and every download passes through the relay | 3.0-3.1 GB | 3.0-3.1 GB | none | Kiwix runs a relay that serves each version as a file |
 | **Viewer switch**: one ZIM with every language | about 3.9 GB (*estimate*) | about 3.9 GB | none | none | Zimfarm builds one bigger file |
-| **Recipe as a book**: libzim reads the recipe | 8.5 GB | 3.1 GB | 0.8-0.9 GB, no full copy | libzim's file layer, the library, every app | Zimfarm builds the parts |
+| **Recipe as a book**: libzim reads the recipe | 8.5 GB | 3.1 GB | 0.7-0.8 GB, no full copy | libzim's file layer, the library, every app | Zimfarm builds the parts |
 
 - **Compose on download** saves mirror space and lets a user with the
   base add a language cheaply. The device stores a full-size file per
