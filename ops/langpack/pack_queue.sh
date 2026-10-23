@@ -1,0 +1,524 @@
+#!/bin/bash
+# The language step after each map of the rebuild round: as the round ships
+# a map (its latest row in rebuild-old.tsv, written after this queue first
+# started, says `uploaded`; or `upload-pending` and archive.org now lists
+# the file with its MD5), this runs ship_packs.sh for it, then
+# publishes its recipes into the PREVIEW site and redeploys the preview
+# channel. Never the live site: production's web/build/recipes stays empty
+# until the page goes live.
+#
+#   ops/langpack/pack_queue.sh [--once]
+#   ops/langpack/pack_queue.sh enqueue REGION ZIM   (a map by hand: ZIM, a file
+#       in MAPS_DIR, is a candidate whatever the round's file says, until the
+#       round writes a new row for REGION; works while the queue runs)
+#
+# In the order the maps shipped, one ship_packs.sh run at a time while the
+# round builds (the disk is saturated: its scheduler ignores ionice), and
+# only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
+# memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
+# run under the same memory rule and with room on LANGPACK_WORK's disk for
+# its merged files (2 x the base + QUEUE_DISK_MARGIN_GB, 40). The round runs
+# while a pid file of QUEUE_ROUND_PIDFILES names a live process whose command
+# line has the given text, or a process holds one of QUEUE_ROUND_LOCKS (read
+# from /proc/locks: the round's locks are never taken here). Each run holds
+# one merged file at a time; ship_packs.sh serializes its network step (the
+# shared Wikipedia cache), uploads go one at a time under the host's upload
+# lock, and publishing and deploying are done one at a time here.
+# Per map:
+#   - eligible: not a light/ultralight map, its base on disk, at most
+#     QUEUE_MAX_BASE_GB (8; also passed to ship_packs.sh as SHIP_MAX_BASE_GB),
+#     multilingual tiles (map-config tileLanguages). A continent is refused by
+#     ship_packs.sh itself (exit 4).
+#   - ops/langpack/ship_packs.sh REGION BASE from a clean environment (HOME,
+#     USER, LOGNAME, PATH, LANG, LC_ALL, SHELL; nothing else of this shell's:
+#     no SHIP_* knob or test stand-in left over from a test run), with
+#     production's items (SHIP_BASE_ITEM=streetzim-<region>,
+#     SHIP_PACK_ITEM=streetzim-<region>-lang), LANGPACK_WORK, WP_CACHE,
+#     LANGPACK_WEBSEED and SHIP_MAX_BASE_GB; host-env.sh gives it the rest.
+#     Under ionice/nice. Exit 0: published; 6 (archive.org listing pending):
+#     run again after QUEUE_RETRY_SECS; 2 (a lock held), or a run killed or
+#     ended without an exit code: again after QUEUE_RETRY_SECS, a loud
+#     failure after QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
+#     no packs, or nothing is publishable): logged, skipped for this base;
+#     anything else: a loud failure. A failure is not retried, in this run or
+#     after a restart, unless the queue starts with QUEUE_RETRY_FAILED=1.
+#   - published: the preview clone (PREVIEW_DIR, a clone of PROD_REPO moved
+#     to its current commit first; made with QUEUE_SEED's recipes already in
+#     it, the Swiss preview the channel shows now, which production's
+#     Switzerland replaces when it ships) gets the region (publish_site.sh), then
+#     `firebase hosting:channel:deploy $PREVIEW_CHANNEL --expires 30d
+#     --project $FIREBASE_PROJECT` from it. A failed deploy is tried again
+#     at the next pass (nothing is shipped again for it).
+# Refused at the start (exit 3): a PREVIEW_DIR that is, holds or sits in
+# PROD_REPO or /storage/streetzim; PREVIEW_CHANNEL empty or `live`; unless
+# QUEUE_FORCE_WORK=1 (tests), a LANGPACK_WORK, WP_CACHE, LANGPACK_WEBSEED,
+# ROUND_TSV, MAPS_DIR or PROD_REPO other than production's, or QUEUE_SHIP,
+# QUEUE_PUBLISH or QUEUE_DIR set.
+# Resumable: a map published for the same base (UUID and file MD5) is not
+# shipped again; a new or rewritten file for the region is. The queue's
+# start (QUEUE_DIR/since) is kept, so a restart still ignores what shipped
+# before the first start. Runs going when the queue stopped (runs/) are
+# counted after a restart and finished here when they end.
+#
+# Files, all in QUEUE_DIR ($LANGPACK_WORK/pack-queue): lock, since, queue.log
+# (PDT), status.tsv (region, state, zim, base key: uuid/md5 or uuid,
+# updated, retry after, note), published.tsv (region, uuid, md5, zim,
+# time), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
+# zim, base key), deploy-pending, stop (a file: nothing new starts, the
+# running ones finish, then the queue ends; remove it before starting
+# again), ship-<region>.out. The round's files are only read (ROUND_TSV).
+#
+# Env (production defaults): ROUND_TSV (/storage/streetzim/rebuild-old.tsv),
+# MAPS_DIR (/storage/streetzim), PROD_REPO (/storage/streetzim), PREVIEW_DIR
+# (/storage/experiments/build-preview/streetzim), PREVIEW_CHANNEL
+# (swiss-languages), FIREBASE_PROJECT (streetzim), FIREBASE (firebase),
+# LANGPACK_WEBSEED (https://streetzim-build-proxy.tiltastech.workers.dev),
+# QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8),
+# QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
+# QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40),
+# QUEUE_SINCE (first run only: count maps shipped since this date, e.g. the
+# round's start, instead of since now), QUEUE_SEED (REGION=SITE_DIR ...: site
+# folders, SITE_DIR/recipes/REGION sealed by ship_packs.sh, published into a
+# new preview clone; default the Swiss test site), QUEUE_ROUND_PIDFILES
+# (FILE:TEXT ..., FILE may be a glob; default the driver's
+# /storage/streetzim/.rebuild-old.pid and the parallel runner's
+# rebuild-par/pids/*.pid, TEXT rebuild_old_regions.sh), QUEUE_ROUND_LOCKS
+# (default rebuild-par/run.lock and sz-tests/rebuild-all/run.lock under
+# /storage/streetzim), IA (the archive.org CLI, for upload-pending rows).
+# Tests: QUEUE_SHIP and QUEUE_PUBLISH (stand-ins for ship_packs.sh and
+# publish_site.sh), QUEUE_DIR, QUEUE_FORCE_WORK=1.
+# Exit: 0; 2 another queue holds the lock; 3 refused (above); 1 (--once) a
+# map failed in this run; enqueue: 1 a bad region or file.
+set -uo pipefail
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+PROD_WORK=/storage/streetzim/langpack-work
+PROD_WEBSEED=https://streetzim-build-proxy.tiltastech.workers.dev
+REFUSED=0
+refuse() { echo "pack_queue: refused: $*" >&2; REFUSED=1; }
+same_dir() { [ "$(realpath -m "$1")" = "$(realpath -m "$2")" ]; }
+covers() { [ "$1" = "$2" ] || [ "$1" = / ] || case "$2" in "$1"/*) true ;; *) false ;; esac; }  # folder $1 is or holds $2
+# production's files, webseed and scripts only: an env.sh or a test's settings left in this shell
+# must not reach production
+if [ "${QUEUE_FORCE_WORK:-0}" != 1 ]; then
+  for v in ROUND_TSV=/storage/streetzim/rebuild-old.tsv MAPS_DIR=/storage/streetzim PROD_REPO=/storage/streetzim; do
+    n=${v%%=*} d=${v#*=}
+    [ -z "${!n:-}" ] || same_dir "${!n}" "$d" || refuse "$n=${!n} is not production's $d (QUEUE_FORCE_WORK=1 allows it)"
+  done
+  for v in QUEUE_SHIP QUEUE_PUBLISH QUEUE_DIR; do       # (QUEUE_DIR: a second queue beside production's)
+    [ -z "${!v:-}" ] || refuse "$v=${!v}: a test's setting (QUEUE_FORCE_WORK=1 allows it)"
+  done
+  [ -z "${LANGPACK_WORK:-}" ] || same_dir "$LANGPACK_WORK" "$PROD_WORK" \
+    || refuse "LANGPACK_WORK=$LANGPACK_WORK is not production's $PROD_WORK (QUEUE_FORCE_WORK=1 allows it)"
+  [ -z "${WP_CACHE:-}" ] || same_dir "$WP_CACHE" "$PROD_WORK/wpcache" \
+    || refuse "WP_CACHE=$WP_CACHE is not production's $PROD_WORK/wpcache (QUEUE_FORCE_WORK=1 allows it)"
+  [ -z "${LANGPACK_WEBSEED:-}" ] || [ "$LANGPACK_WEBSEED" = "$PROD_WEBSEED" ] \
+    || refuse "LANGPACK_WEBSEED=$LANGPACK_WEBSEED is not production's $PROD_WEBSEED (QUEUE_FORCE_WORK=1 allows it)"
+fi
+. "$ROOT/ops/langpack/host-env.sh"
+WEBSEED=${LANGPACK_WEBSEED:-$PROD_WEBSEED}
+ROUND_TSV=${ROUND_TSV:-/storage/streetzim/rebuild-old.tsv}
+MAPS_DIR=${MAPS_DIR:-/storage/streetzim}
+PROD_REPO=${PROD_REPO:-/storage/streetzim}
+PREVIEW_DIR=${PREVIEW_DIR:-/storage/experiments/build-preview/streetzim}
+CHANNEL=${PREVIEW_CHANNEL-swiss-languages}
+PROJECT=${FIREBASE_PROJECT:-streetzim}
+FIREBASE=${FIREBASE:-firebase}
+# the preview clone is never production, the channel never the live site
+for p in "$PROD_REPO" /storage/streetzim; do
+  pv=$(realpath -m "$PREVIEW_DIR") pr=$(realpath -m "$p")
+  if covers "$pr" "$pv" || covers "$pv" "$pr"; then
+    refuse "PREVIEW_DIR=$PREVIEW_DIR ($pv) is, holds or sits in $p ($pr): the preview clone is never production"
+  fi
+done
+case "${CHANNEL,,}" in ''|live) refuse "PREVIEW_CHANNEL='$CHANNEL': a preview channel only, never the live site" ;; esac
+[ $REFUSED = 0 ] || exit 3
+SHIP=${QUEUE_SHIP:-$ROOT/ops/langpack/ship_packs.sh}
+POLL=${QUEUE_POLL_SECS:-300}
+RETRY=${QUEUE_RETRY_SECS:-1800}
+MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
+RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
+MAXGB=${QUEUE_MAX_BASE_GB:-8}
+JOBS=${QUEUE_JOBS:-2}
+MIN_MEM_GB=${QUEUE_MIN_MEM_GB:-24}
+DISK_MARGIN_GB=${QUEUE_DISK_MARGIN_GB:-40}
+PY=${PYTHON:-python3}
+IA=${IA:-/storage/streetzim/venv-linux/bin/ia}
+SEED=${QUEUE_SEED-switzerland=/storage/experiments/lang-torrents/swiss-site2}
+ROUND_PIDFILES=${QUEUE_ROUND_PIDFILES-/storage/streetzim/.rebuild-old.pid:rebuild_old_regions.sh /storage/streetzim/rebuild-par/pids/*.pid:rebuild_old_regions.sh}
+ROUND_LOCKS=${QUEUE_ROUND_LOCKS-/storage/streetzim/rebuild-par/run.lock /storage/streetzim/sz-tests/rebuild-all/run.lock}
+Q=${QUEUE_DIR:-$LANGPACK_WORK/pack-queue}
+mkdir -p "$Q/runs" || exit 1
+LOG=$Q/queue.log STATUS=$Q/status.tsv DONE=$Q/published.tsv ENQ=$Q/enqueued.tsv
+say() { echo "$(TZ=America/Los_Angeles date '+%F %T %Z') $*" >> "$LOG"; }
+loud() { say "FAILED: $*"; echo "pack_queue: FAILED: $*" >&2; }
+
+if [ "${1:-}" = enqueue ]; then   # no lock: one short line appended, read at the next pass
+  rid=${2:-} zim=${3:-}
+  [[ $rid =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "pack_queue: enqueue REGION ZIM: '$rid' is not a region id" >&2; exit 1; }
+  case $zim in ''|*/*) echo "pack_queue: enqueue REGION ZIM: ZIM is a file name in $MAPS_DIR, not '$zim'" >&2; exit 1 ;; esac
+  [ -s "$MAPS_DIR/$zim" ] || { echo "pack_queue: enqueue: $MAPS_DIR/$zim is not on disk" >&2; exit 1; }
+  n=$(wc -l 2>/dev/null < "$ROUND_TSV") || n=0
+  printf '%s\t%s\t%s\t%s\n' "$rid" "$zim" "$(date +%s)" "$n" >> "$ENQ" || exit 1
+  say "$rid: enqueued by hand: $zim"; echo "pack_queue: $rid enqueued ($zim); the queue takes it at its next pass"
+  exit 0
+fi
+case "${1:-}" in
+  '') ONCE=0 ;;
+  --once) ONCE=1 ;;
+  *) echo "usage: pack_queue.sh [--once] | enqueue REGION ZIM" >&2; exit 1 ;;
+esac
+# fd 9 holds the lock: every child that may outlive a killed queue (sleeps, md5sum, firebase, the
+# runs) is started without it, so a restart is not locked out; -w for the brief ones
+exec 9> "$Q/lock"
+flock -w 10 9 || { echo "pack_queue: another queue holds $Q/lock" >&2; exit 2; }
+# the start: now, or QUEUE_SINCE (a date, e.g. the round's start) on the first run
+if [ ! -s "$Q/since" ]; then
+  if [ -n "${QUEUE_SINCE:-}" ]; then date -d "$QUEUE_SINCE" +%s > "$Q/since" || { echo "pack_queue: QUEUE_SINCE '$QUEUE_SINCE' is not a date" >&2; exit 1; }
+  else date +%s > "$Q/since"; fi
+fi
+SINCE=$(cat "$Q/since")
+touch "$STATUS" "$DONE"
+declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=()
+ANY_FAILED=0 STOP_SAID=
+# what a ship_packs.sh run starts from: the login basics, then production's settings
+SHIP_ENV=()
+for v in HOME USER LOGNAME PATH LANG LC_ALL SHELL; do [ -n "${!v+x}" ] && SHIP_ENV+=("$v=${!v}"); done
+SHIP_ENV+=("LANGPACK_WORK=$LANGPACK_WORK" "WP_CACHE=$WP_CACHE" "LANGPACK_WEBSEED=$WEBSEED" "SHIP_MAX_BASE_GB=$MAXGB")
+
+# region state zim key [retry-after] [note]: one line per region, replaced atomically
+set_state() {
+  local t
+  t=$(mktemp "$Q/.status.XXXXXX") || return 1
+  awk -F'\t' -v r="$1" '$1 != r' "$STATUS" > "$t"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(TZ=America/Los_Angeles date '+%F %T %Z')" "${5:--}" "${6:-}" >> "$t"
+  mv -f "$t" "$STATUS"
+}
+state_of() { awk -F'\t' -v r="$1" -v k="$2" '$1 == r && $4 == k {print $2 "\t" $6}' "$STATUS"; }
+
+# region <TAB> zim <TAB> epoch <TAB> status: the maps whose latest row, written since the start, is
+# `uploaded` or `upload-pending` (archive.org's listing to be checked), or enqueued by hand
+# after that row was written (`enqueued`), in that order
+candidates() {
+  "$PY" - "$ROUND_TSV" "$SINCE" "$ENQ" <<'PY'
+import datetime, sys
+tsv, since, enq = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+def lines(p):
+    try:
+        return open(p, encoding="utf-8").read().splitlines()
+    except OSError:
+        return []
+
+last = {}
+for i, line in enumerate(lines(tsv)):
+    f = line.split("\t")
+    if i == 0 or len(f) < 4 or not f[0] or f[0].startswith("#"):
+        continue
+    try:
+        last[f[0]] = (datetime.datetime.fromisoformat(f[3]).timestamp(), f[2], f[1], i)
+    except ValueError:
+        last[f[0]] = (0.0, f[2], "unreadable", i)
+rows = {rid: v for rid, v in last.items() if v[2] in ("uploaded", "upload-pending") and v[0] >= since}
+for line in lines(enq):  # an enqueue wins over the rows the round's file had then, not over a later one
+    f = line.split("\t")
+    if len(f) == 4 and f[2].isdigit() and f[3].isdigit() and last.get(f[0], (0, "", "", -1))[3] < int(f[3]):
+        rows[f[0]] = (float(f[2]), f[1], "enqueued", -1)
+for t, rid, z, st in sorted((v[0], rid, v[1], v[2]) for rid, v in rows.items()):
+    print(f"{rid}\t{z}\t{int(t)}\t{st}")
+PY
+}
+
+# BASE -> "uuid tileLanguages-count"
+baseinfo() {
+  "$PY" - "$ROOT" "$1" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from tools.langpack.merge_zim import KEY_MAPCFG, blob_of
+from tools.langpack.zimfmt import ZimReader
+z = ZimReader(sys.argv[2])
+try:
+    cfg = json.loads(blob_of(z, KEY_MAPCFG) or b"{}")
+except ValueError:
+    cfg = {}
+tl = cfg.get("tileLanguages") if isinstance(cfg, dict) else None
+print(z.header.uuid.hex(), len(tl) if isinstance(tl, list) else 0)
+PY
+}
+
+# The local file's MD5, computed once per file (name, inode, size, mtime in ns).
+file_md5() {
+  local f=$1 k
+  k=$Q/md5/$(basename "$f").$(stat -c %i.%s "$f").$(stat -c %.9Y "$f")
+  [ -s "$k" ] || { mkdir -p "$Q/md5" && ionice -c3 nice -n19 md5sum "$f" 9>&- | cut -d' ' -f1 > "$k.tmp" && mv -f "$k.tmp" "$k"; } || return 1
+  cat "$k"
+}
+# Does archive.org list the region's file with the local file's MD5? (an upload-pending row)
+listed() {  # region base md5
+  timeout 300 "$IA" metadata "streetzim-$1" 2>/dev/null 9>&- | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$(basename "$2")" "$3"
+}
+
+# QUEUE_SEED's site folders into a new preview clone (what the channel shows already)
+seed_preview() {
+  local item rid dir w
+  for item in $SEED; do
+    rid=${item%%=*}; dir=${item#*=}
+    [ -d "$PREVIEW_DIR/web/build/recipes/$rid" ] && continue
+    [ -d "$dir/recipes/$rid" ] || { loud "seed $rid: no $dir/recipes/$rid"; continue; }
+    w=$Q/seed/$rid
+    rm -rf "$w" && mkdir -p "$w/site" && ln -s "$dir" "$w/site/$rid" || continue
+    if LANGPACK_WORK=$w bash "${QUEUE_PUBLISH:-$PREVIEW_DIR/ops/langpack/publish_site.sh}" "$rid" "$PREVIEW_DIR/web" >> "$LOG" 2>&1 9>&-; then
+      say "seeded the preview with $rid from $dir"
+    else loud "seed $rid: publish_site.sh refused $dir/recipes/$rid"; fi
+  done
+}
+
+# the preview clone at production's current commit (web/build/recipes is ignored by git: kept)
+preview_update() {
+  if [ ! -d "$PREVIEW_DIR/.git" ]; then
+    mkdir -p "$(dirname "$PREVIEW_DIR")" && git clone -q "$PROD_REPO" "$PREVIEW_DIR" 9>&- || return 1
+    say "preview clone made: $PREVIEW_DIR"
+    seed_preview
+  fi
+  local want have
+  want=$(git -C "$PROD_REPO" rev-parse HEAD) || return 1
+  have=$(git -C "$PREVIEW_DIR" rev-parse HEAD 2>/dev/null)
+  if [ "$want" != "$have" ]; then
+    git -C "$PREVIEW_DIR" fetch -q "$PROD_REPO" HEAD 9>&- && git -C "$PREVIEW_DIR" checkout -q --detach "$want" || return 1
+    say "preview clone moved to $(git -C "$PREVIEW_DIR" rev-parse --short HEAD)"
+  fi
+}
+
+deploy() {
+  say "deploy: firebase hosting:channel:deploy $CHANNEL --expires 30d --project $PROJECT (from $PREVIEW_DIR)"
+  if (cd "$PREVIEW_DIR" && timeout 3600 "$FIREBASE" hosting:channel:deploy "$CHANNEL" --expires 30d --project "$PROJECT") >> "$LOG" 2>&1 9>&-; then
+    rm -f "$Q/deploy-pending"; say "deployed the preview channel $CHANNEL"
+    # what was published and waited for a deploy is live on the channel now
+    local t; t=$(mktemp "$Q/.status.XXXXXX") && \
+      awk -F'\t' -v OFS='\t' '$2 == "published-not-deployed" {$2 = "published"; $7 = "deployed later"} {print}' "$STATUS" > "$t" && mv -f "$t" "$STATUS"
+    return 0
+  fi
+  touch "$Q/deploy-pending"; loud "the preview deploy failed (tried again at the next pass)"; return 1
+}
+
+publish() {  # region
+  preview_update || { loud "$1: could not bring $PREVIEW_DIR to $PROD_REPO's commit"; return 1; }
+  local pub=${QUEUE_PUBLISH:-$PREVIEW_DIR/ops/langpack/publish_site.sh}
+  if ! LANGPACK_WORK=$LANGPACK_WORK bash "$pub" "$1" "$PREVIEW_DIR/web" >> "$LOG" 2>&1 9>&-; then
+    loud "$1: publish_site.sh into $PREVIEW_DIR/web failed"; return 1
+  fi
+  say "$1: published into $PREVIEW_DIR/web/build/recipes"
+}
+
+# Is the map to be shipped now? Records why not. Sets KEY (base uuid/md5).
+eligible() {  # region zim round-status
+  local rid=$1 zim=$2 base=$MAPS_DIR/$2 uuid ntile md5 st state retry gb
+  KEY=
+  [ -n "${RUN_PID[$rid]:-}" ] && return 1                     # shipping now
+  case "$rid" in *-light|*-light-*|*ultralight*) [ -n "$(state_of "$rid" -)" ] || { set_state "$rid" ineligible-light "$zim" - - "a light map carries no Wikipedia"; say "$rid: a light map: no packs"; }; return 1 ;; esac
+  if [ ! -s "$base" ]; then
+    [ "$(state_of "$rid" - | cut -f1)" = missing ] || { loud "$rid: $base is not on disk"; set_state "$rid" missing "$zim" - - "not in $MAPS_DIR"; }
+    ANY_FAILED=1; return 1
+  fi
+  read -r uuid ntile < <(baseinfo "$base") || true
+  if [ -z "${uuid:-}" ]; then loud "$rid: could not read $base"; set_state "$rid" failed "$zim" - - "unreadable"; ANY_FAILED=1; return 1; fi
+  # whatever the file's bytes: the size and the tiles (logged once per base)
+  gb=$("$PY" -c 'import sys; print(f"{int(sys.argv[1]) / 1e9:.2f}")' "$(stat -c %s "$base")")
+  if [ "$("$PY" -c 'import sys; print(int(int(sys.argv[1]) > float(sys.argv[2]) * 1e9))' "$(stat -c %s "$base")" "$MAXGB")" = 1 ]; then
+    [ "$(state_of "$rid" "$uuid" | cut -f1)" = ineligible-size ] && return 1
+    set_state "$rid" ineligible-size "$zim" "$uuid" - "$gb GB > $MAXGB GB"
+    say "$rid: $zim is $gb GB, over the $MAXGB GB limit: no language packs in v1"; return 1
+  fi
+  if [ "${ntile:-0}" = 0 ]; then
+    [ "$(state_of "$rid" "$uuid" | cut -f1)" = ineligible-no-ml-tiles ] && return 1
+    set_state "$rid" ineligible-no-ml-tiles "$zim" "$uuid" - "no tileLanguages"; say "$rid: $zim has no multilingual tiles: no packs"; return 1
+  fi
+  md5=$(file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
+  KEY=$uuid/$md5
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE" && return 1     # published for this base already
+  st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
+  case "$state" in
+    refused-*) return 1 ;;
+    failed*) [ "$RETRY_FAILED" = 1 ] && [ -z "${FAILED_NOW[$rid]:-}" ] || return 1 ;;
+    pending) [ "$retry" != - ] && [ "$(date +%s)" -lt "$retry" ] && return 1 ;;
+  esac
+  if [ "${3:-uploaded}" = upload-pending ] && ! listed "$rid" "$base" "$md5"; then
+    [ "$state" = waiting-listing ] || { set_state "$rid" waiting-listing "$zim" "$KEY" - "upload-pending: archive.org does not list it yet"
+                                        say "$rid: upload-pending; waiting until archive.org lists $zim with its MD5"; }
+    return 1
+  fi
+  return 0
+}
+
+# Does the round build now? Its drivers' pid files (a live process with the
+# given text in its command line: a reused pid is not it) and its locks (held,
+# as /proc/locks shows: never taken here). Sets ROUND_WHY.
+lock_held() {  # file
+  local ino dev
+  read -r ino dev < <(stat -L -c '%i %d' "$1" 2>/dev/null) || return 1
+  awk -v k="$(printf '%02x:%02x:%s' $(( (dev >> 8) & 0xfff )) $(( (dev & 0xff) | ((dev >> 12) & 0xfff00) )) "$ino")" \
+    '{for (i = 1; i <= NF; i++) if ($i == k) {f = 1; exit}} END {exit !f}' /proc/locks
+}
+round_running() {
+  local item f pid c
+  ROUND_WHY=
+  for item in $ROUND_PIDFILES; do
+    for f in ${item%:*}; do
+      pid=$(head -c 32 "$f" 2>/dev/null | tr -dc 0-9)
+      [ -n "$pid" ] && c=$(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline") || continue
+      case "$c" in *"${item##*:}"*) ROUND_WHY="the round builds (pid $pid in $f)"; return 0 ;; esac
+    done
+  done
+  for f in $ROUND_LOCKS; do
+    lock_held "$f" && { ROUND_WHY="the round builds ($f is held)"; return 0; }
+  done
+  return 1
+}
+# Room for one more run beside those going? Sets WHY when not.
+room_for() {  # base
+  local n=${#RUN_PID[@]} rnd=0 avail full need free r
+  WHY=
+  round_running && rnd=1
+  [ "$n" = 0 ] || [ $rnd = 0 ] || { WHY="one run at a time while $ROUND_WHY"; return 1; }
+  [ "$n" -lt "$JOBS" ] || { WHY="$n runs going (QUEUE_JOBS=$JOBS)"; return 1; }
+  [ "$n" = 0 ] && [ $rnd = 0 ] && return 0                   # the first run while no round builds
+  avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+  [ "${avail:-0}" -ge $(( MIN_MEM_GB * 1048576 )) ] \
+    || { WHY="$(( ${avail:-0} / 1048576 )) GB of memory available, under QUEUE_MIN_MEM_GB=$MIN_MEM_GB${ROUND_WHY:+ while $ROUND_WHY}"; return 1; }
+  full=$(awk '/^full/ {sub("avg10=", "", $2); print int($2)}' /proc/pressure/memory 2>/dev/null)
+  [ "${full:-0}" -lt 5 ] || { WHY="memory pressure (full avg10=$full)"; return 1; }
+  [ "$n" = 0 ] && return 0                                   # the first run: ship_packs.sh minds the disk itself
+  need=$(( $(stat -c %s "$1") / 1024 * 2 + DISK_MARGIN_GB * 1048576 ))
+  for r in "${!RUN_ZIM[@]}"; do need=$(( need + $(stat -c %s "$MAPS_DIR/${RUN_ZIM[$r]}" 2>/dev/null || echo 0) / 1024 * 2 )); done
+  free=$(df -Pk "$LANGPACK_WORK" | awk 'NR == 2 {print $4}')
+  [ "${free:-0}" -ge "$need" ] || { WHY="$(( ${free:-0} / 1048576 )) GB free on $LANGPACK_WORK's disk, under the $(( need / 1048576 )) GB the runs need"; return 1; }
+}
+
+starttime() {  # pid -> its start time (/proc/PID/stat field 22); fails for a gone or zombie process
+  local s; s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  s=${s##*) }; set -- $s
+  [ "$1" != Z ] && echo "${20}"
+}
+alive() {  # region: is its run going? (the same process: pid and start time)
+  local s; s=$(starttime "${RUN_PID[$1]}") || return 1
+  [ -z "${RUN_START[$1]}" ] || [ "$s" = "${RUN_START[$1]}" ]
+}
+stopping() {
+  [ -e "$Q/stop" ] || return 1
+  [ -n "$STOP_SAID" ] || { STOP_SAID=1; say "stop file: starting nothing new; ${#RUN_PID[@]} running finish first"; }
+}
+
+start_ship() {  # region zim key
+  local rid=$1 zim=$2 base=$MAPS_DIR/$2 pid
+  set_state "$rid" shipping "$zim" "$3"
+  rm -f "$Q/rc-$rid"
+  say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
+  ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
+      ionice -c3 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
+    echo $? > "$Q/rc-$rid" ) 9>&- &
+  pid=$!
+  RUN_PID[$rid]=$pid; RUN_START[$rid]=$(starttime "$pid"); RUN_ZIM[$rid]=$zim; RUN_KEY[$rid]=$3
+  echo "$pid ${RUN_START[$rid]:--} $zim $3" > "$Q/runs/$rid.tmp" && mv -f "$Q/runs/$rid.tmp" "$Q/runs/$rid"
+}
+
+# Exit 2, a killed run or one without an exit code: again after RETRY, a loud
+# failure after MAX_AGAIN of them in a row for the same base.
+again() {  # region zim key why
+  local n=0 k c
+  [ -s "$Q/again-$1" ] && read -r k c < "$Q/again-$1" && [ "$k" = "$3" ] && n=$c
+  n=$(( n + 1 ))
+  if [ "$n" -ge "$MAX_AGAIN" ]; then
+    rm -f "$Q/again-$1"
+    set_state "$1" failed-again "$2" "$3" - "$4, $n times in a row"; FAILED_NOW[$1]=1; ANY_FAILED=1
+    loud "$1: $4, $n times in a row (see $Q/ship-$1.out): not tried again until a restart with QUEUE_RETRY_FAILED=1"
+  else
+    echo "$3 $n" > "$Q/again-$1"
+    set_state "$1" pending "$2" "$3" "$(( $(date +%s) + RETRY ))" "$4 ($n of $MAX_AGAIN)"
+    say "$1: $4: again after $RETRY s ($n of $MAX_AGAIN in a row)"
+  fi
+}
+
+# A run that ended: its outcome (publishing and deploying one at a time, here).
+finish() {  # region
+  local rid=$1 zim=${RUN_ZIM[$1]} key=${RUN_KEY[$1]} rc
+  wait "${RUN_PID[$rid]}" 2>/dev/null
+  rc=$(cat "$Q/rc-$rid" 2>/dev/null) || rc=
+  unset "RUN_PID[$rid]" "RUN_START[$rid]" "RUN_ZIM[$rid]" "RUN_KEY[$rid]"
+  case $rc in 2|''|129|1[3-5][0-9]) ;; *) rm -f "$Q/again-$rid" ;; esac
+  case $rc in
+    0)
+      say "$rid: packs shipped"
+      if publish "$rid"; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" >> "$DONE"
+        set_state "$rid" published "$zim" "$key"
+        deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
+      else
+        set_state "$rid" failed-publish "$zim" "$key" - "see queue.log"; FAILED_NOW[$rid]=1; ANY_FAILED=1
+      fi ;;
+    6)
+      set_state "$rid" pending "$zim" "$key" "$(( $(date +%s) + RETRY ))" "ship_packs rc=6"
+      say "$rid: ship_packs rc=6 (archive.org listing pending): again after $RETRY s" ;;
+    2) again "$rid" "$zim" "$key" "ship_packs rc=2 (a lock held)" ;;
+    '') again "$rid" "$zim" "$key" "the run ended without an exit code (the queue or the host stopped)" ;;
+    129|1[3-5][0-9]) again "$rid" "$zim" "$key" "ship_packs.sh was killed (rc=$rc)" ;;
+    4|5)
+      set_state "$rid" "refused-$rc" "$zim" "$key" - "ship_packs rc=$rc"
+      say "$rid: ship_packs rc=$rc ($([ "$rc" = 4 ] && echo 'v1 gives this map no packs' || echo 'nothing publishable')): skipped" ;;
+    *)
+      set_state "$rid" "failed" "$zim" "$key" - "ship_packs rc=$rc"; FAILED_NOW[$rid]=1; ANY_FAILED=1
+      loud "$rid: ship_packs.sh rc=$rc (see $Q/ship-$rid.out and its log under $LANGPACK_WORK/logs)" ;;
+  esac
+  rm -f "$Q/rc-$rid" "$Q/runs/$rid"
+}
+
+# Finish the runs that ended; with "all", wait for every one.
+reap() {
+  local r
+  while :; do
+    for r in "${!RUN_PID[@]}"; do alive "$r" || finish "$r"; done
+    [ "${1:-}" = all ] && [ ${#RUN_PID[@]} -gt 0 ] || return 0
+    sleep "${QUEUE_REAP_SECS:-5}" 9>&-
+  done
+}
+
+pass() {
+  [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
+  local rid zim t st why
+  while IFS=$'\t' read -r rid zim t st <&3; do
+    [ -n "$rid" ] || continue
+    reap
+    stopping && break
+    eligible "$rid" "$zim" "$st" || continue
+    # in the order they shipped: wait here until there is room for this one
+    why=
+    until room_for "$MAPS_DIR/$zim"; do
+      [ -n "$why" ] || { why=$WHY; say "$rid: waiting: $WHY"; }
+      sleep "${QUEUE_REAP_SECS:-5}" 9>&-; reap
+      stopping && break 2
+    done
+    start_ship "$rid" "$zim" "$KEY"
+  done 3< <(candidates)
+  reap all
+}
+
+say "== pack_queue at $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'), maps shipped since $(TZ=America/Los_Angeles date -d @"$SINCE" '+%F %T %Z'), $ROUND_TSV"
+# runs from before a restart: counted while they go, finished here when they end
+for f in "$Q"/runs/*; do
+  [ -f "$f" ] || continue
+  case $f in *.tmp) rm -f "$f"; continue ;; esac
+  rid=${f##*/}
+  read -r pid start zim key < "$f" || { rm -f "$f"; continue; }
+  RUN_PID[$rid]=$pid RUN_START[$rid]=$start RUN_ZIM[$rid]=$zim RUN_KEY[$rid]=$key
+  if [ "$start" != - ] && alive "$rid"; then say "$rid: its ship_packs.sh run from before the restart is still going (pid $pid): counted"
+  else say "$rid: its run from before the restart has ended: its outcome now"; fi
+done
+failed=$(awk -F'\t' '$2 ~ /^failed/ && $4 != "-" {printf "%s ", $1}' "$STATUS")
+[ -z "$failed" ] || say "failed before: ${failed% } ($([ "$RETRY_FAILED" = 1 ] && echo 'tried again: QUEUE_RETRY_FAILED=1' || echo 'not tried again; QUEUE_RETRY_FAILED=1 retries them'))"
+while :; do
+  pass
+  [ $ONCE = 1 ] && break
+  stopping && break
+  sleep "$POLL" 9>&-
+done
+[ -e "$Q/stop" ] && say "stop file: stopped"
+[ $ONCE = 1 ] && [ $ANY_FAILED = 1 ] && exit 1
+exit 0

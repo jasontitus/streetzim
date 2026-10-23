@@ -126,7 +126,10 @@ say "menu: $LANGS; region languages: ${RL:-none}; packs: $PACK_LANGS"
 # 2. network first
 if [ -n "$PACK_LANGS" ]; then
   say "prefetch: $PACK_LANGS"
-  "${LOW[@]}" "${LIM[@]}" timeout 21600 "$PY" "${SHIP_PREFETCH:-$TL/prefetch.py}" "$BASE" --langs "$PACK_LANGS" --cache "$WP_CACHE" \
+  # one prefetch at a time on a cache (ship_packs.sh runs side by side,
+  # ops/langpack/pack_queue.sh): it downloads into and appends to shared files
+  mkdir -p "$WP_CACHE"
+  "${LOW[@]}" flock "$WP_CACHE/.prefetch.lock" "${LIM[@]}" timeout 21600 "$PY" "${SHIP_PREFETCH:-$TL/prefetch.py}" "$BASE" --langs "$PACK_LANGS" --cache "$WP_CACHE" \
     >> "$LOG" 2>&1 || say "prefetch incomplete (see above); the packs say what they lack"
 fi
 

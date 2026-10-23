@@ -471,6 +471,71 @@ MD5), and gives exactly those cards their "Build in another language"
 link (`/build/?region=<id>`): a pruned or re-uploaded base leaves the page
 with the next deploy.
 
+### During a rebuild round: the pack queue
+
+`ops/langpack/pack_queue.sh` follows a round: when a map's latest row in
+`rebuild-old.tsv` (written after the queue first started) says `uploaded`,
+or `upload-pending` and archive.org now lists the file with its MD5
+(`ops/cloud/archive_has_file.py`; nothing appends `uploaded` to such a row
+later), it runs `ship_packs.sh` for it with production's items
+(`streetzim-<region>`, `streetzim-<region>-lang`), `LANGPACK_WORK=/storage/streetzim/langpack-work`
+and the build worker as `LANGPACK_WEBSEED`, then publishes the region into a
+**preview** clone of production (`/storage/experiments/build-preview/streetzim`,
+moved to production's commit first) and redeploys the preview channel
+(`firebase hosting:channel:deploy swiss-languages --expires 30d --project
+streetzim`). Never the live site: production's `web/build/recipes` stays
+empty until the page goes live. A new preview clone starts with the Swiss
+test recipes the channel shows now (`QUEUE_SEED`, from
+`/storage/experiments/lang-torrents/swiss-site2`); production's Switzerland
+replaces them when it ships. The preview's home page is not regenerated.
+
+- Eligible: not a light map, at most 8 GB, multilingual tiles
+  (`tileLanguages`); `ship_packs.sh` refuses continents itself (exit 4).
+  The log says so for each: France, Germany, the Nordics and Italy (8.1 GB)
+  get no packs in v1.
+- In the order the maps shipped, one run at a time while a round driver
+  builds (the disk is saturated and its scheduler ignores ionice), and only
+  with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
+  pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the
+  same memory rule and with room on the disk for its merged files. The round
+  builds while a driver's pid file (`.rebuild-old.pid`, the parallel
+  runner's `rebuild-par/pids/*.pid`) names a live `rebuild_old_regions.sh`
+  or a process holds `rebuild-par/run.lock` or
+  `sz-tests/rebuild-all/run.lock` (read from `/proc/locks`, never taken).
+  `ship_packs.sh` takes turns on the shared Wikipedia cache (its prefetch
+  holds a lock).
+- Each `ship_packs.sh` starts from a clean environment (`HOME`, `USER`,
+  `PATH`, the locale; then production's items and settings, set by the
+  queue): no `SHIP_*` knob or stand-in from a test shell or the Swiss
+  preview's `env.sh` reaches a production run. The queue refuses to start
+  (exit 3) with a `PREVIEW_DIR` that is, holds or sits in production
+  (`PROD_REPO`, `/storage/streetzim`), with `PREVIEW_CHANNEL` empty or
+  `live`, or, unless `QUEUE_FORCE_WORK=1` (tests), with a `LANGPACK_WORK`,
+  `WP_CACHE`, `LANGPACK_WEBSEED`, `ROUND_TSV`, `MAPS_DIR` or `PROD_REPO`
+  other than production's, or `QUEUE_SHIP`, `QUEUE_PUBLISH` or `QUEUE_DIR`
+  set.
+- Exit 6 (archive.org listing pending): tried again after 30 min. Exit 2 (a
+  lock held), or a run killed or gone without an exit code: tried again
+  after 30 min, a loud failure after 8 in a row (`QUEUE_MAX_AGAIN`). 4 and
+  5: logged, skipped for that base. Anything else: a loud failure
+  (`queue.log`, stderr). A failure is not tried again, in this run or after
+  a restart, unless the queue starts with `QUEUE_RETRY_FAILED=1`.
+- Resumable: a map published for the same base (UUID and file MD5) is not
+  shipped again; a new or rewritten file is. Runs still going when the
+  queue stopped are counted after a restart and finished by the new queue
+  (`runs/`). State in `$LANGPACK_WORK/pack-queue/` (`status.tsv`,
+  `published.tsv`, `queue.log` in PDT). A file named `stop` there: nothing
+  new starts, the running ones finish, then the queue ends (remove it
+  before starting again). The round's files are only read.
+- `pack_queue.sh enqueue REGION ZIM` (while the queue runs, too) makes a map
+  in `/storage/streetzim` a candidate whatever `rebuild-old.tsv` says, until
+  the round writes a new row for that region.
+
+```bash
+cd /storage/streetzim                # QUEUE_SINCE: count maps the round shipped before this start
+QUEUE_SINCE='2026-10-23 00:00' setsid nohup ops/langpack/pack_queue.sh > langpack-work/pack-queue.nohup 2>&1 < /dev/null &
+```
+
 ### The builder page
 
 `/build/` (`web/build/`; the prototype's `/lab/build/` redirects there)

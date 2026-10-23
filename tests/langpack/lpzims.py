@@ -88,7 +88,7 @@ VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
 
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
                extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
-               front_redirects: list[tuple[str, str, str]] | None = None) -> str:
+               front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
     (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
@@ -111,7 +111,7 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                                ("routing-worker.js", "application/javascript")):
                 c.add_item(_Item(name, "Testland" if name == "index.html" else "", mime,
                                  pad_to_slot(name, slots[name]), front=name == "index.html", compress=False))
-        cfg = {"name": "Testland", "bounds": [19.0, 9.0, 22.0, 12.0]}
+        cfg = {"name": "Testland", "bounds": [19.0, 9.0, 22.0, 12.0], **(cfg_extra or {})}
         if wiki:
             cfg["hasWikiArticles"] = True
         c.add_item(_Item("map-config.json", "", "application/json", json.dumps(cfg)))
