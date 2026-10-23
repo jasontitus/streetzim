@@ -634,4 +634,22 @@ osm-greece-2026-10-15.zim, 1.05 GB, all 22 core languages):
 | make_site.py + site_check.py | 2 min | 722/722 checks (archive.org listings synthetic: nothing uploaded) |
 | builder_e2e.mjs: el, ar, ja one-click, de from a local copy | 17-23 s each (local servers) | each file byte-identical to its gated merge |
 
-Recipes: 2.7-3.8 MB each, 63 MB for the region's 22.
+Recipes: 2.7-3.8 MB each, 63 MB for the region's 22 (before search packs
+and viewer slots).
+
+Later runs, with search packs and viewer slots (the files published on the
+builder page's preview, 2026-10-23):
+
+| region | base | versions | recipe each | pack files a version downloads |
+|---|---|---|---|---|
+| Greece (osm-greece-2026-10-23.zim) | 1.05 GB | 22 | 4.8-5.8 MB | 0.11-0.13 GB |
+| Switzerland (osm-switzerland-2026-10-22.zim) | 2.28 GB | 23 | 13.7-15.5 MB (de: 3.7 MB gzipped) | 0.77-0.86 GB |
+
+Switzerland on the build host, 2026-10-22: ship_packs.sh took 405 min
+(search packs 1 h 58 min, gates 3 h 45 min). The builder page one-click in
+headless Chromium, every byte from archive.org through the range proxy:
+de 10 min, fr 12, it 10.5, ar 13, ja 10, rm 26 (under disk contention),
+each file's MD5 equal to its recipe's. A search pack indexes every page of
+the base, so search packs are about half of what a region stores: Swiss
+search packs 4.11 GB against 1.27 GB of Wikipedia packs and the 2.28 GB
+base.
