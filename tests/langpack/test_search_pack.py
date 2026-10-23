@@ -344,3 +344,53 @@ def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> N
     assert {x["index_lang"] for x in rows} == {"de", "en"}      # the visitor's language, else the base's
     r2 = tool("search_packs.py", *args)
     assert [json.loads(x)["built"] for x in r2.stdout.splitlines() if x.startswith("{")] == [False, False]
+
+
+def test_search_packs_side_by_side_in_a_scratch_folder(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """--jobs: the pack sets' builds run side by side, each in a process of its
+    own; --work-dir (the NVMe scratch): built there, then moved into the packs
+    folder with their sidecars and gates (nothing left behind); the rows are
+    the serial run's."""
+    import threading
+    import time
+    from tests.langpack import lpzims
+    zc = lpzims.fake_zimcheck(tmp_path / "zc", "clean", None)
+    runs = {}
+    for name, jobs in (("serial", "1"), ("side", "3")):
+        packs = tmp_path / name / "packs"
+        packs.mkdir(parents=True)
+        for x in ("de", "fr", "th"):
+            shutil.copy(lp.packs[x], packs / lp.packs[x].name)
+            assert tool("pack_gate.py", packs / lp.packs[x].name, "--base", lp.base,
+                        env={"PACK_GATE_ZIMCHECK": zc}).returncode == 0
+        work = tmp_path / name / "scratch"
+        most, stop = [0], threading.Event()
+
+        def watch(w: Path = work, m: list = most, s: threading.Event = stop) -> None:
+            while not s.is_set():
+                if w.exists():
+                    m[0] = max(m[0], len({p.name.split(".zim")[0] for p in w.iterdir()}))   # builds there at once
+                time.sleep(0.005)
+        t = threading.Thread(target=watch)
+        t.start()
+        try:
+            r = tool("search_packs.py", lp.base, packs, "--region", "testland", "--langs", "de,fr,th,en", "--region-langs", "",
+                     "--date", "2026-10-22", "--cache", tmp_path / name / "cache", "--jobs", jobs, "--work-dir", work)
+        finally:
+            stop.set()
+            t.join()
+        assert r.returncode == 0, r.stderr[-2000:]
+        rows = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
+        runs[name] = (rows, most[0], r.stderr)
+        assert not list(work.iterdir())                         # moved out, nothing left
+        for x in rows:
+            out = packs / x["search_pack"]
+            g = json.loads(Path(str(out) + ".gate.json").read_text())
+            assert g["ok"] and g["pack_md5"] == lpzims.md5_of(out) and Path(str(out) + ".json").exists()
+        assert not list(packs.glob(".*.part"))
+    key = [(tuple(x["packs"]), tuple(x["entries"]), x["index_lang"], x["gate_ok"]) for x in runs["serial"][0]]
+    assert key == [(("de",), ("de",), "de", True), (("fr",), ("fr",), "fr", True), (("th",), ("th",), "th", True)], key
+    assert [(tuple(x["packs"]), tuple(x["entries"]), x["index_lang"], x["gate_ok"]) for x in runs["side"][0]] == key
+    assert runs["serial"][1] == 1 and runs["side"][1] >= 2, runs     # one build at a time; then side by side
+    assert runs["side"][2].count("base pages and redirects:") == 1, runs["side"][2]    # the base's pages read once
+    assert "search packs: 3 to build, 3 at a time, in " in runs["side"][2]

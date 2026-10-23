@@ -37,16 +37,22 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
 
 
-def sha(b) -> str:
-    return hashlib.sha256(bytes(b)).hexdigest()[:16]
-
-
 def sig(a: Archive, path: str):
+    """What an entry is: a redirect's title and target, an item's title, MIME
+    type and content (the bytes themselves: compared, not hashed)."""
     e = a.get_entry_by_path(path)
     if e.is_redirect:
         return ("R", e.title, e.get_redirect_entry().path)
     it = e.get_item()
-    return ("I", e.title, it.mimetype, sha(it.content))
+    return ("I", e.title, it.mimetype, bytes(it.content))
+
+
+def cluster_order(d):
+    """Entries sorted by where their content is (redirects last): each cluster
+    is then read once, not once per entry. In path order a base's Wikipedia
+    images jump from cluster to cluster (Switzerland: 328 of 480 s); the same
+    entries are compared either way."""
+    return (d.cluster is None, d.cluster or 0, d.blob or 0)
 
 
 def fronts(z: ZimReader):
@@ -125,14 +131,12 @@ def main():
     # base C entries
     bad = []
     n = 0
-    for d in zb.iter_dirents():
-        if d.ns != C or d.path == b"map-config.json":
-            continue
+    for d in sorted((d for d in zb.iter_dirents() if d.ns == C and d.path != b"map-config.json"), key=cluster_order):
         n += 1
         p = d.path.decode()
         if sig(am, p) != sig(ab, p):
             bad.append(p)
-    check("base C entries identical (title, mime, content, redirect target)", not bad, f"checked={n} bad={bad[:3]}")
+    check("base C entries identical (title, mime, content, redirect target)", not bad, f"checked={n} bad={sorted(bad)[:3]}")
 
     # map-config.json
     bcfg = json.loads(bytes(ab.get_entry_by_path("map-config.json").get_item().content))
@@ -149,9 +153,7 @@ def main():
     # pack entries
     bad, n = [], 0
     for k, p in enumerate(packs):
-        for d in p.z.iter_dirents():
-            if d.ns != C:
-                continue
+        for d in sorted((d for d in p.z.iter_dirents() if d.ns == C), key=cluster_order):
             n += 1
             ps = d.path.decode()
             if sig(am, ps) != sig(aps[k], ps):
@@ -161,7 +163,7 @@ def main():
                 if not tgt.startswith(p.prefix.decode()):
                     bad.append(ps + " (redirect leaves its pack)")
     check("pack C entries identical (title, mime, content, redirect target in own pack)", not bad,
-          f"checked={n} bad={bad[:3]}")
+          f"checked={n} bad={sorted(bad)[:3]}")
     for k, p in enumerate(packs):
         for f in ("pack.json", "wiki-geo-index.json", "wikidata-text.json"):
             path = p.prefix.decode() + f

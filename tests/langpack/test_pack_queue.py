@@ -50,6 +50,14 @@ if rc == 0:
     d = os.path.join(os.environ["LANGPACK_WORK"], "site", rid, "recipes", rid)
     os.makedirs(d, exist_ok=True)
     open(os.path.join(d, "region.json"), "w").write(json.dumps({"id": rid, "base": os.path.basename(base)}))
+# FAKE_SHIP_RETRY "region:es fr;...": the languages whose pack builds ran out of time (ship_packs.sh's retry-langs)
+retry = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_RETRY", "").split(";") if x)
+rl = os.path.join(os.environ["LANGPACK_WORK"], "packs", os.path.basename(base)[:-4], "retry-langs")
+if retry.get(rid):
+    os.makedirs(os.path.dirname(rl), exist_ok=True)
+    open(rl, "w").write(retry[rid] + "\n")
+elif os.path.exists(rl):
+    os.remove(rl)
 sys.exit(rc)
 '''
 # publish_site.sh REGION WEB: copies the site files over; FAKE_PUBLISH_RC
@@ -92,7 +100,8 @@ def q(tmp_path: Path) -> SimpleNamespace:
         p.write_text(body.replace("#!PY", f"#!{sys.executable}"))
         p.chmod(0o755)
     (d / "ship-env").mkdir()
-    (stubs / "ship.sh").write_text(f'#!/bin/bash\nenv -0 > {d / "ship-env"}/"$1"\nset -a; . {d / "ship.env"}; set +a\n'
+    (stubs / "ship.sh").write_text(f'#!/bin/bash\nenv -0 > {d / "ship-env"}/"$1"\nionice -p $$ > {d / "ship-env"}/"$1".io\n'
+                                   f'set -a; . {d / "ship.env"}; set +a\n'
                                    f'exec {sys.executable} {stubs / "ship.py"} "$@"\n')
     maps = d / "maps"
     maps.mkdir()
@@ -143,6 +152,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "FAKE_LOG": str(log), "FAKE_SHIP_RC": "alpha:6,0;cont:4;fail:1", "PYTHONDONTWRITEBYTECODE": "1",
            "IA": str(stubs / "ia"), "FAKE_IA_DIR": str(d / "ia"), "QUEUE_SEED": "",
            "QUEUE_FORCE_WORK": "1",                                        # a test's LANGPACK_WORK
+           "LANGPACK_SCRATCH": str(d / "nvme"),                            # not the host's NVMe scratch
            "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": ""}            # not the host's own round
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
@@ -151,7 +161,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
 
 def _env(q: SimpleNamespace, extra: dict[str, str]) -> dict[str, str]:
     env = {**q.env, **extra}
-    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP") if k in env))
+    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_RETRY") if k in env))
     return env
 
 
@@ -615,3 +625,86 @@ def test_ship_packs_starts_from_a_clean_environment(q: SimpleNamespace) -> None:
         assert e["LANGPACK_WORK"] == str(q.work) and e["WP_CACHE"] == str(q.work / "wpcache"), e
         assert e["LANGPACK_WEBSEED"] == "https://streetzim-build-proxy.tiltastech.workers.dev" and e["SHIP_MAX_BASE_GB"] == q.env["QUEUE_MAX_BASE_GB"]
         assert e["HOME"] == os.environ["HOME"] and e["PATH"] == os.environ["PATH"]
+
+
+def test_a_language_that_ran_out_of_time_is_shipped_again_later(q: SimpleNamespace) -> None:
+    """ship_packs.sh published without a language whose pack build ran out of
+    time (retry-langs): the map is published and deployed as it is, and run
+    again after QUEUE_RETRY_SECS; once the language's pack is in, it is
+    published for good. After QUEUE_PARTIAL_RETRIES runs it stays as it is,
+    with a warning."""
+    env = {"FAKE_SHIP_RC": "", "QUEUE_PARTIAL_RETRIES": "2"}
+    r = _run(q, **env, FAKE_SHIP_RETRY="beta:es;alpha:es fr", QUEUE_RETRY_SECS="3600")
+    assert r.returncode == 0, r.stderr
+    n0 = len(_calls(q, "ship"))
+    _run(q, **env, FAKE_SHIP_RETRY="beta:es;alpha:es fr", QUEUE_RETRY_SECS="3600")
+    assert len(_calls(q, "ship")) == n0                     # not before QUEUE_RETRY_SECS
+    for rid in ("alpha", "beta"):                            # due now
+        f = q.qd / "status.tsv"
+        f.write_text("\n".join("\t".join(x[:5] + ["0"] + x[6:]) if x[0] == rid else "\t".join(x)
+                               for x in (y.split("\t") for y in f.read_text().splitlines())) + "\n")
+    st = _status(q)
+    assert st["beta"][1] == "published-partial" and st["beta"][6] == "without es (1 of 2)", st["beta"]
+    assert st["alpha"][1] == "published-partial" and st["alpha"][6] == "without es fr (1 of 2)", st["alpha"]
+    assert "beta: published without es (their pack builds ran out of time)" in log_text(q)
+    assert "beta" not in (q.qd / "published.tsv").read_text()
+    assert (q.preview / "web" / "build" / "recipes" / "beta").exists()              # the menu without es is live
+    ships = lambda rid: len([c for c in _calls(q, "ship") if c["ship"] == rid])      # noqa: E731
+    r = _run(q, **env, FAKE_SHIP_RETRY="alpha:es fr")                               # beta's es built this time
+    assert r.returncode == 0, r.stderr
+    assert ships("beta") == 2 and _status(q)["beta"][1] == "published" and "beta\t" in (q.qd / "published.tsv").read_text()
+    assert _status(q)["alpha"][1] == "published-partial" and _status(q)["alpha"][6] == "without es fr (2 of 2)"
+    r = _run(q, **env, FAKE_SHIP_RETRY="alpha:es fr")                               # out of time once more
+    assert "WARNING: alpha: published without es fr: their pack builds ran out of time 2 times" in r.stderr, r.stderr
+    assert _status(q)["alpha"][1] == "published" and "alpha\t" in (q.qd / "published.tsv").read_text()
+    assert ships("beta") == 2 and ships("alpha") == 3
+    _run(q, **env)
+    assert ships("beta") == 2 and ships("alpha") == 3                               # done: not again
+
+
+def test_ship_packs_starts_at_best_effort_io(q: SimpleNamespace) -> None:
+    """The HDD's mq-deadline serves the idle class only when the disk is idle,
+    which a round's builds never leave it: ship_packs.sh starts at best effort."""
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    assert (q.d / "ship-env" / "beta.io").read_text().strip() == "best-effort: prio 7"
+
+
+def test_nothing_publishable_yet_is_run_again_within_bounds(q: SimpleNamespace) -> None:
+    """ship_packs.sh exit 7 (a region language's pack ran out of time: no
+    entry publishable yet): run again after QUEUE_RETRY_SECS, at most
+    QUEUE_PARTIAL_RETRIES times for the same base, then a loud failure; a run
+    that publishes in between is published."""
+    env = {"FAKE_SHIP_RC": "beta:7;alpha:7,7,0", "FAKE_SHIP_RETRY": "beta:pl;alpha:fr", "QUEUE_PARTIAL_RETRIES": "2"}
+    r = _run(q, **env)
+    st = _status(q)
+    assert st["beta"][1] == "pending" and "ship_packs rc=7: pl ran out of time (1 of 2)" in st["beta"][6], st["beta"]
+    assert r.returncode == 0 and "beta: nothing publishable yet (pl ran out of time)" in log_text(q), r.stderr
+    _run(q, **env)
+    assert _status(q)["beta"][1] == "pending" and _status(q)["alpha"][1] == "pending"
+    r = _run(q, **env)
+    assert r.returncode == 1 and "beta: no packs: pl ran out of time 2 times in a row" in r.stderr, r.stderr
+    assert _status(q)["beta"][1] == "failed-timeout"
+    assert _status(q)["alpha"][1] == "published"                  # its third run published (alpha:7,7,0)
+    n = len([c for c in _calls(q, "ship") if c["ship"] == "beta"])
+    _run(q, **env)
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n     # a failure: not again without the flag
+
+
+def test_the_queue_sweeps_dead_runs_scratch_at_start(q: SimpleNamespace) -> None:
+    """ship_packs.sh runs killed with the queue leave their NVMe folders: the
+    queue's start removes those whose process is gone, not a live run's."""
+    scr = Path(q.env["LANGPACK_SCRATCH"])
+    scr.mkdir()
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    live = subprocess.Popen(["sleep", "60"])
+    try:
+        st = Path(f"/proc/{live.pid}/stat").read_text()
+        (scr / f"run-gone-{dead.pid}").mkdir()
+        (scr / f"run-going-{live.pid}").mkdir()
+        (scr / f"run-going-{live.pid}" / ".owner").write_text(f"{live.pid} {st[st.rindex(')') + 2:].split()[19]}\n")
+        assert _run(q, FAKE_SHIP_RC="").returncode == 0
+        assert not (scr / f"run-gone-{dead.pid}").exists() and (scr / f"run-going-{live.pid}").exists()
+        assert f"NVMe scratch: removed {scr / f'run-gone-{dead.pid}'}: its run is gone" in log_text(q)
+    finally:
+        live.kill()

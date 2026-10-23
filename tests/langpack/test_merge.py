@@ -265,3 +265,25 @@ def test_materialize_refuses_a_recipe_whose_file_md5_is_wrong(lp: SimpleNamespac
     with pytest.raises(merge_zim.MergeError, match="file MD5"):
         recipe2.materialize(recipe, str(lp.base), {p.lang: p.path for p in plan.packs}, str(tmp_path / "x.zim"),
                             trust_md5=True)
+
+
+def test_verify_compares_the_entries_bytes(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """One byte of a pack image changed in the merged file (its length kept,
+    the trailing MD5 made right): verify_merge.py finds that entry, by its
+    content, whatever order it reads the entries in."""
+    import hashlib
+    from tools.langpack.zimfmt import ZimReader
+    out = tmp_path / "m-de.zim"
+    merge_zim.merge(str(lp.base), _packs(lp), str(out), "de", region_langs=["en"], title="Testland")
+    z = ZimReader(str(out))
+    path = next(d.path for d in z.iter_dirents() if d.ns == ord("C") and d.path.startswith(b"~w/fr/images/"))
+    d = z.dirent_at(z.find(ord("C"), path))
+    off, n = z.raw_blob(d.cluster, d.blob)
+    data = bytearray(out.read_bytes())
+    data[off + n // 2] ^= 0x01
+    data[-16:] = hashlib.md5(bytes(data[:-16]), usedforsecurity=False).digest()
+    out.write_bytes(bytes(data))
+    r = tool("verify_merge.py", out, lp.base, *_packs(lp), "--lang", "de", "--region-langs", "en", "--title", "Testland")
+    assert r.returncode == 1, r.stdout[-3000:]
+    fails = [x for x in r.stdout.splitlines() if x.startswith("FAIL")]
+    assert len(fails) == 1 and "pack C entries identical" in fails[0] and path.decode() in fails[0], fails

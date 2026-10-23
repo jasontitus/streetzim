@@ -24,7 +24,9 @@ Everything is set by arguments and environment variables.
 | `KIWIX_SERVE`, `NODE` | run_gates.sh | Defaults `kiwix-serve` and `node`. |
 | `PLAYWRIGHT_CORE`, `CHROME_PATH`, `BROWSER_LIBS` | the browser gates | Path to playwright-core's `index.mjs` (default: the installed package); the Chromium to drive; extra `LD_LIBRARY_PATH` for that Chromium. |
 | `LANGPACK_MIN_FREE_GB` | shell scripts | Pause while MemAvailable is below this; default 0. On the shared build host it is 40 (`ops/langpack/host-env.sh`). |
-| `LANGPACK_DISK_MARGIN_GB`, `KEEP_MERGED`, `RESUME` | run_gates.sh | Free disk asked beyond twice the base (default 20); 1 keeps every merged file; 1 skips what already passed (see §2). |
+| `LANGPACK_DISK_MARGIN_GB`, `KEEP_MERGED`, `RESUME` | run_gates.sh | Free disk asked beyond twice the base per running entry (default 20); 1 keeps every merged file; 1 skips what already passed (see §2). |
+| `GATE_JOBS`, `LANGPACK_MERGED` | run_gates.sh | Entries checked at a time (default 1; ship_packs.sh passes up to 4); the merged files' folder (default `$LANGPACK_WORK/merged`; ship_packs.sh puts it on the NVMe scratch). |
+| `PACK_BUILD_TIMEOUT`, `PACK_GATE_TIMEOUT`, `WIKI_NVME_DIR` | build_packs.sh | A build's time (default 3 h per 3 GB of base, at least 3 h) and pack_gate.py's (3600 s); the folder of verified NVMe copies of source ZIMs (default `/mnt/data/tilemaker/streetzim-wiki`, where parallel_rebuild.sh keeps the English one). |
 | `LANGPACK_WEBSEED` | ship_packs.sh, site_check.py | The build worker's origin (`build-proxy/`, e.g. `https://streetzim-build-proxy.<account>.workers.dev`). Set: a webseeded torrent per language entry (see "Language torrents"), and site_check.py requires every torrent's webseed to use it. Empty (the default): none. |
 | `LANGPACK_WEBSEED_SUBREQ_LIMIT`, `LANGPACK_WEBSEED_BLOB_BUDGET` | lang_torrents.py, site_check.py | The most worker subrequests a 16 MiB request of a language version may need (default 40; the free plan allows 50); the most blob bytes per entry (default 64 MiB). |
 | `SHIP_TORRENT_TIMEOUT`, `SHIP_LANG_TORRENTS_ARGS` | ship_packs.sh | lang_torrents.py's time limit (default 7200 s; on expiry: a WARNING, published without torrents); extra arguments for it. |
@@ -79,13 +81,19 @@ which uses only packs with a passing gate. It writes
 | search | `search_gate.py`: Kiwix's search finds 8 pack-only article titles by suggestion (first 10) and by full text (first 25), and base parity: of 12 base front pages and 12 base front redirects, each the base's own suggestions find, the merged file's find too; the kiwix-serve check asks `/suggest` and `/search` for three pack titles too. Required (v1 does not launch without it) |
 | smoke | `cloud/zim_viewer_smoke.mjs` |
 
-The viewer, UI and smoke gates also run on the base alone, first. Then one
-language at a time: its merged file is made, checked with kiwix-serve
-serving it alone, and deleted (`KEEP_MERGED=1` keeps it), so the disk holds
-one merged file and, during the recipe = merge check, its copy. The run
-refuses to start, and stops before the next language, while the merged
-folder's disk has less than twice the base plus `LANGPACK_DISK_MARGIN_GB`
-free. `RESUME=1` keeps the last run's logs and skips an entry whose verdict
+The viewer, UI and smoke gates also run on the base alone, first. Then
+`GATE_JOBS` entries at a time (1 by default; ship_packs.sh runs up to 4),
+each a job of its own, with its kiwix-serve on its own port and its own
+logs: its merged file is made, checked with kiwix-serve serving it alone,
+and deleted (`KEEP_MERGED=1` keeps it), so the disk holds at most
+`GATE_JOBS` merged files and, during the recipe = merge check, their copies.
+The run refuses to start while the merged folder's disk has less than twice
+the base plus `LANGPACK_DISK_MARGIN_GB` free; an entry waits for a running
+one to end while there is no such room for it beside the running ones, and
+with none running, neither it nor any later language runs. verify_merge.py
+compares the entries in the order of their clusters, so each cluster is
+read once (on Switzerland its Wikipedia images took 328 of its 480 s in
+path order), and compares their content bytes themselves. `RESUME=1` keeps the last run's logs and skips an entry whose verdict
 already passes for the recipe this run makes, and the base's checks when
 they passed for a base of the same size and mtime. Every language's logs
 are stamped with its recipe's md5 and uuid (`<L>.stamp`); a verdict needs
@@ -430,10 +438,42 @@ it on archive.org) logs each step in PDT to
 3. `build_packs.sh` for each pack language without a gated pack for this
    base in `$LANGPACK_WORK/packs/<base>/`. Packs are named
    `osm_<region>_wiki-<L>_<date>_<first 8 hex of the base's UUID>.zim`, so two
-   bases of a region never share a pack name. Then `search_packs.py`: the
-   search packs the menu needs (above).
-4. `run_gates.sh` with `RESUME=1`, streamed. The region file is
+   bases of a region never share a pack name. A build has 3 h per 3 GB of
+   base (at least 3 h; `PACK_BUILD_TIMEOUT`); one that runs out of it leaves
+   `.timeout-<L>`, and the run goes on without that language and lists it in
+   `packs/<base>/retry-langs`: the queue runs the region again later for it
+   (the packs done are not redone; the recipes and menu are made again when
+   its pack is in). The English Wikipedia is read from the parallel runner's
+   verified NVMe copy when it is exactly the original. The other Wikipedias
+   are read from `/storage`: copying one is too big for the NVMe, and a
+   language's articles are spread over its whole ZIM (no small range to stage).
+   Then the NVMe scratch (`tools/langpack/nvme.py`): when the shared volume
+   has room for a copy of the base and one job beside what the map builds may
+   still write (counted as parallel_rebuild.sh counts it: free, less its
+   running builds' projections less their scratch, less the live
+   `.reserve-ml-*` reservations, keeping `LANGPACK_NVME_MIN_GB` (100) free),
+   the run gets a folder of its own in `LANGPACK_SCRATCH`
+   (`/mnt/data/tilemaker/streetzim-packs/run-<region>-<pid>`) for the merged
+   files, temporary files and search-pack builds, with a copy of the base
+   (size and MD5 checked against the stream it was copied from, its mtime and
+   `.parent.json` kept: the same recipes and verdicts) that the search packs
+   and gates read. It reserves what it may still write
+   (`.reserve-ml-langpack-<pid>` in `/mnt/data/tilemaker/streetzim-scratch`,
+   which the runner, the tile stores and the stagers count), and the folder
+   and the reservation go when the gates are done (a dead run's are swept by
+   the next). Jobs: up to `LANGPACK_GATE_JOBS` and `LANGPACK_SEARCH_JOBS` (4
+   each), fewer when the room or MemAvailable (4 GB a gate job, 2 a search
+   build, above `LANGPACK_MIN_FREE_GB`) says so. Without the room: on
+   `LANGPACK_WORK`, one at a time, as before. Then `search_packs.py`: the
+   search packs the menu needs (above), side by side, the base's pages read
+   once first; each built and gated in the scratch, then moved beside the
+   packs with its sidecars.
+4. `run_gates.sh` with `RESUME=1`, streamed, the entries side by side. The region file is
    `tools/langpack/regions/<REGION>.json`, else `region_json.py`'s.
+   Everything runs at best-effort I/O, lowest level (`ionice -c2 -n7`) and
+   nice 19: the HDD's scheduler (mq-deadline) serves the idle class only when
+   the disk is idle, which a rebuild round's builds never leave it (a copy at
+   the idle class moved 0.04 MB/s there, at best effort 45 MB/s).
 5. archive.org: the packs the passing entries use go to
    `streetzim-<REGION>-lang` (made on the first upload: mediatype data,
    collection opensource_media like the bases, licence CC BY-SA 4.0 for
@@ -494,7 +534,7 @@ replaces them when it ships. The preview's home page is not regenerated.
   The log says so for each: France, Germany, the Nordics and Italy (8.1 GB)
   get no packs in v1.
 - In the order the maps shipped, one run at a time while a round driver
-  builds (the disk is saturated and its scheduler ignores ionice), and only
+  builds (the disk is saturated), and only
   with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
   pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the
   same memory rule and with room on the disk for its merged files. The round
@@ -514,6 +554,16 @@ replaces them when it ships. The preview's home page is not regenerated.
   `WP_CACHE`, `LANGPACK_WEBSEED`, `ROUND_TSV`, `MAPS_DIR` or `PROD_REPO`
   other than production's, or `QUEUE_SHIP`, `QUEUE_PUBLISH` or `QUEUE_DIR`
   set.
+- Exit 0 with languages whose pack builds ran out of time
+  (`packs/<base>/retry-langs`): published and deployed without them
+  (`published-partial`), and run again after 30 min for them; once their
+  packs are in, published for good; after 3 such runs
+  (`QUEUE_PARTIAL_RETRIES`) it stays as it is, with a warning. Exit 7
+  (nothing publishable yet: packs ran out of time, e.g. a region language's,
+  which every entry needs, so make_site.py refuses them all): run again
+  after 30 min within the same 3 runs, then a loud failure. At its start the
+  queue sweeps the NVMe scratch folders of ship_packs.sh runs that were
+  killed (live runs' are kept).
 - Exit 6 (archive.org listing pending): tried again after 30 min. Exit 2 (a
   lock held), or a run killed or gone without an exit code: tried again
   after 30 min, a loud failure after 8 in a row (`QUEUE_MAX_AGAIN`). 4 and

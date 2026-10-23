@@ -25,17 +25,22 @@ for _cmd in ("bash", "curl", "ss", "setsid"):
         pytest.skip(f"run_gates.sh needs {_cmd}", allow_module_level=True)
 
 KIWIX_STUB = r'''
-import http.server, json, os, sys
+import http.server, json, os, signal, sys, time
 port = int(sys.argv[sys.argv.index("--port") + 1])
 addr = sys.argv[sys.argv.index("--address") + 1] if "--address" in sys.argv else "0.0.0.0"
 books = [a for a in sys.argv[1:] if a.endswith(".zim")]
-# what the disk held when this server started (the gates must stream: one merged file at a time)
+# what the disk held when this server started (the gates must stream: GATE_JOBS merged files at a time)
 log = os.environ.get("KIWIX_STUB_LOG")
 if log:
-    merged = os.path.join(os.environ["LANGPACK_WORK"], "merged")
+    merged = os.environ.get("LANGPACK_MERGED") or os.path.join(os.environ["LANGPACK_WORK"], "merged")
     with open(log, "a") as fh:
-        fh.write(json.dumps({"books": [os.path.basename(b) for b in books], "address": addr,
-                             "merged_dir": sorted(os.listdir(merged))}) + "\n")
+        fh.write(json.dumps({"books": [os.path.basename(b) for b in books], "address": addr, "port": port,
+                             "merged_dir": sorted(os.listdir(merged)), "start": time.time()}) + "\n")
+    def bye(*_a):
+        with open(log + ".end", "a") as fh:
+            fh.write(json.dumps({"port": port, "books": [os.path.basename(b) for b in books], "end": time.time()}) + "\n")
+        os._exit(0)
+    signal.signal(signal.SIGTERM, bye)
 xml = "<feed>" + "".join(f"<entry><title>x</title><link href=\"/content/{b.rsplit('/', 1)[-1][:-4].lower()}\"/></entry>"
                          for b in books) + "</feed>"
 class H(http.server.BaseHTTPRequestHandler):
@@ -51,7 +56,7 @@ http.server.HTTPServer((addr, port), H).serve_forever()
 NODE_STUB = r'''#!/bin/bash
 # stand-in for node: the gate scripts must exist where run_gates.sh says
 [ -f "$1" ] || { echo "no such script: $1" >&2; exit 1; }
-case "$1" in *viewer_gate.mjs) [ -n "$NODE_STUB_LOG" ] && echo "EXPECT_PACKS=$EXPECT_PACKS $2" >> "$NODE_STUB_LOG" ;; esac
+case "$1" in *viewer_gate.mjs) [ -n "$NODE_STUB_LOG" ] && echo "EXPECT_PACKS=$EXPECT_PACKS $2" >> "$NODE_STUB_LOG"; sleep "${NODE_STUB_SLEEP:-0}" ;; esac
 case "$1" in
   *viewer_gate.mjs|*ui_gate.mjs) echo '{"pass": true}' ;;
   *zim_viewer_smoke.mjs) echo "1 passed, 0 failed" ;;
@@ -431,3 +436,117 @@ def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path
     assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
     r = run(env_t)
     assert "light gate" not in r.stdout and int(runs.read_text()) == 6, r.stdout
+
+
+def _servers(log: Path) -> list[dict]:
+    """kiwix-serve's lifetimes: start (with what it served) and end, by port and books."""
+    starts = [json.loads(x) for x in log.read_text().splitlines()]
+    ends = {(e["port"], tuple(e["books"])): e["end"]
+            for e in (json.loads(x) for x in Path(str(log) + ".end").read_text().splitlines())}
+    for s in starts:
+        s["end"] = ends[(s["port"], tuple(s["books"]))]
+    return starts
+
+
+def _most_at_once(spans: list[dict]) -> int:
+    ev = sorted([(s["start"], 1) for s in spans] + [(s["end"], -1) for s in spans], key=lambda x: (x[0], x[1]))
+    n = best = 0
+    for _, d in ev:
+        n += d
+        best = max(best, n)
+    return best
+
+
+def test_entries_are_checked_side_by_side(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """GATE_JOBS=2: two entries at a time, each served alone by its own
+    kiwix-serve on its own port; never more than two merged files on disk,
+    in LANGPACK_MERGED; the verdicts are the serial run's."""
+    work = tmp_path / "work"
+    merged = tmp_path / "nvme-merged"
+    served = tmp_path / "served.jsonl"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th,en", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=1200,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "GATE_JOBS": "2", "LANGPACK_MERGED": str(merged),
+                            "KIWIX_STUB_LOG": str(served), "NODE_STUB_SLEEP": "3"})
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    rows = _servers(served)
+    entries = [x for x in rows if x["books"] != [gates.base.name]]
+    assert sorted(x["books"][0] for x in entries) == sorted(f"m-{gates.tag}-{L}.zim" for L in ("de", "th", "en"))
+    assert all(len(x["books"]) == 1 for x in rows)
+    assert _most_at_once(entries) == 2, entries                    # two at a time, never three
+    for a in rows:                                              # servers alive together listen on different ports
+        for b in rows:
+            if a is not b and a["start"] < b["end"] and b["start"] < a["end"]:
+                assert a["port"] != b["port"], (a, b)
+    assert max(len([f for f in x["merged_dir"] if f.endswith(".zim")]) for x in entries) <= 2
+    assert {x["address"] for x in rows} == {"127.0.0.1"}
+    assert merged.is_dir() and not list(merged.iterdir())             # the merged files were there, and are gone
+    assert not (work / "merged").exists() or not list((work / "merged").iterdir())
+    out = work / "gates" / gates.tag
+    for L in ("de", "th", "en"):
+        v = json.loads((work / "verdicts" / gates.tag / f"{L}.json").read_text())
+        w = json.loads((gates.work / "verdicts" / gates.tag / f"{L}.json").read_text())
+        assert v["checks"] == w["checks"] and v["recipe_md5"] == w["recipe_md5"] and v["all_pass"] == w["all_pass"], L
+        assert (out / f"{L}.catalog.xml").exists() and (out / f"{L}.kiwix-serve.log").exists()
+
+
+DF_ONE_JOB = r'''#!/bin/bash
+# room for one merged file (2 x the base) and no more
+echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+echo "x 999999999999 0 $(( $(stat -L -c %s "$DF_BASE") / 1024 * 3 )) 0% /"
+'''
+
+
+def test_an_entry_waits_while_there_is_room_only_for_the_running_ones(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """GATE_JOBS=3 on a disk with room for one merged file: one entry at a
+    time, every one of them checked (none is skipped for want of room)."""
+    work = tmp_path / "work"
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "df").write_text(DF_ONE_JOB)
+    (stubs / "df").chmod(0o755)
+    served = tmp_path / "served.jsonl"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th,en", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=1200,
+                       env={**gates.env, "LANGPACK_WORK": str(work), "GATE_JOBS": "3", "KIWIX_STUB_LOG": str(served),
+                            "NODE_STUB_SLEEP": "2", "PATH": f"{stubs}:{os.environ['PATH']}", "DF_BASE": str(gates.base)})
+    assert r.returncode == 0 and "not run" not in r.stderr, r.stdout[-2000:] + r.stderr[-2000:]
+    entries = [x for x in _servers(served) if x["books"] != [gates.base.name]]
+    assert len(entries) == 3 and _most_at_once(entries) == 1, entries
+    for L in ("de", "th", "en"):
+        assert json.loads((work / "verdicts" / gates.tag / f"{L}.json").read_text())["checks"]["verify"] is True
+
+
+@pytest.mark.parametrize("how", ["group", "run_gates"])
+def test_a_stopped_run_leaves_no_kiwix_serve(gates: SimpleNamespace, tmp_path: Path, how: str) -> None:
+    """Stopped while entries are being checked, by a signal to its whole
+    process group (timeout's) or to run_gates.sh alone: each job stops its
+    kiwix-serve (which runs in a session of its own)."""
+    import signal
+    import time
+    served = tmp_path / "served.jsonl"
+    p = subprocess.Popen([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th,en", "en", "testland",
+                          str(gates.region), str(_free_port())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env={**gates.env, "LANGPACK_WORK": str(tmp_path / "work"), "GATE_JOBS": "2",
+                              "KIWIX_STUB_LOG": str(served), "NODE_STUB_SLEEP": "60"}, start_new_session=True)
+    try:
+        t0 = time.time()
+        while (not served.exists() or len(served.read_text().splitlines()) < 2) and time.time() - t0 < 300:
+            time.sleep(0.2)
+        assert len(served.read_text().splitlines()) >= 2
+        if how == "group":
+            os.killpg(p.pid, signal.SIGTERM)
+        else:
+            os.kill(p.pid, signal.SIGTERM)
+        p.wait(timeout=60)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    t0 = time.time()
+    while time.time() - t0 < 30:
+        ends = Path(str(served) + ".end")
+        if ends.exists() and len(ends.read_text().splitlines()) == len(served.read_text().splitlines()):
+            break
+        time.sleep(0.2)
+    starts = served.read_text().splitlines()
+    assert len(Path(str(served) + ".end").read_text().splitlines()) == len(starts), starts

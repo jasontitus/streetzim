@@ -17,10 +17,23 @@
 #   2. prefetch.py: SQL dumps, title maps and Wikidata text for those packs
 #      (network; the pack builds then run offline).
 #   3. build_packs.sh for every pack language without a gated pack for this
-#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done), then
-#      search_packs.py: a search pack per distinct pack set (index_pack.py).
-#   4. run_gates.sh, streamed (one merged file on disk at a time), RESUME=1:
-#      an entry whose verdict already passes for its recipe is not run again.
+#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done). A
+#      language whose build ran out of its time (exit 124, build_packs.sh's
+#      .timeout-<L>) and still has no pack is listed in
+#      $LANGPACK_WORK/packs/<base>/retry-langs: the run goes on without it and
+#      pack_queue.sh runs the region again later for it (no file: none).
+#      Then the NVMe scratch (tools/langpack/nvme.py): when the shared volume
+#      has room beside what the map builds may still write, this run's merged
+#      files, temporary files and search-pack builds go to its own folder in
+#      LANGPACK_SCRATCH, with a verified copy of the base the search packs and
+#      gates read, reserved there while the run lives and removed before the
+#      uploads; else on LANGPACK_WORK, one job at a time, as before. Then
+#      search_packs.py: a search pack per distinct pack set (index_pack.py),
+#      up to LANGPACK_SEARCH_JOBS (4) at a time.
+#   4. run_gates.sh, streamed (each entry's merged file made, checked and
+#      deleted), LANGPACK_GATE_JOBS (4) entries at a time on the NVMe (fewer
+#      when its room or MemAvailable says so), RESUME=1: an entry whose
+#      verdict already passes for its recipe is not run again.
 #      The region file is tools/langpack/regions/<REGION>.json when there is
 #      one, else region_json.py's.
 #   5. archive.org: the packs the menu uses go to item streetzim-<REGION>-lang
@@ -50,7 +63,9 @@
 # any download or build); 5 nothing publishable: every entry with a
 # Wikipedia pack that passed its gates is over the per-entry budget
 # (make_site.py's; each refusal is logged as REFUSED, before anything is
-# sent), or make_site.py offers no entry;
+# sent), or make_site.py offers no entry; 7 nothing publishable YET: as 5,
+# but with languages whose pack builds ran out of time (retry-langs; a region
+# language's missing pack refuses every entry): run again later;
 # 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
@@ -61,7 +76,13 @@
 # lock, default /storage/streetzim/.retrofit-upload.lock), SHIP_RESEND_AFTER_H
 # (72), SHIP_SKIP_UPLOAD=1 (stop after
 # the gates: a dry run), PACK_DATE (pack file names; default today),
-# GATES_PORT (default a free port). Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
+# GATES_PORT (default a free port), LANGPACK_SCRATCH (the NVMe scratch,
+# /mnt/data/tilemaker/streetzim-packs; empty: none), LANGPACK_GATE_JOBS and
+# LANGPACK_SEARCH_JOBS (4 each), LANGPACK_NVME_MIN_GB (100: what the shared
+# volume keeps free, as parallel_rebuild.sh). I/O at best effort, lowest
+# level (ionice -c2 -n7; CPU at nice 19): the HDD's scheduler (mq-deadline)
+# serves the idle class only when the disk is idle, which a rebuild round's
+# builds never leave it. Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
 # and SHIP_RUN_GATES (stand-ins for prefetch.py and run_gates.sh), BUILDER
 # (build_packs.sh's), SHIP_IA_FETCH= and SHIP_PROBE_URLS= (site_check.py
 # reads $LANGPACK_WORK/ia-cache only and probes nothing), SHIP_LISTING_POLLS,
@@ -98,7 +119,8 @@ LOG=$W/logs/ship-$REGION-$TAG.log
 exec 9> "$W/locks/ship-$REGION.lock"
 flock -n 9 || { echo "ship_packs: another run is shipping $REGION ($W/locks/ship-$REGION.lock)" >&2; exit 2; }
 say() { echo "$(TZ=America/Los_Angeles date '+%F %T %Z') $*" | tee -a "$LOG"; }
-LOW=(nice -n 19); command -v ionice > /dev/null && LOW=(ionice -c3 nice -n 19)
+# best effort (the queue may have started this at the idle class)
+LOW=(nice -n 19); command -v ionice > /dev/null && { ionice -c2 -n7 -p $$ 2> /dev/null; LOW=(ionice -c2 -n7 nice -n 19); }
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=24000000000 --)
 say "== ship_packs $REGION $BASE"
 
@@ -140,7 +162,7 @@ printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
 say "titles: $(mget titles)"
 
 # 3. packs not yet built and gated for this base
-TODO=$("$PY" - "$BASE" "$PACKS" "$REGION" "$PACK_LANGS" <<'PY'
+todo_langs() { "$PY" - "$BASE" "$PACKS" "$REGION" "$PACK_LANGS" <<'PY'
 import glob, json, os, sys
 sys.path.insert(0, os.environ["LP_ROOT"])
 from tools.langpack.gatelib import pack_gate_ok
@@ -162,7 +184,8 @@ for L in [x for x in langs.split(",") if x]:
         todo.append(L)
 print(" ".join(todo))
 PY
-) || { say "could not list the packs done"; exit 1; }
+}
+TODO=$(todo_langs) || { say "could not list the packs done"; exit 1; }
 if [ -n "$TODO" ]; then
   say "build_packs: $TODO"
   "${LOW[@]}" "$TL/build_packs.sh" "$REGION" "$BASE" "$PACKS" "$TODO" >> "$LOG" 2>&1
@@ -171,16 +194,85 @@ if [ -n "$TODO" ]; then
   # 2: another build_packs.sh holds a language's lock (another ship_packs.sh
   # of the same base under another region id, or a hand run)
   [ $BRC = 2 ] && { say "another run is building some of these packs: stopping (run again later)"; exit 2; }
+  LEFT=$(todo_langs) || { say "could not list the packs done"; exit 1; }
+  TIMED=""
+  for L in $LEFT; do [ -e "$PACKS/.timeout-$L" ] && TIMED+="${TIMED:+ }$L"; done
+  if [ -n "$TIMED" ]; then
+    printf '%s\n' "$TIMED" > "$PACKS/retry-langs"
+    say "ran out of time: $TIMED (no pack this run; listed in $PACKS/retry-langs: the queue runs $REGION again later for them)"
+  else
+    rm -f "$PACKS/retry-langs"
+  fi
 else
   say "packs: all gated for this base already"
+  rm -f "$PACKS/retry-langs"
+fi
+
+# 3a. the NVMe scratch, when the shared volume has room (tools/langpack/nvme.py)
+SCR=${LANGPACK_SCRATCH-/mnt/data/tilemaker/streetzim-packs}
+GJ=1; SJ=1; RUN=; HOLD=; WBASE=$BASE; NV=()
+release_scratch() {
+  [ -n "$HOLD" ] && kill "$HOLD" 2> /dev/null && wait "$HOLD" 2> /dev/null
+  HOLD=
+  [ -n "$RUN" ] && rm -rf "${RUN:?}"
+  RUN=
+}
+# The long steps run in the background and are waited for: a signal then
+# stops the step at once (timeout's process group, which a signal to this
+# run's group does not reach) and releases the scratch; a foreground step
+# would hold the trap until it ended.
+STEP=
+run_step() {
+  "$@" &
+  STEP=$!
+  wait "$STEP"
+  local rc=$?
+  STEP=
+  return $rc
+}
+on_signal() {
+  if [ -n "$STEP" ]; then
+    kill -TERM -- -"$STEP" 2> /dev/null || kill -TERM "$STEP" 2> /dev/null
+    wait "$STEP" 2> /dev/null
+  fi
+  exit 143
+}
+trap release_scratch EXIT
+trap on_signal TERM INT HUP
+if [ -n "$SCR" ] && mkdir -p "$SCR" 2> /dev/null; then
+  "$PY" "$TL/nvme.py" sweep --scratch "$SCR" | while read -r l; do say "NVMe scratch: $l"; done
+  PLAN=$("$PY" "$TL/nvme.py" plan --scratch "$SCR" --base "$BASE" --packs-dir "$PACKS" \
+           --gate-jobs "${LANGPACK_GATE_JOBS:-4}" --search-jobs "${LANGPACK_SEARCH_JOBS:-4}" 2>> "$LOG") || PLAN='{"use": false, "why": "nvme.py plan failed (the log says why)"}'
+  pget() { "$PY" -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$PLAN" "$1"; }
+  if [ "$(pget use)" = True ]; then
+    RUN=$SCR/run-$REGION-$$
+    mkdir -p "$RUN/merged" "$RUN/tmp" "$RUN/search" \
+      && printf '%s %s\n' $$ "$(sed 's/.*) //' /proc/$$/stat | cut -d' ' -f20)" > "$RUN/.owner" || RUN=
+  fi
+  if [ -n "$RUN" ]; then
+    "$PY" "$TL/nvme.py" hold --run-dir "$RUN" --need "$(pget need)" --parent $$ >> "$LOG" 2>&1 &
+    HOLD=$!
+    say "NVMe scratch: $RUN, $(pget gate_jobs) gate and $(pget search_jobs) search jobs ($PLAN)"
+    if WBASE=$("${LOW[@]}" "$PY" "$TL/nvme.py" stage "$BASE" "$RUN/base" 2>> "$LOG"); then
+      GJ=$(pget gate_jobs); SJ=$(pget search_jobs)
+      NV=(LANGPACK_MERGED="$RUN/merged" LANGPACK_TMP="$RUN/tmp" TMPDIR="$RUN/tmp" LANGPACK_DISK_MARGIN_GB="${LANGPACK_NVME_MIN_GB:-100}")
+      say "base staged: $WBASE (size and MD5 checked)"
+    else
+      say "NVMe scratch: the base could not be staged (the log says why): working on $W, one job at a time"
+      WBASE=$BASE; release_scratch
+    fi
+  else
+    say "NVMe scratch: not used ($(pget why)): working on $W, one job at a time"
+  fi
 fi
 
 # 3b. search packs: Kiwix's indexes of the base's pages and each entry's
 # packs (index_pack.py), one per distinct pack set; the gates require Kiwix
 # to find pack articles
 say "search packs"
-"${LOW[@]}" "${LIM[@]}" timeout 43200 "$PY" "$TL/search_packs.py" "$BASE" "$PACKS" --region "$REGION" \
-  --langs "$LANGS" --region-langs "$RL" --cache "$WP_CACHE" ${PACK_DATE:+--date "$PACK_DATE"} >> "$LOG" 2>&1 \
+SW=(); [ -n "$RUN" ] && SW=(--work-dir "$RUN/search")
+run_step env "${NV[@]}" "${LOW[@]}" "${LIM[@]}" timeout 43200 "$PY" "$TL/search_packs.py" "$WBASE" "$PACKS" --region "$REGION" \
+  --langs "$LANGS" --region-langs "$RL" --cache "$WP_CACHE" ${PACK_DATE:+--date "$PACK_DATE"} --jobs "$SJ" "${SW[@]}" >> "$LOG" 2>&1 \
   || say "search_packs.py rc=$? (an entry without its search pack fails the search gate)"
 
 # 4. gates
@@ -190,10 +282,11 @@ if [ ! -f "$RJ" ]; then
   "$PY" "$TL/region_json.py" "$BASE" -o "$RJ" >> "$LOG" 2>&1 || { say "no region file (region_json.py failed)"; exit 1; }
 fi
 PORT=${GATES_PORT:-$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')}
-say "gates: region file $RJ, port $PORT"
-RESUME=1 LANGUAGE_META=map TITLES=$(mget titles) "${LOW[@]}" timeout 172800 \
-  "${SHIP_RUN_GATES:-$TL/run_gates.sh}" "$BASE" "$PACKS" "$LANGS" "$RL" "$REGION" "$RJ" "$PORT" >> "$LOG" 2>&1
+say "gates: region file $RJ, port $PORT, $GJ at a time"
+run_step env "${NV[@]}" GATE_JOBS="$GJ" RESUME=1 LANGUAGE_META=map TITLES="$(mget titles)" "${LOW[@]}" timeout 172800 \
+  "${SHIP_RUN_GATES:-$TL/run_gates.sh}" "$WBASE" "$PACKS" "$LANGS" "$RL" "$REGION" "$RJ" "$PORT" >> "$LOG" 2>&1
 GRC=$?
+release_scratch                 # nothing reads the copy or the scratch after the gates
 SUMMARY=$W/gates/$TAG/summary.txt
 [ -f "$SUMMARY" ] && tee -a "$LOG" < "$SUMMARY" > /dev/null
 [ $GRC = 0 ] || { say "run_gates.sh rc=$GRC"; exit 1; }
@@ -238,7 +331,14 @@ PY
 while read -r l; do case "$l" in REFUSED*) say "$l";; esac; done <<< "$BUDGET"
 PASSED=$(sed -n 's/^OK //p' <<< "$BUDGET")
 # an entry without a Wikipedia pack (the base's own language) is no reason to publish
-[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || { say "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"; exit 5; }
+# nothing publishable while some packs ran out of time: not a refusal, a run to do again (exit 7)
+nothing_yet() {   # MESSAGE: exit 7 when packs ran out of time this run, else 5
+  if [ -s "$PACKS/retry-langs" ]; then
+    say "$1, while $(tr '\n' ' ' < "$PACKS/retry-langs")ran out of time: run again later (exit 7)"; exit 7
+  fi
+  say "$1"; exit 5
+}
+[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || nothing_yet "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"
 if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org (exit 3: gated, nothing published)"; exit 3; fi
 
 # 5. archive.org: the packs the passing entries use
@@ -347,7 +447,7 @@ rm -rf "$STG" && mkdir -p "$OUT"
 "$PY" -c 'import json,sys; [print("REFUSED %s: %s" % (r.get("lang") or r.get("pack"), r["why"])) for r in json.load(open(sys.argv[1]))]' \
   "$OUT/refused.json" | while read -r l; do say "$l"; done
 MENU=$("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json")
-[ -n "$MENU" ] || { say "make_site.py offers no entry: nothing to publish ($STG kept)"; exit 5; }
+[ -n "$MENU" ] || nothing_yet "make_site.py offers no entry: nothing to publish ($STG kept)"
 if [ -n "${LANGPACK_WEBSEED:-}" ]; then
   BT=$ROOT/web/torrents/$REGION.torrent
   BTA=(); [ -f "$BT" ] && BTA=(--base-torrent "$BT")
