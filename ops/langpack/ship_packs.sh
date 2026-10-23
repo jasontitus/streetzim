@@ -63,7 +63,9 @@
 # any download or build); 5 nothing publishable: every entry with a
 # Wikipedia pack that passed its gates is over the per-entry budget
 # (make_site.py's; each refusal is logged as REFUSED, before anything is
-# sent), or make_site.py offers no entry;
+# sent), or make_site.py offers no entry; 7 nothing publishable YET: as 5,
+# but with languages whose pack builds ran out of time (retry-langs; a region
+# language's missing pack refuses every entry): run again later;
 # 1 anything else (the log says what).
 #
 # Env: ops/langpack/host-env.sh (sourced here; set values win). CORE (the
@@ -329,7 +331,14 @@ PY
 while read -r l; do case "$l" in REFUSED*) say "$l";; esac; done <<< "$BUDGET"
 PASSED=$(sed -n 's/^OK //p' <<< "$BUDGET")
 # an entry without a Wikipedia pack (the base's own language) is no reason to publish
-[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || { say "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"; exit 5; }
+# nothing publishable while some packs ran out of time: not a refusal, a run to do again (exit 7)
+nothing_yet() {   # MESSAGE: exit 7 when packs ran out of time this run, else 5
+  if [ -s "$PACKS/retry-langs" ]; then
+    say "$1, while $(tr '\n' ' ' < "$PACKS/retry-langs")ran out of time: run again later (exit 7)"; exit 7
+  fi
+  say "$1"; exit 5
+}
+[ "$(sed -n 's/^WIKI //p' <<< "$BUDGET")" != 0 ] || nothing_yet "every entry with a Wikipedia pack is over the per-entry budget: nothing to publish"
 if [ "${SHIP_SKIP_UPLOAD:-0}" = 1 ]; then say "SHIP_SKIP_UPLOAD=1: stopping before archive.org (exit 3: gated, nothing published)"; exit 3; fi
 
 # 5. archive.org: the packs the passing entries use
@@ -438,7 +447,7 @@ rm -rf "$STG" && mkdir -p "$OUT"
 "$PY" -c 'import json,sys; [print("REFUSED %s: %s" % (r.get("lang") or r.get("pack"), r["why"])) for r in json.load(open(sys.argv[1]))]' \
   "$OUT/refused.json" | while read -r l; do say "$l"; done
 MENU=$("$PY" -c 'import json,sys; print(",".join(m["lang"] for m in json.load(open(sys.argv[1]))["regions"][0]["menu"]))' "$OUT/index.json")
-[ -n "$MENU" ] || { say "make_site.py offers no entry: nothing to publish ($STG kept)"; exit 5; }
+[ -n "$MENU" ] || nothing_yet "make_site.py offers no entry: nothing to publish ($STG kept)"
 if [ -n "${LANGPACK_WEBSEED:-}" ]; then
   BT=$ROOT/web/torrents/$REGION.torrent
   BTA=(); [ -f "$BT" ] && BTA=(--base-torrent "$BT")

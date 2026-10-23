@@ -152,6 +152,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "FAKE_LOG": str(log), "FAKE_SHIP_RC": "alpha:6,0;cont:4;fail:1", "PYTHONDONTWRITEBYTECODE": "1",
            "IA": str(stubs / "ia"), "FAKE_IA_DIR": str(d / "ia"), "QUEUE_SEED": "",
            "QUEUE_FORCE_WORK": "1",                                        # a test's LANGPACK_WORK
+           "LANGPACK_SCRATCH": str(d / "nvme"),                            # not the host's NVMe scratch
            "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": ""}            # not the host's own round
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
@@ -666,3 +667,44 @@ def test_ship_packs_starts_at_best_effort_io(q: SimpleNamespace) -> None:
     which a round's builds never leave it: ship_packs.sh starts at best effort."""
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert (q.d / "ship-env" / "beta.io").read_text().strip() == "best-effort: prio 7"
+
+
+def test_nothing_publishable_yet_is_run_again_within_bounds(q: SimpleNamespace) -> None:
+    """ship_packs.sh exit 7 (a region language's pack ran out of time: no
+    entry publishable yet): run again after QUEUE_RETRY_SECS, at most
+    QUEUE_PARTIAL_RETRIES times for the same base, then a loud failure; a run
+    that publishes in between is published."""
+    env = {"FAKE_SHIP_RC": "beta:7;alpha:7,7,0", "FAKE_SHIP_RETRY": "beta:pl;alpha:fr", "QUEUE_PARTIAL_RETRIES": "2"}
+    r = _run(q, **env)
+    st = _status(q)
+    assert st["beta"][1] == "pending" and "ship_packs rc=7: pl ran out of time (1 of 2)" in st["beta"][6], st["beta"]
+    assert r.returncode == 0 and "beta: nothing publishable yet (pl ran out of time)" in log_text(q), r.stderr
+    _run(q, **env)
+    assert _status(q)["beta"][1] == "pending" and _status(q)["alpha"][1] == "pending"
+    r = _run(q, **env)
+    assert r.returncode == 1 and "beta: no packs: pl ran out of time 2 times in a row" in r.stderr, r.stderr
+    assert _status(q)["beta"][1] == "failed-timeout"
+    assert _status(q)["alpha"][1] == "published"                  # its third run published (alpha:7,7,0)
+    n = len([c for c in _calls(q, "ship") if c["ship"] == "beta"])
+    _run(q, **env)
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n     # a failure: not again without the flag
+
+
+def test_the_queue_sweeps_dead_runs_scratch_at_start(q: SimpleNamespace) -> None:
+    """ship_packs.sh runs killed with the queue leave their NVMe folders: the
+    queue's start removes those whose process is gone, not a live run's."""
+    scr = Path(q.env["LANGPACK_SCRATCH"])
+    scr.mkdir()
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    live = subprocess.Popen(["sleep", "60"])
+    try:
+        st = Path(f"/proc/{live.pid}/stat").read_text()
+        (scr / f"run-gone-{dead.pid}").mkdir()
+        (scr / f"run-going-{live.pid}").mkdir()
+        (scr / f"run-going-{live.pid}" / ".owner").write_text(f"{live.pid} {st[st.rindex(')') + 2:].split()[19]}\n")
+        assert _run(q, FAKE_SHIP_RC="").returncode == 0
+        assert not (scr / f"run-gone-{dead.pid}").exists() and (scr / f"run-going-{live.pid}").exists()
+        assert f"NVMe scratch: removed {scr / f'run-gone-{dead.pid}'}: its run is gone" in log_text(q)
+    finally:
+        live.kill()

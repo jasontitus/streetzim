@@ -42,7 +42,10 @@
 #     ($LANGPACK_WORK/packs/<base>/retry-langs), published without them,
 #     `published-partial`, and run again after QUEUE_RETRY_SECS for them (the
 #     packs done are not redone), at most QUEUE_PARTIAL_RETRIES (3) times, then
-#     recorded as published with a warning; 6 (archive.org listing pending):
+#     recorded as published with a warning; 7 (nothing publishable yet:
+#     packs ran out of time, e.g. a region language's, which every entry
+#     needs): run again after QUEUE_RETRY_SECS within the same
+#     QUEUE_PARTIAL_RETRIES, then a loud failure; 6 (archive.org listing pending):
 #     run again after QUEUE_RETRY_SECS; 2 (a lock held), or a run killed or
 #     ended without an exit code: again after QUEUE_RETRY_SECS, a loud
 #     failure after QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
@@ -475,6 +478,19 @@ finish() {  # region
       else
         set_state "$rid" failed-publish "$zim" "$key" - "see queue.log"; FAILED_NOW[$rid]=1; ANY_FAILED=1
       fi ;;
+    7)
+      local missing n=0 k c
+      missing=$(tr -s ' \n' ' ' < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" 2>/dev/null | sed 's/^ //; s/ $//')
+      [ -s "$Q/partial-$rid" ] && read -r k c < "$Q/partial-$rid" && [ "$k" = "$key" ] && n=$c
+      if [ "$n" -lt "$PARTIAL_MAX" ]; then
+        echo "$key $(( n + 1 ))" > "$Q/partial-$rid"
+        set_state "$rid" pending "$zim" "$key" "$(( $(date +%s) + RETRY ))" "ship_packs rc=7: ${missing:-packs} ran out of time ($(( n + 1 )) of $PARTIAL_MAX)"
+        say "$rid: nothing publishable yet (${missing:-some packs} ran out of time): ship_packs.sh runs again after $RETRY s ($(( n + 1 )) of $PARTIAL_MAX)"
+      else
+        rm -f "$Q/partial-$rid"
+        set_state "$rid" failed-timeout "$zim" "$key" - "${missing:-packs} ran out of time $PARTIAL_MAX times"; FAILED_NOW[$rid]=1; ANY_FAILED=1
+        loud "$rid: no packs: ${missing:-some packs} ran out of time $PARTIAL_MAX times in a row (see $Q/ship-$rid.out); QUEUE_RETRY_FAILED=1 on a restart tries again"
+      fi ;;
     6)
       set_state "$rid" pending "$zim" "$key" "$(( $(date +%s) + RETRY ))" "ship_packs rc=6"
       say "$rid: ship_packs rc=6 (archive.org listing pending): again after $RETRY s" ;;
@@ -522,6 +538,9 @@ pass() {
 }
 
 say "== pack_queue at $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'), maps shipped since $(TZ=America/Los_Angeles date -d @"$SINCE" '+%F %T %Z'), $ROUND_TSV"
+# the NVMe scratch's folders of ship_packs.sh runs that were killed (tools/langpack/nvme.py; live runs' are kept)
+SCR=${LANGPACK_SCRATCH-/mnt/data/tilemaker/streetzim-packs}
+[ -z "$SCR" ] || [ ! -d "$SCR" ] || "$PY" "$ROOT/tools/langpack/nvme.py" sweep --scratch "$SCR" 2>&1 | while read -r l; do say "NVMe scratch: $l"; done
 # runs from before a restart: counted while they go, finished here when they end
 for f in "$Q"/runs/*; do
   [ -f "$f" ] || continue

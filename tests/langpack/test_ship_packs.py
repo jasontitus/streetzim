@@ -905,3 +905,22 @@ def test_the_scratch_is_released_before_the_uploads_and_on_a_signal(ship: Simple
     while list((ship.d / "nvme" / "acct").iterdir()) and time.time() - t0 < 30:
         time.sleep(0.2)
     assert not list((ship.d / "nvme" / "packs").glob("run-*")) and not list((ship.d / "nvme" / "acct").iterdir())
+
+
+@pytest.mark.parametrize("slow", ["fr", "de,fr,th"])
+def test_a_region_language_out_of_time_means_run_again_not_refused(ship: SimpleNamespace, slow: str) -> None:
+    """A region language's pack (fr here) is in every entry: out of time, it
+    leaves nothing publishable. That is no refusal (exit 5, never retried)
+    but exit 7, run again later, with retry-langs saying which; so too when
+    every pack ran out of time (no Wikipedia pack at all)."""
+    uuid = lpzims.write_base(ship.base, cfg_extra={"regionLanguages": ["fr"]})
+    fake = ship.d / "fakepacks"
+    for p in fake.iterdir():                                  # the stand-in builder's packs, for this base
+        lpzims.write_pack(p, p.name.split("wiki-")[1][:2], uuid)
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": ship.base.name, "size": str(ship.base.stat().st_size), "md5": _md5(ship.base)}]}))
+    r = _run(ship, FAKE_SLOW=slow, PACK_BUILD_TIMEOUT="3")
+    assert r.returncode == 7, (r.returncode, r.stdout[-3000:] + r.stderr[-3000:])
+    packs = ship.work / "packs" / ship.tag
+    assert (packs / "retry-langs").read_text().split() == slow.split(","), (packs / "retry-langs").read_text()
+    assert "ran out of time: run again later (exit 7)" in _log(ship)

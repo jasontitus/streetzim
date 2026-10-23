@@ -558,7 +558,12 @@ replaces them when it ships. The preview's home page is not regenerated.
   (`packs/<base>/retry-langs`): published and deployed without them
   (`published-partial`), and run again after 30 min for them; once their
   packs are in, published for good; after 3 such runs
-  (`QUEUE_PARTIAL_RETRIES`) it stays as it is, with a warning.
+  (`QUEUE_PARTIAL_RETRIES`) it stays as it is, with a warning. Exit 7
+  (nothing publishable yet: packs ran out of time, e.g. a region language's,
+  which every entry needs, so make_site.py refuses them all): run again
+  after 30 min within the same 3 runs, then a loud failure. At its start the
+  queue sweeps the NVMe scratch folders of ship_packs.sh runs that were
+  killed (live runs' are kept).
 - Exit 6 (archive.org listing pending): tried again after 30 min. Exit 2 (a
   lock held), or a run killed or gone without an exit code: tried again
   after 30 min, a loud failure after 8 in a row (`QUEUE_MAX_AGAIN`). 4 and
