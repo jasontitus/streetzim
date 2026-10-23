@@ -48,7 +48,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
   'Access-Control-Allow-Headers': 'Range, If-Range',
-  'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag',
+  'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag, Retry-After',
   'Access-Control-Max-Age': '86400',
 };
 

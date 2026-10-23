@@ -24,6 +24,9 @@
 //   search_native / search_english  the map's own search box finds results
 //   search_map_lang  (reported, not gated) the place's name in the map language
 // Prints one JSON line; exit 0 = PASS.
+// UI_GATE_PREOPEN: a URL to open first, the /drive/ picker with ?zim=<a
+// language version> (tools/langpack/drive_preview_e2e.mjs), which hands
+// over to the viewer; ORIGIN is then <site>/drive/viewer.
 // PLAYWRIGHT_CORE: path to playwright-core's index.mjs (else the installed package);
 // CHROME_PATH: the Chromium to drive; BROWSER_LIBS: extra LD_LIBRARY_PATH for it.
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
@@ -50,6 +53,10 @@ async function step(name, fn) {
   catch (e) { out[name] = { error: String(e && e.message || e).slice(0, 300) }; out.checks[name] = false; }
 }
 try {
+  if (process.env.UI_GATE_PREOPEN) {
+    await page.goto(process.env.UI_GATE_PREOPEN, { timeout: 120000 });
+    await page.waitForURL(/\/drive\/viewer\//, { timeout: 300000 });
+  }
   await page.goto(ORIGIN + '/index.html', { timeout: 120000 });
   await ready();
 
@@ -212,8 +219,9 @@ try {
     });
     r.article = await page.evaluate(() => ({ path: decodeURIComponent(location.pathname), title: document.title,
       images: [...document.images].map((i) => ({ src: i.getAttribute('src'), ok: i.complete && i.naturalWidth > 0 })),
-      back: [...document.querySelectorAll('a')].map((a) => a.getAttribute('href') || '').filter((h) => /index\.html/.test(h)).slice(0, 2) }));
-    const back = await page.$('a[href*="index.html"]');
+      back: [...document.querySelectorAll('a')].map((a) => a.getAttribute('href') || '').filter((h) => /index\.html|^\/drive\/viewer\/$/.test(h)).slice(0, 2) }));
+    // in the /drive/ viewer the service worker's bar links /drive/viewer/ (sw.js backBarHtml)
+    const back = await page.$('a[href*="index.html"]') || (process.env.UI_GATE_PREOPEN ? await page.$('nav.sz-back a') : null);
     if (back) {
       await Promise.all([page.waitForNavigation({ timeout: 30000 }), back.click()]);
       await page.waitForFunction(() => window.__szMap && window.__szMap.loaded(), null, { timeout: 120000 });
@@ -227,7 +235,8 @@ try {
       && (!mustPack || (r.expected.prefix === `~w/${LANG}/` && r.button.lang === LANG
                         && r.article.path.includes(`/~w/${LANG}/wiki-article/`)))
       && (!packLang || r.expected.prefix === '' || r.expected.prefix === `~w/${LANG}/`)
-      && r.article.images.every((i) => i.ok) && !!r.backTo && r.backTo.endsWith('/index.html');
+      && r.article.images.every((i) => i.ok) && !!r.backTo
+      && (r.backTo.endsWith('/index.html') || (!!process.env.UI_GATE_PREOPEN && r.backTo.endsWith('/drive/viewer/')));
     r.mapLangArticle = packLang ? r.expected && r.expected.prefix === `~w/${LANG}/` : null;
     return r;
   });

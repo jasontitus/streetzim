@@ -166,6 +166,30 @@ async function main() {
       assert.ok(await r.read('big/0.bin'));
     });
 
+    await check('a 503 with a long Retry-After (a quota or a switch) is not retried; a bare 503 is', async () => {
+      // The build worker's meter answers 503 + Retry-After: 3600 (exposed to
+      // the page); retrying would spend more of the shared daily quota.
+      const mkCtx = (answer) => {
+        const ctx = { console, TextDecoder, DataView, Uint8Array, Map, Promise, setTimeout };
+        ctx.calls = 0;
+        ctx.fetch = async (url, init) => { ctx.calls++; return answer(ctx.calls, url, init); };
+        ctx.self = ctx; ctx.globalThis = ctx; vm.createContext(ctx);
+        vm.runInContext(fs.readFileSync(path.join(ROOT, 'web/drive/fzstd.js'), 'utf8'), ctx);
+        vm.runInContext(fs.readFileSync(path.join(ROOT, 'web/drive/zim-reader.js'), 'utf8'), ctx);
+        return ctx;
+      };
+      const quota = mkCtx(() => new Response('used up', { status: 503, headers: { 'Retry-After': '3600' } }));
+      const src = new quota.StreetZimHttpSource(`http://127.0.0.1:${PORT}/synthetic.zim`);
+      await assert.rejects(() => src.open(), (e) => e.status === 503 && e.upstream === true);
+      assert.equal(quota.calls, 1, 'one request, no retries');
+      const blip = mkCtx((n, url, init) => n === 1
+        ? new Response('busy', { status: 503, headers: { 'Retry-After': '30' } }) : fetch(url, init));
+      const src2 = new blip.StreetZimHttpSource(`http://127.0.0.1:${PORT}/synthetic.zim`);
+      await src2.open();
+      assert.equal(src2.size, zim.length);
+      assert.equal(blip.calls, 2, 'a short Retry-After is tried again');
+    });
+
     if (REAL_ZIM) {
       await check('real ZIM: entries read over HTTP match the Blob reader', async () => {
         const name = path.basename(REAL_ZIM);

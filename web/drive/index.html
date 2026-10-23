@@ -511,14 +511,42 @@
   // CORS headers, and its /cors/ endpoint ignores Range, so archive.org
   // URLs are rewritten onto the range proxy from preview-config.js
   // (docs/online-preview.md). Same-origin URLs go direct — that is how
-  // the smoke test runs against scripts/serve-web-local.py. Anything
-  // else is refused: ZIM content renders on this origin, so a link must
-  // not be able to point the viewer at a ZIM on a hostile server.
+  // the smoke test runs against scripts/serve-web-local.py. A map's
+  // language version streams straight from the build worker (exact
+  // /merged/ path on STREETZIM_MERGED_ORIGIN). Anything else is refused:
+  // ZIM content renders on this origin, so a link must not be able to
+  // point the viewer at a ZIM on a hostile server.
   const IA_DOWNLOAD_RE = /^https?:\/\/archive\.org\/(?:download|serve)\/(streetzim-[a-z0-9-]+)\/([A-Za-z0-9._-]+\.zim)(?:[?#].*)?$/;
   const IA_ITEM_RE = /^(?:https?:\/\/archive\.org\/(?:details|download)\/)?(streetzim-[a-z0-9-]+)\/?$/;
 
   function previewProxy() {
     return String(window.STREETZIM_PREVIEW_PROXY || '').replace(/\/+$/, '');
+  }
+
+  // A map's language version (the /build/ page's entries): the build
+  // worker on STREETZIM_MERGED_ORIGIN (preview-config.js) serves it with
+  // Range and CORS at exactly this path (build-proxy/merged-webseed.js),
+  // and nothing else on that origin is accepted.
+  const MERGED_PATH_RE = /^\/merged\/[a-z0-9-]+\/[a-z]{2,3}(?:-[a-z0-9]+)?\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/([A-Za-z0-9._-]+\.zim)$/;
+
+  function mergedOrigin() {
+    try {
+      const o = new URL(String(window.STREETZIM_MERGED_ORIGIN || ''));
+      return /^https?:$/.test(o.protocol) ? o.origin : '';
+    } catch (e) { return ''; }
+  }
+
+  // The language-version URL in `raw`, or null: the configured origin and
+  // the exact path, written out as is (so no credentials, query or
+  // fragment, and nothing the URL parser had to clean up).
+  function mergedZimUrl(raw) {
+    const origin = mergedOrigin();
+    if (!origin) return null;
+    let u;
+    try { u = new URL(raw); } catch (e) { return null; }
+    if (u.origin !== origin || raw !== u.origin + u.pathname) return null;
+    const m = MERGED_PATH_RE.exec(u.pathname);
+    return m ? { url: u.href, name: m[1], host: u.host } : null;
   }
 
   // Newest .zim in an archive.org item — the rule web/generate.py uses
@@ -564,13 +592,15 @@
         host: 'archive.org'
       };
     }
+    const mz = mergedZimUrl(raw);
+    if (mz) return { fetchUrl: mz.url, sourceUrl: mz.url, name: mz.name, host: mz.host };
     let u;
     try { u = new URL(raw, location.href); } catch (e) { throw new Error('Not a valid URL: ' + raw); }
     if (u.origin === location.origin) {
       return { fetchUrl: u.href, sourceUrl: u.href,
                name: decodeURIComponent(u.pathname.split('/').pop() || 'zim'), host: u.host };
     }
-    throw new Error('Only StreetZim downloads on archive.org can be streamed (got ' + u.host + ').');
+    throw new Error('Only StreetZim downloads on archive.org and their language versions can be streamed (got ' + u.host + ').');
   }
 
   async function loadZimUrl(raw) {
