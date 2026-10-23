@@ -232,6 +232,24 @@
     return PROXY + u.slice('{proxy}'.length);
   };
 
+  // "Preview in browser": /drive/ streams a language version from the build
+  // worker, the torrent's webseed URL, which it accepts only on
+  // STREETZIM_MERGED_ORIGIN (/drive/preview-config.js) at exactly this path.
+  const MERGED_ORIGIN = (() => {
+    try {
+      const o = new URL(String(window.STREETZIM_MERGED_ORIGIN || ''));
+      return /^https?:$/.test(o.protocol) ? o.origin : '';
+    } catch (e) { return ''; }
+  })();
+  const MERGED_PATH_RE = /^\/merged\/[a-z0-9-]+\/[a-z]{2,3}(?:-[a-z0-9]+)?\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]+\.zim$/;
+  const previewHref = (url) => {
+    if (!MERGED_ORIGIN || typeof url !== 'string') return null;
+    let u;
+    try { u = new URL(url); } catch (e) { return null; }
+    if (u.origin !== MERGED_ORIGIN || url !== u.origin + u.pathname || !MERGED_PATH_RE.test(u.pathname)) return null;
+    return '/drive/?zim=' + encodeURIComponent(url);
+  };
+
   async function getJSON(url, onBytes) {
     let r;
     try { r = await fetch(url, { cache: 'no-cache' }); } catch (e) { throw new Error('no connection (' + (e.message || e) + ')'); }
@@ -341,6 +359,24 @@
         t.setAttribute('download', `${m.file_name || m.lang}.torrent`);
         t.title = `${pickerName(m.lang, m.label)}: ${region.title} as a torrent (the same file)`;
         li.append(t);
+        // ... and the same file in the browser, streamed by /drive/ from the
+        // torrent's webseed (the entry's "webseed"; from its segment index
+        // for entries published before that field)
+        const show = (href) => {
+          const v = document.createElement('a');
+          v.href = href; v.textContent = 'Preview in browser'; v.className = 'preview';
+          v.target = '_blank'; v.rel = 'noopener';
+          v.title = `${pickerName(m.lang, m.label)}: ${region.title}, streamed in this browser (nothing to download first)`;
+          li.append(v);
+        };
+        const href = previewHref(m.webseed);
+        if (href) show(href);
+        else if (MERGED_ORIGIN && m.webseed === undefined) {
+          const shown = region;
+          getJSON(m.torrent.replace(/\.torrent$/, '.ws.json'))
+            .then((ix) => { const h = previewHref(ix && ix.webseed); if (h && region === shown) show(h); })
+            .catch(() => {});
+        }
       }
       dl.append(li);
     }

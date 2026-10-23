@@ -31,7 +31,9 @@ region.json, index.json). For every menu entry it writes, next to the recipe:
                 content, so identical runs (the viewer slots) are stored once
                 per region
 
-and adds "torrent" and "infohash" to the entry in region.json and index.json.
+and adds "torrent", "infohash" and "webseed" (the webseed URL, which the
+/build/ page also offers as a preview in /drive/) to the entry in
+region.json and index.json.
 Blobs no index of OUT_DIR names any more are removed.
 
 Subrequests (the free Workers plan allows 50 per request): a request costs
@@ -564,7 +566,7 @@ def torrent_for(recipe_path: str, region: dict, lang: str, base_path: str, pack_
     write_atomic(os.path.join(out_dir, f"{lang}.ws.json"),
                  json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode())
     write_atomic(os.path.join(out_dir, f"{lang}.torrent"), data)
-    return {"lang": lang, "infohash": infohash, "size": index["size"], "piece_length": plen,
+    return {"lang": lang, "infohash": infohash, "webseed": index["webseed"], "size": index["size"], "piece_length": plen,
             "parts": len(index["parts"]), "blobs": len(blobs), "blob_bytes": sum(len(x) for x in blobs.values()),
             "remote_min": index["remote_min"], "subrequests": index["subrequests"],
             "etags": sum(1 for x in index["sources"].values() if "etag" in x),
@@ -623,6 +625,8 @@ def verify_entry(out_dir: str, region: dict, entry: dict, recipe: dict, base_pat
             bad(f"infohash {ih} != the entry's/index's")
         if entry.get("torrent", "").rsplit("/", 1)[-1] != f"{L}.torrent":
             bad(f"entry torrent path {entry.get('torrent')}")
+        if "webseed" in entry and entry["webseed"] != want["webseed"]:
+            bad(f"entry webseed {entry['webseed']} != {want['webseed']}")
         if not fails:
             pieces, md5, _ = piece_hashes(want, Stream(want, blobs, readers), plen)
             if pieces != info[b"pieces"]:
@@ -656,7 +660,9 @@ def stray_files(out_dir: str, region: dict) -> list[str]:
 
 
 def annotate(out_dir: str, results: dict[str, dict]):
-    """Add torrent/infohash to region.json's and index.json's menu entries."""
+    """Add torrent/infohash/webseed to region.json's and index.json's menu
+    entries (webseed: the language version's URL on the build worker, which
+    the /build/ page links to /drive/ as a preview)."""
     for name in ("region.json", "index.json"):
         p = os.path.join(out_dir, name)
         if not os.path.exists(p):
@@ -670,10 +676,15 @@ def annotate(out_dir: str, results: dict[str, dict]):
                 if res is None:
                     m.pop("torrent", None)
                     m.pop("infohash", None)
+                    m.pop("webseed", None)
                     continue
                 prefix = m["recipe"].rsplit("/", 1)[0] + "/" if "/" in m["recipe"] else ""
                 m["torrent"] = f"{prefix}{m['lang']}.torrent"
                 m["infohash"] = res["infohash"]
+                if res.get("webseed"):
+                    m["webseed"] = res["webseed"]
+                else:
+                    m.pop("webseed", None)
         write_atomic(p, json.dumps(doc, ensure_ascii=False, indent=1).encode())
 
 
@@ -755,7 +766,7 @@ def main(argv=None) -> int:
     if only is not None:          # keep the entries not redone
         for m in region["menu"]:
             if m["lang"] not in results and m.get("torrent") and m["lang"] not in only:
-                results[m["lang"]] = {"infohash": m["infohash"]}
+                results[m["lang"]] = {"infohash": m["infohash"], "webseed": m.get("webseed")}
     annotate(a.out_dir, results)
     removed = prune(a.out_dir)
     print(json.dumps({"torrents": sorted(results), "removed": removed}), flush=True)

@@ -258,6 +258,9 @@ def test_main_annotates_the_menu_and_prunes(tmp_path):
         doc = json.loads((s["site"] / name).read_text())
         m = (doc["regions"][0] if "regions" in doc else doc)["menu"][0]
         assert m["torrent"] == "recipes/testland/de.torrent" and len(m["infohash"]) == 40
+        # the webseed URL, which /build/ offers as a /drive/ preview
+        assert m["webseed"] == json.loads((s["site"] / "de.ws.json").read_text())["webseed"]
+        assert m["webseed"].startswith(WEBSEED + "/merged/testland/de/")
     assert not stale.exists() and not (s["site"] / "xx.torrent").exists()
     region = json.loads((s["site"] / "region.json").read_text())
     assert lt.stray_files(str(s["site"]), region) == []
@@ -280,7 +283,7 @@ def test_a_failed_language_loses_its_torrent(tmp_path):
     assert not list(s["site"].glob("*.torrent")) and not list(s["site"].glob("ws-*.bin"))
 
 
-@pytest.mark.parametrize("tamper", ["blob", "torrent_webseed", "index_part", "infohash", "piece"])
+@pytest.mark.parametrize("tamper", ["blob", "torrent_webseed", "index_part", "infohash", "piece", "entry_webseed"])
 def test_verify_entry_catches_tampering(tmp_path, tamper):
     s = synth(tmp_path)
     assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED]) == 0
@@ -294,6 +297,8 @@ def test_verify_entry_catches_tampering(tmp_path, tamper):
         (s["site"] / "de.ws.json").write_text(json.dumps(ix))
     elif tamper == "infohash":
         region["menu"][0]["infohash"] = "0" * 40
+    elif tamper == "entry_webseed":                 # the preview link would open another file
+        region["menu"][0]["webseed"] = region["menu"][0]["webseed"].replace("/de/", "/fr/")
     else:
         t = lt.bdecode((s["site"] / "de.torrent").read_bytes())
         if tamper == "torrent_webseed":
@@ -434,7 +439,7 @@ def test_strip_removes_every_torrent_file_and_field(tmp_path):
     for name in ("region.json", "index.json"):
         doc = json.loads((s["site"] / name).read_text())
         m = (doc["regions"][0] if "regions" in doc else doc)["menu"][0]
-        assert "torrent" not in m and "infohash" not in m
+        assert "torrent" not in m and "infohash" not in m and "webseed" not in m
     assert (s["site"] / "de.json").exists()                       # the recipe stays
 
 
@@ -660,6 +665,7 @@ def test_a_partial_run_keeps_the_other_entries(tmp_path):
     assert lt.main(args + ["--langs", "de"]) == 0
     after = json.loads((s["site"] / "region.json").read_text())["menu"]
     assert after[1]["torrent"] == before[1]["torrent"] and after[1]["infohash"] == before[1]["infohash"]
+    assert after[1]["webseed"] == before[1]["webseed"] and "/merged/testland/fr/" in after[1]["webseed"]
     assert (s["site"] / "fr.torrent").exists() and (s["site"] / "fr.ws.json").exists()
 
 

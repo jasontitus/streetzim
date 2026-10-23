@@ -78,9 +78,11 @@ How many requests a download costs depends on the client:
 | libtorrent (qBittorrent, Deluge, …) | up to 16 MiB (`urlseed_max_request_bytes`) | about 90 requests (measured: 4 per 51 MB) |
 | a client asking one piece at a time | the piece length (1 MiB here) | about 1,100 requests |
 | a browser or `curl` (the plain download) | the whole file | 1 request |
+| the /drive/ viewer ("Preview in browser") | a 128 KiB block or one cluster | about 120 to open, then 55-75 a minute (docs/online-preview.md) |
 
-So the 50,000 budget is roughly 45 per-piece downloads or 550 libtorrent
-downloads a day. Workers Paid ($5/month) removes the daily cap.
+So the 50,000 budget is roughly 45 per-piece downloads, 550 libtorrent
+downloads or 100 five-minute previews a day, shared. Workers Paid
+($5/month) removes the daily cap.
 
 ## Staleness and archive.org
 

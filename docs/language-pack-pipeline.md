@@ -323,9 +323,12 @@ range of one archive.org file, with its archive.org ETag when `--ia-cache`
 has the file's mtime, or of a blob; a few KB) and `ws-<h>.bin` blobs: the
 recipe's inline bytes, the MD5 and base or pack segments shorter than the
 remote threshold, coalesced into blobs of at most 4 MiB, named by content
-(the viewer slots are stored once per region). It adds `torrent` and
-`infohash` to the entry in `region.json`/`index.json`; the page shows a
-"Torrent" link.
+(the viewer slots are stored once per region). It adds `torrent`,
+`infohash` and `webseed` (the worker URL) to the entry in
+`region.json`/`index.json`; the page shows a "Torrent" link and a
+"Preview in browser" link, `/drive/?zim=<webseed>` (docs/online-preview.md,
+"A map's language versions"; for an entry published before `webseed`,
+the page reads it from `<L>.ws.json`).
 
 Subrequests: the worker spends 1 on the index, 1 per blob and 1 per
 archive.org part (2 for a file's first: archive.org's redirect), and the

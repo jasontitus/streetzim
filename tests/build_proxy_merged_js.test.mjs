@@ -467,6 +467,8 @@ assert.ok(handle.state().blobCacheBytes <= 1020, JSON.stringify(handle.state()))
   res = await get('bytes=0-9', { handle: h });
   assert.equal(res.status, 503);
   assert.equal(res.headers.get('retry-after'), '3600');
+  // a browser (the /drive/ preview) can read it and stop retrying
+  assert.match(res.headers.get('access-control-expose-headers'), /(^|, )Retry-After(,|$)/);
   assert.equal(hits.site, s2, 'over budget: nothing fetched');
   const im = isolateMeter(2);
   assert.deepEqual([im.allow(), im.allow(), im.allow()], [true, true, false]);
@@ -483,6 +485,8 @@ const call = (path, e) => { _reset(); return worker.fetch(new Request(`http://w.
 const mpath = new URL(urlFor()).pathname;
 res = await call(mpath, { ...env, OFF: 'true' });
 assert.equal(res.status, 503);
+assert.equal(res.headers.get('retry-after'), '3600');
+assert.equal(res.headers.get('access-control-expose-headers'), 'Retry-After');
 res = await call(mpath, { ...env, OFF: '0' });
 assert.equal(res.status, 206);
 await res.arrayBuffer();

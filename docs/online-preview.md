@@ -22,6 +22,42 @@ Nothing is stored except the URL: the service worker keeps it in
 IndexedDB like it keeps a picked File, and re-opens the stream after it
 has been idle.
 
+## A map's language versions
+
+A language version of a map (`/build/` assembles it in the browser from
+the base and its Wikipedia packs; docs/language-pack-pipeline.md) is
+stored nowhere, but the build worker (`build-proxy/`) serves it as one
+file with Range and CORS at
+`/merged/<region>/<lang>/<recipe uuid>/<file>.zim`, the URL its torrent
+uses as a webseed. `/build/` puts a **Preview in browser** link next to
+each language's Download and Torrent links:
+`/drive/?zim=<that URL>`. The picker streams it exactly like an
+archive.org file, straight from the worker, which it accepts only on
+`window.STREETZIM_MERGED_ORIGIN` (`web/drive/preview-config.js`) and only
+at that exact path. The viewer (the site's copy, every core UI language)
+reads the merged map-config: the UI and the labels in that language, its
+Wikipedia popups from `~w/<lang>/`, the search in that language.
+
+What a session asks of the worker (measured 2026-10-23 in headless
+Chromium through workerd and a local archive.org stand-in; Switzerland
+and Greece, 1.2–3 GB language versions):
+
+| what the visitor does | worker requests |
+|---|---|
+| open the map (header, map-config, style, first tiles, Wikipedia and search indexes) | about 120 |
+| a city's popup, its article with pictures, back, three searches | 105–145 in 40 s |
+| browsing a city, zooming from 11 to 15 and panning | 55–75 a minute (25–40 MB) |
+
+Each is one small range (a 128 KiB block or one cluster) that costs the
+worker 1 subrequest (4 at most, 1–2 parts of the file); Chromium sends no
+CORS preflight (a single-range `Range` is safelisted), so no OPTIONS
+requests. These requests share the worker's daily budget
+(`WEBSEED_DAILY_BUDGET`, 50,000 by default, shared with torrent
+clients) and the account's 100,000 a day: roughly 100 five-minute
+previews a day. Over the budget the worker answers 503 with
+`Retry-After: 3600` (exposed to the page), which the reader takes as
+final instead of retrying.
+
 ## Why there is a proxy
 
 A browser can only do this if the file server answers `Range` requests
@@ -257,8 +293,11 @@ ZIM content — search pages, wiki articles — renders on the
 `streetzim.web.app` origin, so a link must not be able to point the
 viewer at a ZIM on a hostile server. The picker only streams
 `https://archive.org/download/streetzim-*/….zim` (rewritten onto the
-proxy) or same-origin URLs (used by the local smoke test); everything
-else is refused with a message. The proxy independently refuses
+proxy), a language version on the build worker's origin
+(`STREETZIM_MERGED_ORIGIN`) at exactly
+`/merged/<region>/<lang>/<uuid>/<file>.zim`, written out as is (no
+credentials, query or fragment), or same-origin URLs (used by the local
+smoke test); everything else is refused with a message. The proxy independently refuses
 anything that is not a `streetzim-*` item and a `.zim` file, requires a
 single-range `Range` header on `GET`, and never follows a caller-supplied
 URL.
@@ -271,6 +310,7 @@ node tests/test_preview_proxy.mjs [some.zim]       # proxy handler against archi
 node tests/test_sw_streaming.mjs                   # the worker's data path in Chromium (synthetic ZIM)
 node tests/test_picker.mjs                         # the picker's flows in Chromium
 python3 -m pytest tests/test_generate_preview_button.py
+python3 -m pytest tests/langpack/test_merged_preview.py   # a language version via the build worker (browser stack)
 ZIM_FILE=/path/osm-washington-dc-2026-09-08.zim CHROME_PATH=... SHOT_DIR=/tmp \
   H2=1 node cloud/preview_smoke_test.mjs all       # picker → viewer, both modes
 IA_ZIM=https://archive.org/download/streetzim-europe/osm-europe-2026-05-06.zim \
@@ -292,7 +332,12 @@ For hands-on local testing, serve `web/` with `scripts/serve-web-local.py`
 copy of `preview-config.js`, and open
 `http://127.0.0.1:8765/drive/?zim=https://archive.org/download/streetzim-washington-dc/osm-washington-dc-2026-09-08.zim`.
 A same-origin URL (`?zim=http://127.0.0.1:8765/some.zim` with the file
-next to `drive/`) needs no proxy at all.
+next to `drive/`) needs no proxy at all. For a language version, run the
+build worker (`build-proxy/`, its README's local test) and name it as
+`window.STREETZIM_MERGED_ORIGIN` in that copy;
+`tools/langpack/drive_preview_e2e.mjs` checks the picker, the viewer's
+language and an article, and with `--browse-secs` measures a visitor's
+requests.
 
 ## Limits
 

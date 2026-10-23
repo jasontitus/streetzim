@@ -28,7 +28,7 @@ export function flag(value, dflt) {
   return dflt;
 }
 
-const off = (msg) => new Response(msg + '\n', { status: 503, headers: { 'Access-Control-Allow-Origin': '*', 'Retry-After': '3600' } });
+const off = (msg) => new Response(msg + '\n', { status: 503, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Retry-After', 'Retry-After': '3600' } });
 
 // The shared daily meter. Each isolate adds up its own requests and reports
 // them to the Durable Object (every FLUSH_EVERY requests, and FLUSH_MS after

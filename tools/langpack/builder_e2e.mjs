@@ -7,6 +7,8 @@
 //        --region R --langs L1,L2 --out OUT_DIR [--mode net|file] [--base BASE.zim]
 //        [--corrupt ITEM/FILE@OFFSET] [--expect pass|fail] [--proxy-url URL]
 //
+// --merged-origin: the build worker origin the page's preview-config.js names
+// (STREETZIM_MERGED_ORIGIN): its entries' webseeds get "Preview in browser".
 // --proxy-url: the page uses that range proxy (the real one in front of
 // archive.org, web/drive/preview-config.js) instead of the local stand-in
 // below; then no --item is needed and the "proxy" counts stay 0.
@@ -64,6 +66,8 @@ const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
 const EXPECT = opt('--expect', 'pass');
 const PROXY_URL = opt('--proxy-url', '');
+const MERGED_ORIGIN = opt('--merged-origin', '');
+const WAIT_PREVIEWS = +opt('--wait-previews', '0');   // links that come later (from a segment index)
 const THROTTLE = opt('--throttle', '');
 const WATCH = +opt('--watch-secs', '0');
 const FEEDBACK_ONLY = argv.includes('--feedback-only');
@@ -104,7 +108,8 @@ const page = http.createServer((req, res) => {
   const p = decodeURIComponent(u.pathname);
   if (p === '/drive/preview-config.js') {
     res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' });
-    res.end(`window.STREETZIM_PREVIEW_PROXY = ${JSON.stringify(PROXY)};\n`);
+    res.end(`window.STREETZIM_PREVIEW_PROXY = ${JSON.stringify(PROXY)};\n`
+      + `window.STREETZIM_MERGED_ORIGIN = ${JSON.stringify(MERGED_ORIGIN)};\n`);
     return;
   }
   if (p.startsWith('/build/recipes/')) {
@@ -193,11 +198,16 @@ async function runOne(L) {
   const before = { ...stats, items: { ...stats.items }, files: { ...stats.files } };
   await pg.goto(`${PAGE}?region=${encodeURIComponent(REGION)}&lang=${encodeURIComponent(L)}`);
   await pg.waitForFunction((l) => document.querySelector('#lang') && document.querySelector('#lang').value === l, L, { timeout: 60000 });
+  if (WAIT_PREVIEWS) {
+    await pg.waitForFunction((n) => document.querySelectorAll('#downloads li a.preview').length >= n, WAIT_PREVIEWS,
+      { timeout: 15000 }).catch(() => {});
+  }
   const shown = await pg.evaluate(() => ({
     regionOptions: [...document.querySelectorAll('#region option')].map((o) => o.textContent),
     langOption: document.querySelector('#lang').selectedOptions[0].textContent,
     downloads: [...document.querySelectorAll('#downloads li a')].map((a) => a.textContent).slice(0, 25),
     torrents: [...document.querySelectorAll('#downloads li a.torrent')].map((a) => a.getAttribute('href')),
+    previews: [...document.querySelectorAll('#downloads li a.preview')].map((a) => a.getAttribute('href')),
     packs: [...document.querySelectorAll('#packs li')].map((li) => li.textContent),
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });

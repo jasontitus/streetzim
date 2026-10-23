@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -294,10 +295,21 @@ def test_the_page_offers_each_torrent_and_builds_the_torrents_file(ship: SimpleN
     assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
                           capture_output=True).returncode == 0
     p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
-    rc, rows = _e2e(p, "de")
+    ws = "https://streetzim-build-proxy.example.workers.dev"
+    # each entry's webseed, previewed in /drive/ (which accepts exactly that origin and path): th's on
+    # another origin gets none, en's (published before entries carried "webseed") comes from en.ws.json
+    idx = json.loads((rec / "index.json").read_text())
+    menu = idx["regions"][0]["menu"]
+    hooks = {m["lang"]: m["webseed"] for m in menu}
+    assert all(h.startswith(ws + "/merged/testland/") for h in hooks.values()), hooks
+    menu[2]["webseed"] = hooks["th"].replace(ws, "https://elsewhere.example")
+    del menu[3]["webseed"]
+    (rec / "index.json").write_text(json.dumps(idx))
+    rc, rows = _e2e(p, "de", "net", "--merged-origin", ws, "--wait-previews", "3")
     assert rc == 0 and rows[0]["pass"], rows
     shown = json.loads((p.out / "e2e-de.json").read_text())["shown"]
     assert shown["torrents"] == [f"recipes/testland/{x}.torrent" for x in ("de", "fr", "th", "en")], shown
+    assert shown["previews"] == ["/drive/?zim=" + urllib.parse.quote(hooks[x], safe="-_.!~*'()") for x in ("de", "fr", "en")], shown
     info = bdecode((rec / "testland" / "de.torrent").read_bytes())[b"info"]
     data = (p.out / "testland-de.zim").read_bytes()
     plen = info[b"piece length"]

@@ -893,6 +893,13 @@
         if (res.status >= 500) {
           lastErr = new Error('HTTP ' + res.status + ' from ' + this.url);
           lastErr.status = res.status;
+          // A 503 with a long Retry-After is a switch or a daily quota (the
+          // build worker's meter answers 3600): retrying would only spend
+          // more of the quota and hold a tile slot.
+          if (res.status === 503 && parseInt(res.headers.get('Retry-After') || '', 10) >= 60) {
+            lastErr.upstream = true;
+            throw lastErr;
+          }
           continue;
         }
         const err = new Error('HTTP ' + res.status + ' from ' + this.url);
