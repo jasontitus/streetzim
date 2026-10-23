@@ -174,6 +174,20 @@ resolves `?zim=` and the URL box onto the proxy; the viewer
 the banner when the source is a URL. Inside Kiwix there is no such
 service worker, so nothing changes there.
 
+The banner is the lowest of the bottom overlays, just above MapLibre's
+attribution. While it shows, the map-name box, About, the scale bar and
+the locate button stand on it: it publishes its height as
+`--sz-banner-h` (a ResizeObserver, so a wrap or a dismissal moves them),
+and 0 once its x is tapped. On a phone its copy is one line plus the
+Download row (two lines from 641 px of height, the file name cut with an
+ellipsis): on an iPhone the full banner shared the map-name box's band,
+its Download under "Change map", and on a 320x568 phone two lines lift
+the locate button into the layer panel. On a landscape phone (500 px
+high or less) it is one row left of About and the locate button, which
+stay put: the layer panel's row is right above them. An upstream note
+gets a row of its own. `tmp/overlap-check.mjs` with `PREVIEW_SITE`
+measures all of it (Testing, below).
+
 ### What a preview costs
 
 Washington, D.C. (216 MB, 9,010 entries, 331 clusters) in headless
@@ -310,6 +324,10 @@ node tests/test_preview_proxy.mjs [some.zim]       # proxy handler against archi
 node tests/test_sw_streaming.mjs                   # the worker's data path in Chromium (synthetic ZIM)
 node tests/test_picker.mjs                         # the picker's flows in Chromium
 python3 -m pytest tests/test_generate_preview_button.py
+# the banner covers nothing, nor is covered: web/ served with a ZIM inside it
+python3 scripts/serve-web-local.py 8905 "$PWD/site" &   # site/ = web/ + some.zim
+PREVIEW_SITE=http://127.0.0.1:8905 PREVIEW_ZIM=http://127.0.0.1:8905/some.zim \
+  VW=393 VH=852 UILANG=en,de,id,ar THEME=light,dark SHOTS=/tmp node tmp/overlap-check.mjs
 python3 -m pytest tests/langpack/test_merged_preview.py   # a language version via the build worker (browser stack)
 ZIM_FILE=/path/osm-washington-dc-2026-09-08.zim CHROME_PATH=... SHOT_DIR=/tmp \
   H2=1 node cloud/preview_smoke_test.mjs all       # picker → viewer, both modes

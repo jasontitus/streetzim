@@ -138,9 +138,11 @@ def test_the_pages_carry_the_right_to_left_rules() -> None:
                  'html[dir="rtl"] #search-clear { right: auto; left: 0; }',
                  'html[dir="rtl"] #attr-dialog #about-mt { border-left: none; padding-left: 0; border-right: 3px solid var(--border); padding-right: 8px; }',
                  'html[dir="rtl"] #sz-fatal ul { padding-left: 0; padding-right: 20px; }',
-                 # not RTL: About fits a 390 px phone; #info keeps clear of the About button
+                 # not RTL: About fits a 390 px phone; #info keeps clear of the About
+                 # button, and of the layer panel when the preview banner lifts it
                  'max-width: 536px; width: calc(100% - 40px); box-sizing: border-box;',
-                 'max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)));',
+                 'max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)), '
+                 'calc(100vw - 28px - var(--sz-controls-w, 0px)));',
                  # the HUD reroute button leaves the status beside it half the row, a
                  # longer label cut with an ellipsis
                  'flex: 0 0 auto; max-width: 50%;\n'
@@ -207,6 +209,8 @@ def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
     ("020-body-markup.html", "szT('places.status_sentence', '{text}.', { text: '' });"),
     # the About button's width, published for #info's max-width
     ("120-map-init-and-style.js", "document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');"),
+    # and the layer panel's (Arabic's is 110 px), which #info passes when lifted
+    ("120-map-init-and-style.js", "document.documentElement.style.setProperty('--sz-controls-w', panel.offsetWidth + 'px');"),
 ])
 def test_right_to_left_code_paths(part: str, code: str) -> None:
     assert code in (PARTS / part).read_text(encoding="utf-8"), part

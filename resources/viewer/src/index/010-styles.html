@@ -48,20 +48,28 @@
   /* 48px: MapLibre's attribution wraps to a 44px band at phone width and
      occupies bottom 10..54, so the scale bar at bottom:0 (+10px of
      MapLibre's own margin) printed straight on top of its second line.
-     Verified by injection at 320/390/430 before editing. */
-  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--safe-bottom, 0px)); }
+     Verified by injection at 320/390/430 before editing.
+     --sz-banner-h: the online-preview banner's height plus a gap while it
+     shows (020-body-markup.html), so this, #attr-btn, #info and the locate
+     button stand on the banner instead of under it. */
+  .maplibregl-ctrl-bottom-left { bottom: calc(max(48px, var(--sz-attrib-h, 0px) + 4px) + var(--sz-banner-h, 0px) + var(--safe-bottom, 0px)); }
   /* Keep the locate button above the DEAD TOUCH BAND next to the app's bottom
      toolbar: in the Kiwix WebView, taps in the lowest ~50px are swallowed by
      the native toolbar hit-slop / home-indicator gestures even though the
      content renders. min() ties the lift to --bottom-inset, so on desktop/PWA
      (inset 0) the button stays in the normal corner position. */
   .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
-    margin-bottom: calc(min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
+    margin-bottom: calc(min(var(--bottom-inset, 0px), 64px) + var(--sz-banner-h, 0px) + var(--safe-bottom, 0px));
   }
 
-  /* --- Online-preview banner (PWA only; docs/online-preview.md) --- */
+  /* --- Online-preview banner (PWA only; docs/online-preview.md) ---
+     The lowest of the bottom overlays: 4 px above MapLibre's attribution
+     (10 px off the bottom, --sz-attrib-h tall; the compact (i) is 24 px).
+     At bottom:84px it shared #info's band and covered the scale bar, About
+     and the locate button when it wrapped on a phone, Download landing under
+     "Change map"; those now rise by its height (--sz-banner-h). */
   #preview-banner {
-    position: absolute; left: 50%; bottom: calc(84px + var(--safe-bottom, 0px)); transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: calc(max(38px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); transform: translateX(-50%);
     z-index: 1; box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
     gap: 10px; flex-wrap: wrap;
@@ -75,9 +83,56 @@
   }
   #preview-banner[hidden] { display: none; }
   #preview-banner b { color: var(--text-primary); font-weight: 600; }
-  #preview-banner-note:not(:empty) { color: #b45309; font-weight: 600; }
-  /* Phones: one line of copy; the map needs the room (§D). */
-  @media (max-width: 480px) { #preview-banner .long { display: none; } }
+  /* A row of its own under the rest, so a phone's one line of copy can
+     be cut without cutting what went wrong. */
+  #preview-banner-note:not(:empty) { color: #b45309; font-weight: 600; flex-basis: 100%; text-align: center; }
+  #preview-banner-note:empty { display: none; }
+  /* Phones: one line of copy; the map needs the room (§D). Landscape
+     phones too: in 320-430 px of height, three lines of it lifted About
+     into the layer panel (overlap-check, PREVIEW_SITE). */
+  @media (max-width: 480px), (max-height: 500px) { #preview-banner .long { display: none; } }
+  /* Tighter there, and a long file name is cut ("osm_en_switzerl…")
+     instead of breaking over two lines. */
+  @media (max-width: 480px), (max-height: 500px) {
+    #preview-banner { padding: 6px 10px; gap: 4px 8px; }
+    #preview-banner a.dl { padding: 4px 10px; }
+    #preview-banner-name {
+      display: inline-block; max-width: 55%; vertical-align: bottom;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      direction: ltr; unicode-bidi: isolate;
+    }
+  }
+  /* One line of text on a 4-inch phone (320x568), or the lifted locate
+     button and About reach the layer panel; and on a landscape phone,
+     beside Download. The file name gives way first (#info names the map),
+     then the byte counter. */
+  @media (max-width: 480px) and (max-height: 640px), (max-height: 500px) {
+    #preview-banner > span:first-child {
+      display: flex; justify-content: center; flex: 1 1 0; min-width: 0; white-space: nowrap;
+    }
+    #preview-banner > span:first-child > span:not(#preview-banner-bytes) { flex: none; }
+    #preview-banner-name { flex: 0 100 auto; min-width: 1.2em; max-width: none; margin-inline-start: 0.3em; }
+    #preview-banner-bytes {
+      flex: 0 1 auto; min-width: 0; white-space: pre;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+  }
+  @media (max-width: 480px) and (max-height: 640px) {
+    #preview-banner > span:first-child { flex-basis: 100%; }
+  }
+  /* Landscape phones: left of About and the locate button instead of under
+     them, so they stay put (#attr-btn's rule is with it, below). The layer
+     panel's row is right above them: at 568x320 even a one-row banner
+     lifted About 15 px into it. */
+  @media (max-height: 500px) and (min-width: 481px) {
+    #preview-banner {
+      left: 10px; transform: none;
+      max-width: min(560px, calc(100vw - 82px - var(--sz-attr-w, 71px)));
+    }
+    .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
+      margin-bottom: calc(min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
+    }
+  }
   #preview-banner a.dl {
     color: #fff; background: var(--accent); padding: 5px 10px;
     border-radius: 6px; text-decoration: none; font-weight: 600;
@@ -100,7 +155,7 @@
        masking it by lifting everything bottom-anchored clear. */
     /* --sz-attrib-h: the attribution's height when it wraps further
        (120-map-init-and-style.js). */
-    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
+    position: absolute; bottom: calc(max(84px, var(--sz-attrib-h, 0px) + 40px) + var(--sz-banner-h, 0px) + var(--safe-bottom, 0px)); left: 10px; z-index: 1;
     background: rgba(255,255,255,0.65); padding: 3px 8px;
     border-radius: 4px; font-family: var(--ui-font);
     font-size: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -124,9 +179,13 @@
 
        --sz-attr-w: #attr-btn's width in the UI language ("À propos" is
        77 px; 120-map-init-and-style.js publishes it), 71 px until then;
-       82 = 64 (its right) + 10 (#info's left) + an 8 px gap. */
+       82 = 64 (its right) + 10 (#info's left) + an 8 px gap.
+
+       --sz-controls-w: the layer panel's width (Satellite / 3D / Wiki,
+       110 px in Arabic). The preview banner lifts #info beside it on a
+       320x568 phone; 28 = 10 (its right) + 10 + 8. */
     box-sizing: border-box;
-    max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)));
+    max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)), calc(100vw - 28px - var(--sz-controls-w, 0px)));
   }
   #info h3 { margin: 0; font-size: 10px; font-weight: 600; display: inline; color: var(--text-primary); }
   #info p { margin: 0; color: var(--text-tertiary); font-size: 9px; }
@@ -185,6 +244,9 @@
      44) and the panel sits left of it (10 + 89 + 11 = 110 px). */
   @media (max-height: 500px) {
     #controls { top: calc(152px + var(--top-inset, 0px)); right: 110px; flex-direction: row; }
+    /* #info keeps clear of it there too (128 = 110 + 10 + 8): in Arabic at
+       568x320 the two overlapped by 14 px. */
+    #info { max-width: min(250px, calc(100vw - 82px - var(--sz-attr-w, 71px)), calc(100vw - 128px - var(--sz-controls-w, 0px))); }
     #controls button + button { border-top: none; border-left: 1px solid var(--border); }
     .sz-home-group { display: flex; flex-direction: row; }
     .sz-home-group button + button { border-top: none; border-left: 1px solid #ddd; }
@@ -467,11 +529,16 @@
     /* Left of MapLibre's bottom-right control stack (the locate button,
        44 px wide on a coarse pointer): at right:10px its lower third sat
        under that button on phones. */
-    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
+    position: absolute; bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--sz-banner-h, 0px) + var(--safe-bottom, 0px)); right: 64px; z-index: 2;
     background: rgba(255,255,255,0.65); border: none; border-radius: 4px;
     padding: 2px 7px; font-size: 11px; cursor: pointer;
     font-family: var(--ui-font); color: var(--text-secondary);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  /* Not lifted on a landscape phone, where the preview banner keeps left
+     of it (#preview-banner above). */
+  @media (max-height: 500px) and (min-width: 481px) {
+    #attr-btn { bottom: calc(max(58px, var(--sz-attrib-h, 0px) + 14px) + var(--safe-bottom, 0px)); }
   }
   #attr-btn:hover { background: rgba(255,255,255,0.9); color: var(--text-primary); }
   #attr-overlay {
@@ -974,8 +1041,8 @@
     #search-results { max-height: calc(var(--app-height, 100vh) - 130px); }
   }
   /* The build stamp is a debugging aid; on a phone it sat over the top
-     band of the search box (§C). ?debug=1 keeps it. */
-  @media (max-width: 480px) {
+     band of the search box (§C), in landscape too. ?debug=1 keeps it. */
+  @media (max-width: 480px), (max-height: 500px) {
     body:not(.sz-debug) #viewer-build-stamp { display: none !important; }
   }
   /* --- Dark UI chrome ---

@@ -1118,4 +1118,141 @@ await ok('the compass shows only while the map is rotated or tilted', () => {
   V.initCompassVisibility({ getContainer: () => ({ querySelector: () => null }) });
 });
 
+// ---- The online-preview banner (010-styles.html, 020-body-markup.html) ---
+// On a phone it wrapped over the map-name box, the scale bar, About and the
+// locate button, its Download under "Change map". The overlays now stand on
+// it; ops/tmp/overlap-check.mjs (PREVIEW_SITE) measures the result.
+
+const BANNER_SRC = (() => {
+  const part = slice('<div id="preview-banner" hidden>', '<div id="controls">');
+  return part.slice(part.indexOf('<script>') + '<script>'.length, part.lastIndexOf('</script>'));
+})();
+function runBanner({ pathname = '/drive/viewer/', status = null } = {}) {
+  const els = {};
+  const el = (id) => (els[id] = els[id] || { id, textContent: '', href: '', on: {},
+    addEventListener(t, f) { this.on[t] = f; } });
+  const banner = el('preview-banner');
+  banner.hidden = true;
+  Object.defineProperty(banner, 'offsetHeight', { get() { return this.hidden ? 0 : 86; } });
+  const props = {}, observers = [], winOn = {}, lang = { v: 'en' };
+  function ResizeObserver(cb) { this.observe = (t) => observers.push({ cb, t }); }
+  function MessageChannel() {
+    const port1 = { onmessage: null };
+    this.port1 = port1;
+    this.port2 = { postMessage(d) { Promise.resolve().then(() => port1.onmessage && port1.onmessage({ data: d })); } };
+  }
+  const document = {
+    getElementById: (id) => (id.startsWith('preview-banner') ? el(id) : null),
+    documentElement: { style: { setProperty(k, v) { props[k] = v; } } },
+    visibilityState: 'visible', addEventListener() {},
+  };
+  const window = { addEventListener(t, f) { (winOn[t] = winOn[t] || []).push(f); } };
+  const controller = { postMessage(msg, ports) { if (msg.type === 'status') ports[0].postMessage(status); } };
+  const navigator = { serviceWorker: { controller, ready: Promise.resolve({ active: null }), addEventListener() {} } };
+  // A table that marks its language, to see what is written in which.
+  const T = (key, fb, vars) => (lang.v === 'en' ? '' : '[' + lang.v + '] ') +
+    fb.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? vars[k] : m));
+  new Function('document', 'window', 'navigator', 'location', 'ResizeObserver', 'MessageChannel',
+    'szT', 'szFixed', 'szLtr', 'setInterval', 'clearInterval', BANNER_SRC)(
+    document, window, navigator, { pathname }, ResizeObserver, MessageChannel,
+    T, (n, d) => n.toFixed(d), (x) => x, () => 0, () => {});
+  const resized = () => observers.forEach((o) => o.cb([{ target: o.t }]));
+  const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0)); };
+  return { els, banner, props, observers, winOn, lang, resized, settle };
+}
+const STREAMED = { ok: true, source: 'url', url: 'https://archive.org/download/x/osm_en_switzerland.zim',
+                   name: 'osm_en_switzerland.zim', sizeBytes: 1.2e9, stats: { bytes: 12.3 * 1048576 } };
+
+await ok('preview banner: --sz-banner-h is its height and a gap while it shows, 0 once dismissed', async () => {
+  const b = runBanner({ status: STREAMED });
+  assert.ok(b.observers.some((o) => o.t === b.banner), 'observes the banner');
+  b.resized();
+  assert.strictEqual(b.props['--sz-banner-h'], '0px', 'hidden until the worker says it streams');
+  await b.settle();
+  assert.strictEqual(b.banner.hidden, false);
+  b.resized();
+  assert.strictEqual(b.props['--sz-banner-h'], '94px', '86 px tall + 8');
+  b.els['preview-banner-close'].on.click();
+  b.resized();
+  assert.strictEqual(b.props['--sz-banner-h'], '0px', 'dismissed: the overlays come back down');
+});
+
+await ok('preview banner: published off /drive/ too, for a banner forced on (overlap-check)', () => {
+  const b = runBanner({ pathname: '/content/osm-monaco-ci/index.html' });
+  b.banner.hidden = false;
+  b.resized();
+  assert.strictEqual(b.props['--sz-banner-h'], '94px');
+});
+
+await ok('preview banner: the byte counter follows the UI language with the rest', async () => {
+  const b = runBanner({ status: STREAMED });
+  await b.settle();
+  const bytes = b.els['preview-banner-bytes'];
+  assert.strictEqual(bytes.textContent, ' · 12.3 MB streamed so far');
+  b.lang.v = 'de';
+  for (const f of b.winOn['sz-ui-language']) f();
+  assert.strictEqual(bytes.textContent, ' · [de] 12.3 MB streamed so far');
+  assert.strictEqual(b.els['preview-banner-download'].textContent, '[de] Download (1.1 GB)');
+});
+
+await ok('preview banner: an upstream note is a row of its own, not in the line a phone cuts', () => {
+  const part = slice('<div id="preview-banner" hidden>', '<script>');
+  const copy = part.slice(part.indexOf('<span>'), part.indexOf('<a class="dl"'));
+  assert.ok(copy.includes('id="preview-banner-bytes"') && !copy.includes('id="preview-banner-note"'));
+  assert.ok(part.indexOf('id="preview-banner-note"') > part.indexOf('id="preview-banner-close"'));
+  const rule = HTML.slice(HTML.indexOf('\n  #preview-banner-note:not(:empty) {'));
+  assert.match(rule.slice(0, rule.indexOf('}')), /flex-basis: 100%;/);
+});
+
+await ok('preview banner: the bottom overlays stand on it, and it on the attribution', () => {
+  // bottom: calc(max(F, --sz-attrib-h + O) [+ --sz-banner-h] + --safe-bottom)
+  const RE = /bottom: calc\(max\((\d+)px, var\(--sz-attrib-h, 0px\) \+ (\d+)px\)( \+ var\(--sz-banner-h, 0px\))? \+ var\(--safe-bottom, 0px\)\);/;
+  const place = (sel) => {
+    const i = HTML.indexOf('\n  ' + sel + ' {');
+    assert.ok(i >= 0, sel);
+    const m = RE.exec(HTML.slice(i, HTML.indexOf('}', i)));
+    assert.ok(m, sel + ': bottom formula');
+    return { F: +m[1], O: +m[2], lifted: !!m[3] };
+  };
+  const banner = place('#preview-banner');
+  assert.strictEqual(banner.lifted, false);
+  // MapLibre's attribution sits 10 px off the bottom, --sz-attrib-h tall
+  // (24 px folded to its (i)): 4 px above it ...
+  assert.ok(banner.O >= 14 && banner.F >= 24 + 14, JSON.stringify(banner));
+  // ... and no higher than the locate button's own place, which follows
+  // the attribution's 10 px margins, so lifting that by --sz-banner-h
+  // clears it.
+  assert.ok(banner.O <= 20 && banner.F <= 24 + 20, JSON.stringify(banner));
+  // The others rise by its height from places no lower than its own (the
+  // scale bar inside its corner by MapLibre's 10 px margin).
+  for (const [sel, margin] of [['#info', 0], ['#attr-btn', 0], ['.maplibregl-ctrl-bottom-left', 10]]) {
+    const p = place(sel);
+    assert.ok(p.lifted, sel + ' rises by --sz-banner-h');
+    assert.ok(p.F + margin >= banner.F && p.O + margin >= banner.O, sel + ' ' + JSON.stringify(p));
+  }
+  const locate = HTML.slice(HTML.indexOf('\n  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {'));
+  assert.match(locate.slice(0, locate.indexOf('}')),
+    /margin-bottom: calc\(min\(var\(--bottom-inset, 0px\), 64px\) \+ var\(--sz-banner-h, 0px\) \+ var\(--safe-bottom, 0px\)\);/);
+});
+
+await ok('preview banner: on a landscape phone it keeps left of About, which stays put', () => {
+  // Every landscape rule for these, in source order (the later one wins).
+  const LAND = '@media (max-height: 500px) and (min-width: 481px) {';
+  const blocks = HTML.split(LAND).slice(1).map((b) => b.slice(0, b.indexOf('\n  }')));
+  assert.strictEqual(blocks.length, 2, 'the banner/locate block and the About one');
+  const css = blocks.join('\n');
+  // 10 (its left) + its width + 8 + About's width + 64 (About's right) = 100vw
+  assert.match(css, /#preview-banner \{\s*left: 10px; transform: none;\s*max-width: min\(560px, calc\(100vw - 82px - var\(--sz-attr-w, 71px\)\)\);/);
+  for (const sel of ['#attr-btn', '.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group']) {
+    const i = css.indexOf(sel + ' {');
+    assert.ok(i >= 0, sel);
+    const rule = css.slice(i, css.indexOf('}', i));
+    assert.ok(rule.includes('var(--safe-bottom, 0px)') && !rule.includes('--sz-banner-h'), sel + ': not lifted');
+  }
+  // ... and comes after the base rule it overrides (same specificity).
+  assert.ok(HTML.lastIndexOf(LAND) > HTML.indexOf('\n  #attr-btn {'), 'About override after #attr-btn');
+  assert.ok(HTML.indexOf(LAND) > HTML.indexOf('\n  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {'));
+  assert.ok(HTML.indexOf(LAND) > HTML.indexOf('\n  #preview-banner {'));
+});
+
 console.log(`\n${pass} passed`);

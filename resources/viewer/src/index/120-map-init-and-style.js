@@ -251,6 +251,15 @@ if (!window.__szUnsupported) fetchConfig(1)
         document.documentElement.style.setProperty('--sz-attr-w', about.offsetWidth + 'px');
       }).observe(about);
     })();
+    // ... and of the layer panel, which #info passes when the preview
+    // banner lifts it on a short phone: --sz-controls-w (0 while hidden).
+    (function () {
+      var panel = document.getElementById('controls');
+      if (!panel || typeof ResizeObserver === 'undefined') return;
+      new ResizeObserver(function () {
+        document.documentElement.style.setProperty('--sz-controls-w', panel.offsetWidth + 'px');
+      }).observe(panel);
+    })();
 
     // Satellite layer toggle
     if (config.hasSatellite) {

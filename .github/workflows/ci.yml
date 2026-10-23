@@ -397,13 +397,44 @@ jobs:
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:8902/content/osm-monaco-ci/map-config.json >/dev/null && break; sleep 1; done
           # SHOW_ALL_CONTROLS=1: Monaco has no satellite, terrain or Wikidata,
           # so the layer panel is empty here unless forced visible. Portrait
-          # sizes from the device matrix, and landscape phones.
+          # sizes from the device matrix, and landscape phones. Each again
+          # with the online-preview banner forced on (SHOW_PREVIEW_BANNER=1):
+          # it only shows on /drive/, which is the next step.
           fail=0
           for s in 320x568 375x667 390x844 430x932 844x390 667x375 932x430; do
-            ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+            for b in 0 1; do
+              ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+                SHOW_PREVIEW_BANNER=$b CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+                node tmp/overlap-check.mjs | tee "overlap-$s-$b.txt"
+              grep -q '^NO OVERLAPS' "overlap-$s-$b.txt" || { echo "::error::controls overlap at $s (banner=$b)"; fail=1; }
+            done
+          done
+          exit $fail
+
+      # The /drive/ online preview (docs/online-preview.md): the picker
+      # streams the ZIM by range requests from the same origin, standing in
+      # for archive.org, and the preview banner must cover nothing, nor be
+      # covered, in four UI languages (one right to left), light and dark,
+      # with the attribution open and folded, and after its x. On an iPhone
+      # it was drawn over the map name, its Download under "Change map".
+      - name: The preview banner covers nothing (overlap-check, /drive/ preview)
+        run: |
+          mkdir -p preview-site && cp -r web/. preview-site/ && cp osm-monaco-ci.zim preview-site/
+          python scripts/serve-web-local.py 8905 "$PWD/preview-site" &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8905/drive/ >/dev/null && break; sleep 1; done
+          fail=0
+          # Dark changes colours, not geometry: once, at the reported iPhone's size.
+          for s in 320x568:en,de,id,ar:light 375x667:en,de,id,ar:light 390x844:en,de,id,ar:light \
+                   393x852:en,de,id,ar:light,dark 430x932:en,de,id,ar:light \
+                   844x390:en,ar:light 667x375:en,ar:light 932x430:en,ar:light 568x320:en,ar:light; do
+            IFS=: read -r vp langs themes <<< "$s"
+            PREVIEW_SITE=http://127.0.0.1:8905 PREVIEW_ZIM=http://127.0.0.1:8905/osm-monaco-ci.zim \
+              VW=${vp%x*} VH=${vp#*x} UILANG=$langs THEME=$themes SETTLE_MS=3000 SHOW_ALL_CONTROLS=1 \
+              INFO_NAME="Switzerland and the Alps" \
               CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
-              node tmp/overlap-check.mjs | tee "overlap-$s.txt"
-            grep -q '^NO OVERLAPS' "overlap-$s.txt" || { echo "::error::controls overlap at $s"; fail=1; }
+              node tmp/overlap-check.mjs > "preview-overlap-$vp.txt" 2>&1
+            grep -E '^(NO OVERLAPS|OVERLAPS:)' -A40 "preview-overlap-$vp.txt"
+            grep -q '^NO OVERLAPS' "preview-overlap-$vp.txt" || { echo "::error::preview banner overlap at $vp"; fail=1; }
           done
           exit $fail
 
