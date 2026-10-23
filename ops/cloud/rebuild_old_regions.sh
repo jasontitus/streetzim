@@ -116,9 +116,16 @@ PYEOF
 # A browser gate that fails by timing out -- the page never loaded while the
 # disk was saturated (iceland 2026-10-23: "Navigation timeout of 90000 ms
 # exceeded" at 390 px; a re-run passed) -- is not a finding, so it is run
-# once more after RETRY_WAIT (60 s). A real finding (an overlap report, a
-# device that loaded and failed a check, a render that drew too little, the
-# old viewer in the ZIM) is never retried.
+# once more after RETRY_WAIT (60 s). The overlap and render gates are retried
+# only then: an overlap report or a render that drew too little is never
+# retried. The device matrix and the kiwix in-ZIM gate are retried once on
+# ANY failure, and the second run's verdict stands: under load they fail
+# checks that wait on the page (switzerland-light 2026-10-23: "Find page
+# returns places from the ZIM -- clicked=null"; a re-run passed 18/18), and
+# a deterministic failure fails the second run too. Both runs are logged.
+# Used by the overlap and render gates, which retry only without a verdict;
+# "Target closed|Protocol error" is the browser dying under memory pressure,
+# no verdict either.
 TIMEOUT_RE='TimeoutError|Navigation timeout|Timeout [0-9]+ ?ms exceeded|net::ERR_|Target closed|Protocol error'
 RETRY_WAIT=${REBUILD_GATE_RETRY_WAIT:-60}
 timed_out(){  # $1 output file, $2 exit code
@@ -126,10 +133,12 @@ timed_out(){  # $1 output file, $2 exit code
 }
 
 gate(){  # $1=zim $2=term
-  local Z=$1 TERM=$2 B G="" VW q c up=0 i f rc try MH
+  local Z=$1 TERM=$2 B G="" VW q c up=0 i f rc try MH n2
   B=$(basename "$Z" .zim)
   if ss -ltn 2>/dev/null | grep -q ":$OV "; then log "  port $OV busy — NOT a geometry failure"; return 1; fi
-  setsid nohup "$KS" --port "$OV" "$Z" > "$TMPDIR/ec-$B.log" 2>&1 < /dev/null &
+  # 6>&-: parallel_rebuild.sh --regate's lock (fd 6), held by this driver;
+  # a kiwix-serve left behind must not hold it.
+  setsid nohup "$KS" --port "$OV" "$Z" > "$TMPDIR/ec-$B.log" 2>&1 < /dev/null 6>&- &
   for i in $(seq 1 150); do sleep 2
     [ "$(curl -s -m 8 -o /dev/null -w '%{http_code}' "http://localhost:$OV/content/$B/index.html")" = 200 ] && { up=1; break; }
   done
@@ -155,16 +164,17 @@ gate(){  # $1=zim $2=term
     SEARCH_TERM="$TERM" ZIM_ORIGIN="http://localhost:$OV/content/$B" \
       timeout 3600 "$NODE" tmp/device-matrix.mjs > "$f" 2>&1; rc=$?
     grep -q "^all 7 devices passed" "$f" && break
-    # Retried only when every reported failure is a timeout (or nothing was
-    # reported because the run itself timed out).
-    if [ "$try" = 1 ] && timed_out "$f" "$rc" \
-       && ! grep -E "^ +!" "$f" | grep -vqE "$TIMEOUT_RE"; then
-      log "  device matrix timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+    if [ "$try" = 1 ]; then
+      cp -f "$f" "$f.run1"
+      log "  device matrix run 1 FAILED (rc $rc$(grep -cE '^FAIL ' "$f" | sed 's/^/, devices failed: /')); once more in ${RETRY_WAIT} s:"
+      grep -E "^ +!" "$f" | sort -u | head -4 | while read -r l; do log "      $l"; done
+      sleep "$RETRY_WAIT"; continue
     fi
     break
   done
-  if grep -q "^all 7 devices passed" "$f"; then log "  device matrix: 7/7 PASS"
-  else G="$G device-matrix"; log "  device matrix FAILED:"
+  n2=""; [ "$try" = 1 ] || n2=" (run 2)"
+  if grep -q "^all 7 devices passed" "$f"; then log "  device matrix: 7/7 PASS$n2"
+  else G="$G device-matrix"; log "  device matrix FAILED$n2:"
        grep -E "^ +!" "$f" | sort -u | head -4 | while read -r l; do log "      $l"; done; fi
   # Render gate: the device matrix waits for the canvas ELEMENT and would
   # pass a blank map. This asserts the style loaded, the tile source loaded,
@@ -194,15 +204,18 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
   for q in $(pgrep -x kiwix-serve); do c=$(tr '\0' ' ' < /proc/$q/cmdline); case "$c" in *"--port $OV"*) kill $q;; esac; done
   f="$TMPDIR/ec-$B-kiwix.txt"
   for try in 1 2; do
-    timeout 2400 bash cloud/kiwix_viewer_gate.sh "$Z" "$KW" "$TERM" > "$f" 2>&1; rc=$?
+    timeout 2400 bash cloud/kiwix_viewer_gate.sh "$Z" "$KW" "$TERM" > "$f" 2>&1 6>&-; rc=$?
     cat "$f" >> "$LOG"
     [ "$rc" = 0 ] && break
-    if [ "$try" = 1 ] && ! grep -q 'FAIL' "$f" && timed_out "$f" "$rc"; then
-      log "  kiwix in-ZIM gate timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+    if [ "$try" = 1 ]; then
+      cp -f "$f" "$f.run1"
+      log "  kiwix in-ZIM gate run 1 FAILED (rc $rc$(grep -m1 'FAIL' "$f" | sed 's/^ */: /')); once more in ${RETRY_WAIT} s"
+      sleep "$RETRY_WAIT"; continue
     fi
     break
   done
-  [ "$rc" = 0 ] && log "  kiwix in-ZIM gate: OK" || { G="$G kiwix"; log "  kiwix in-ZIM gate: FAIL"; }
+  n2=""; [ "$try" = 1 ] || n2=" (run 2)"
+  [ "$rc" = 0 ] && log "  kiwix in-ZIM gate: OK$n2" || { G="$G kiwix"; log "  kiwix in-ZIM gate: FAIL$n2"; }
   [ -z "$G" ] && return 0
   log "  GATES FAILED:$G"; return 1
 }
