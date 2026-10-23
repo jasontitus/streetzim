@@ -9,8 +9,8 @@ run time (streetzim/paths.py RUNTIME_FILES) resolves inside the installed
 package and that cloud/ holds exactly CLOUD_MODULES (no operations code),
 verifies the vendored MapLibre and RTL plugin against their pinned hashes,
 and reads the tilemaker config, the lock file's font list and
-cloud/regions.tsv the way a build does. CI's `wheel` job runs it
-(docs/packaging.md).
+cloud/regions.tsv, region-languages.tsv and region-outlines.tsv the way a
+build does. CI's `wheel` job runs it (docs/packaging.md).
 """
 from __future__ import annotations
 
@@ -57,9 +57,9 @@ def check() -> list[str]:
     viewer_assets.vendored(viewer_assets.RTL_TEXT_PLUGIN)   # raises on a mismatch
     if viewer_assets.font_fallback() and viewer_assets.fallback_licence() is None:
         problems.append("the fallback fonts' licence (vendor/noto-sans/OFL.txt) is missing")
-    regions = cloud_dir / "regions.tsv"
-    if not regions.is_file():
-        problems.append(f"missing: {regions}")
+    for table in ("regions.tsv", "region-languages.tsv", "region-outlines.tsv"):
+        if not (cloud_dir / table).is_file():
+            problems.append(f"missing: {cloud_dir / table}")
     return problems
 
 

@@ -252,6 +252,32 @@
         "disk"
       ]
     },
+    "multilingual": {
+      "type": "boolean",
+      "required": false,
+      "title": "Multilingual",
+      "description": "One ZIM for visitors of many languages: labels in the 21 label languages (ar, de, el, es, fa, fr, he, hi, id, it, ja, ko, nl, pl, pt, ru, th, tr, uk, vi, zh; hi labels do not render yet: no Devanagari glyphs) plus the area's own (--region-languages, when they are at most 7), search by the names in those languages, and the map's languages recorded for the viewer and for language packs. The interface and the map's first language follow --language. Tiles from --mbtiles/--mbtiles-url must carry name:XX for the label languages (none: the build stops; some missing: they are named, left out of the recorded label languages, and those labels stay local). Name the recipe osm_mul_..., so that it does not share a Name and file with a single-language one. Default: off (labels in --language)"
+    },
+    "region_languages": {
+      "type": "string",
+      "required": false,
+      "title": "Region languages",
+      "description": "The area's own languages, comma-separated ISO 639 codes, most spoken first (Switzerland: de,fr,it,rm; deu becomes de). Recorded in the ZIM for the viewer and for language packs; with --multilingual those with label support are also label languages when the list (English counted) has at most 7. 'none' records none. Default: with --multilingual, the area's: a StreetZim region's (cloud/region-languages.tsv) for a preset of its name or box or Geofabrik extracts that are its whole outline, else the official languages of the Geofabrik extracts' countries, or only the first for a part of a country (resources/geofabrik-languages.tsv); none for a --bbox or a polygon from elsewhere; without --multilingual, none",
+      "pattern": "^(none|[a-z]{2,3}(,[a-z]{2,3})*)$"
+    },
+    "tile_languages": {
+      "type": "string",
+      "required": false,
+      "title": "Label languages",
+      "description": "With --multilingual: the label languages, instead of the 21 plus the area's own",
+      "pattern": "^[a-z]{2,3}(,[a-z]{2,3})*$"
+    },
+    "no_translated_search": {
+      "type": "boolean",
+      "required": false,
+      "title": "No translated search",
+      "description": "With Multilingual, search finds places only by their local and English names, not by their names in the label languages (on by default)"
+    },
     "profile": {
       "type": "string-enum",
       "required": true,

@@ -584,6 +584,139 @@ streetzim --name osm_en_monaco --title Monaco --description "Offline map of Mona
 Satellite tiles are downloaded from EOX during the build: Monaco at z0-14
 is 29 tiles and about 15 s. They are cached under `--dl`, per source.
 
+## Multilingual maps (`--multilingual`)
+
+StreetZim's own region maps are multilingual: one ZIM serves visitors of
+many languages, and it is the base that the language versions are
+assembled from ([proposal-kiwix-language-assembly.md](proposal-kiwix-language-assembly.md)).
+`--multilingual` makes the same kind of ZIM:
+
+- **Labels in many languages.** tilemaker writes `name:XX` for the 21
+  label languages (ar de el es fa fr he hi id it ja ko nl pl pt ru th tr
+  uk vi zh: `MATRIX_TILE_LANGUAGES` in `streetzim/languages.py`), plus the
+  region's own languages when there are at most 7 of them, English
+  counted (`REGION_TILE_ROW_MAX`; Switzerland's de, fr, it, rm add
+  Romansh). Only languages with label support join
+  (`region_label_languages`); the others are recorded but never labels,
+  and the log says so ("ka: recorded, no label support"). English is
+  always in the tiles (`name:latin`). For every StreetZim region this
+  gives the list its own builds use (`default_tile_languages`, read by
+  `ops/region-ml-tiles.py`). `--tile-languages` replaces the list. Hindi
+  labels do not render yet: the viewer has no Devanagari glyphs (its
+  fallback glyphs cover Arabic, Armenian, Georgian, Hebrew, Lao and Thai;
+  Chinese, Japanese and Korean come from the device's own fonts).
+- **Search by those names.** Search records carry `ln`, the place's names
+  in the label languages, so "Genf" finds Geneva. `--no-translated-search`
+  leaves them out (local and English names only).
+- **The languages, recorded.** `map-config.json` gets `tileLanguages` and
+  `regionLanguages`. The viewer reads `regionLanguages` only: on a map in
+  another language than the region's, labels show the visitor's name with
+  the local one under it. `tileLanguages` decides the search records'
+  `ln`, and the language-pack tools (`tools/langpack/`) read both.
+
+The interface's default language and the map's first language follow
+`--language`, and so does the ZIM's `Language` metadata; the viewer
+carries its interface in 23 languages (the 21, English and Swedish).
+Matching places to Wikipedia across neighbouring search cells and merging
+near-duplicate stops after that matching are not options: every build does
+them.
+
+| flag | Zimfarm field | default |
+|---|---|---|
+| `--multilingual` | `multilingual` (boolean) | off: labels in `--language`, as before |
+| `--region-languages XX,YY` | `region-languages` (text, `^(none\|[a-z]{2,3}(,[a-z]{2,3})*)$`) | with `--multilingual`, the area's (below); without, none |
+| `--tile-languages XX,YY` | `tile-languages` (text, `^[a-z]{2,3}(,[a-z]{2,3})*$`) | the 21 plus the region's own |
+| `--translated-search` / `--no-translated-search` | `no-translated-search` (boolean) | on |
+
+**The region's languages.** Given, `--region-languages` is recorded with
+or without `--multilingual`; `none` records none. Not given, a
+`--multilingual` build takes the area's, and logs where from:
+
+1. a StreetZim region: an `--area` preset of that name or whose box is the
+   region's box in `cloud/regions.tsv` (`dc` is `washington-dc`);
+   Geofabrik extracts that are all of a region's outline in
+   `cloud/region-outlines.tsv`, every part of it and nothing else
+   (`europe/ukraine` alone is not the region `ukraine`, whose outline adds
+   Moldova and Russia; `europe` alone is not the region `europe`); or, for
+   a region without an outline row, a single extract named like it
+   (`europe/switzerland`: de, fr, it, rm; `north-america/us/alaska`: en,
+   esu). Its row of `cloud/region-languages.tsv`, the table StreetZim's own
+   builds use;
+2. else the Geofabrik extracts behind the area (the preset's, or each
+   `.poly` of `--include-poly`, all of them Geofabrik's), when each has a
+   row of `resources/geofabrik-languages.tsv`: a country's official and de
+   facto official languages, most spoken first (its most spoken language
+   when it has none; corrected for a few countries, such as South Africa's
+   zu, xh, af and Ukraine without ru); for a part of a country (a US state, a Spanish
+   region, a Canadian province) only its country's first language, which
+   then labels nothing, and the log asks for `--region-languages`. The
+   ZIM's License metadata then credits the sources. The table is generated
+   by `tools/gen_geofabrik_languages.py` from Geofabrik's extract index
+   (the extracts' ISO 3166 codes, with corrections for the extracts it gets
+   wrong), Unicode CLDR's territory data (official languages; Unicode
+   License v3, its notice in `resources/LICENSES/Unicode-3.0.txt`) and
+   GeoNames' country table (most spoken languages; CC BY 4.0); rerun it to
+   refresh;
+3. else none, with a loud warning: a `--bbox`, an `--include-poly` with
+   any polygon that is not a Geofabrik extract (the log asks for
+   `--region-languages`), a continent, or an extract across parts of
+   several countries such as `alps`. The map then records no region
+   languages and its labels are the 21 only.
+
+A single-language build records region languages only when given, so its
+output is what it was. Three-letter codes with a two-letter one become it
+(`deu`, `ger` → `de`).
+
+These fail at once, before any download: `--tile-languages` or
+`--no-translated-search` without `--multilingual`, a code that is not two
+or three letters, `en` among the label languages (English is always
+there), and a `--tile-languages` code the builder cannot label. The
+command line takes codes in any case, separated by commas or spaces; a
+Zimfarm recipe takes them lowercase and comma-separated (the patterns).
+
+**Name multilingual recipes apart.** The output file is `{name}_{period}`
+and Kiwix takes books with the same Name (and Flavour) for versions of one
+title, so a multilingual recipe needs a Name of its own, `osm_mul_<area>`
+("mul": several languages), not the `osm_en_<area>` of a single-language
+recipe; otherwise the two write the same file and Kiwix offers one as an
+update of the other.
+
+A recipe (Switzerland as StreetZim publishes it):
+
+```json
+{"offliner_id": "streetzim", "name": "osm_mul_switzerland", "title": "Switzerland",
+ "description": "Offline map of Switzerland in many languages",
+ "include-poly": "https://download.geofabrik.de/europe/switzerland.poly",
+ "profile": "full", "multilingual": true, "region-languages": "de,fr,it,rm"}
+```
+
+On the command line:
+
+```sh
+streetzim --name osm_mul_monaco --title Monaco --description "Offline map of Monaco" \
+  --area monaco --output out --multilingual          # region languages: fr (Monaco's official)
+```
+
+**Ready-made tiles.** With `--mbtiles` or `--mbtiles-url`, the tiles must
+already carry the names. The build reads their tiles up to zoom 8 (gzip,
+zlib or plain; tiles that do not decode are skipped and counted; it stops
+as soon as every label language is found), refuses raster tiles, stops
+when none of the label languages is there ("the tiles carry no name:XX for
+any label language"), and otherwise names the missing ones: those labels
+stay local, and `tileLanguages` (and so the search records' `ln`) lists
+only the languages the tiles carry. OpenMapTiles-schema tiles such as
+OpenFreeMap's carry `name:XX` for many languages.
+
+**The image needs nothing new.** tilemaker, its profile (which writes
+whatever `STREETZIM_TILE_LANGUAGES` lists) and the pinned fallback glyphs
+were already in it.
+
+**Cost.** Monaco, `--profile basic`, in the image: 2.99 MB against 2.76 MB
+single-language (+8%, mostly the Arabic and Hebrew fallback glyphs the
+labels need); 516 of 6,921 search records carry `ln`. On larger maps the
+names themselves cost +0.15 to +1.1% of the ZIM
+([language-packs.md](language-packs.md)); the glyphs are a fixed cost.
+
 ## Feature parity with StreetZim's own builds
 
 The production builds are `ops/build-region-fast.sh` (which
@@ -612,6 +745,7 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Dead-website filter for Overture places (`--url-cache`) | yes | no | - | - | a crawl of every Overture website, kept on StreetZim's build host | no: the crawl result is not published anywhere a task could fetch it; without it, Overture places keep websites that may be dead |
 | Terrain / hillshade / 3D terrain (`--terrain`, `--low-zoom-world-vrt`) | yes | yes: `--terrain` / `--no-terrain` | full: on | Copernicus DEM licence (free, attribution) | Copernicus DEM on AWS S3 | yes: measured on Monaco and Luxembourg ([Terrain cost](#terrain-cost)) |
 | Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | opt-in, labelled ([Satellite imagery](#satellite-imagery)) | off, in no profile | 2016 mosaic (the default source): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | yes, about 15 s for Monaco |
+| Multilingual labels and search: `name:XX` for 21 languages plus the region's own, `ln` search names, `tileLanguages`/`regionLanguages` (`--tile-languages`, `--region-languages`) | yes (tiles from `ops/region-ml-tiles.py`, `STREETZIM_ML_TILES=1`) | **was missing; now `--multilingual`, `--region-languages`** ([above](#multilingual-maps---multilingual)) | off | ODbL | the extract | yes |
 | Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | yes | full: on | ODbL | the extract | yes (+12 to 28% ZIM size, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
 | 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
 | Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |

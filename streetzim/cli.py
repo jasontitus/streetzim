@@ -115,6 +115,15 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "mbtiles": {"offliner": False},
     "overwrite": {"offliner": False},
     "keep_temp": {"offliner": False},
+    "multilingual": {"title": "Multilingual"},
+    "region_languages": {"title": "Region languages",
+                         "pattern": r"^(none|[a-z]{2,3}(,[a-z]{2,3})*)$"},
+    "tile_languages": {"title": "Label languages",
+                       "pattern": r"^[a-z]{2,3}(,[a-z]{2,3})*$"},
+    "no_translated_search": {"title": "No translated search",
+                             "description": "With Multilingual, search finds places only by "
+                                            "their local and English names, not by their names "
+                                            "in the label languages (on by default)"},
 }
 # Zimfarm checks these when a recipe is saved (its check_exclusive_fields).
 MODEL_VALIDATORS = [{"name": "check_exclusive_fields",
@@ -329,9 +338,127 @@ def build_parser() -> argparse.ArgumentParser:
                            f"{tilemaker_store.FREE_FACTOR:g} times the cut free "
                            "(disk then fails)")
     feat.add_argument("--keep-temp", action="store_true", help=argparse.SUPPRESS)
+    add_language_arguments(p)
     add_profile_arguments(p)
     add_satellite_flags(p)
     return p
+
+
+def add_language_arguments(p: argparse.ArgumentParser) -> None:
+    """--multilingual and the language lists it uses (docs/zimfarm.md,
+    "Multilingual maps"): what StreetZim's own region builds make."""
+    from streetzim.languages import MATRIX_TILE_LANGUAGES, REGION_TILE_ROW_MAX
+    langs = p.add_argument_group("Languages")
+    langs.add_argument(
+        "--multilingual", action="store_true",
+        help="One ZIM for visitors of many languages: labels in the "
+             f"{len(MATRIX_TILE_LANGUAGES)} label languages "
+             f"({', '.join(MATRIX_TILE_LANGUAGES)}; hi labels do not render yet: "
+             "no Devanagari glyphs) plus the area's own (--region-languages, when "
+             f"they are at most {REGION_TILE_ROW_MAX}), search by the names in those "
+             "languages, and the map's languages recorded for the viewer and for "
+             "language packs. The interface and the map's first language follow "
+             "--language. Tiles from --mbtiles/--mbtiles-url must carry name:XX "
+             "for the label languages (none: the build stops; some missing: they "
+             "are named, left out of the recorded label languages, and those "
+             "labels stay local). Name the recipe osm_mul_..., so that it does "
+             "not share a Name and file with a single-language one. Default: off "
+             "(labels in --language)")
+    langs.add_argument(
+        "--region-languages", metavar="XX,YY",
+        help="The area's own languages, comma-separated ISO 639 codes, most "
+             "spoken first (Switzerland: de,fr,it,rm; deu becomes de). Recorded "
+             "in the ZIM for the viewer and for language packs; with "
+             "--multilingual those with label support are also label languages "
+             f"when the list (English counted) has at most {REGION_TILE_ROW_MAX}. "
+             "'none' records none. Default: with --multilingual, the area's: "
+             "a StreetZim region's (cloud/region-languages.tsv) for a preset of "
+             "its name or box or Geofabrik extracts that are its whole outline, "
+             "else the official languages of the Geofabrik extracts' countries, "
+             "or only the first for a part of a country "
+             "(resources/geofabrik-languages.tsv); none for a --bbox or a "
+             "polygon from elsewhere; without --multilingual, none")
+    langs.add_argument(
+        "--tile-languages", metavar="XX,YY",
+        help="With --multilingual: the label languages, instead of the "
+             f"{len(MATRIX_TILE_LANGUAGES)} plus the area's own")
+    langs.add_argument(
+        "--translated-search", action=argparse.BooleanOptionalAction, default=True,
+        help="With --multilingual: search also finds places by their names in "
+             "the label languages (\"Genf\" finds Geneva). --no-translated-search "
+             "keeps only local and English names. Default: on")
+
+
+def resolve_languages(args: argparse.Namespace) -> None:
+    """Check the language flags (ValueError) and put the lists given in
+    canonical form, comma-separated as create_osm_zim's
+    --tile-languages/--region-languages take them; --region-languages=none
+    stays "none". plan() fills in the rest once it knows the area
+    (finish_languages)."""
+    from streetzim import languages
+    if args.tile_languages and not args.multilingual:
+        raise ValueError("--tile-languages needs --multilingual")
+    if not args.translated_search and not args.multilingual:
+        raise ValueError("--no-translated-search needs --multilingual")
+    args.region_languages_source = None     # finish_languages: the License credit
+    if args.region_languages and args.region_languages.strip().lower() == "none":
+        args.region_languages = "none"
+    elif args.region_languages:
+        args.region_languages = ",".join(languages.region_languages(args.region_languages))
+    if args.tile_languages:
+        args.tile_languages = ",".join(languages.tile_languages(args.tile_languages))
+
+
+def finish_languages(args: argparse.Namespace, area: str | None, geofabrik: list[str] | None,
+                     bbox: str | None = None) -> None:
+    """The region's languages (the flag's; with --multilingual and no flag,
+    the area's: streetzim/area_languages.py) and, with --multilingual, the
+    label languages (--tile-languages, else
+    languages.region_label_languages), each logged with its reason."""
+    from streetzim import area_languages, languages
+    matrix, row_max = languages.MATRIX_TILE_LANGUAGES, languages.REGION_TILE_ROW_MAX
+    if args.region_languages == "none":
+        found = area_languages.Derived([], "--region-languages=none")
+    elif args.region_languages:
+        found = area_languages.Derived(args.region_languages.split(","), "--region-languages")
+    elif args.multilingual:
+        found = area_languages.derive(area, geofabrik, bbox=bbox)
+        args.region_languages_source = found.credit if found.languages else None
+    else:
+        found = area_languages.Derived([])
+    region, where = found.languages, found.where
+    args.region_languages = ",".join(region) or None
+    if not args.multilingual:
+        return
+    if region:
+        print(f"  Region languages: {','.join(region)} ({where})", flush=True)
+    else:
+        print("  WARNING: --multilingual without region languages ("
+              + (where or "none known for this area") + "): the map records none, "
+              f"its labels are the {len(matrix)} label languages only, and the viewer "
+              "shows no local name under the visitor's. Give --region-languages "
+              "(StreetZim's own are in cloud/region-languages.tsv).", flush=True)
+    if found.hint:
+        print(f"  Hint: {found.hint}", flush=True)
+    if args.tile_languages:
+        print(f"  Label languages: {args.tile_languages} (--tile-languages)", flush=True)
+        return
+    tiles, unlabelled = languages.region_label_languages(region if found.labels else [])
+    own = [x for x in tiles if x not in matrix]
+    if not found.labels:
+        why = "none of the region's (part of a country)"
+    elif len(region) > row_max:
+        why = (f"none of the region's: it lists {len(region)} languages, more than "
+               f"{row_max} (English counted)")
+    elif own:
+        why = (f"plus {','.join(own)} of the region's {len(region)} (at most {row_max}, "
+               "English counted)")
+    else:
+        why = "the region's own are among them, English, or without label support"
+    print(f"  Label languages: the {len(matrix)} label languages, {why}", flush=True)
+    for lang in unlabelled:
+        print(f"  {lang}: recorded, no label support", flush=True)
+    args.tile_languages = ",".join(tiles)
 
 
 def _profile_default_text(dest: str) -> str:
@@ -471,6 +598,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             raise ValueError("--zim-builder=manifest requires --xapian=builder or --xapian=none")
         if args.xapian == "builder" and args.zim_builder != "manifest":
             raise ValueError("--xapian=builder requires --zim-builder=manifest")
+        resolve_languages(args)
         return apply_profile(args, parser)
     except ValueError as e:
         parser.error(str(e))
@@ -904,6 +1032,29 @@ def prepare_mbtiles(path: Path, bbox: BBox | None, work: Path,
     return out, meta
 
 
+def check_tile_languages(path: Path, want: list[str]) -> list[str]:
+    """--multilingual on ready-made tiles: the label languages they carry
+    name:XX for (zooms 0-8), in `want`'s order. ValueError when none (tiles
+    without any would give a map whose labels never change language) or
+    when they are raster tiles; the ones they lack are named, and so are
+    tiles that would not decode."""
+    from streetzim import mbtiles
+    found, bad = mbtiles.name_languages(path, want=want)
+    if bad:
+        print(f"  WARNING: {bad} tile(s) at zoom 0-8 would not decode; skipped", flush=True)
+    have = [lang for lang in want if lang in found]
+    if not have:
+        raise ValueError("--multilingual: the tiles carry no name:XX for any label "
+                         f"language ({','.join(want)}); build the tiles here (leave "
+                         "out --mbtiles/--mbtiles-url) or pass --tile-languages they carry")
+    missing = [lang for lang in want if lang not in found]
+    print(f"  MBTiles labels: {len(have)} of {len(want)} languages"
+          + (f" (none for {','.join(missing)}: local names there, and left out of "
+             "tileLanguages)" if missing else ""),
+          flush=True)
+    return have
+
+
 def _name_of_url(url: str) -> str:
     return download.name_of_url(url)
 
@@ -929,6 +1080,9 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         raise ValueError("give --mbtiles or --mbtiles-url, not both")
     has_tiles = bool(args.mbtiles or args.mbtiles_url)
     geofabrik: str | None = None
+    area_key: str | None = None         # the --area preset, for its languages
+    # every Geofabrik extract behind the area; None: a polygon from elsewhere
+    geofabrik_all: list[str] | None = []
     outlines: list[str] = []            # --include-poly's files, for the clip
     across = False                      # --include-poly's box crosses ±180
     if args.area:
@@ -938,6 +1092,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
                              + ", ".join(sorted(KNOWN_AREAS)))
         area = KNOWN_AREAS[key]
         geofabrik, bbox = area["geofabrik"], area["bbox"]
+        area_key, geofabrik_all = key, [geofabrik]
     elif args.include_poly:
         urls = [u.strip() for u in args.include_poly.split(",") if u.strip()]
         rings: list[tuple[BBox, float]] = []
@@ -956,6 +1111,8 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         m = GEOFABRIK_POLY.match(urls[0])
         if len(urls) == 1 and m:
             geofabrik = m.group(1)
+        matched = [GEOFABRIK_POLY.match(u) for u in urls]
+        geofabrik_all = [g.group(1) for g in matched if g] if all(matched) else None
     else:
         parse_bbox_arg(args.bbox)
         bbox = args.bbox
@@ -969,6 +1126,7 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         raise ValueError("--routing needs an OSM extract: give --pbf-url, or --no-routing")
     clip_poly = (border_clip(outlines, bbox, dl, across=across)
                  if outlines and args.clip else None)
+    finish_languages(args, area_key, geofabrik_all, bbox if area_key else None)
 
     # The MBTiles before the extract: a bad one fails before that download.
     tiles_argv: list[str] = []
@@ -979,6 +1137,11 @@ def plan(args: argparse.Namespace, dl: Path, *, illustration: Path | None = None
         from streetzim.area import normalize    # (`area` is the preset here)
         box = normalize([float(v) for v in bbox.split(",")])
         path, _ = prepare_mbtiles(source[0], box, work)
+        if getattr(args, "tile_languages", None):
+            # tileLanguages (and the search records' ln) name only what the
+            # tiles carry.
+            args.tile_languages = ",".join(
+                check_tile_languages(path, args.tile_languages.split(",")))
         if path != source[0]:
             cut = str(path)
         tiles_argv = ["--mbtiles", str(path), "--record-tile-source"]
@@ -1095,6 +1258,12 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
             argv += ["--map-zoom", str(round(zoom))]
     if args.debug or args.keep_temp:
         argv += ["--keep-temp"]
+    if getattr(args, "tile_languages", None):
+        argv += [f"--tile-languages={args.tile_languages}"]
+    if getattr(args, "region_languages", None):
+        argv += [f"--region-languages={args.region_languages}"]
+    if getattr(args, "region_languages_source", None):
+        argv += [f"--region-languages-source={args.region_languages_source}"]
     argv += LAYOUT_ARGS + profile_feature_args(args, dl, bbox) + satellite_argv(args)
     return argv
 
@@ -1551,12 +1720,27 @@ def _build(args: argparse.Namespace, dl: Path, illustration: Path | None, work: 
     # --tmp nothing ever removed it.
     tempdir = tempfile.tempdir
     tempfile.tempdir = str(work)
+    # --translated-search sets the builder's switch for names in the label
+    # languages on search records (streetzim/zim_writer.py, "ln"), whatever
+    # the environment held; a single-language build writes none anyway.
+    search_ln = os.environ.get("STREETZIM_SEARCH_LN")
+    # create_osm_zim sets STREETZIM_TILE_LANGUAGES for its tilemaker run;
+    # in this process it would outlive the build.
+    tile_env = os.environ.get("STREETZIM_TILE_LANGUAGES")
+    if args.multilingual:
+        os.environ["STREETZIM_SEARCH_LN"] = "1" if args.translated_search else "0"
     try:
         import create_osm_zim
         # The builder module itself is not typed (pyright basic mode).
         create_osm_zim.main(build_args)  # pyright: ignore[reportUnknownMemberType]
     finally:
         tempfile.tempdir = tempdir
+        for key, was in (("STREETZIM_SEARCH_LN", search_ln),
+                         ("STREETZIM_TILE_LANGUAGES", tile_env)):
+            if was is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = was
         os.chdir(cwd)
         # tilemaker deletes its store files when it exits, but not when it is
         # killed; they take about twice the cut extract, so --keep-temp keeps none.

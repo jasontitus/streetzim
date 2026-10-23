@@ -64,6 +64,25 @@ PACK_ISO639_3 = {
     "yo": "yor", "zu": "zul",
 }
 
+# ISO 639-2/B (bibliographic) codes that are not also the language's ISO
+# 639-3 code: two_letter() reads them too.
+ISO639_2B = {"alb": "sq", "arm": "hy", "baq": "eu", "bur": "my", "chi": "zh", "cze": "cs",
+             "dut": "nl", "fre": "fr", "geo": "ka", "ger": "de", "gre": "el", "ice": "is",
+             "mac": "mk", "may": "ms", "per": "fa", "rum": "ro", "slo": "sk", "tib": "bo",
+             "wel": "cy"}
+# Three-letter codes these tables know a two-letter code for (deu -> de).
+_TWO_LETTER = {three: two
+               for table in (ISO639_3, REGION_ISO639_3, PACK_ISO639_3)
+               for two, three in table.items() if len(two) == 2}
+_TWO_LETTER.update(ISO639_2B)
+
+
+def two_letter(code: str) -> str:
+    """``code`` as its ISO 639-1 code where the tables here know one (deu,
+    ger -> de); any other code as it is (haw, gsw have none)."""
+    return _TWO_LETTER.get(code, code) if len(code) == 3 else code
+
+
 # Right-to-left scripts: the viewer's layout is left-to-right; labels and
 # search results still render correctly (MapLibre's RTL plugin). Gilaki
 # and Mazandarani (Iran's tiles) are written in Arabic script too.
@@ -153,7 +172,7 @@ MATRIX_TILE_LANGUAGES = ("ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "
 REGION_TILE_ROW_MAX = 7
 
 
-def default_tile_languages(region_langs) -> list[str]:
+def default_tile_languages(region_langs: list[str] | None) -> list[str]:
     """The name:xx languages a language-ready map's tiles carry by default:
     the matrix, plus the region's own languages when its row is short
     (REGION_TILE_ROW_MAX), sorted (tile_languages). A code the matrix
@@ -163,6 +182,27 @@ def default_tile_languages(region_langs) -> list[str]:
     extra = ([x for x in region if x not in MATRIX_TILE_LANGUAGES]
              if len(list(region_langs or [])) <= REGION_TILE_ROW_MAX else [])
     return tile_languages(",".join(list(MATRIX_TILE_LANGUAGES) + extra))
+
+
+def has_label_support(lang: str) -> bool:
+    """Whether tiles can carry ``lang`` as a label language (tile_languages
+    takes it): ISO639_3 or REGION_ISO639_3."""
+    return lang in ISO639_3 or lang in REGION_ISO639_3
+
+
+def region_label_languages(region_langs: list[str] | None) -> tuple[list[str], list[str]]:
+    """default_tile_languages for any region row: the matrix, plus the row's
+    own languages when the whole row (English counted) lists at most
+    REGION_TILE_ROW_MAX, but only those with label support. Returns the
+    label languages and the row's languages left out for lack of it
+    (recorded in regionLanguages, never labels: ka, hy). For a row whose
+    languages all have it, the same list as default_tile_languages."""
+    row = list(region_langs or [])
+    extra = ([x for x in row if x != "en" and x not in MATRIX_TILE_LANGUAGES]
+             if len(row) <= REGION_TILE_ROW_MAX else [])
+    unlabelled = [x for x in extra if not has_label_support(x)]
+    labelled = [x for x in extra if has_label_support(x)]
+    return tile_languages(",".join(list(MATRIX_TILE_LANGUAGES) + labelled)), unlabelled
 
 
 def first_name(value: object) -> str:
@@ -247,12 +287,14 @@ def region_languages(text: str) -> list[str]:
     """A region's own languages (cloud/region-languages.tsv; map-config
     ``regionLanguages``): ISO 639 codes, largest first, once each. Any
     two- or three-letter code: a region's language need not be one a build
-    can be made in (ht, ka)."""
+    can be made in (ht, ka). A three-letter code with a two-letter one
+    becomes it (two_letter: deu -> de)."""
     langs: list[str] = []
     for code in _codes(text):
         if not _REGION_CODE.fullmatch(code):
             raise ValueError(f"region language {code!r} is not an ISO 639 code "
                              "(two or three letters)")
+        code = two_letter(code)
         if code not in langs:
             langs.append(code)
     if not langs:

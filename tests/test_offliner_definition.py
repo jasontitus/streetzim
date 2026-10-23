@@ -73,8 +73,11 @@ def test_every_offered_flag_parses():
     del config["area"], config["include_poly"]      # exclusive with bbox
     config.update(output="/output", stats_filename="/output/task_progress.json",
                   bbox="7.4,43.72,7.44,43.76", default_view="43.7,7.4,12", max_zoom=12,
-                  overture_release="2026-09-23.1")
+                  overture_release="2026-09-23.1",
+                  region_languages="de,fr,it,rm", tile_languages="fr,de")
     args = parse_args(_argv_for(config))
+    assert args.multilingual and args.translated_search is False
+    assert args.tile_languages == "de,fr" and args.region_languages == "de,fr,it,rm"
     assert args.routing is False             # no_routing ticked
     assert args.terrain is True              # terrain: "on"
     assert args.stats_filename == "/output/task_progress.json"
@@ -145,7 +148,17 @@ def test_zimfarm_accepts_the_definition_and_its_recipes():
                            {"profile": "basic", "overture": True, "wikidata": False}),
                           ({"profile": "full", "wikipedia": "off"},
                            {"profile": "full", "wikipedia": False, "overture": True}),
-                          ({"profile": "full"}, {"profile": "full", "wikipedia": True})]:
+                          ({"profile": "full"}, {"profile": "full", "wikipedia": True}),
+                          ({"profile": "basic", "multilingual": True,
+                            "region-languages": "de,fr,it,rm"},
+                           {"multilingual": True, "region_languages": "de,fr,it,rm",
+                            "translated_search": True}),
+                          ({"profile": "basic", "multilingual": True,
+                            "tile-languages": "de,fr", "no-translated-search": True},
+                           {"tile_languages": "de,fr", "translated_search": False}),
+                          ({"profile": "basic", "multilingual": True,
+                            "region-languages": "none"},
+                           {"region_languages": "none"})]:
         recipe = model.model_validate({**base, **extra})
         flags = recipe.model_dump(mode="json")
         argv = compute_flags(flags)
@@ -157,6 +170,11 @@ def test_zimfarm_accepts_the_definition_and_its_recipes():
             model.model_validate({**base, **bad})
     with pytest.raises(ValidationError):
         model.model_validate({**base, "overture-release": "newest"})
+    for field in ("region-languages", "tile-languages"):   # the language-list patterns
+        for bad in ("de;fr", "DE", "de, fr", "german", "de,", ""):
+            with pytest.raises(ValidationError):
+                model.model_validate({**base, "profile": "basic", "multilingual": True,
+                                      field: bad})
 
 
 def test_terrain_is_a_profile_feature():

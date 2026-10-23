@@ -474,6 +474,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "codes), recorded in map-config.json (regionLanguages) "
                              "for the viewer; nothing else changes "
                              "(docs/language-ready.md)")
+    parser.add_argument("--region-languages-source", metavar="TEXT",
+                        help="Where --region-languages came from, when it is others' "
+                             "data: credited in the ZIM's License metadata "
+                             "('Region languages: TEXT')")
     parser.add_argument("--output", "-o", help="Output ZIM file path")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files")
     parser.add_argument("--max-zoom", type=int, default=14, help="Maximum zoom level (default: 14)")
@@ -1820,6 +1824,8 @@ def _build_map_config(
         map_config["tileLanguages"] = list(args.tile_languages)
     if getattr(args, "region_languages", None):
         map_config["regionLanguages"] = list(args.region_languages)
+        if getattr(args, "region_languages_source", None):
+            map_config["regionLanguagesSource"] = args.region_languages_source
     if bbox:
         map_config["bounds"] = bbox
         active_clip = _clip.active()

@@ -128,6 +128,11 @@ def test_map_config_records_the_languages_and_nothing_else(coz):
     assert mc.pop("tileLanguages") == ["de", "fr"]
     assert mc.pop("regionLanguages") == ["el", "en"]
     assert mc == plain
+    mc = _map_config(coz, _args(coz, "--region-languages", "fr",
+                                "--region-languages-source", "GeoNames, CC BY 4.0"))
+    assert mc.pop("regionLanguages") == ["fr"]
+    assert mc.pop("regionLanguagesSource") == "GeoNames, CC BY 4.0"   # the License credit
+    assert mc == plain
 
 
 def test_tile_languages_reach_the_tile_profile_and_the_glyphs(coz):

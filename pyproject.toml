@@ -79,14 +79,17 @@ packages = [
 "streetzim.resources" = "resources"
 
 # What the build reads at run time: streetzim/paths.py RUNTIME_FILES, plus
-# cloud/regions.tsv (create_osm_zim.registry_anchor). Not the viewer's
+# cloud/regions.tsv (create_osm_zim.registry_anchor), and
+# cloud/region-languages.tsv and cloud/region-outlines.tsv
+# (streetzim/area_languages.py). Not the viewer's
 # sources (resources/viewer/src/), which only tools/build_viewer.py reads.
 [tool.setuptools.package-data]
-"streetzim.resources" = ["viewer-assets.lock.json"]
+"streetzim.resources" = ["viewer-assets.lock.json", "geofabrik-languages.tsv",
+                         "LICENSES/*.txt"]
 "streetzim.resources.tilemaker" = ["*"]
 "streetzim.resources.vendor" = ["*/*"]
 "streetzim.resources.viewer" = ["*.html", "*.js"]
-cloud = ["regions.tsv"]
+cloud = ["regions.tsv", "region-languages.tsv", "region-outlines.tsv"]
 
 [tool.setuptools.dynamic]
 version = { attr = "streetzim.__about__.__version__" }

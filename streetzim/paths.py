@@ -27,6 +27,8 @@ LOCK_NAME = "viewer-assets.lock.json"
 # in pyproject.toml (tests/test_packaging.py checks the two agree).
 RUNTIME_FILES = (
     LOCK_NAME,
+    "geofabrik-languages.tsv",
+    "LICENSES/Unicode-3.0.txt",
     "tilemaker/config-openmaptiles.json",
     "tilemaker/process-openmaptiles.lua",
     "tilemaker/fetch-shapefiles.sh",

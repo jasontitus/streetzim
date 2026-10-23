@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from streetzim import area
@@ -69,6 +69,57 @@ def check(path: Path) -> dict[str, str]:
     except sqlite3.DatabaseError as e:
         raise ValueError(f"{path} is not a readable MBTiles file: {e}") from e
     return {str(k): str(v) for k, v in rows if k is not None and v is not None}
+
+
+RASTER_FORMATS = ("png", "jpg", "jpeg", "webp")
+_RASTER_MAGIC = (b"\x89PNG", b"\xff\xd8\xff", b"RIFF")
+
+
+def name_languages(path: Path, max_zoom: int = 8,
+                   want: Iterable[str] | None = None) -> tuple[set[str], int]:
+    """The XX of every name:XX key in the zoom 0..max_zoom tiles (name:latin
+    left out), and how many of those tiles would not decode (skipped): which
+    label languages a ready-made tile set carries, as ops/region-ml-tiles.py's
+    check reads its own tiles. Tiles may be gzip, zlib or plain. With `want`,
+    stops once every one of those languages is found. ValueError for raster
+    tiles."""
+    import gzip
+    import importlib
+    import zlib
+    pb2 = importlib.import_module("mapbox_vector_tile.Mapbox.vector_tile_pb2")
+    decode_error = importlib.import_module("google.protobuf.message").DecodeError
+    fmt = check(path).get("format", "").lower()
+    if fmt in RASTER_FORMATS:
+        raise ValueError(f"{path} holds raster tiles (format {fmt}): labels in other "
+                         "languages need vector tiles (OpenMapTiles schema)")
+    wanted = {f"name:{lang}" for lang in want} if want is not None else None
+    keys: set[str] = set()
+    bad = 0
+    c = _connect(path)
+    try:
+        for (blob,) in c.execute("SELECT tile_data FROM tiles WHERE zoom_level <= ?",
+                                 (max_zoom,)):
+            data = bytes(blob or b"")
+            if data.startswith(_RASTER_MAGIC):
+                raise ValueError(f"{path} holds raster tiles: labels in other languages "
+                                 "need vector tiles (OpenMapTiles schema)")
+            try:
+                if data[:2] == b"\x1f\x8b":
+                    data = gzip.decompress(data)
+                elif data[:1] == b"\x78" and len(data) > 1 and data[1] in (0x01, 0x5E, 0x9C, 0xDA):
+                    data = zlib.decompress(data)
+                tile = pb2.tile()  # pyright: ignore[reportAttributeAccessIssue]
+                tile.ParseFromString(data)
+            except (OSError, EOFError, zlib.error, decode_error):
+                bad += 1
+                continue
+            keys |= {k for layer in tile.layers for k in layer.keys if k.startswith("name:")}
+            if wanted is not None and wanted <= keys:
+                break
+    finally:
+        c.close()
+    keys.discard("name:latin")
+    return {k[5:] for k in keys}, bad
 
 
 def describe(meta: dict[str, str]) -> str:

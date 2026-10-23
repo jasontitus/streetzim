@@ -935,3 +935,374 @@ def test_sigbus_in_tilemaker_is_reported_as_a_full_disk(tmp_path, monkeypatch, c
                              bbox="7.40,43.72,7.44,43.76", store=where)
     out = capsys.readouterr().out
     assert ("on-disk store ran out of disk in " + str(where) in out) == says
+
+
+# ------------------------------------------------------------ --multilingual
+# What StreetZim's own region builds make (ops/region-ml-tiles.py, the
+# driver's --tile-languages/--region-languages), from the openZIM command.
+
+def _matrix_plus(*extra):
+    from streetzim.languages import MATRIX_TILE_LANGUAGES
+    return sorted(set(MATRIX_TILE_LANGUAGES) | set(extra))
+
+
+def test_multilingual_labels_the_matrix_plus_a_short_rows_own_languages(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--multilingual",
+                    "--region-languages", "de,fr,it,rm"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.tile_languages.split(",") == _matrix_plus("rm")      # Romansh joins
+    assert ns.region_languages.split(",") == ["de", "fr", "it", "rm"]
+
+
+def test_a_long_row_adds_no_label_languages(tmp_path, no_network):
+    row = "de,fr,it,nl,pl,es,pt,ro"                        # 8 > REGION_TILE_ROW_MAX
+    argv, _ = plan(["--area", "monaco", "--multilingual", "--region-languages", row],
+                   tmp_path)
+    ns = builder_args(argv)
+    assert ns.tile_languages.split(",") == _matrix_plus()
+    assert ns.region_languages.split(",") == row.split(",")
+
+
+def test_tile_languages_replace_the_default(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--multilingual", "--tile-languages", "fr,de"],
+                   tmp_path)
+    assert builder_args(argv).tile_languages.split(",") == ["de", "fr"]
+
+
+def test_a_single_language_build_passes_no_label_languages(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.tile_languages is None and ns.region_languages is None
+    argv, _ = plan(["--area", "monaco", "--region-languages", "fr"], tmp_path / "r")
+    ns = builder_args(argv)
+    assert ns.tile_languages is None and ns.region_languages == "fr"
+
+
+@pytest.mark.parametrize("flags, needle", [
+    (["--tile-languages", "de"], "--tile-languages needs --multilingual"),
+    (["--no-translated-search"], "--no-translated-search needs --multilingual"),
+    (["--multilingual", "--region-languages", "de,xx-bogus"], "region"),
+    (["--multilingual", "--tile-languages", "de,qqq"], "qqq"),
+])
+def test_language_flag_mistakes_fail_before_any_download(tmp_path, no_network, capsys,
+                                                          flags, needle):
+    with pytest.raises(SystemExit):
+        plan(["--area", "monaco"] + flags, tmp_path)
+    assert no_network == []
+    assert needle in capsys.readouterr().err
+
+
+def _vector_mbtiles(path, names):
+    """An MBTiles (plain tiles table) whose zoom-0 tile has one place feature
+    with these properties, gzip-encoded like tilemaker's."""
+    import gzip
+    import sqlite3
+    import mapbox_vector_tile
+    data = gzip.compress(mapbox_vector_tile.encode(
+        [{"name": "place", "features": [{"geometry": "POINT(2048 2048)",
+                                         "properties": names}]}]))
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE metadata (name text, value text)")
+    conn.executemany("INSERT INTO metadata VALUES (?, ?)",
+                     [("format", "pbf"), ("name", "t"), ("bounds", "-180,-85,180,85")])
+    conn.execute("CREATE TABLE tiles (zoom_level integer, tile_column integer, "
+                 "tile_row integer, tile_data blob)")
+    conn.execute("INSERT INTO tiles VALUES (0, 0, 0, ?)", (data,))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_ready_made_tiles_must_carry_some_label_language(tmp_path, no_network, capsys):
+    good = _vector_mbtiles(tmp_path / "ml.mbtiles",
+                           {"name": "Monaco", "name:de": "Monaco", "name:ru": "Монако",
+                            "name:latin": "Monaco"})
+    for flag, value, sub in (("--mbtiles", str(good), "a"), ("--mbtiles-url", good.as_uri(), "u")):
+        argv, _ = plan(["--area", "monaco", flag, value, "--multilingual"], tmp_path / sub)
+        # tileLanguages (and the search records' ln) name only what the tiles carry
+        assert builder_args(argv).tile_languages == "de,ru", flag
+        out = capsys.readouterr().out
+        assert "MBTiles labels: 2 of" in out and "local names there" in out
+    plain = _vector_mbtiles(tmp_path / "plain.mbtiles", {"name": "Monaco",
+                                                          "name:latin": "Monaco"})
+    with pytest.raises(ValueError, match="no name:XX for any label language"):
+        plan(["--area", "monaco", "--mbtiles", str(plain), "--multilingual"], tmp_path / "b")
+
+
+def test_name_languages_reads_every_low_zoom_tile(tmp_path):
+    import gzip
+    import sqlite3
+    import mapbox_vector_tile
+    from streetzim import mbtiles
+    t = _vector_mbtiles(tmp_path / "t.mbtiles", {"name": "x", "name:fr": "x", "name:latin": "x"})
+    conn = sqlite3.connect(str(t))
+    for z, key, packed in ((8, "name:it", True), (9, "name:ja", False)):
+        tile = mapbox_vector_tile.encode([{"name": "place", "features": [
+            {"geometry": "POINT(1 1)", "properties": {key: "x"}}]}])
+        conn.execute("INSERT INTO tiles VALUES (?, 0, 0, ?)",
+                     (z, gzip.compress(tile) if packed else tile))
+    conn.commit()
+    conn.close()
+    assert mbtiles.name_languages(t) == ({"fr", "it"}, 0)                  # zooms 0-8
+    assert mbtiles.name_languages(t, max_zoom=9) == ({"fr", "it", "ja"}, 0)   # an unzipped tile too
+    assert mbtiles.name_languages(t, max_zoom=-1) == (set(), 0)
+
+
+def test_name_languages_reads_zlib_skips_bad_tiles_and_stops_early(tmp_path):
+    import sqlite3
+    import zlib
+    import mapbox_vector_tile
+    from streetzim import mbtiles
+    t = _vector_mbtiles(tmp_path / "t.mbtiles", {"name": "x", "name:fr": "x"})
+    tile = mapbox_vector_tile.encode([{"name": "place", "features": [
+        {"geometry": "POINT(1 1)", "properties": {"name:it": "x"}}]}])
+    conn = sqlite3.connect(str(t))
+    conn.executemany("INSERT INTO tiles VALUES (?, 0, 0, ?)",
+                     [(1, zlib.compress(tile)),                 # zlib, as some writers store
+                      (2, b"\x1f\x8b\x08\x00broken gzip"),       # bad gzip
+                      (3, b"\x0a\xff\xff\xff")])                  # bad protobuf
+    conn.commit()
+    conn.close()
+    assert mbtiles.name_languages(t) == ({"fr", "it"}, 2)
+    assert mbtiles.name_languages(t, want=["fr"]) == ({"fr"}, 0)   # stopped at the first tile
+
+
+def test_name_languages_refuses_raster_tiles(tmp_path):
+    import sqlite3
+    from streetzim import mbtiles
+    t = _vector_mbtiles(tmp_path / "png.mbtiles", {"name:fr": "x"})
+    conn = sqlite3.connect(str(t))
+    conn.execute("UPDATE metadata SET value = 'png' WHERE name = 'format'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match="raster tiles"):
+        mbtiles.name_languages(t)
+    t2 = _vector_mbtiles(tmp_path / "nofmt.mbtiles", {"name:fr": "x"})
+    conn = sqlite3.connect(str(t2))
+    conn.execute("DELETE FROM metadata WHERE name = 'format'")
+    conn.execute("UPDATE tiles SET tile_data = ?", (b"\x89PNG\r\n\x1a\n...",))
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match="raster tiles"):
+        mbtiles.name_languages(t2)
+
+
+@pytest.mark.parametrize("outside, flags, want", [
+    (None, ["--multilingual"], "1"),
+    ("0", ["--multilingual"], "1"),                        # the flag decides, not the shell
+    (None, ["--multilingual", "--no-translated-search"], "0"),
+    ("1", ["--multilingual", "--no-translated-search"], "0"),
+    (None, [], None),                                      # single language: left alone
+    ("0", [], "0"),
+])
+def test_translated_search_switch_reaches_the_builder_and_is_restored(
+        tmp_path, monkeypatch, outside, flags, want):
+    import create_osm_zim
+    seen = {}
+    if outside is None:
+        monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    else:
+        monkeypatch.setenv("STREETZIM_SEARCH_LN", outside)
+    monkeypatch.setattr(cli, "plan", lambda *a, **k: (["--bbox=0,0,1,1"], {}))
+    monkeypatch.setattr(cli, "ensure_shapefiles", lambda folder: tmp_path)
+    monkeypatch.setattr(cli, "publish", lambda building, final, overwrite: None)
+    monkeypatch.setattr(create_osm_zim, "main",
+                        lambda argv: seen.setdefault("ln", os.environ.get("STREETZIM_SEARCH_LN")))
+    args = cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco"] + flags)
+    assert cli._build(args, tmp_path, None, tmp_path, tmp_path / "b.zim", tmp_path / "f.zim") == 0
+    assert seen["ln"] == want
+    assert os.environ.get("STREETZIM_SEARCH_LN") == outside
+
+
+def test_build_restores_the_language_environment_when_the_builder_fails(tmp_path, monkeypatch):
+    import create_osm_zim
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "xx")
+    monkeypatch.setattr(cli, "plan", lambda *a, **k: (["--bbox=0,0,1,1"], {}))
+    monkeypatch.setattr(cli, "ensure_shapefiles", lambda folder: tmp_path)
+
+    def failing_builder(argv):
+        os.environ["STREETZIM_TILE_LANGUAGES"] = "de,fr"   # as create_osm_zim's own setup does
+        raise RuntimeError("tilemaker died")
+    monkeypatch.setattr(create_osm_zim, "main", failing_builder)
+    args = cli.parse_args(REQ + ["--profile", "basic", "--area", "monaco", "--multilingual",
+                                 "--no-translated-search"])
+    with pytest.raises(RuntimeError):
+        cli._build(args, tmp_path, None, tmp_path, tmp_path / "b.zim", tmp_path / "f.zim")
+    assert "STREETZIM_SEARCH_LN" not in os.environ
+    assert os.environ["STREETZIM_TILE_LANGUAGES"] == "xx"
+
+
+def test_region_languages_without_label_support_are_recorded(tmp_path, no_network, capsys):
+    # Georgia's languages: az has label support, ka and hy do not (no tiles carry them)
+    argv, _ = plan(["--area", "monaco", "--multilingual", "--region-languages", "ka,ru,hy,az"],
+                   tmp_path)
+    ns = builder_args(argv)
+    assert ns.tile_languages.split(",") == _matrix_plus("az")
+    assert ns.region_languages.split(",") == ["ka", "ru", "hy", "az"]
+    out = capsys.readouterr().out
+    assert "ka: recorded, no label support" in out and "hy: recorded, no label support" in out
+    assert "plus az of the region's 4" in out
+
+
+def test_every_streetzim_region_row_labels_as_before():
+    # streetzim and StreetZim's own builds (ops/region-ml-tiles.py) agree on
+    # every row of cloud/region-languages.tsv
+    from streetzim import languages as L
+    rows = [line.rstrip("\n").split("\t") for line in
+            (ROOT / "cloud" / "region-languages.tsv").read_text().splitlines()
+            if "\t" in line and not line.startswith("#")]
+    assert len(rows) >= 71
+    for rid, row in rows:
+        langs = L.region_languages(row)
+        assert langs == row.split(","), rid
+        assert L.region_label_languages(langs) == (L.default_tile_languages(langs), []), rid
+
+
+@pytest.mark.parametrize("flags, want, source", [
+    (["--area", "monaco"], "fr",
+     "the official languages of the Geofabrik extract europe/monaco; "),
+    (["--area", "california"], "en,es", "StreetZim region california; "),
+    (["--area", "us"], "en,es,zh", "StreetZim region united-states, the outline north-america/us; "),
+    (["--area", "dc"], "en,es", "StreetZim region washington-dc, the box of --area dc; "),
+    (["--include-poly", "https://download.geofabrik.de/europe/switzerland.poly"],
+     "de,fr,it,rm", "StreetZim region switzerland, the extract europe/switzerland; "),
+    (["--include-poly", "https://download.geofabrik.de/north-america/us/alaska.poly"],
+     "en,esu", "StreetZim region alaska, the extract north-america/us/alaska; "),
+    (["--include-poly", ",".join(f"https://download.geofabrik.de/europe/{c}.poly"
+                                 for c in ("lithuania", "latvia", "estonia")),
+      "--pbf-url", "https://example.org/baltics.pbf"],
+     "lt,lv,et", "StreetZim region baltics, the outline "),
+    (["--include-poly", "https://download.geofabrik.de/europe/ukraine.poly"],
+     "uk", "the official languages of the Geofabrik extract europe/ukraine; "),
+    (["--include-poly", "https://download.geofabrik.de/europe/ukraine.poly,"
+                        "https://download.geofabrik.de/europe/moldova.poly",
+      "--pbf-url", "https://example.org/um.pbf"],
+     "uk,ro", "the official languages of the Geofabrik extracts europe/ukraine, "),
+    (["--include-poly", "https://download.geofabrik.de/europe/ukraine.poly,"
+                        "https://download.geofabrik.de/europe/moldova.poly,"
+                        "https://download.geofabrik.de/russia.poly",
+      "--pbf-url", "https://example.org/umr.pbf"],
+     "ru,uk,ro", "StreetZim region ukraine, the outline "),
+    (["--include-poly", "https://download.geofabrik.de/europe/monaco.poly,"
+                        "https://download.geofabrik.de/europe/liechtenstein.poly",
+      "--pbf-url", "https://example.org/two.pbf"],
+     "fr,de", "the official languages of the Geofabrik extracts europe/monaco, "
+              "europe/liechtenstein; "),
+])
+def test_multilingual_derives_the_region_languages(tmp_path, no_network, capsys,
+                                                   flags, want, source):
+    from streetzim import area_languages
+    argv, _ = plan(flags + ["--multilingual"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages == want
+    out = capsys.readouterr().out
+    assert f"Region languages: {want} ({source}" in out
+    assert "Label languages: the 21 label languages" in out
+    # Only the Geofabrik table (CLDR and GeoNames data) is credited
+    assert ns.region_languages_source == (area_languages.GEOFABRIK_CREDIT
+                                          if "Geofabrik extract" in source
+                                          and "StreetZim" not in source else None)
+    if want in ("de,fr,it,rm", "en,esu"):                  # Romansh and Yup'ik label the map
+        assert ns.tile_languages.split(",") == _matrix_plus(want.split(",")[-1])
+
+
+
+@pytest.mark.parametrize("polys, hint", [
+    (["https://download.geofabrik.de/europe.poly"], False),          # a continent alone
+    (["https://download.geofabrik.de/europe/monaco.poly", "https://example.org/x.poly"], True),
+    (["https://example.org/x.poly"], True),
+])
+def test_no_region_languages_for_continents_and_foreign_polygons(tmp_path, no_network, capsys,
+                                                                 polys, hint):
+    argv, _ = plan(["--include-poly", ",".join(polys), "--pbf-url", "https://example.org/x.pbf",
+                    "--multilingual"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages is None and ns.region_languages_source is None
+    assert ns.tile_languages.split(",") == _matrix_plus()
+    out = capsys.readouterr().out
+    assert "WARNING: --multilingual without region languages" in out
+    assert ("Hint: pass --region-languages" in out) == hint
+
+
+def test_part_of_a_country_records_its_first_language_only(tmp_path, no_network, capsys):
+    argv, _ = plan(["--include-poly", "https://download.geofabrik.de/europe/spain/andalucia.poly",
+                    "--multilingual"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages == "es" and ns.tile_languages.split(",") == _matrix_plus()
+    out = capsys.readouterr().out
+    assert "Region languages: es (the first language of the country of the Geofabrik " in out
+    assert "Hint: europe/spain/andalucia is part of a country" in out
+    assert "--region-languages" in out.split("Hint:")[1]
+
+
+def test_part_of_a_country_adds_no_label_language(tmp_path, no_network, capsys, monkeypatch):
+    from streetzim import area_languages
+    table = tmp_path / "geofabrik-languages.tsv"
+    table.write_text("# test\neurope/sweden/x\tpart\tSE\tsv\n")
+    monkeypatch.setattr(area_languages, "GEOFABRIK_TABLE", table)
+    argv, _ = plan(["--include-poly", "https://download.geofabrik.de/europe/sweden/x.poly",
+                    "--multilingual"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages == "sv"
+    assert ns.tile_languages.split(",") == _matrix_plus()       # sv has label support, still none
+    assert "none of the region's (part of a country)" in capsys.readouterr().out
+
+
+def test_single_language_builds_pass_no_region_language_source(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--region-languages", "fr"], tmp_path)
+    assert builder_args(argv).region_languages_source is None
+    assert not any(a.startswith("--region-languages-source") for a in argv)
+
+
+def test_derived_region_languages_are_credited_in_the_license(tmp_path):
+    import tests.test_zim_metadata as tzm
+    from streetzim import area_languages
+    md = tzm._build(tmp_path, map_config_extra={
+        "regionLanguages": ["fr"], "regionLanguagesSource": area_languages.GEOFABRIK_CREDIT})
+    lic = md["License"].decode()
+    assert f"Region languages: {area_languages.GEOFABRIK_CREDIT}" in lic
+    assert "GeoNames" in lic and "CC BY 4.0" in lic
+    (tmp_path / "p").mkdir()
+    plain = tzm._build(tmp_path / "p")
+    assert "Region languages" not in plain["License"].decode()
+
+
+def test_region_languages_given_none_or_unknown_warn(tmp_path, no_network, capsys):
+    argv, _ = plan(["--area", "monaco", "--multilingual", "--region-languages", "none"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages is None and ns.tile_languages.split(",") == _matrix_plus()
+    assert ("WARNING: --multilingual without region languages (--region-languages=none)"
+            in capsys.readouterr().out)
+    argv, _ = plan(["--bbox", "7.40,43.72,7.44,43.76", "--pbf-url", "https://example.org/x.pbf",
+                    "--multilingual"], tmp_path / "b")
+    assert builder_args(argv).region_languages is None
+    assert "(none known for this area)" in capsys.readouterr().out
+
+
+def test_single_language_builds_derive_no_region_languages(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco"], tmp_path)
+    assert builder_args(argv).region_languages is None
+    argv, _ = plan(["--area", "monaco", "--region-languages", "none"], tmp_path / "n")
+    assert builder_args(argv).region_languages is None
+
+
+def test_three_letter_region_codes_become_two_letter(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco", "--multilingual", "--region-languages", "deu,fra,haw"],
+                   tmp_path)
+    ns = builder_args(argv)
+    assert ns.region_languages == "de,fr,haw"
+    assert ns.tile_languages.split(",") == _matrix_plus("haw")
+
+
+def test_english_counts_toward_the_region_row_limit():
+    from streetzim import languages as L
+    matrix = sorted(L.MATRIX_TILE_LANGUAGES)
+    seven = ["en", "de", "fr", "it", "nl", "pl", "rm"]
+    assert L.region_label_languages(seven) == (sorted(matrix + ["rm"]), [])
+    assert L.region_label_languages(seven + ["es"]) == (matrix, [])     # eight with English
+
+
+def test_bibliographic_and_terminology_codes_become_two_letter():
+    from streetzim import languages as L
+    assert L.region_languages("ger,deu,fre,FRA,haw,gsw") == ["de", "fr", "haw", "gsw"]

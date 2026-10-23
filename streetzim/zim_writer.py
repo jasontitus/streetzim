@@ -1298,7 +1298,8 @@ def _create_zim(
                       has_terrain=bool(terrain_dir and os.path.isdir(terrain_dir)),
                       has_wiki=has_wikidata or has_articles,
                       tile_credit=(_tile_credit(tile_metadata)
-                                   if map_config.get("tileSource") else None))
+                                   if map_config.get("tileSource") else None),
+                      region_languages_credit=map_config.get("regionLanguagesSource"))
         _add_routing_graph(creator, MapItem,
                            routing_graph_path=routing_graph_path,
                            routing_graph_chunk_mb=routing_graph_chunk_mb,
@@ -1451,7 +1452,7 @@ def _tile_credit(tile_metadata):
 def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
                   language="eng", metadata=None, illustration=None, has_satellite=True,
                   has_terrain=True, has_wiki=True, satellite_source=None,
-                  tile_credit=None):
+                  tile_credit=None, region_languages_credit=None):
     """ZIM metadata (Name, Title, Tags, License, ...) and the 48x48 illustration.
 
     ``metadata`` holds openZIM-flag overrides validated by
@@ -1532,6 +1533,10 @@ def _add_metadata(creator, *, name, description, overture_sources, xapian_mode,
             "Address enrichment: Overture Maps Foundation "
             "(overturemaps.org) — dataset credits in overture-sources.json"
         )
+    if region_languages_credit:
+        # streetzim --multilingual took the region's languages from others'
+        # data (streetzim/area_languages.py).
+        license_parts.append(f"Region languages: {region_languages_credit}")
     license_parts.append("Tool code: MIT")
     creator.add_metadata("License", "; ".join(license_parts))
 
