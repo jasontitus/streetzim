@@ -29,8 +29,10 @@ false when not even one job fits (the run then works on /storage as before).
 stage: copies the base (and its .parent.json, which base_lineage reads) into
 DIR with its timestamps, checks the copy's size and MD5 against the stream it
 was copied from, prints the copy's path. sweep: removes run folders whose
-process is gone. Tests: LANGPACK_NVME_FREE (the free bytes to count, as
-parallel_rebuild.sh's PAR_FREE_GB_CMD), NVME_SCRATCH, PAR_STATE, PAR_SCRATCH.
+process is gone. LANGPACK_PAR_STATE: the parallel runner's state folder
+(ops/langpack/host-env.sh sets it; unset, no runner's builds are counted).
+Tests: LANGPACK_NVME_FREE (the free bytes to count, as parallel_rebuild.sh's
+PAR_FREE_GB_CMD), NVME_SCRATCH, PAR_STATE (over LANGPACK_PAR_STATE), PAR_SCRATCH.
 """
 from __future__ import annotations
 
@@ -48,7 +50,6 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 GB = 1 << 30
 ACCT = "/mnt/data/tilemaker/streetzim-scratch"     # build-region-fast.sh's NVME_SCRATCH: the reservations
-PAR_STATE = "/storage/streetzim/rebuild-par"
 PAR_SCRATCH = "/mnt/data/tilemaker/streetzim-par"
 REFRESH = 30
 GATE_MEM_GB = 4                 # a gate job: merge or verify (under 8 GB --as), kiwix-serve, one Chromium
@@ -96,7 +97,9 @@ def runner_committed() -> int:
     """What the parallel runner's running builds may still write: each one's
     projection (proj=<n>G in its status file) less what its scratch holds,
     as parallel_rebuild.sh's start guard counts it (GiB, rounded up)."""
-    state = os.environ.get("PAR_STATE") or PAR_STATE
+    state = os.environ.get("PAR_STATE") or os.environ.get("LANGPACK_PAR_STATE") or ""
+    if not state:
+        return 0
     scratch = os.environ.get("PAR_SCRATCH") or PAR_SCRATCH
     total = 0
     for p in glob.glob(os.path.join(state, "status", "*")):

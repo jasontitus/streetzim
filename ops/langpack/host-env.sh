@@ -27,6 +27,10 @@ export LANGPACK_WORK=${LANGPACK_WORK:-/storage/streetzim/langpack-work}
 # The pack builder's cache (SQL dumps, 0.1-2.5 GB a language; title maps,
 # base scans, Wikidata text): kept from one round to the next.
 export WP_CACHE=${WP_CACHE:-$LANGPACK_WORK/wpcache}
+# The parallel rebuild runner's state (ops/cloud/parallel_rebuild.sh): what its
+# running builds may still write on the shared NVMe, which tools/langpack/nvme.py
+# counts before this pipeline takes room there.
+export LANGPACK_PAR_STATE=${LANGPACK_PAR_STATE:-/storage/streetzim/rebuild-par}
 # The host is shared with other builds: pause the heavy steps below 40 GB.
 export LANGPACK_MIN_FREE_GB=${LANGPACK_MIN_FREE_GB:-40}
 # The build worker's origin (build-proxy/, deployed by hand): set, and ship_packs.sh
