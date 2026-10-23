@@ -146,6 +146,22 @@ def test_refuses_a_zimcheck_that_is_not_the_official_one(gates: SimpleNamespace,
     assert not (work / "verdicts").exists()
 
 
+def test_zimcheck_passes_only_with_exit_0(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """run_gates.sh keeps zimcheck's exit code beside its log; a Pass line
+    with a non-zero exit is no pass (compose_verdicts.py)."""
+    out = gates.work / "gates" / gates.tag
+    assert (out / "de.zimcheck.log.rc").read_text().strip() == "0"
+    zc = lpzims.fake_zimcheck(tmp_path / "zc", "passrc1", "[INFO] Overall Test Status: Pass\n", rc=1)
+    work = tmp_path / "work"
+    r = subprocess.run([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de", "en", "testland",
+                        str(gates.region), str(_free_port())], capture_output=True, text=True, timeout=600,
+                       env={**gates.env, "PACK_GATE_ZIMCHECK": zc, "LANGPACK_WORK": str(work)})
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert (work / "gates" / gates.tag / "de.zimcheck.log.rc").read_text().strip() == "1"
+    v = json.loads((work / "verdicts" / gates.tag / "de.json").read_text())
+    assert v["checks"]["zimcheck"] is False and v["checks"]["recipe_eq_merge"] is True
+
+
 def test_one_merged_file_at_a_time(gates: SimpleNamespace) -> None:
     """kiwix-serve serves the base alone, then each merged file alone, and the
     merged folder holds only the file being checked (and none for the base)."""

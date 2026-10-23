@@ -55,6 +55,7 @@ ops = ["internetarchive>=4.0"]
 [project.scripts]
 streetzim = "streetzim.cli:main"
 streetzim-pack = "streetzim.pack:main"
+streetzim-langpack = "streetzim.langpack_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jasontitus/streetzim"
@@ -121,6 +122,7 @@ include = [
   "tools/langpack",
   "tools/measure_build.py",
   "tools/offliner_definition.py",
+  "tools/offliner_definition_langpack.py",
   "tools/pin_viewer_assets.py",
 ]
 strict = [

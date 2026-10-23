@@ -382,3 +382,55 @@ def test_the_per_entry_budget(site: SimpleNamespace, lp: SimpleNamespace, tmp_pa
     r = tool("site_check.py", site.out, "--base", site.base, "--packs-dir", site.packs, "--ia-cache", site.ia,
              "--recipe-budget", "100", env=site.env)
     assert r.returncode == 1 and "over the per-entry budget: a" in r.stdout, r.stdout[-1500:]
+
+
+# ---------- the zimcheck rule: exit 0 and a last "Overall Test Status:" line that is Pass ----------
+
+LINK = "  - 'Overall%20Test%20Status%3A%20Pass' (resolves to 'Overall Test Status: Pass')"
+
+
+def test_zimcheck_log_rule() -> None:
+    from tools.langpack.gatelib import zimcheck_log_passed
+    passed = "[INFO] Checking ...\n[INFO] Overall Test Status: Pass\n[INFO] Total time taken: 3s\n"
+    assert zimcheck_log_passed(passed, 0) and zimcheck_log_passed(passed, None)
+    assert not zimcheck_log_passed(passed, 1)
+    linked = f"[ERROR] Internal URL: Dangling link(s) in article 'x':\n{LINK}\n[INFO] Overall Test Status: Fail\n"
+    assert not zimcheck_log_passed(linked, 1) and not zimcheck_log_passed(linked, 0)
+    cut = f"[ERROR] Internal URL: Dangling link(s) in article 'x':\n{LINK}\n"      # stopped mid-run
+    assert not zimcheck_log_passed(cut, None)
+    # the last line decides: an earlier exact Pass line, then Fail, no exit code kept
+    twice = "[INFO] Overall Test Status: Pass\n[INFO] Checking again...\n[INFO] Overall Test Status: Fail\n"
+    assert not zimcheck_log_passed(twice, None)
+    assert not zimcheck_log_passed("", 0)
+
+
+@pytest.mark.parametrize("log, rc, ok", [
+    (f"[ERROR] Internal URL: Dangling link(s) in article 'x':\n{LINK}\n[INFO] Overall Test Status: Fail\n", "1", False),
+    (f"{LINK}\n", None, False),
+    ("[INFO] Overall Test Status: Pass\n", "1", False),
+    ("[INFO] Overall Test Status: Pass\n", "0", True),
+    ("[INFO] Overall Test Status: Pass\n", None, True),      # a log kept without its exit code
+    ("[INFO] Overall Test Status: Pass\n[INFO] Checking again...\n[INFO] Overall Test Status: Fail\n", None, False),
+])
+def test_compose_verdicts_zimcheck_rule(site: SimpleNamespace, tmp_path: Path, log: str, rc: str | None,
+                                        ok: bool) -> None:
+    work, gates = tmp_path / "work", tmp_path / "gates"
+    shutil.copytree(site.work, work)
+    shutil.copytree(site.gates, gates)
+    (gates / "de.zimcheck.log").write_text(log)
+    if rc is not None:
+        (gates / "de.zimcheck.log.rc").write_text(rc + "\n")
+    r = tool("compose_verdicts.py", gates, site.base, LANGS, env={"LANGPACK_WORK": str(work)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    v = json.loads((work / "verdicts" / site.tag / "de.json").read_text())
+    assert v["checks"]["zimcheck"] is ok and v["all_pass"] is ok, (log, rc)
+
+
+def test_make_site_without_a_gated_pack_says_so(site: SimpleNamespace, tmp_path: Path) -> None:
+    empty = tmp_path / "packs"
+    empty.mkdir()
+    r = tool("make_site.py", site.base, "--packs-dir", empty, "--region", "testland", "--region-title", "T",
+             "--region-langs", "en", "--langs", LANGS, "--url-template", "{file}",
+             "--base-download", site.base.name, "-o", tmp_path / "out", env=site.env)
+    assert r.returncode == 1 and "Traceback" not in r.stderr
+    assert "passed its gate for testland" in r.stderr

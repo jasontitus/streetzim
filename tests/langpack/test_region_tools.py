@@ -353,7 +353,8 @@ def test_site_index(tmp_path: Path) -> None:
     assert tool("site_index.py", empty).returncode == 1 and not (empty / "index.json").exists()
 
 
-def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                           capsys: pytest.CaptureFixture[str]) -> None:
     from streetzim import wiki_pack
     from tools.langpack import prefetch
     calls: dict[str, list] = {"titles": [], "dump": [], "text": []}
@@ -381,12 +382,21 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
     rc = prefetch.main(["base.zim", "--langs", "de,el", "--cache", str(tmp_path), "--text-rounds", "3"])
     assert rc == 0 and calls["text"] == ["de", "el", "el"]
     assert ("de", "redirect") in calls["dump"]
+    assert _summary(capsys) == {"failed": [], "text_incomplete": []}
     # a language whose dumps fail: exit 1 (its text complete)
     assert prefetch.main(["base.zim", "--langs", "zz", "--cache", str(tmp_path), "--text-rounds", "1"]) == 1
+    assert _summary(capsys) == {"failed": ["zz"], "text_incomplete": ["zz"]}
     # text that never completes: exit 1 (its dumps fine)
     monkeypatch.setattr(wiki_pack, "wikidata_text", lambda q, lg, c, fetch=None, langs=(), log=None:
                         ({}, {"qids": 2, "asked": 2, "requests": 1, "missing": 1, "complete": False}))
     assert prefetch.main(["base.zim", "--langs", "de", "--cache", str(tmp_path), "--text-rounds", "2"]) == 1
+    assert _summary(capsys) == {"failed": [], "text_incomplete": ["de"]}
+
+
+def _summary(capsys: pytest.CaptureFixture[str]) -> dict:
+    """prefetch.py's summary line: which title maps failed, which texts are incomplete."""
+    last = json.loads([x for x in capsys.readouterr().out.splitlines() if x.startswith("{")][-1])
+    return {k: last[k] for k in ("failed", "text_incomplete")}
 
 
 def test_prefetch_asks_wikidata_once_for_every_pack_language(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

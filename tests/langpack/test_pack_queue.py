@@ -552,18 +552,40 @@ def test_enqueue_a_map_by_hand(q: SimpleNamespace) -> None:
     assert _status(q)["old"][1] == "published" and "old: enqueued by hand: osm-old-2026-10-01.zim" in log_text(q)
 
 
-@pytest.mark.parametrize("rc,why", [("2", "ship_packs rc=2 (a lock held)"), ("143", "ship_packs.sh was killed (rc=143)")])
+@pytest.mark.parametrize("rc,why", [("2", "ship_packs rc=2 (a lock held)"), ("143", "ship_packs.sh was killed (rc=143)"),
+                                    ("8", "ship_packs rc=8 (archive.org metadata unavailable)")])
 def test_a_lock_held_again_and_again_is_a_loud_failure(q: SimpleNamespace, rc: str, why: str) -> None:
-    """ship_packs.sh exit 2 (a lock held), or a killed run, is tried again, and
-    after QUEUE_MAX_AGAIN times in a row for the same base, a loud failure."""
+    """ship_packs.sh exit 2 (a lock held) or 8 (archive.org's metadata
+    unreadable), or a killed run, is tried again, and after QUEUE_MAX_AGAIN
+    times in a row for the same base, a loud failure."""
     for i in range(2):
         r = _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
         assert r.returncode == 0 and _status(q)["beta"][1] == "pending", (i, r.stderr)
     r = _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
-    assert r.returncode == 1 and f"beta: {why}, 3 times in a row" in r.stderr, r.stderr
+    assert r.returncode == 1 and f"beta: 3 times in a row: {why} x3" in r.stderr, r.stderr
     assert _status(q)["beta"][1] == "failed-again"
     _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
     assert [c["ship"] for c in _calls(q, "ship")].count("beta") == 3
+
+
+def test_the_loud_failure_names_each_cause(q: SimpleNamespace) -> None:
+    """Locks held and an unreadable archive.org listing count together; the
+    failure says how often each happened."""
+    for _ in range(3):
+        r = _run(q, FAKE_SHIP_RC="beta:2,2,8", QUEUE_MAX_AGAIN="3")
+    assert r.returncode == 1, r.stderr
+    assert ("beta: 3 times in a row: ship_packs rc=2 (a lock held) x2; "
+            "ship_packs rc=8 (archive.org metadata unavailable) x1") in r.stderr, r.stderr
+    assert _status(q)["beta"][1] == "failed-again"
+
+
+def test_a_listing_pending_between_unreadable_listings_starts_the_count_again(q: SimpleNamespace) -> None:
+    """Exit 6 (packs sent, listing pending) is progress: the exits 8 around
+    it are not in a row."""
+    for i in range(5):
+        r = _run(q, FAKE_SHIP_RC="beta:8,6,8,6,8", QUEUE_MAX_AGAIN="2")
+        assert r.returncode == 0 and _status(q)["beta"][1] == "pending", (i, r.stderr)
+    assert [c["ship"] for c in _calls(q, "ship")].count("beta") == 5
 
 
 @pytest.mark.parametrize("what", ["preview=prod", "preview=prod/sub", "preview=link-to-prod", "preview=holds-prod",

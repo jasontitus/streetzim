@@ -85,6 +85,8 @@ jobs:
           npm run lint:viewer
       - name: offliner-definition.json matches the streetzim flags
         run: python tools/offliner_definition.py --check
+      - name: offliner-definition-langpack.json matches the streetzim-langpack flags
+        run: python tools/offliner_definition_langpack.py --check
       - name: offliner-definition.json validates against Zimfarm's own schema
         # zimfarm_backend's OfflinerSpecSchema at a pinned commit, in its own
         # venv with just the packages its models import.
@@ -98,10 +100,14 @@ jobs:
             "SQLAlchemy==2.0.41" "PyJWT==2.13.0" "pytz==2025.2" "humanfriendly==10.0" \
             "pycountry==24.6.1" "regex==2025.9.1" "requests==2.33.0"
           PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py
+          PYTHONPATH=/tmp/zimfarm/backend/src /tmp/zfvenv/bin/python tools/check_zimfarm_schema.py \
+            offliner-definition-langpack.json
           # Recipes per --profile through Zimfarm's own models and compute_flags.
           /tmp/zfvenv/bin/pip install -q "pytest>=8.0"
           PYTHONPATH=/tmp/zimfarm/backend/src:$PWD /tmp/zfvenv/bin/python -m pytest -q \
             -p no:cacheprovider -W ignore tests/test_offliner_definition.py -k zimfarm
+          PYTHONPATH=/tmp/zimfarm/backend/src:$PWD /tmp/zfvenv/bin/python -m pytest -q \
+            -p no:cacheprovider -W ignore tests/test_langpack_cli.py -k zimfarm_accepts
       - name: Install pytest-cov (pyproject.toml's test extra)
         run: pip install pytest-cov==7.1.0
       - name: Python tests
@@ -615,6 +621,8 @@ jobs:
           docker run --rm --network none streetzim python /app/tools/pin_viewer_assets.py --prefetch /app/viewer-assets
           docker run --rm streetzim tilemaker --help > /dev/null
           docker run --rm streetzim osmium --version
+          # The official zimcheck streetzim-langpack's gates require.
+          docker run --rm streetzim zimcheck --version | grep -q '^zim-tools '
           docker run --rm streetzim python -c "import sys; from streetzim import scraperlib; assert scraperlib.AVAILABLE, 'zimscraperlib missing'; print(sys.version)"
           # Terrain's GDAL (from the rasterio wheel); the build below is offline.
           docker run --rm --network none streetzim python -c "import rasterio; print('GDAL', rasterio.__gdal_version__)"

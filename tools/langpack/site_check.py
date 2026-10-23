@@ -3,7 +3,7 @@
 
     site_check.py SITE_DIR --base BASE.zim --packs-dir DIR
         [--verdicts DIR] [--gated DIR] [--ia-cache DIR] [--ia-fetch] [--probe-urls]
-        [--recipes-dir DIR] [--proxy URL]
+        [--recipes-dir DIR] [--proxy URL] [--no-archive]
 
 SITE_DIR holds recipes/{index,region,refused,<L>}.json (or, with
 --recipes-dir, that folder: recipes/<region>/ on the production site) and
@@ -13,6 +13,8 @@ proxy there): --proxy says which one the probes use (default: the one in
 web/drive/preview-config.js). Read-only: nothing is written except, with --ia-fetch,
 archive.org metadata JSON into --ia-cache (a plain GET of
 https://archive.org/metadata/<item>). Exit 0 only when every check passes.
+--no-archive (streetzim-langpack's menu, whose parts are not on archive.org):
+a URL must still end in the local file's name, and nothing is looked up.
 
 Per region (index.json; region.json must equal it):
   * base.file/size/md5 == the local base; base.download and base.url end in
@@ -111,7 +113,7 @@ def configured_proxy() -> str:
 
 def url_item_file(url: str) -> tuple[str, str]:
     parts = url.split("?")[0].rstrip("/").split("/")
-    return parts[-2], parts[-1]
+    return (parts[-2] if len(parts) > 1 else ""), parts[-1]
 
 
 def range_bytes(url: str, start: int, n: int) -> bytes:
@@ -149,6 +151,8 @@ def main():
     ap.add_argument("--recipe-budget", type=int, default=RECIPE_BUDGET)
     ap.add_argument("--webseed", default=os.environ.get("LANGPACK_WEBSEED") or None,
                     help="the build worker's origin every torrent's webseed must use (default $LANGPACK_WEBSEED)")
+    ap.add_argument("--no-archive", action="store_true",
+                    help="the parts are not on archive.org: check URL file names only")
     a = ap.parse_args()
     webseed = a.webseed
     tag = os.path.basename(os.path.realpath(a.base))[:-4]
@@ -170,6 +174,8 @@ def main():
     def ia_listed(url, local, label):
         item, fn = url_item_file(url)
         need(fn == os.path.basename(local), f"{label}: URL file {fn} != {os.path.basename(local)}")
+        if a.no_archive:
+            return
         lst = ia.files(item)
         if need(lst is not None, f"{label}: no archive.org metadata for item {item}") and lst is not None:
             got = lst.get(fn)

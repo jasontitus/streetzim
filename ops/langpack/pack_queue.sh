@@ -46,9 +46,10 @@
 #     packs ran out of time, e.g. a region language's, which every entry
 #     needs): run again after QUEUE_RETRY_SECS within the same
 #     QUEUE_PARTIAL_RETRIES, then a loud failure; 6 (archive.org listing pending):
-#     run again after QUEUE_RETRY_SECS; 2 (a lock held), or a run killed or
-#     ended without an exit code: again after QUEUE_RETRY_SECS, a loud
-#     failure after QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
+#     run again after QUEUE_RETRY_SECS; 2 (a lock held), 8 (archive.org's
+#     metadata unreadable, nothing sent), or a run killed or ended without an
+#     exit code: again after QUEUE_RETRY_SECS, a loud failure after
+#     QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
 #     no packs, or nothing is publishable): logged, skipped for this base;
 #     anything else: a loud failure. A failure is not retried, in this run or
 #     after a restart, unless the queue starts with QUEUE_RETRY_FAILED=1.
@@ -449,18 +450,23 @@ start_ship() {  # region zim key
   echo "$pid ${RUN_START[$rid]:--} $zim $3 $SCHEME" > "$Q/runs/$rid.tmp" && mv -f "$Q/runs/$rid.tmp" "$Q/runs/$rid"
 }
 
-# Exit 2, a killed run or one without an exit code: again after RETRY, a loud
-# failure after MAX_AGAIN of them in a row for the same base.
+# Exit 2 or 8, a killed run or one without an exit code: again after RETRY, a loud
+# failure after MAX_AGAIN of them in a row for the same base, naming each cause
+# and how often (again-<region>: "<key> <count>", then one cause per line).
 again() {  # region zim key why
-  local n=0 k c
+  local n=0 k c whys=
   [ -s "$Q/again-$1" ] && read -r k c < "$Q/again-$1" && [ "$k" = "$3" ] && n=$c
+  [ "$n" -gt 0 ] && whys=$(tail -n +2 "$Q/again-$1")
+  whys=$(printf '%s\n%s\n' "$whys" "$4" | sed '/^$/d')
   n=$(( n + 1 ))
   if [ "$n" -ge "$MAX_AGAIN" ]; then
     rm -f "$Q/again-$1"
-    set_state "$1" failed-again "$2" "$3" - "$4, $n times in a row"; FAILED_NOW[$1]=1; ANY_FAILED=1
-    loud "$1: $4, $n times in a row (see $Q/ship-$1.out): not tried again until a restart with QUEUE_RETRY_FAILED=1"
+    local all
+    all=$(printf '%s\n' "$whys" | sort | uniq -c | sort -rn | sed 's/^ *\([0-9]*\) \(.*\)$/\2 x\1/' | paste -sd ';' - | sed 's/;/; /g')
+    set_state "$1" failed-again "$2" "$3" - "$n times in a row: $all"; FAILED_NOW[$1]=1; ANY_FAILED=1
+    loud "$1: $n times in a row: $all (see $Q/ship-$1.out): not tried again until a restart with QUEUE_RETRY_FAILED=1"
   else
-    echo "$3 $n" > "$Q/again-$1"
+    printf '%s %s\n%s\n' "$3" "$n" "$whys" > "$Q/again-$1"
     set_state "$1" pending "$2" "$3" "$(( $(date +%s) + RETRY ))" "$4 ($n of $MAX_AGAIN)"
     say "$1: $4: again after $RETRY s ($n of $MAX_AGAIN in a row)"
   fi
@@ -474,7 +480,7 @@ finish() {  # region
   [ -e "$Q/rc-$rid" ] && read -r rc scheme < "$Q/rc-$rid"
   scheme=${scheme:-${RUN_SCHEME[$rid]:-1}}
   unset "RUN_PID[$rid]" "RUN_START[$rid]" "RUN_ZIM[$rid]" "RUN_KEY[$rid]" "RUN_SCHEME[$rid]"
-  case $rc in 2|''|129|1[3-5][0-9]) ;; *) rm -f "$Q/again-$rid" ;; esac
+  case $rc in 2|8|''|129|1[3-5][0-9]) ;; *) rm -f "$Q/again-$rid" ;; esac
   case $rc in
     0)
       say "$rid: packs shipped"
@@ -514,6 +520,7 @@ finish() {  # region
       set_state "$rid" pending "$zim" "$key" "$(( $(date +%s) + RETRY ))" "ship_packs rc=6"
       say "$rid: ship_packs rc=6 (archive.org listing pending): again after $RETRY s" ;;
     2) again "$rid" "$zim" "$key" "ship_packs rc=2 (a lock held)" ;;
+    8) again "$rid" "$zim" "$key" "ship_packs rc=8 (archive.org metadata unavailable)" ;;
     '') again "$rid" "$zim" "$key" "the run ended without an exit code (the queue or the host stopped)" ;;
     129|1[3-5][0-9]) again "$rid" "$zim" "$key" "ship_packs.sh was killed (rc=$rc)" ;;
     4|5)

@@ -41,6 +41,17 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libmagic1t64 libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
+# The official zimcheck (zim-tools' static build, checked against its
+# SHA-256), which streetzim-langpack's gates require (docs/zimfarm-langpack.md).
+# x86_64 only, like the image's CI build.
+ARG ZIM_TOOLS_VERSION=3.8.0
+ARG ZIM_TOOLS_SHA256=9d4cbf68675670176fe72f096364c7f4ecf09950340e769bdb81dcbb5030da00
+RUN curl -fsSL --retry 3 -o /tmp/zim-tools.tgz \
+        "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz" \
+    && echo "${ZIM_TOOLS_SHA256}  /tmp/zim-tools.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/zim-tools.tgz -C /usr/local/bin --strip-components=1 \
+        "zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}/zimcheck" \
+    && rm /tmp/zim-tools.tgz && zimcheck --version | head -n 1
 
 WORKDIR /app
 # Runtime dependencies only (no pytest, no internetarchive; see
