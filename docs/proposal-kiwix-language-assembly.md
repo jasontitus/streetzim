@@ -2,7 +2,9 @@
 
 Status: proposal for the Kiwix product lead and the openZIM developers,
 2026-10-23. Nothing in Kiwix depends on it yet. Numbers marked *estimate*
-are not measured; the others are measured on StreetZim's published maps.
+are not measured; the others come from StreetZim's published maps, with
+the parts counted as StreetZim now builds them (one search pack per
+version; see [Details](#details)).
 
 ## Summary
 
@@ -21,8 +23,8 @@ are not measured; the others are measured on StreetZim's published maps.
    multilingual base, and if so, which of the four options below?
 5. **Who builds what.** StreetZim: the format spec, test files, a C++
    splicer for libkiwix and the Zimfarm side. Kiwix: the catalog entries
-   and the download step in each app, about 12-23 developer-weeks in all
-   (*estimate*).
+   and the download step in each app, about 7-14 developer-weeks (12-23 in
+   all with StreetZim's part; *estimate*).
 
 ## Why
 
@@ -30,13 +32,15 @@ Zimfarm can already build the multilingual base (`streetzim
 --multilingual`, [zimfarm.md](zimfarm.md#multilingual-maps---multilingual)):
 map labels in 21 languages plus the region's own, search by those names,
 and the viewer's interface in 23 languages. Hosting only that base is the
-simplest choice. What the base cannot hold for every language at once is
-the Wikipedia articles in the visitor's language and Kiwix's own search
-in it (a ZIM has one title index and one full-text index). A language
-version adds those.
+simplest choice. What one file serves poorly is Kiwix's own search in each
+visitor's language: a ZIM has one title index and one full-text index,
+each with one stemmer. Carrying every language's Wikipedia also makes
+every download bigger. A language version adds the articles and the
+search for one language.
 
-Storing every language version as its own file costs this (measured on
-the versions published on StreetZim's builder page):
+Storing every language version as its own file costs this (from the
+versions published on StreetZim's builder page, with one search pack per
+version as StreetZim now builds them):
 
 | region | versions | each version | all versions as files | as parts (base + packs) | files / parts |
 |---|---|---|---|---|---|
@@ -82,8 +86,8 @@ published version passed zimcheck, libzim's own check, kiwix-serve
 
 This runs today on StreetZim's website: the builder page composes a
 version in the browser (Swiss versions in 10-13 minutes, everything
-downloaded from archive.org), a relay streams versions as files, and each
-version has a torrent.
+downloaded from archive.org), a relay streams versions as files
+(Baltics, Greece, Iceland), and each version has a torrent.
 
 **In Kiwix** (the proposed option) the flow would be:
 
@@ -135,8 +139,8 @@ Switzerland, 23 languages.
 - **Viewer switch** needs nothing new in Kiwix: the viewer already shows
   labels, search names and the interface in the visitor's language. Every
   download carries every language's Wikipedia (about 25% more than one
-  version for Switzerland, more for regions with larger Wikipedias), and one
-  search index serves all languages with one stemmer.
+  version for Switzerland), and one search index serves all languages with
+  one stemmer.
 - **Recipe as a book** extends what libzim does for split ZIMs (one archive
   from several files) to ranges of files: nothing is copied, and one base on
   the device serves every language. It changes libzim's I/O core, the parts
@@ -179,11 +183,12 @@ every region it publishes.
   `web/build/assembler-worker.js`, the relay in `build-proxy/`.
 - **Measurements.** Sizes from the versions published on the builder
   page's preview for Switzerland (2026-10-22 base), the Baltics, Greece and
-  Iceland (2026-10-23). Each version now gets a search pack in its own
-  language; before 2026-10-23, versions with the same packs shared one
-  stemmed in English, and Switzerland's parts were 7.66 GB (the 4 extra
-  search packs add 0.84 GB). Browser times: de and ja 10 min, it 10.5, fr
-  12, ar 13 (rm took 26 while the host's disk was saturated).
+  Iceland (2026-10-23). The published preview still has the older shared
+  search packs, stemmed in English (Switzerland's parts: 7.66 GB).
+  StreetZim builds one search pack per version, in its own language, since
+  2026-10-23; the figures here add Switzerland's 4 extra search packs
+  (0.84 GB) and Greece's one (57 MB). Browser times: de and ja 10 min, it
+  10.5, fr 12, ar 13 (rm took 26 while the host's disk was saturated).
 - **Version names.** Each version's Name is `osm_<lang>_<region>`, so a
   multilingual base built on Zimfarm should be `osm_mul_<region>`; the
   Flavour should stay stable across rebuilds.

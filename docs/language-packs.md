@@ -1,8 +1,7 @@
 # Maps in any language without a copy per language
 
-Status: design, 2026-10-13. Not built yet. The measurements behind it are in
-`/storage/experiments/langpack/{inventory,merge,multiling}/REPORT.md` on the
-build host, with their scripts.
+Status: design, 2026-10-13. Not built yet. The measurements behind it were
+made on StreetZim's build host.
 
 On `main` (2026-10-22): all of it is here. The viewer side (Wikipedia packs, bilingual labels, your language first, the UI tables), the pack builder (`streetzim/wiki_pack.py`, `tools/build_wiki_pack.py`), the merger, recipes and gates (`tools/langpack/`), the builder page (`web/build/`, served at `/build/`) and the post-ship step for every published map (`ops/langpack/ship_packs.sh`). [language-pack-pipeline.md](language-pack-pipeline.md) is the operator's guide.
 
