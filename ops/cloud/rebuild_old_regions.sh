@@ -113,8 +113,20 @@ sys.exit(0 if all(checks.values()) else 1)
 PYEOF
 }
 
+# A browser gate that fails by timing out -- the page never loaded while the
+# disk was saturated (iceland 2026-10-23: "Navigation timeout of 90000 ms
+# exceeded" at 390 px; a re-run passed) -- is not a finding, so it is run
+# once more after RETRY_WAIT (60 s). A real finding (an overlap report, a
+# device that loaded and failed a check, a render that drew too little, the
+# old viewer in the ZIM) is never retried.
+TIMEOUT_RE='TimeoutError|Navigation timeout|Timeout [0-9]+ ?ms exceeded|net::ERR_|Target closed|Protocol error'
+RETRY_WAIT=${REBUILD_GATE_RETRY_WAIT:-60}
+timed_out(){  # $1 output file, $2 exit code
+  [ "$2" = 124 ] || grep -qE "$TIMEOUT_RE" "$1" 2>/dev/null
+}
+
 gate(){  # $1=zim $2=term
-  local Z=$1 TERM=$2 B G="" VW q c up=0 i
+  local Z=$1 TERM=$2 B G="" VW q c up=0 i f rc try MH
   B=$(basename "$Z" .zim)
   if ss -ltn 2>/dev/null | grep -q ":$OV "; then log "  port $OV busy — NOT a geometry failure"; return 1; fi
   setsid nohup "$KS" --port "$OV" "$Z" > "$TMPDIR/ec-$B.log" 2>&1 < /dev/null &
@@ -127,19 +139,51 @@ gate(){  # $1=zim $2=term
     return 1
   fi
   for VW in 320 390 430; do
-    ZIM_ORIGIN="http://localhost:$OV/content/$B" VW=$VW timeout 400 "$NODE" tmp/overlap-check.mjs > "$TMPDIR/ec-$B-$VW.txt" 2>&1
-    grep -q "^NO OVERLAPS" "$TMPDIR/ec-$B-$VW.txt" || { G="$G overlap@$VW"; log "    overlaps @ ${VW}px"; }
+    f="$TMPDIR/ec-$B-$VW.txt"
+    for try in 1 2; do
+      ZIM_ORIGIN="http://localhost:$OV/content/$B" VW=$VW timeout 600 "$NODE" tmp/overlap-check.mjs > "$f" 2>&1; rc=$?
+      grep -q "^NO OVERLAPS" "$f" && break
+      if [ "$try" = 1 ] && ! grep -q '^OVERLAPS:' "$f" && timed_out "$f" "$rc"; then
+        log "    overlap @ ${VW}px timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+      fi
+      break
+    done
+    grep -q "^NO OVERLAPS" "$f" || { G="$G overlap@$VW"; log "    overlaps @ ${VW}px"; }
   done
-  SEARCH_TERM="$TERM" ZIM_ORIGIN="http://localhost:$OV/content/$B" \
-    timeout 1800 "$NODE" tmp/device-matrix.mjs > "$TMPDIR/ec-$B-matrix.txt" 2>&1
-  if grep -q "^all 7 devices passed" "$TMPDIR/ec-$B-matrix.txt"; then log "  device matrix: 7/7 PASS"
+  f="$TMPDIR/ec-$B-matrix.txt"
+  for try in 1 2; do
+    SEARCH_TERM="$TERM" ZIM_ORIGIN="http://localhost:$OV/content/$B" \
+      timeout 3600 "$NODE" tmp/device-matrix.mjs > "$f" 2>&1; rc=$?
+    grep -q "^all 7 devices passed" "$f" && break
+    # Retried only when every reported failure is a timeout (or nothing was
+    # reported because the run itself timed out).
+    if [ "$try" = 1 ] && timed_out "$f" "$rc" \
+       && ! grep -E "^ +!" "$f" | grep -vqE "$TIMEOUT_RE"; then
+      log "  device matrix timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+    fi
+    break
+  done
+  if grep -q "^all 7 devices passed" "$f"; then log "  device matrix: 7/7 PASS"
   else G="$G device-matrix"; log "  device matrix FAILED:"
-       grep -E "^ +!" "$TMPDIR/ec-$B-matrix.txt" | sort -u | head -4 | while read -r l; do log "      $l"; done; fi
+       grep -E "^ +!" "$f" | sort -u | head -4 | while read -r l; do log "      $l"; done; fi
   # Render gate: the device matrix waits for the canvas ELEMENT and would
   # pass a blank map. This asserts the style loaded, the tile source loaded,
   # and real features were drawn.
-  local MH
-  MH=$(TAG="$B" ZIM_ORIGIN="http://localhost:$OV/content/$B" timeout 200 "$NODE" tmp/map-health.mjs 2>&1 | grep '^{' | tail -1)
+  f="$TMPDIR/ec-$B-health.txt"
+  for try in 1 2; do
+    TAG="$B" ZIM_ORIGIN="http://localhost:$OV/content/$B" timeout 600 "$NODE" tmp/map-health.mjs > "$f" 2>&1; rc=$?
+    MH=$(grep '^{' "$f" | tail -1)
+    if echo "$MH" | "$PY" -c 'import sys,json
+d=json.loads(sys.stdin.read() or "{}")
+src=d.get("sourceLoaded") or {}
+ok=d.get("styleLoaded") and src and all(v is True for v in src.values()) and (d.get("renderedFeatures") or 0)>=100 and not d.get("errors")
+sys.exit(0 if ok else 1)' 2>/dev/null; then break; fi
+    # No result at all (the page never loaded) is a timeout, not a finding.
+    if [ "$try" = 1 ] && [ -z "$MH" ] && timed_out "$f" "$rc"; then
+      log "  render gate timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+    fi
+    break
+  done
   if echo "$MH" | "$PY" -c 'import sys,json
 d=json.loads(sys.stdin.read() or "{}")
 src=d.get("sourceLoaded") or {}
@@ -148,8 +192,17 @@ sys.exit(0 if ok else 1)' 2>/dev/null; then
     log "  render gate: OK ($(echo "$MH" | grep -oE '"renderedFeatures":[0-9]+'))"
   else G="$G render"; log "  render gate: FAIL $(echo "$MH" | head -c 200)"; fi
   for q in $(pgrep -x kiwix-serve); do c=$(tr '\0' ' ' < /proc/$q/cmdline); case "$c" in *"--port $OV"*) kill $q;; esac; done
-  timeout 2400 bash cloud/kiwix_viewer_gate.sh "$Z" "$KW" "$TERM" >> "$LOG" 2>&1 \
-    && log "  kiwix in-ZIM gate: OK" || { G="$G kiwix"; log "  kiwix in-ZIM gate: FAIL"; }
+  f="$TMPDIR/ec-$B-kiwix.txt"
+  for try in 1 2; do
+    timeout 2400 bash cloud/kiwix_viewer_gate.sh "$Z" "$KW" "$TERM" > "$f" 2>&1; rc=$?
+    cat "$f" >> "$LOG"
+    [ "$rc" = 0 ] && break
+    if [ "$try" = 1 ] && ! grep -q 'FAIL' "$f" && timed_out "$f" "$rc"; then
+      log "  kiwix in-ZIM gate timed out (not a finding); once more in ${RETRY_WAIT} s"; sleep "$RETRY_WAIT"; continue
+    fi
+    break
+  done
+  [ "$rc" = 0 ] && log "  kiwix in-ZIM gate: OK" || { G="$G kiwix"; log "  kiwix in-ZIM gate: FAIL"; }
   [ -z "$G" ] && return 0
   log "  GATES FAILED:$G"; return 1
 }
@@ -178,6 +231,21 @@ for ID in $ORDER; do
   R=$(awk -F'\t' -v id="$ID" '$1==id' "$REGISTRY" | head -1)
   BBOX=$(echo "$R" | cut -f3); NAME=$(echo "$R" | cut -f2); TERM=$(echo "$R" | cut -f7)
   [ -n "$BBOX" ] || { log "skip $ID: no registry row"; row "$ID" no-registry "-"; continue; }
+  # REBUILD_REGATE_ZIM (parallel_rebuild.sh --regate): an already-built ZIM of
+  # this region -- gates and upload only, no extract, tiles or build (e.g. a
+  # region whose gates failed for a reason since fixed). The else branch (the
+  # data steps and the build) is left unindented to keep it as it was.
+  if [ -n "${REBUILD_REGATE_ZIM:-}" ]; then
+    T0=$(date +%s)
+    log "=== $ID ($NAME) bbox=$BBOX"
+    OUT=$(basename "$REBUILD_REGATE_ZIM")
+    case "$OUT" in
+      osm-${ID}-20??-??-??*.zim) ;;
+      *) log "  regate: $OUT is not a ZIM of $ID"; row "$ID" no-output "$OUT"; continue ;;
+    esac
+    [ -s "$OUT" ] || { log "  regate: no $OUT in $(pwd)"; row "$ID" no-output "$OUT"; continue; }
+    log "  regate $OUT ($(du -h "$OUT" | cut -f1)): gates and upload only, no build"
+  else
   # A Light variant (cloud/region-variants.tsv) is built by build-region-fast.sh
   # from its parent's extracts and Overture parquets, so the data steps below
   # check the parent's files (DATA_ID). Without this, africa-light would get an
@@ -298,6 +366,7 @@ for ID in $ORDER; do
     row "$ID" no-output "${OUT:--}"; continue
   fi
   log "  built $OUT ($(du -h "$OUT" | cut -f1)) in $(( ($(date +%s)-T0)/60 )) min"
+  fi
   # The wrapper runs validate_zim but only echoes on failure and exits 0.
   if ! TERRAIN_STRIPE_TOLERATE=10 timeout 10800 "$PY" cloud/validate_zim.py "$OUT" >> "$LOG" 2>&1; then
     log "  gate validate: FAIL — not uploading"; row "$ID" validate-failed "$OUT"; continue

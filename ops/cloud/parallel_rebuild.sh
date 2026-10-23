@@ -96,6 +96,10 @@
 # --cleanup-wiki` removes the NVMe Wikipedia copy (refuses while a runner or
 # any reader is active).
 #
+# A region whose gates failed for a reason since fixed: `bash
+# ops/cloud/parallel_rebuild.sh --regate REGION ZIM` (gates and upload of the
+# built ZIM, no rebuild; see regate() below).
+#
 # Logs: $PAR_STATE/run.out (PDT), $PAR_STATE/status.txt (a table with start,
 # end and duration in PDT, rewritten every poll), $PAR_STATE/logs/<id>.log.
 # Usage (from /storage/streetzim, with $PAR_STATE/queue.txt written):
@@ -165,9 +169,6 @@ mkdir -p "$STATE/status" "$STATE/logs" "$STATE/lists" "$STATE/pids" "$STATE/env"
 say() { echo "$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z') $*" >> "$OUT"; }
 die() { say "FATAL: $*"; exit 1; }
 pdt() { [ -n "$1" ] && [ "$1" != 0 ] && TZ=America/Los_Angeles date -d "@$1" '+%m-%d %H:%M' || echo -; }
-exec 7> "$STATE/run.lock"
-# -w: a killed runner's last `sleep` may still hold the lock for a moment.
-flock -w 60 7 || die "another parallel_rebuild.sh holds $STATE/run.lock"
 [ -s "$QUEUE" ] || die "no queue $QUEUE"
 case "$WORKERS" in ''|*[!0-9]*|0) die "PAR_WORKERS must be a positive integer, not '$WORKERS'" ;; esac
 for _v in STAGGER NVME_MIN_GB NVME_RESUME_GB NVME_KILL_GB SCRATCH_FACTOR_X10 SCRATCH_FLOOR_GB MEM_MIN_GB \
@@ -188,13 +189,16 @@ for _k in BUILD_SCRATCH BUILD_WIKI_ZIM; do
   grep -q "$_k" "$(readlink -f "$WRAPPER")" 2>/dev/null || die "$WRAPPER has no $_k; not starting"
 done
 grep -q STREETZIM_KEEP_ZIMS "$(readlink -f "$UPLOADER")" 2>/dev/null || die "$UPLOADER has no STREETZIM_KEEP_ZIMS; not starting"
-# Freeze on code, not on HEAD: every upload commits a torrent (web/torrents)
-# in this checkout, which must not stall the round. `git diff A B` compares
-# trees only (no index refresh, so no index lock).
+# Freeze on map-build code, not on HEAD: every upload commits a torrent
+# (web/torrents) in this checkout, and language-pack merges (ops/langpack,
+# tools/langpack, tests/langpack, web/build) and docs never touch a map build;
+# none of them may stall the round. `git diff A B` compares trees only (no
+# index refresh, so no index lock).
 HEAD0=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "")
+FREEZE_IGNORE=(web/torrents ops/langpack tools/langpack tests/langpack web/build docs)
 code_moved() {
   [ -n "$HEAD0" ] || return 1
-  ! git -C "$ROOT" diff --quiet "$HEAD0" HEAD -- . ':(exclude)web/torrents' 2>/dev/null
+  ! git -C "$ROOT" diff --quiet "$HEAD0" HEAD -- . "${FREEZE_IGNORE[@]/#/:(exclude)}" 2>/dev/null
 }
 
 # ---- measurements (overridable for tests) ---------------------------------
@@ -336,6 +340,68 @@ cpu_range() {  # worker $1's cores
   echo "$a-$b"
 }
 
+# ---- --regate REGION ZIM: gates and upload of an already-built ZIM ----------
+# For a region whose build finished but whose gates failed for a reason since
+# fixed: runs one driver instance with REBUILD_REGATE_ZIM (validate, markers,
+# gates, upload -- no extract, tiles or build), on ports outside the workers'
+# range, under the upload lock like every upload, appending rows as the driver
+# does, and records the result in $PAR_STATE/status so a running runner skips
+# the region (an upload-pending result goes to its finisher). Runs in the
+# foreground; does not take the runner's lock, so it works while the runner
+# runs. Usage: bash ops/cloud/parallel_rebuild.sh --regate iceland osm-iceland-2026-10-23.zim
+regate() {
+  local id=${1:-} zim=${2:-} ov kw lst rc t0 row st q
+  [ -n "$id" ] && [ -n "$zim" ] || die "usage: $0 --regate REGION ZIM"
+  zim=$(basename "$zim")
+  case "$zim" in "osm-$id-"20??-??-??*.zim) ;; *) die "regate: $zim is not a ZIM of $id" ;; esac
+  [ -s "$ROOT/$zim" ] || die "regate: no $ROOT/$zim"
+  # A driver without the knob would rebuild the region from scratch.
+  grep -q REBUILD_REGATE_ZIM "$(readlink -f "$DRIVER")" 2>/dev/null || die "regate: $DRIVER has no REBUILD_REGATE_ZIM; not starting"
+  # One --regate at a time (they share the ports). fd 6 stays open in the
+  # driver and its children: the lock is held until the last of them (an
+  # upload, a kiwix-serve) is gone.
+  exec 6> "$STATE/regate.lock"
+  flock -n 6 || die "regate: another --regate holds $STATE/regate.lock"
+  [ "$(status_of "$id")" != running ] || die "regate: $id is building in the runner now"
+  ov=$(( PORT_BASE + 2 * 16 )); kw=$(( ov + 1 ))
+  for q in $(stray_listeners "$ov") $(stray_listeners "$kw"); do
+    say "regate: stopping stray kiwix-serve $q on $ov/$kw"; kill "$q" 2>/dev/null || true
+  done
+  lst="$STATE/lists/regate-$id.list"; printf '%s\n' "$id" > "$lst"
+  local -a scrub=()
+  mapfile -t scrub < <(scrub_args)
+  t0=$(date +%s)
+  say "regate $id: $zim (gates and upload only, ports $ov/$kw)"
+  set_status "$id" regating - - - "$t0"
+  env "${scrub[@]}" -u STREETZIM_ROOT PATH="$DRIVER_PATH" STREETZIM_ML_TILES=1 STREETZIM_REQUIRE_WIKI=1 \
+      STREETZIM_KEEP_ZIMS=3 REBUILD_LIST="$lst" REBUILD_PIDFILE="$STATE/pids/regate-$id.pid" \
+      REBUILD_LOG="$STATE/logs/$id.regate.log" REBUILD_OV_PORT="$ov" REBUILD_KW_PORT="$kw" \
+      REBUILD_NO_SKIP=1 REBUILD_REGATE_ZIM="$zim" \
+      bash "$DRIVER" > "$STATE/logs/$id.regate.out" 2>&1 < /dev/null
+  rc=$?
+  row=$(awk -F'\t' -v id="$id" -v t0="$t0" 'NR > 1 && $1 == id {
+          cmd = "date -d \"" $4 "\" +%s"; cmd | getline e; close(cmd)
+          if (e + 0 >= t0 - 5) last = $2 } END {print last}' "$TSV" 2>/dev/null)
+  st=${row:-no-row}
+  case "$st" in
+    uploaded) set_status "$id" uploaded regate - - "$t0" "$(date +%s)" "$zim" ;;
+    upload-pending) set_status "$id" upload-pending regate - - "$t0" "$(date +%s)" "$zim"
+                    printf '%s\n' "$zim" > "$STATE/pending/$id"
+                    say "regate $id: listing pending: a running runner's finisher completes it" ;;
+    *) set_status "$id" failed regate - - "$t0" "$(date +%s)" "$st" "$zim"
+       say "FAILED regate $id: $st (driver rc $rc; log $STATE/logs/$id.regate.log)"; return 1 ;;
+  esac
+  say "regate $id: $st $zim"
+  return 0
+}
+if [ "${1:-}" = --regate ]; then
+  say() { local m; m="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z') $*"; echo "$m" >> "$OUT"; echo "$m"; }
+  regate "${2:-}" "${3:-}"; exit $?
+fi
+exec 7> "$STATE/run.lock"
+# -w: a killed runner's last `sleep` may still hold the lock for a moment.
+flock -w 60 7 || die "another parallel_rebuild.sh holds $STATE/run.lock"
+
 # ---- slots ---------------------------------------------------------------
 declare -a S_PID S_ID S_T0 S_ST S_PAUSED S_PROJ
 for ((k = 0; k < WORKERS; k++)); do S_PID[k]=""; S_ID[k]=""; S_T0[k]=0; S_ST[k]=""; S_PAUSED[k]=0; S_PROJ[k]=0; done
@@ -378,6 +444,7 @@ done
 eligible() {  # $1 region: not done/failed/running
   case "$(status_of "$1")" in
     running|uploaded|upload-pending) return 1 ;;
+    regating) ! flock -n "$STATE/regate.lock" true 2>/dev/null && return 1 ;;  # unless that --regate died
     failed) [ "$RETRY_FAILED" = 1 ] || return 1 ;;
   esac
   return 0
@@ -535,7 +602,7 @@ can_start() {  # $1 region; prints why not, returns 1
   if [ "$PRECUT" = 1 ] && [[ " $PRECUT_GROUP " == *" $id "* ]] && [ "$(tiles_state "$id")" = pending ]; then
     echo "its tiles are being cut (one at a time, in the background)"; return 1
   fi
-  ! code_moved || { echo "the checkout's code changed since ${HEAD0:0:9} (outside web/torrents) during the round"; return 1; }
+  ! code_moved || { echo "the checkout's code changed since ${HEAD0:0:9} (outside ${FREEZE_IGNORE[*]}) during the round"; return 1; }
   if is_big "$id" && [ "$(big_running)" -ge "$BIG_MAX" ]; then echo "$BIG_MAX big regions already running"; return 1; fi
   free=$(free_gb); mem=$(mem_gb); proj=$(proj_gb "$id")
   [ -n "$free" ] && [ -n "$mem" ] || { echo "cannot read free space or memory"; return 1; }

@@ -63,7 +63,7 @@ try {
 
   // ---- 1. the viewer boots at all, from inside the archive ----------------
   const resp = await page.goto(ORIGIN + '/index.html' + UILANG_Q, {
-    waitUntil: 'domcontentloaded', timeout: 60_000,
+    waitUntil: 'domcontentloaded', timeout: 240_000,
   });
   ok('index.html served from the ZIM', resp && resp.ok(),
      resp ? 'status ' + resp.status() : 'no response');
@@ -235,7 +235,7 @@ try {
   let findOk = false, findDetail = '';
   try {
     await page.goto(ORIGIN + '/places.html' + UILANG_Q, {
-      waitUntil: 'domcontentloaded', timeout: 60_000 });
+      waitUntil: 'domcontentloaded', timeout: 240_000 });
     await sleep(3000);
     const clicked = await page.evaluate(() => {
       // By chip id first: since 2026-10 the label is in the map's language.

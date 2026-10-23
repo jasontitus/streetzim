@@ -47,8 +47,8 @@ for(const d of DEVICES){
   p.on('pageerror',e=>bad.push('pageerror '+String(e).slice(0,80)));
   const R={dev:d.n,size:`${d.w}x${d.h}`,inset:d.inset,checks:[],fail:[]};
   try{
-    await p.goto(`${origin}/index.html`,{waitUntil:'domcontentloaded',timeout:90000});
-    await p.waitForSelector('canvas.maplibregl-canvas',{timeout:90000});
+    await p.goto(`${origin}/index.html`,{waitUntil:'domcontentloaded',timeout:240000});
+    await p.waitForSelector('canvas.maplibregl-canvas',{timeout:240000});
     await new Promise(r=>setTimeout(r,6000));
     const res=await p.evaluate((inset,CONTROLS)=>{
       const out={hit:{},geom:{},overlap:[],offscreen:[]};
