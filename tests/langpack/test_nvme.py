@@ -182,3 +182,17 @@ def test_sweep_removes_only_dead_runs(nv: SimpleNamespace) -> None:
         assert not runs["reused"].exists()                  # no pid in its name: junk in our folder
     finally:
         live.kill()
+
+
+def test_the_runners_state_comes_from_host_env(nv: SimpleNamespace) -> None:
+    """The runner's state folder is LANGPACK_PAR_STATE, which host-env.sh sets
+    for the build host (PAR_STATE, the runner's own name, overrides it)."""
+    env = {k: v for k, v in nv.env.items() if k != "PAR_STATE"}
+    (nv.d / "par" / "status" / "rome").write_text(f"running w0 1 2 3 proj={int(nv.free / GB) + 1}G\n")
+    r = subprocess.run([sys.executable, str(NVME), "plan", "--scratch", str(nv.d / "scratch"), "--base", str(nv.base),
+                        "--packs-dir", str(nv.d / "packs")], capture_output=True, text=True, timeout=60,
+                       env={**env, "LANGPACK_NVME_MIN_GB": "0", "LANGPACK_PAR_STATE": str(nv.d / "par")})
+    assert r.returncode == 0 and json.loads(r.stdout)["use"] is False, r.stdout + r.stderr
+    r = subprocess.run(["env", "-i", f"HOME={os.environ['HOME']}", f"PATH={os.environ['PATH']}", "bash", "-c",
+                        f". {ROOT}/ops/langpack/host-env.sh && echo $LANGPACK_PAR_STATE"], capture_output=True, text=True)
+    assert r.stdout.strip() == "/storage/streetzim/rebuild-par", r.stdout + r.stderr
