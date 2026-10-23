@@ -5,14 +5,18 @@ it was given and appends a rebuild-old.tsv row the way the real driver does,
 and with free NVMe space, MemAvailable and the checkout's HEAD read from
 files the test changes (PAR_FREE_GB_CMD, PAR_MEM_GB_CMD, PAR_HEAD_CMD).
 Also: the driver's new knobs (its list, log, pid file, ports, REBUILD_NO_SKIP,
-REBUILD_STAGE_MBTILES, locked appends) and build-region-fast.sh's
+REBUILD_STAGE_MBTILES, REBUILD_REGATE_ZIM, locked appends), its gate() retrying
+a browser gate that timed out (and never one with a finding), the runner's
+--regate mode, and build-region-fast.sh's
 BUILD_SCRATCH copy and BUILD_WIKI_ZIM, each run from a copy whose
 /storage/streetzim is a temp dir.
 """
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -26,8 +30,9 @@ WRAPPER = ROOT / "ops" / "build-region-fast.sh"
 FAKE_DRIVER = r"""#!/bin/bash
 # Fake single-region driver. Knobs it stands in for: REBUILD_LIST REBUILD_PIDFILE
 # REBUILD_LOG REBUILD_OV_PORT REBUILD_KW_PORT REBUILD_NO_SKIP REBUILD_STAGE_MBTILES
+# REBUILD_REGATE_ZIM
 id=$(head -1 "$REBUILD_LIST")
-echo "start $id $(date +%s.%N) $$ scratch=${BUILD_SCRATCH-unset} ports=$REBUILD_OV_PORT,$REBUILD_KW_PORT ml=${STREETZIM_ML_TILES:-} noskip=${REBUILD_NO_SKIP:-} stage=${REBUILD_STAGE_MBTILES:-} reqwiki=${STREETZIM_REQUIRE_WIKI:-} wikimax=${STREETZIM_WIKI_MAX_PER_MIN:-} keep=${STREETZIM_KEEP_ZIMS:-} wikizim=${BUILD_WIKI_ZIM-unset} ln=${STREETZIM_SEARCH_LN-unset} zstd=${ZSTD_CLEVEL-unset} cache=${STREETZIM_SEARCH_CACHE-unset} cpus=$(taskset -cp $$ | sed 's/.*: //')" >> "$FAKE_LOG"
+echo "start $id $(date +%s.%N) $$ scratch=${BUILD_SCRATCH-unset} ports=$REBUILD_OV_PORT,$REBUILD_KW_PORT ml=${STREETZIM_ML_TILES:-} noskip=${REBUILD_NO_SKIP:-} stage=${REBUILD_STAGE_MBTILES:-} reqwiki=${STREETZIM_REQUIRE_WIKI:-} wikimax=${STREETZIM_WIKI_MAX_PER_MIN:-} keep=${STREETZIM_KEEP_ZIMS:-} wikizim=${BUILD_WIKI_ZIM-unset} ln=${STREETZIM_SEARCH_LN-unset} zstd=${ZSTD_CLEVEL-unset} cache=${STREETZIM_SEARCH_CACHE-unset} cpus=$(taskset -cp $$ | sed 's/.*: //') regate=${REBUILD_REGATE_ZIM-unset}" >> "$FAKE_LOG"
 echo $$ > "$REBUILD_PIDFILE"
 if [ -n "${BUILD_SCRATCH:-}" ]; then mkdir -p "$BUILD_SCRATCH/tmp"; head -c 1024 /dev/zero > "$BUILD_SCRATCH/tmp/blob"; fi
 if [ -e "$FAKE_DIR/$id.uploading" ]; then bash -c 'exec -a upload_validated.sh sleep 30' & fi
@@ -245,7 +250,12 @@ def _git(root: Path, *args: str) -> None:
                    check=True, capture_output=True)
 
 
-@pytest.mark.parametrize("what", ["torrent", "code"])
+FREEZE_IGNORED = {"torrent": "web/torrents/a.torrent", "langpack ops": "ops/langpack/q.sh",
+                  "langpack tools": "tools/langpack/p.py", "langpack tests": "tests/langpack/t.py",
+                  "build page": "web/build/index.html", "docs": "docs/x.md"}
+
+
+@pytest.mark.parametrize("what", [*FREEZE_IGNORED, "code", "code beside docs", "web viewer"])
 def test_code_freeze_ignores_torrent_commits(tmp_path, what):
     _setup(tmp_path, ["a", "b"])
     root = tmp_path / "root"
@@ -258,14 +268,20 @@ def test_code_freeze_ignores_torrent_commits(tmp_path, what):
         (tmp_path / "fake" / f"{rid}.sleep").write_text("3.0")
     p = _bg(tmp_path, _env(tmp_path, PAR_WORKERS="1"))
     _wait_starts(tmp_path, 1)
-    if what == "torrent":
-        (root / "web" / "torrents").mkdir(parents=True)
-        (root / "web" / "torrents" / "a.torrent").write_text("t")
+    if what in FREEZE_IGNORED:
+        (root / FREEZE_IGNORED[what]).parent.mkdir(parents=True, exist_ok=True)
+        (root / FREEZE_IGNORED[what]).write_text("t")
+    elif what == "web viewer":
+        (root / "web").mkdir()
+        (root / "web" / "app.js").write_text("v2\n")
     else:
         (root / "ops" / "x.sh").write_text("v2\n")
+        if what == "code beside docs":
+            (root / "docs").mkdir()
+            (root / "docs" / "x.md").write_text("t")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", what)
-    if what == "torrent":
+    if what in FREEZE_IGNORED:
         assert p.wait(timeout=60) == 0
         assert _status(tmp_path, "b") == "uploaded"
         assert "code changed" not in (tmp_path / "state" / "run.out").read_text()
@@ -831,3 +847,249 @@ def test_a_slot_waiting_for_its_tiles_does_not_hold_up_the_others(tmp_path):
     # worker 0 waits for big's tiles; worker 1 starts a meanwhile
     assert lines.index(next(x for x in lines if x.startswith("start a "))) < lines.index("cut big")
     assert lines.index("cut big") < lines.index(next(x for x in lines if x.startswith("start big ")))
+
+
+# ---- gate(): a browser gate that timed out is run once more -----------------
+
+STUB_NODE = r"""#!/bin/bash
+# stub node: prints the scripted output for this call of the gate script $1
+n=$(basename "$1" .mjs)
+c=$(( $(cat "$GT/$n.n" 2>/dev/null || echo 0) + 1 )); echo "$c" > "$GT/$n.n"
+f="$GT/$n.$c"; [ -f "$f" ] || f="$GT/$n.ok"
+cat "$f"; exit "$(cat "$f.rc" 2>/dev/null || echo 0)"
+"""
+OK_OUT = {
+    "overlap-check": "viewport {}\nNO OVERLAPS\nOVERLAP-CHECK-DONE\n",
+    "device-matrix": "PASS  iPhone SE\n\nall 7 devices passed\n",
+    "map-health": '{"styleLoaded":true,"sourceLoaded":{"osm":true},"renderedFeatures":500,"errors":[]}\n',
+    "kiwix": "  kiwix viewer smoke rc=0\n",
+}
+NAV_TIMEOUT = "TimeoutError: Navigation timeout of 240000 ms exceeded\n"
+
+
+def _gate(tmp: Path, outputs: dict[str, tuple[str, int]]) -> tuple[int, dict[str, int], str]:
+    """Runs the driver's own gate() with stub node, kiwix-serve and kiwix gate.
+    outputs: {"<script>.<call>": (stdout, rc)}; other calls print OK_OUT."""
+    text = DRIVER.read_text()
+    start = text.index("TIMEOUT_RE=")
+    end = text.index("\n}\n", text.index("\ngate(){")) + 3
+    gt = tmp / "gt"
+    (gt / "tmp").mkdir(parents=True)
+    (gt / "cloud").mkdir()
+    (gt / "node").write_text(STUB_NODE)
+    (gt / "node").chmod(0o755)
+    (gt / "cloud" / "kiwix_viewer_gate.sh").write_text('exec "$GT/node" kiwix\n')
+    for name, out in OK_OUT.items():
+        (gt / f"{name}.ok").write_text(out)
+    for key, (out, rc) in outputs.items():
+        (gt / key).write_text(out)
+        (gt / f"{key}.rc").write_text(f"{rc}\n")
+    script = (text[start:end] + "\n"
+              'log(){ echo "$*" >> "$LOG"; }\n'
+              'ss(){ :; }; curl(){ echo 200; }; pgrep(){ :; }; sleep(){ :; }\n'
+              f'KS=/bin/true NODE="$GT/node" PY={sys.executable} OV=19901 KW=19902 '
+              'LOG="$GT/log" TMPDIR="$GT/tmp"\n'
+              'gate "$GT/osm-x-2026-10-23.zim" Term\n')
+    r = subprocess.run(["bash", "-c", script], env={**os.environ, "GT": str(gt)}, cwd=gt,
+                       capture_output=True, text=True, timeout=60)
+    calls = {n: int((gt / f"{n}.n").read_text()) if (gt / f"{n}.n").exists() else 0 for n in OK_OUT}
+    log = (gt / "log").read_text() if (gt / "log").exists() else ""
+    return r.returncode, calls, log
+
+
+GATE_CASES = {
+    # name: (scripted outputs, calls per script, gate rc, failed gates)
+    "overlap timeout, then pass": (
+        {"overlap-check.1": ("Error: " + NAV_TIMEOUT, 1)}, {"overlap-check": 4}, 0, ""),
+    "overlap timeout twice": (
+        {"overlap-check.1": (NAV_TIMEOUT, 1), "overlap-check.2": (NAV_TIMEOUT, 1)},
+        {"overlap-check": 4}, 1, "overlap@320"),
+    "overlap killed by timeout(1)": (
+        {"overlap-check.3": ("", 124)}, {"overlap-check": 4}, 0, ""),
+    "real overlap": (
+        {"overlap-check.2": ("OVERLAPS:\n  #a  x  #b   overlap 4x4px\n", 124)},  # then hung closing
+        {"overlap-check": 3}, 1, "overlap@390"),
+    "overlap crash, no timeout": (
+        {"overlap-check.1": ("Error: Cannot find module puppeteer\n", 1)},
+        {"overlap-check": 3}, 1, "overlap@320"),
+    "matrix: only timeouts": (
+        {"device-matrix.1": ("FAIL  iPhone SE\n        ! EXC " + NAV_TIMEOUT + "\n1/7 devices FAILED\n", 1)},
+        {"device-matrix": 2}, 0, ""),
+    "matrix: killed by timeout(1)": (
+        {"device-matrix.1": ("PASS  iPhone SE\n", 124)}, {"device-matrix": 2}, 0, ""),
+    "matrix: a real failure beside a timeout": (
+        {"device-matrix.1": ("FAIL  a\n        ! EXC " + NAV_TIMEOUT + "FAIL  b\n        ! search returned 0\n"
+                             "\n2/7 devices FAILED\n", 1)},
+        {"device-matrix": 1}, 1, "device-matrix"),
+    "render: no result, timeout": (
+        {"map-health.1": (NAV_TIMEOUT, 1)}, {"map-health": 2}, 0, ""),
+    "render: drew too little": (
+        {"map-health.1": ('{"styleLoaded":true,"sourceLoaded":{"osm":true},"renderedFeatures":5}\n'
+                          "Timeout 30000ms exceeded\n", 0)},
+        {"map-health": 1}, 1, "render"),
+    "kiwix: timeout": (
+        {"kiwix.1": ("TimeoutError: page.goto: Timeout 240000ms exceeded.\n", 1)}, {"kiwix": 2}, 0, ""),
+    "kiwix: a finding": (
+        {"kiwix.1": ("FAIL  find page\n        TimeoutError: Waiting failed: 60000ms exceeded\n", 1)},
+        {"kiwix": 1}, 1, "kiwix"),
+    "kiwix: old viewer": (
+        {"kiwix.1": ("  FAIL: ZIM still carries the OLD viewer\n", 1)}, {"kiwix": 1}, 1, "kiwix"),
+}
+
+
+@pytest.mark.parametrize("case", list(GATE_CASES))
+def test_gate_retries_a_timed_out_browser_gate_once_never_a_finding(tmp_path, case):
+    outputs, want_calls, want_rc, want_failed = GATE_CASES[case]
+    rc, calls, log = _gate(tmp_path, outputs)
+    expect = {"overlap-check": 3, "device-matrix": 1, "map-health": 1, "kiwix": 1, **want_calls}
+    assert (rc, calls) == (want_rc, expect), log
+    retried = sum(expect.values()) - 6
+    assert log.count("timed out (not a finding)") == retried, log
+    if want_failed:
+        assert f"GATES FAILED: {want_failed}" in log, log
+    else:
+        assert "GATES FAILED" not in log, log
+
+
+def test_gate_browser_timeouts_raised():
+    for script, needle, n in (("overlap-check.mjs", "timeout: 240000", 2),
+                              ("device-matrix.mjs", "timeout:240000", 2),
+                              ("map-health.mjs", "timeout:240000", 1)):
+        assert (ROOT / "ops" / "tmp" / script).read_text().count(needle) == n, script
+    assert (ROOT / "cloud" / "zim_viewer_smoke.mjs").read_text().count("'domcontentloaded', timeout: 240_000") == 2
+
+
+# ---- the driver's REBUILD_REGATE_ZIM ---------------------------------------
+
+def _driver_regate(tmp: Path, zim: str, uprc: int = 0) -> tuple[str, str, str]:
+    p = _driver_copy(tmp)
+    text = p.read_text()
+    assert text.count("gate(){  # $1=zim $2=term") == 1
+    p.write_text(text.replace("gate(){  # $1=zim $2=term",
+                              'gate(){ echo "gate $*" >> "$GT_LOG"; return 0; }\n_gate_real(){', 1))
+    (tmp / "cloud" / "regions.tsv").write_text("# id\tname\tbbox\nx\tX\t1,2,3,4\t\t\t\tTerm\n")
+    (tmp / "cloud" / "upload_validated.sh").write_text(f'echo "upload $*" >> "$GT_LOG"; exit {uprc}\n')
+    (tmp / "venv-linux" / "bin").mkdir(parents=True)
+    (tmp / "venv-linux" / "bin" / "python3").write_text('#!/bin/bash\necho "py $*" >> "$GT_LOG"; cat > /dev/null\n')
+    (tmp / "venv-linux" / "bin" / "python3").chmod(0o755)
+    (tmp / "osm-x-2026-10-23.zim").write_text("zim")
+    (tmp / "osm-x-light-2026-10-23.zim").write_text("zim")
+    (tmp / "rebuild-old.tsv").write_text("id\tstatus\tzim\tfinished\n")
+    (tmp / "w.list").write_text("x\n")
+    env = {**os.environ, "REBUILD_LIST": str(tmp / "w.list"), "REBUILD_LOG": str(tmp / "w.log"),
+           "REBUILD_PIDFILE": str(tmp / "w.pid"), "REBUILD_OV_PORT": "19999",
+           "REBUILD_KW_PORT": "19998", "REBUILD_NO_SKIP": "1", "REBUILD_REGATE_ZIM": zim,
+           "GT_LOG": str(tmp / "calls.log")}
+    subprocess.run(["bash", str(p)], env=env, cwd=tmp, check=True, capture_output=True, text=True, timeout=60)
+    calls = (tmp / "calls.log").read_text() if (tmp / "calls.log").exists() else ""
+    return (tmp / "w.log").read_text(), calls, (tmp / "rebuild-old.tsv").read_text().splitlines()[-1]
+
+
+@pytest.mark.parametrize("uprc,status", [(0, "uploaded"), (6, "upload-pending")])
+def test_driver_regate_gates_and_uploads_without_building(tmp_path, uprc, status):
+    log, calls, last = _driver_regate(tmp_path, "osm-x-2026-10-23.zim", uprc)
+    assert "regate osm-x-2026-10-23.zim" in log and "=== rebuild complete ===" in log
+    for step in ("osmium", "build-region-fast", "overture", "Overture", "built "):
+        assert step not in log, step
+    assert "py cloud/validate_zim.py osm-x-2026-10-23.zim" in calls
+    assert "gate osm-x-2026-10-23.zim Term" in calls
+    assert "upload x osm-x-2026-10-23.zim" in calls
+    assert last.startswith(f"x\t{status}\tosm-x-2026-10-23.zim\t")
+
+
+@pytest.mark.parametrize("zim", ["osm-x-light-2026-10-23.zim", "osm-x-2026-10-24.zim"])
+def test_driver_regate_refuses_a_sibling_or_missing_zim(tmp_path, zim):
+    log, calls, last = _driver_regate(tmp_path, zim)
+    assert "gate " not in calls and "upload " not in calls
+    assert last.startswith(f"x\tno-output\t{zim}\t")
+
+
+# ---- the runner's --regate --------------------------------------------------
+
+def _hold(lock: Path) -> subprocess.Popen:
+    """Holds flock $lock (-o: the sleep does not inherit it) until _release."""
+    p = subprocess.Popen(["flock", "-o", str(lock), "sleep", "60"], start_new_session=True)
+    deadline = time.time() + 10
+    while subprocess.run(["flock", "-n", str(lock), "true"]).returncode == 0 and time.time() < deadline:
+        time.sleep(0.05)
+    return p
+
+
+def _release(p: subprocess.Popen) -> None:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+
+
+def _regate(tmp: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(RUNNER), "--regate", *args], env=env, cwd=tmp,
+                          capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.parametrize("st,want,rc", [("uploaded", "uploaded", 0), ("upload-pending", "upload-pending", 0),
+                                        ("gate-failed", "failed", 1)])
+def test_runner_regate_runs_one_driver_and_records_the_result(tmp_path, st, want, rc):
+    _setup(tmp_path, ["x", "y"])
+    env = _env(tmp_path)
+    (tmp_path / "fake" / "x.status").write_text(st)
+    (tmp_path / "fake" / "x.sleep").write_text("0.2")
+    (tmp_path / "root" / "osm-x-2026-10-23.zim").write_text("zim")
+    (tmp_path / "state" / "status").mkdir()
+    (tmp_path / "state" / "status" / "x").write_text("failed w0 - - 1 2 gate-failed osm-x-2026-10-23.zim\n")
+    # works beside a running runner: it does not take the runner's lock
+    holder = _hold(tmp_path / "state" / "run.lock")
+    try:
+        r = _regate(tmp_path, env, "x", "osm-x-2026-10-23.zim")
+    finally:
+        _release(holder)
+    assert r.returncode == rc, r.stdout + r.stderr
+    line = (tmp_path / "fake.log").read_text().splitlines()[0]
+    assert line.startswith("start x ") and "regate=osm-x-2026-10-23.zim" in line
+    assert "ports=19843,19844" in line and "noskip=1" in line and "keep=3" in line and "ml=1" in line
+    assert "zstd=unset" in line and "cache=unset" in line and "scratch=unset" in line
+    assert _statuses(tmp_path) == {"x": want}
+    assert (tmp_path / "state" / "pending" / "x").exists() == (want == "upload-pending")
+    assert f"regate x: {st}" in r.stdout or f"FAILED regate x: {st}" in r.stdout
+
+
+@pytest.mark.parametrize("why", ["running", "other region's zim", "no zim", "old driver", "locked"])
+def test_runner_regate_refusals(tmp_path, why):
+    _setup(tmp_path, ["x"])
+    env = _env(tmp_path)
+    zim = "osm-x-2026-10-23.zim"
+    (tmp_path / "root" / zim).write_text("zim")
+    (tmp_path / "root" / "osm-x-light-2026-10-23.zim").write_text("zim")
+    (tmp_path / "state" / "status").mkdir()
+    holder = None
+    if why == "running":
+        (tmp_path / "state" / "status" / "x").write_text("running w0 1 1 1\n")
+    elif why == "other region's zim":
+        zim = "osm-x-light-2026-10-23.zim"
+    elif why == "no zim":
+        zim = "osm-x-2026-10-24.zim"
+    elif why == "old driver":
+        (tmp_path / "driver.sh").write_text(FAKE_DRIVER.replace("# REBUILD_REGATE_ZIM\n", "")
+                                            .replace(" regate=${REBUILD_REGATE_ZIM-unset}", ""))
+    else:
+        holder = _hold(tmp_path / "state" / "regate.lock")
+    try:
+        r = _regate(tmp_path, env, "x", zim)
+    finally:
+        if holder:
+            _release(holder)
+    assert r.returncode == 1 and "FATAL: regate" in r.stdout, r.stdout + r.stderr
+    assert not (tmp_path / "fake.log").exists()
+
+
+def test_runner_skips_a_region_being_regated_until_the_regate_is_gone(tmp_path):
+    _setup(tmp_path, ["x"])
+    env = _env(tmp_path)
+    (tmp_path / "state" / "status").mkdir()
+    (tmp_path / "state" / "status" / "x").write_text("regating - - - 1\n")
+    holder = _hold(tmp_path / "state" / "regate.lock")
+    try:
+        _run(tmp_path, env, timeout=60)
+        assert not (tmp_path / "fake.log").exists()
+    finally:
+        _release(holder)
+    _run(tmp_path, env, timeout=60)                # that --regate died: built as usual
+    assert _starts(tmp_path)[0][0] == "x" and _status(tmp_path, "x") == "uploaded"

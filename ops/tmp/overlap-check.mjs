@@ -7,8 +7,8 @@ const b = await puppeteer.launch({ headless: true, executablePath: process.env.C
 try {
   const p = await b.newPage();
   await p.setViewport({ width: W, height: H, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-  await p.goto(ORIGIN + '/index.html', { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await p.waitForSelector('canvas.maplibregl-canvas, .maplibregl-canvas', { timeout: 90000 });
+  await p.goto(ORIGIN + '/index.html', { waitUntil: 'domcontentloaded', timeout: 240000 });
+  await p.waitForSelector('canvas.maplibregl-canvas, .maplibregl-canvas', { timeout: 240000 });
   await new Promise(r => setTimeout(r, 10000));
   // SHOW_ALL_CONTROLS=1: show every #controls button (satellite, terrain,
   // wiki) before measuring. Each is display:none unless the ZIM has that

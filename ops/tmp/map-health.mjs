@@ -100,7 +100,7 @@ await p.evaluateOnNewDocument(() => {
     },
   });
 });
-await p.goto(`${origin}/index.html`, { waitUntil:'domcontentloaded', timeout:60000 });
+await p.goto(`${origin}/index.html`, { waitUntil:'domcontentloaded', timeout:240000 });
 await new Promise(r => setTimeout(r, 20000));
 // Move to the anchor city and let its tiles settle before counting. No anchor
 // (unknown region, odd filename) => probe where it opened, as before.
