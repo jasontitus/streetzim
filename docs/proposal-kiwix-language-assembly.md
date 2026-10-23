@@ -28,8 +28,8 @@ version; see [Details](#details)).
 
 ## Why
 
-Zimfarm can already build the multilingual base (`streetzim
---multilingual`, [zimfarm.md](zimfarm.md#multilingual-maps---multilingual)):
+With a change now in review (`streetzim --multilingual`), Zimfarm can
+build the multilingual base:
 map labels in 21 languages plus the region's own, search by those names,
 and the viewer's interface in 23 languages. Hosting only that base is the
 simplest choice. What one file serves poorly is Kiwix's own search in each
