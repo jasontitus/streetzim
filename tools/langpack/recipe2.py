@@ -297,10 +297,20 @@ def available_packs(packs_dir: str, base_path: str, region: str | None) -> dict[
     return {lang: max(c)[2] for lang, c in cands.items()}
 
 
-def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str]) -> str | None:
+def search_lang(L: str) -> str:
+    """The language a version's search pack is indexed in: the version's own
+    map language. libzim indexes with it (Xapian's stemmer for it, where there
+    is one: de, fr, it, el, ...; none for rm), and the query side reads it
+    from the index, so a German speaker's "Kirchen" finds "Kirche". A search
+    pack is shared only by versions with the same packs and this language."""
+    return L
+
+
+def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str], lang: str) -> str | None:
     """The search pack (index_pack.py) in packs_dir built for exactly this
-    base and these packs (its sidecar names their files and MD5s) and with a
-    passing gate for its bytes; the newest such, or None."""
+    base and these packs (its sidecar names their files and MD5s), indexed in
+    `lang` (search_lang of the version), and with a passing gate for its
+    bytes; the newest such, or None."""
     from tools.langpack.gatelib import md5_file
     from tools.langpack.merge_zim import ZimReader, base_lineage
     lineage = base_lineage(base_path, ZimReader(base_path).header.uuid)
@@ -315,6 +325,8 @@ def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str]) -> s
         except (OSError, ValueError):
             continue
         if side.get("packs") != want or str(side.get("base_uuid", "")).replace("-", "") not in lineage:
+            continue
+        if side.get("lang") != lang:
             continue
         if pack_gate_ok(fp)[0]:
             found.append((os.path.getmtime(fp), fp))
@@ -499,7 +511,7 @@ def main(argv=None):
             packs = menu_packs(a.region_langs.split(","), base_wiki, L, avail)
             # the search pack built for exactly these packs (index_pack.py), if any:
             # without one Kiwix finds no pack article and search_gate.py fails the entry
-            index = find_search_pack(a.packs_dir, a.base, [avail[x] for x in packs])
+            index = find_search_pack(a.packs_dir, a.base, [avail[x] for x in packs], search_lang(L))
             recipe, plan, st = build_recipe(a.base, [avail[x] for x in packs], L, region=region,
                                             title=titles.get(L), region_langs=a.region_langs.split(","),
                                             language_meta=a.language_meta, index_path=index)

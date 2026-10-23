@@ -738,3 +738,22 @@ def test_the_preview_follows_production_over_the_deploys_generated_files(q: Simp
     assert f"(local changes dropped: {bi})" in log_text(q), log_text(q)
     recipes = q.preview / "web" / "build" / "recipes"
     assert (recipes / "beta" / "region.json").exists() and (recipes / "gamma" / "region.json").exists()
+
+
+def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -> None:
+    """The recipes' scheme changed (2: each version's search pack in its own
+    language): a map published under an older one (a published.tsv row
+    without the scheme) ships again, once; ship_packs.sh redoes only what the
+    scheme changes."""
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    done = q.qd / "published.tsv"
+    rows = [x.split("\t") for x in done.read_text().splitlines()]
+    assert all(len(r) == 6 and r[5] == "2" for r in rows), rows
+    done.write_text("".join("\t".join(r[:5] if r[0] == "beta" else r) + "\n" for r in rows))     # beta: the old format
+    n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
+    assert "beta: published under an older recipe scheme: shipped again for scheme 2" in log_text(q)
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1        # once

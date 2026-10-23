@@ -296,21 +296,22 @@ def test_the_merge_carries_the_search_packs_indexes(sp: SimpleNamespace, tmp_pat
 def test_a_search_pack_counts_only_for_its_base_and_exact_packs(sp: SimpleNamespace, lp: SimpleNamespace,
                                                                 tmp_path: Path) -> None:
     from tools.langpack.recipe2 import find_search_pack
-    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.de)]) == str(sp.out)
-    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.packs / lp.packs["fr"].name)]) is None
-    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.de), str(sp.packs / lp.packs["fr"].name)]) is None
+    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.de)], "de") == str(sp.out)
+    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.de)], "en") is None       # indexed in another language
+    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.packs / lp.packs["fr"].name)], "de") is None
+    assert find_search_pack(str(sp.packs), str(sp.base), [str(sp.de), str(sp.packs / lp.packs["fr"].name)], "de") is None
     # a pack that changed since the search pack was built
     d2 = tmp_path / "p"
     shutil.copytree(sp.packs, d2)
     de2 = d2 / sp.de.name
     de2.write_bytes(de2.read_bytes()[:-1] + b"\x00")
-    assert find_search_pack(str(d2), str(sp.base), [str(de2)]) is None
+    assert find_search_pack(str(d2), str(sp.base), [str(de2)], "de") is None
     # a search pack whose own bytes changed since its gate
     d3 = tmp_path / "q"
     shutil.copytree(sp.packs, d3)
     o3 = d3 / sp.out.name
     o3.write_bytes(o3.read_bytes()[:-1] + b"\x00")
-    assert find_search_pack(str(d3), str(sp.base), [str(d3 / sp.de.name)]) is None
+    assert find_search_pack(str(d3), str(sp.base), [str(d3 / sp.de.name)], "de") is None
     # the merger refuses a search pack built for another base
     side = json.loads((sp.out.parent / (sp.out.name + ".json")).read_text())
     d4 = tmp_path / "r"
@@ -322,8 +323,11 @@ def test_a_search_pack_counts_only_for_its_base_and_exact_packs(sp: SimpleNamesp
 
 
 def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> None:
-    """Entries with the same packs share one search pack; an entry without
-    packs needs none; a rerun builds nothing again."""
+    """Each entry's search pack is indexed in its own language: entries with
+    the same packs (fr, th without its pack, en) share none; an entry without
+    packs needs none; a rerun builds nothing again; a pack of the old scheme
+    (one per pack set, indexed in the base's language) still serves the entry
+    of its language."""
     from tests.langpack import lpzims
     packs = tmp_path / "packs"
     packs.mkdir()
@@ -332,18 +336,27 @@ def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> N
         shutil.copy(lp.packs[x], packs / lp.packs[x].name)
         assert tool("pack_gate.py", packs / lp.packs[x].name, "--base", lp.base,
                     env={"PACK_GATE_ZIMCHECK": zc}).returncode == 0
+    # the old scheme's pack for fr alone: indexed in the base's language (English)
+    old = packs / "osm_testland_search-fr_2026-10-21_x.zim"
+    assert index_pack.build(str(lp.base), [str(packs / lp.packs["fr"].name)], "en", "testland", str(old),
+                            tmp_path / "cache", log=lambda m: None)["gate"]["ok"]
     args = [lp.base, packs, "--region", "testland", "--langs", "de,fr,th,en", "--region-langs", "fr",
             "--date", "2026-10-22", "--cache", tmp_path / "cache"]
     r = tool("search_packs.py", *args)
     rows = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]   # libzim prints too
     assert r.returncode == 0, r.stderr[-2000:]
-    # de: de+fr; fr, th (no th pack) and en: fr alone
-    assert sorted((tuple(x["packs"]), tuple(x["entries"])) for x in rows) == [
-        (("de", "fr"), ("de",)), (("fr",), ("fr", "th", "en"))], rows
-    assert all(x["built"] and x["gate_ok"] for x in rows)
-    assert {x["index_lang"] for x in rows} == {"de", "en"}      # the visitor's language, else the base's
+    # de: de+fr; fr, th (no th pack) and en: fr alone, each in its own language; en reuses the old pack
+    u8 = lpzims.read_uuid(lp.base)[:8]
+    got = [(tuple(x["packs"]), tuple(x["entries"]), x["search_pack"], x["built"]) for x in rows]
+    assert got == [(("de", "fr"), ("de",), f"osm_testland_search-de-fr_2026-10-22_{u8}.zim", True),
+                   (("fr",), ("fr",), f"osm_testland_search-fr.fr_2026-10-22_{u8}.zim", True),
+                   (("fr",), ("th",), f"osm_testland_search-fr.th_2026-10-22_{u8}.zim", True),
+                   (("fr",), ("en",), old.name, False)], got
+    assert all(x["gate_ok"] and x["index_lang"] == x["entries"][0] for x in rows if x["built"])
+    for x in rows:
+        assert json.loads((packs / (x["search_pack"] + ".json")).read_text())["lang"] == x["entries"][0]
     r2 = tool("search_packs.py", *args)
-    assert [json.loads(x)["built"] for x in r2.stdout.splitlines() if x.startswith("{")] == [False, False]
+    assert [json.loads(x)["built"] for x in r2.stdout.splitlines() if x.startswith("{")] == [False] * 4
 
 
 def test_search_packs_side_by_side_in_a_scratch_folder(lp: SimpleNamespace, tmp_path: Path) -> None:
@@ -394,3 +407,33 @@ def test_search_packs_side_by_side_in_a_scratch_folder(lp: SimpleNamespace, tmp_
     assert runs["serial"][1] == 1 and runs["side"][1] >= 2, runs     # one build at a time; then side by side
     assert runs["side"][2].count("base pages and redirects:") == 1, runs["side"][2]    # the base's pages read once
     assert "search packs: 3 to build, 3 at a time, in " in runs["side"][2]
+
+
+def test_each_version_is_stemmed_in_its_own_language(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """A German speaker's version gets German stemming: with de a region
+    language, the de and en versions carry the same packs, and their search
+    packs are indexed in de and in en: "Kirchen" finds "Die Kirche von
+    Testdorf" in the de version (libzim's German stemmer), not in the en one."""
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+    from tests.langpack import lpzims
+    packs = tmp_path / "packs"
+    packs.mkdir()
+    de = packs / "osm_testland_wiki-de_2026-10-13.zim"
+    lpzims.write_pack(de, "de", lpzims.read_uuid(lp.base), articles=[("Kirche_Testdorf", "Die Kirche von Testdorf"),
+                                                                      ("Bruecke_Testdorf", "Eine Brücke über den Fluss")])
+    zc = lpzims.fake_zimcheck(tmp_path / "zc", "clean", None)
+    assert tool("pack_gate.py", de, "--base", lp.base, env={"PACK_GATE_ZIMCHECK": zc}).returncode == 0
+    r = tool("search_packs.py", lp.base, packs, "--region", "testland", "--langs", "de,en", "--region-langs", "de",
+             "--date", "2026-10-23", "--cache", tmp_path / "cache")
+    assert r.returncode == 0, r.stderr[-2000:]
+    rows = {x["entries"][0]: x for x in (json.loads(y) for y in r.stdout.splitlines() if y.startswith("{"))}
+    assert rows["de"]["packs"] == rows["en"]["packs"] == ["de"] and rows["de"]["search_pack"] != rows["en"]["search_pack"]
+
+    def found(entry: str, q: str) -> list[str]:
+        a = Archive(packs / rows[entry]["search_pack"])
+        return list(Searcher(a).search(Query().set_query(q)).getResults(0, 10))
+    assert "~w/de/wiki-article/Kirche_Testdorf" in found("de", "Kirchen")
+    assert "~w/de/wiki-article/Bruecke_Testdorf" in found("de", "Brücken")
+    assert "~w/de/wiki-article/Kirche_Testdorf" not in found("en", "Kirchen")
+    assert "~w/de/wiki-article/Kirche_Testdorf" in found("en", "Kirche")       # the word itself, either way

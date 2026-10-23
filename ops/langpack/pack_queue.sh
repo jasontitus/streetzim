@@ -73,7 +73,7 @@
 # Files, all in QUEUE_DIR ($LANGPACK_WORK/pack-queue): lock, since, queue.log
 # (PDT), status.tsv (region, state, zim, base key: uuid/md5 or uuid,
 # updated, retry after, note), published.tsv (region, uuid, md5, zim,
-# time), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
+# time, recipe scheme), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
 # zim, base key), deploy-pending, stop (a file: nothing new starts, the
 # running ones finish, then the queue ends; remove it before starting
 # again), ship-<region>.out. The round's files are only read (ROUND_TSV).
@@ -146,6 +146,9 @@ SHIP=${QUEUE_SHIP:-$ROOT/ops/langpack/ship_packs.sh}
 POLL=${QUEUE_POLL_SECS:-300}
 RETRY=${QUEUE_RETRY_SECS:-1800}
 MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
+# The recipes' scheme: a map published under an older one ships again (ship_packs.sh redoes
+# only what changed). 2: each version's search pack is indexed in its own language (2026-10-23).
+SCHEME=2
 PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
@@ -352,7 +355,14 @@ eligible() {  # region zim round-status
   fi
   md5=$(file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
   KEY=$uuid/$md5
-  grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE" && return 1     # published for this base already
+  # published for this base already, under this recipe scheme; under an older one: shipped again
+  # (ship_packs.sh redoes only what the scheme changes)
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t$SCHEME$" "$DONE" && return 1
+  if grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE"; then
+    case "$(state_of "$rid" "$KEY" | cut -f1)" in
+      published*) say "$rid: published under an older recipe scheme: shipped again for scheme $SCHEME (only the entries whose recipes change are redone)" ;;
+    esac
+  fi
   st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
   case "$state" in
     refused-*) return 1 ;;
@@ -477,7 +487,7 @@ finish() {  # region
         else
           rm -f "$Q/partial-$rid"
           [ -z "$missing" ] || warn "$rid: published without $missing: their pack builds ran out of time $PARTIAL_MAX times"
-          printf '%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" >> "$DONE"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" "$SCHEME" >> "$DONE"
           set_state "$rid" published "$zim" "$key" - "${missing:+without $missing}"
           deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
         fi

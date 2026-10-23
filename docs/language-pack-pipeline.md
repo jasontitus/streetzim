@@ -234,14 +234,27 @@ and the pack articles alike, with libzim's own matching (case, accents,
 words inside titles), by suggestion and by full text. The base's own index
 bytes stay in the file, unused.
 
-`tools/langpack/search_packs.py` builds one per distinct pack set of the
-menu (entries with the same packs share one: Greece's el and en entries),
-named `osm_<region>_search-<langs>_<date>_<base uuid8>.zim`, with a sidecar
-(the base UUID, the packs' files and MD5s) and a gate (both indexes; a page
-of the base, a front redirect of the base and a page of each pack found by
-suggestion, the packs' by full text too). `recipe2.find_search_pack`
-takes one only for exactly the entry's packs and base and with a passing
-gate. The index's stemmer is the visitor's language, else the base's.
+`tools/langpack/search_packs.py` builds one per menu entry, indexed in
+the entry's own language (`recipe2.search_lang`): libzim indexes with it
+(Xapian's stemmer for it where there is one: de, fr, it, el...; none for
+rm) and the query side reads the language from the index. Entries share a
+search pack only with the same packs and the same language. The name is
+`osm_<region>_search-<langs>[.<L>]_<date>_<base uuid8>.zim` (`.<L>` unless
+the set's one language beyond the region's is the entry's:
+`search-de-fr-it-ja-rm` is ja's, `search-de-fr-it-rm.de` de's), with a
+sidecar (the base UUID, the packs' files and MD5s, the language) and a gate
+(both indexes; a page of the base, a front redirect of the base and a page
+of each pack found by suggestion, the packs' by full text too).
+`recipe2.find_search_pack` takes one only for exactly the entry's packs,
+base and language and with a passing gate. Until 2026-10-23 entries with
+the same packs shared one pack in the set's own language, else the base's:
+Switzerland's de, fr, it, rm and en versions all had English stemming
+("Kirchen": 1,736 pages; with German stemming 9,089, as "Kirche";
+"Brücken" 258 → 1,226, "Gemeinden" 9,571 → 16,030; English plurals still
+match in the German index). Such a pack still serves the entry of its
+language (en); the queue ships published maps again for the rest
+(`pack_queue.sh`'s recipe scheme 2). Switzerland: 4 more search packs (de,
+fr, it, rm), 210-212 MB each (843 MB), 309-314 s each, 4 at a time in 319 s.
 
 Greece (1.05 GB base, 64,457 pages): 57–60 MB per search pack (the base's
 own indexes are 28 MB; a pack's full text adds most of the rest), 67–76 s

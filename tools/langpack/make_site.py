@@ -33,7 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, blob_of, open_pack, peak_rss_mb  # noqa: E402
-from tools.langpack.recipe2 import build_recipe, find_search_pack, menu_packs  # noqa: E402
+from tools.langpack.recipe2 import build_recipe, find_search_pack, menu_packs, search_lang  # noqa: E402
 from tools.langpack import gatelib  # noqa: E402
 from tools.langpack.gatelib import entry_verdict_ok, pack_gate_ok  # noqa: E402
 
@@ -124,7 +124,7 @@ def main():
                                         region=a.region, title=titles.get(L), region_langs=rl,
                                         language_meta=a.language_meta,
                                         index_path=find_search_pack(a.packs_dir, a.base,
-                                                                    [avail[x].path for x in packs]))
+                                                                    [avail[x].path for x in packs], search_lang(L)))
         want = (set(rl) | {L, "en"}) - ({base_wiki} if base_wiki else set())
         missing = sorted(want - set(packs))
         ok, why = entry_verdict_ok(a.base, L, recipe)                  # review S2

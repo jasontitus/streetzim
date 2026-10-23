@@ -4,17 +4,21 @@
     search_packs.py BASE.zim PACKS_DIR --region R --langs de,el,... --region-langs el
         [--cache DIR] [--date YYYY-MM-DD] [--jobs N] [--work-dir DIR]
 
-Every menu entry L carries the packs recipe2.menu_packs gives it; entries
-with the same packs (on Greece: el and en both carry el alone) share one
-search pack. For each such pack set without a search pack built for exactly
-these packs and this base (recipe2.find_search_pack), this writes
-PACKS_DIR/osm_<R>_search-<langs>_<date>_<first 8 hex of the base's UUID>.zim
-with its sidecar and gate. An entry with no pack needs none (the base's own
-indexes find everything in it).
-
-The index language (libzim's stemmer) is the set's language that is not one
-of the region's (the visitor's), else the base's. Prints one JSON line per
-pack set, in the menu's order; exit 1 if a search pack fails its gate.
+Every menu entry L carries the packs recipe2.menu_packs gives it, and its
+search pack is indexed in L itself (recipe2.search_lang: libzim's stemmer,
+stopwords and the query side's language are L's), so entries share a search
+pack only with the same packs and the same language. For each entry without
+a search pack built for exactly these packs, this base and this language
+(recipe2.find_search_pack), this writes
+PACKS_DIR/osm_<R>_search-<langs>[.<L>]_<date>_<first 8 hex of the base's UUID>.zim
+with its sidecar and gate (".<L>" unless the set's one language beyond the
+region's is L: search-de-fr-it-ja-rm is ja's, search-de-fr-it-rm.de de's).
+An entry with no pack needs none (the base's own indexes find everything in
+it). Until 2026-10-23 entries with the same packs shared one pack indexed in
+the set's own language, else the base's: Switzerland's de, fr, it, rm and en
+versions all had English stemming; such a pack still serves the version
+whose language it is indexed in. Prints one JSON line per pack, in the
+menu's order; exit 1 if a search pack fails its gate.
 
 --jobs N builds N packs at a time, each in a process of its own; the base's
 pages are read once first (index_pack.py's index-text cache, with --cache).
@@ -39,7 +43,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from tools.langpack import index_pack  # noqa: E402
 from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, blob_of, open_pack  # noqa: E402
-from tools.langpack.recipe2 import available_packs, find_search_pack, menu_packs  # noqa: E402
+from tools.langpack.recipe2 import available_packs, find_search_pack, menu_packs, search_lang  # noqa: E402
 
 
 def _into(src: str, dst: str) -> None:
@@ -82,16 +86,16 @@ def main(argv: list[str] | None = None) -> int:
     base_lang = cfg.get("language") or "en"
     base_wiki = base_lang if cfg.get("hasWikiArticles") else None
     avail = available_packs(a.packs_dir, a.base, a.region)
-    sets: dict[tuple[str, ...], list[str]] = {}
+    sets: dict[tuple[tuple[str, ...], str], list[str]] = {}       # (pack files, index language) -> entries
     for L in [x for x in a.langs.split(",") if x]:
         packs = menu_packs(rl, base_wiki, L, avail)
         if packs:
-            sets.setdefault(tuple(sorted(avail[x] for x in packs)), []).append(L)
+            sets.setdefault((tuple(sorted(avail[x] for x in packs)), search_lang(L)), []).append(L)
     u8 = z.header.uuid.hex()[:8]
     rows: list[dict] = []
     todo: list[tuple] = []                          # (row, build_one's arguments)
-    for files, entries in sets.items():
-        have = find_search_pack(a.packs_dir, a.base, list(files))
+    for (files, lang), entries in sets.items():
+        have = find_search_pack(a.packs_dir, a.base, list(files), lang)
         langs = sorted(open_pack(f).lang for f in files)
         row: dict = {"packs": langs, "entries": entries}
         rows.append(row)
@@ -100,8 +104,8 @@ def main(argv: list[str] | None = None) -> int:
             row["built"] = False
         else:
             own = [x for x in langs if x not in rl]
-            lang = own[0] if len(own) == 1 else base_lang
-            out = os.path.join(a.packs_dir, f"osm_{a.region}_search-{'-'.join(langs)}_{a.date}_{u8}.zim")
+            tag = "" if own == [lang] else f".{lang}"
+            out = os.path.join(a.packs_dir, f"osm_{a.region}_search-{'-'.join(langs)}{tag}_{a.date}_{u8}.zim")
             row.update(search_pack=os.path.basename(out), built=True, index_lang=lang)
             todo.append((row, (a.base, list(files), lang, a.region, out, a.cache, a.work_dir)))
     args = {id(row): x for row, x in todo}
