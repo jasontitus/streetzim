@@ -310,7 +310,20 @@ NRUN=0
 launch() { "$@" & NRUN=$(( NRUN + 1 )); }
 reap_one() { wait -n; NRUN=$(( NRUN - 1 )); }
 CT0=$CT
-trap 'trap - TERM INT HUP; kill $(jobs -p) 2>/dev/null; wait; exit 143' TERM INT HUP
+# A job waits for its command (run under GNU timeout, which leads a process
+# group of its own: a signal to the run's group misses it) before its trap can
+# stop its kiwix-serve. So the jobs are signalled first (a signalled job starts
+# no further command), then their commands, until every job has ended.
+stop_jobs() {
+  local j _
+  kill $(jobs -p) 2>/dev/null
+  for _ in $(seq 1 120); do
+    [ -n "$(jobs -pr)" ] || return 0
+    for j in $(jobs -pr); do kill $(ps -o pid= --ppid "$j") 2>/dev/null; done
+    sleep 0.25
+  done
+}
+trap 'trap - TERM INT HUP; stop_jobs; wait; exit 143' TERM INT HUP
 trap 'rm -rf "${CT0:?}"' EXIT
 
 # The base alone first. (A base patched in place keeps its name: RESUME
