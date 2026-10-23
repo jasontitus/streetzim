@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 import random
+import shlex
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,7 +27,9 @@ from tests.langpack.conftest import ROOT  # noqa: E402
 QUEUE = ROOT / "ops" / "langpack" / "pack_queue.sh"
 T0 = 1_800_000_000                     # the queue's start in these tests
 
-# ship_packs.sh: logs the call; FAKE_SHIP_RC "region:rc,rc;region2:rc" (one rc per call, the last repeats)
+# ship_packs.sh: logs the call; FAKE_SHIP_RC "region:rc,rc;region2:rc;*:rc" (one rc per call, the last
+# repeats; * for any other region). The queue starts it from a clean environment: its settings come from
+# the file ship.sh sources (_run writes it), and ship.sh keeps the environment it got in ship-env/REGION.
 FAKE_SHIP = r'''#!PY
 import json, os, sys, time
 rid, base = sys.argv[1], sys.argv[2]
@@ -31,7 +37,7 @@ log = os.environ["FAKE_LOG"]
 calls = [json.loads(x) for x in open(log)] if os.path.exists(log) else []
 n = sum(1 for c in calls if c.get("ship") == rid)
 plan = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_RC", "").split(";") if x)
-rcs = (plan.get(rid) or "0").split(",")
+rcs = (plan.get(rid) or plan.get("*") or "0").split(",")
 rc = int(rcs[min(n, len(rcs) - 1)])
 with open(log, "a") as fh:
     fh.write(json.dumps({"ship": rid, "base": base, "work": os.environ.get("LANGPACK_WORK"),
@@ -52,7 +58,7 @@ echo "{\"publish\": \"$1\", \"web\": \"$2\", \"work\": \"$LANGPACK_WORK\"}" >> "
 [ "${FAKE_PUBLISH_RC:-0}" = 0 ] || exit "$FAKE_PUBLISH_RC"
 mkdir -p "$2/build/recipes" && rm -rf "$2/build/recipes/$1" && cp -a "$LANGPACK_WORK/site/$1/recipes/$1" "$2/build/recipes/$1"
 '''
-# firebase: logs where and what; fails while FAKE_FIREBASE_FAILS > the calls so far
+# firebase: logs where and what; fails while FAKE_FIREBASE_FAILS > the calls so far; FAKE_FIREBASE_SLEEP
 # archive.org's CLI: `metadata ITEM` prints FAKE_IA_DIR/ITEM.json (or an empty item)
 FAKE_IA = r'''#!PY
 import os, sys
@@ -60,10 +66,13 @@ p = os.path.join(os.environ["FAKE_IA_DIR"], sys.argv[2] + ".json")
 print(open(p).read() if sys.argv[1] == "metadata" and os.path.exists(p) else "{}")
 '''
 FAKE_FIREBASE = r'''#!PY
-import json, os, sys
+import json, os, sys, time
 log = os.environ["FAKE_LOG"]
 n = sum(1 for x in open(log) if '"firebase"' in x) if os.path.exists(log) else 0
 rc = 1 if n < int(os.environ.get("FAKE_FIREBASE_FAILS", "0")) else 0
+if os.environ.get("FAKE_FIREBASE_SLEEP"):
+    open(log, "a").write(json.dumps({"deploying": 1}) + "\n")
+    time.sleep(float(os.environ["FAKE_FIREBASE_SLEEP"]))
 open(log, "a").write(json.dumps({"firebase": sys.argv[1:], "cwd": os.getcwd(), "rc": rc}) + "\n")
 sys.exit(rc)
 '''
@@ -82,7 +91,9 @@ def q(tmp_path: Path) -> SimpleNamespace:
         p = stubs / name
         p.write_text(body.replace("#!PY", f"#!{sys.executable}"))
         p.chmod(0o755)
-    (stubs / "ship.sh").write_text(f'#!/bin/bash\nexec {sys.executable} {stubs / "ship.py"} "$@"\n')
+    (d / "ship-env").mkdir()
+    (stubs / "ship.sh").write_text(f'#!/bin/bash\nenv -0 > {d / "ship-env"}/"$1"\nset -a; . {d / "ship.env"}; set +a\n'
+                                   f'exec {sys.executable} {stubs / "ship.py"} "$@"\n')
     maps = d / "maps"
     maps.mkdir()
     ml = {"tileLanguages": ["de", "fr"]}
@@ -131,14 +142,39 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "QUEUE_MAX_BASE_GB": str((maps / "osm-big-2026-10-23.zim").stat().st_size / 1e9 - 1e-6),
            "FAKE_LOG": str(log), "FAKE_SHIP_RC": "alpha:6,0;cont:4;fail:1", "PYTHONDONTWRITEBYTECODE": "1",
            "IA": str(stubs / "ia"), "FAKE_IA_DIR": str(d / "ia"), "QUEUE_SEED": "",
-           "QUEUE_ROUND_PATTERNS": f"no-such-round-{os.getpid()}.sh"}     # not the host's own round
+           "QUEUE_FORCE_WORK": "1",                                        # a test's LANGPACK_WORK
+           "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": ""}            # not the host's own round
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
                            preview=d / "preview" / "streetzim")
 
 
-def _run(q: SimpleNamespace, **extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["bash", str(QUEUE), "--once"], capture_output=True, text=True, timeout=600, env={**q.env, **extra})
+def _env(q: SimpleNamespace, extra: dict[str, str]) -> dict[str, str]:
+    env = {**q.env, **extra}
+    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP") if k in env))
+    return env
+
+
+def _run(q: SimpleNamespace, *args: str, timeout: float = 600, **extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["bash", str(QUEUE), *(args or ("--once",))], capture_output=True, text=True, timeout=timeout,
+                          env=_env(q, extra))
+
+
+def _start(q: SimpleNamespace, args: tuple[str, ...] = ("--once",), **extra: str) -> subprocess.Popen[bytes]:
+    """The queue in the background (its runs keep its stdout: none here)."""
+    return subprocess.Popen(["bash", str(QUEUE), *args], env=_env(q, extra), stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def _until(cond, what: str, secs: float = 60) -> None:  # noqa: ANN001
+    end = time.time() + secs
+    while not cond():
+        assert time.time() < end, f"timed out waiting for {what}"
+        time.sleep(0.1)
+
+
+def _ship_env(q: SimpleNamespace, rid: str) -> dict[str, str]:
+    return dict(x.split("=", 1) for x in (q.d / "ship-env" / rid).read_text().split("\0") if x)
 
 
 def _calls(q: SimpleNamespace, kind: str) -> list[dict]:
@@ -177,14 +213,19 @@ def test_ships_in_order_publishes_to_the_preview_and_resumes(q: SimpleNamespace)
     assert fb[0]["cwd"] == str(q.preview)
     log = (q.qd / "queue.log").read_text()
     assert " PDT " in log or " PST " in log
-    # the second pass: alpha (listing pending before) ships and deploys; beta, cont, the ineligible ones not again; fail is tried again
+    # the second run: alpha (listing pending before) ships and deploys; beta, cont, the ineligible ones not
+    # again; nor fail: a failure is tried again only on a restart with QUEUE_RETRY_FAILED=1
     r2 = _run(q)
     ships2 = [c["ship"] for c in _calls(q, "ship")][len(ships):]
-    assert ships2 == ["alpha", "fail"], ships2
+    assert ships2 == ["alpha"], ships2
     assert _status(q)["alpha"][1] == "published" and len(_calls(q, "firebase")) == 2
-    assert r2.returncode == 1
-    published = [x.split("\t")[0] for x in (q.qd / "published.tsv").read_text().splitlines()]
-    assert published == ["beta", "alpha"]
+    assert r2.returncode == 0 and "failed before: fail (not tried again" in log_text(q), r2.stderr
+    r3 = _run(q, QUEUE_RETRY_FAILED="1")
+    assert [c["ship"] for c in _calls(q, "ship")][len(ships) + 1:] == ["fail"] and r3.returncode == 1
+    published = [x.split("\t") for x in (q.qd / "published.tsv").read_text().splitlines()]
+    assert [x[0] for x in published] == ["beta", "alpha"]
+    z = q.maps / "osm-beta-2026-10-23.zim"                        # keyed by the base's UUID and MD5
+    assert published[0][1:4] == [z.read_bytes()[8:24].hex(), hashlib.md5(z.read_bytes()).hexdigest(), z.name], published
     assert q.tsv.read_bytes() == tsv_before                       # the round's file only read
 
 
@@ -278,7 +319,6 @@ def test_an_upload_pending_map_ships_once_archive_org_lists_it(q: SimpleNamespac
     lists the local file with its MD5; a later `uploaded` row works too."""
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert "delta" not in [c["ship"] for c in _calls(q, "ship")]
-    import hashlib
     z = q.maps / "osm-delta-2026-10-23.zim"
     (q.d / "ia" / "streetzim-delta.json").write_text(json.dumps({"files": [
         {"name": z.name, "md5": hashlib.md5(z.read_bytes()).hexdigest(), "size": str(z.stat().st_size)}]}))
@@ -302,17 +342,276 @@ def test_the_preview_starts_with_what_the_channel_shows(q: SimpleNamespace, tmp_
     assert (sw / "region.json").exists() and not (sw / "test-item.json").exists()
 
 
-def test_one_run_at_a_time_while_the_round_builds(q: SimpleNamespace, tmp_path: Path) -> None:
+def _overlap(q: SimpleNamespace) -> bool:
+    log = [json.loads(x) for x in q.log.read_text().splitlines()]
+    t = {(k, c[k]): c["t"] for c in log for k in ("ship", "ship_end") if k in c}
+    return t[("ship", "alpha")] < t[("ship_end", "beta")]
+
+
+@pytest.mark.parametrize("how,builds", [("pidfile", True), ("pidfile-other-process", False), ("pidfile-dead", False),
+                                        ("lock", True), ("lock-free", False)])
+def test_one_run_at_a_time_while_the_round_builds(q: SimpleNamespace, tmp_path: Path, how: str, builds: bool) -> None:
     """While a round driver runs (the disk is saturated) at most one
-    ship_packs.sh at a time, whatever QUEUE_JOBS says."""
-    rnd = tmp_path / "fake_parallel_rebuild.sh"
-    rnd.write_text("sleep 120\n")
-    p = subprocess.Popen(["bash", str(rnd)])
+    ship_packs.sh at a time, whatever QUEUE_JOBS says. The round runs while a
+    driver's pid file names a live process running the driver (not a reused
+    pid: another program, or nothing) or a process holds one of its locks."""
+    extra: dict[str, str] = {}
+    procs: list[subprocess.Popen[bytes]] = []
+    fh = None
+    if how.startswith("pidfile"):
+        (tmp_path / "pids").mkdir()
+        drv = tmp_path / "fake_rebuild_old_regions.sh"
+        drv.write_text("sleep 120\n")
+        if how == "pidfile-dead":
+            dead = subprocess.Popen(["true"])
+            dead.wait()
+            pid = dead.pid
+        else:
+            procs.append(subprocess.Popen(["bash", str(drv)] if how == "pidfile" else ["sleep", "120"]))
+            pid = procs[-1].pid
+        (tmp_path / "pids" / "w1.pid").write_text(f"{pid}\n")
+        extra["QUEUE_ROUND_PIDFILES"] = f"{tmp_path}/no-such.pid:x {tmp_path}/pids/*.pid:fake_rebuild_old_regions.sh"
+    else:
+        lock = tmp_path / "run.lock"
+        fh = open(lock, "w")
+        if how == "lock":
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        extra["QUEUE_ROUND_LOCKS"] = f"{tmp_path}/no-such.lock {lock}"
     try:
-        r = _run(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="2", QUEUE_JOBS="2", QUEUE_ROUND_PATTERNS="fake_parallel_rebuild.sh")
+        r = _run(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="2", QUEUE_JOBS="2", **extra)
     finally:
-        p.kill()
+        for p in procs:
+            p.kill()
+            p.wait()
+        if fh:
+            fh.close()
     assert r.returncode == 0, r.stderr
+    assert _overlap(q) is not builds, how
+    if builds:
+        assert "alpha: waiting: one run at a time while the round builds" in log_text(q), log_text(q)
+
+
+def test_while_the_round_builds_the_first_run_waits_for_memory_too(q: SimpleNamespace, tmp_path: Path) -> None:
+    """While the round builds even the first run waits for QUEUE_MIN_MEM_GB;
+    the stop file ends the wait at once: nothing new starts."""
+    lock = tmp_path / "run.lock"
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        p = _start(q, FAKE_SHIP_RC="", QUEUE_ROUND_LOCKS=str(lock), QUEUE_MIN_MEM_GB="100000")
+        try:
+            _until(lambda: (q.qd / "queue.log").exists() and "beta: waiting:" in log_text(q), "the queue to wait", 60)
+            assert "under QUEUE_MIN_MEM_GB=100000 while the round builds" in log_text(q), log_text(q)
+            time.sleep(1)
+            assert _calls(q, "ship") == []
+            (q.qd / "stop").touch()
+            assert p.wait(timeout=30) == 0
+        finally:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+    assert _calls(q, "ship") == [] and "stop file: starting nothing new" in log_text(q)
+
+
+def test_the_stop_file_starts_nothing_new_and_the_running_finish(q: SimpleNamespace) -> None:
+    p = _start(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="2", QUEUE_JOBS="1")
+    try:
+        _until(lambda: _calls(q, "ship"), "the first run", 60)
+        (q.qd / "stop").touch()
+        assert p.wait(timeout=60) == 0
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    assert [c["ship"] for c in _calls(q, "ship")] == ["beta"]
+    assert _status(q)["beta"][1] == "published" and "alpha" not in _status(q)
+
+
+def test_a_stop_file_at_the_start_starts_nothing(q: SimpleNamespace) -> None:
+    """With room for a run (none going, no round), the stop file still starts nothing."""
+    (q.qd / "stop").touch()
+    r = _run(q, FAKE_SHIP_RC="")
+    assert r.returncode == 0, r.stderr
+    assert _calls(q, "ship") == [] and "stop file: starting nothing new" in log_text(q)
+
+
+def test_a_restart_counts_the_runs_still_going(q: SimpleNamespace) -> None:
+    """The queue stopped (killed) while a run went on: the next queue counts
+    it (QUEUE_JOBS), does not start it again, and finishes it when it ends."""
+    p = _start(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="4", QUEUE_JOBS="1")
+    try:
+        _until(lambda: _calls(q, "ship"), "the first run", 60)
+    finally:
+        os.kill(p.pid, signal.SIGKILL)                             # the queue only: its run goes on
+        p.wait()
+    assert not _calls(q, "ship_end")
+    try:
+        r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1")
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)                       # whatever is left of the first queue
+        except ProcessLookupError:
+            pass
+    assert r.returncode == 0, r.stderr
+    ships = [c["ship"] for c in _calls(q, "ship")]
+    assert ships.count("beta") == 1 and "alpha" in ships, ships
     log = [json.loads(x) for x in q.log.read_text().splitlines()]
     t = {(k, c[k]): c["t"] for c in log for k in ("ship", "ship_end") if k in c}
     assert t[("ship", "alpha")] >= t[("ship_end", "beta")], t
+    assert _status(q)["beta"][1] == "published" and "beta: its ship_packs.sh run from before the restart is still going" in log_text(q)
+    assert not list((q.qd / "runs").iterdir())
+
+
+@pytest.mark.parametrize("during", ["sleep", "deploy"])
+def test_a_killed_queue_does_not_lock_out_its_restart(q: SimpleNamespace, during: str) -> None:
+    """Killed while it sleeps between passes (QUEUE_POLL_SECS) or while a
+    deploy runs, the queue's children do not hold its lock: a restart right
+    away gets it."""
+    if during == "sleep":
+        p = _start(q, (), FAKE_SHIP_RC="", QUEUE_POLL_SECS="300")
+        done = lambda: (q.qd / "published.tsv").exists() and len((q.qd / "published.tsv").read_text().splitlines()) == 4  # noqa: E731
+    else:
+        p = _start(q, FAKE_SHIP_RC="", FAKE_FIREBASE_SLEEP="30")
+        done = lambda: bool(_calls(q, "deploying"))  # noqa: E731
+    try:
+        _until(done, f"the queue's {during}", 120)
+        time.sleep(1)
+    finally:
+        os.kill(p.pid, signal.SIGKILL)                             # the queue only: its sleep or deploy goes on
+        p.wait()
+    try:
+        r = _run(q, FAKE_SHIP_RC="", timeout=120)
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)                       # the sleep left over (a deploy: timeout's own group)
+        except ProcessLookupError:
+            pass
+    assert r.returncode == 0 and "another queue holds" not in r.stderr, r.stderr
+
+
+def test_a_run_gone_without_an_exit_code_runs_again(q: SimpleNamespace) -> None:
+    """A run recorded before a restart whose process is gone (or whose pid now
+    belongs to another process: this test's) and left no exit code: again."""
+    (q.qd / "runs").mkdir()
+    z = q.maps / "osm-beta-2026-10-23.zim"
+    key = f"{z.read_bytes()[8:24].hex()}/{hashlib.md5(z.read_bytes()).hexdigest()}"
+    (q.qd / "runs" / "beta").write_text(f"{os.getpid()} 1 {z.name} {key}\n")
+    r = _run(q, FAKE_SHIP_RC="", timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "beta: the run ended without an exit code" in log_text(q) and _status(q)["beta"][1] == "published"
+
+
+def test_a_rewritten_file_with_the_same_uuid_ships_again(q: SimpleNamespace) -> None:
+    """Published is keyed by the base's UUID and MD5: a file rewritten in
+    place under its name, keeping its UUID (a repair), ships again."""
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    z = q.maps / "osm-beta-2026-10-23.zim"
+    uuid = z.read_bytes()[8:24]
+    lpzims.write_base(z, description="Offline map of Testland, repaired", cfg_extra={"tileLanguages": ["de", "fr"]})
+    with open(z, "r+b") as fh:
+        fh.seek(8)
+        fh.write(uuid)
+    with open(q.tsv, "a") as fh:
+        fh.write(f"beta\tuploaded\t{z.name}\t{_iso(T0 + 600)}\n")
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    assert [c["ship"] for c in _calls(q, "ship")].count("beta") == 2
+    rows = [x.split("\t") for x in (q.qd / "published.tsv").read_text().splitlines() if x.startswith("beta\t")]
+    assert len(rows) == 2 and rows[0][1] == rows[1][1] == uuid.hex() and rows[0][2] != rows[1][2], rows
+
+
+def test_enqueue_a_map_by_hand(q: SimpleNamespace) -> None:
+    """`enqueue REGION ZIM` (while a queue runs: no lock needed) makes a map a
+    candidate whatever the round's file says (here: shipped before the start),
+    until the round writes a new row for the region."""
+    with open(q.qd / "lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        for bad in (("Bad_Name", "osm-old-2026-10-01.zim"), ("old", "../maps/osm-old-2026-10-01.zim"), ("old", "osm-nope.zim"),
+                    ("old", "")):
+            r = _run(q, "enqueue", *bad, timeout=60)
+            assert r.returncode == 1 and "enqueue" in r.stderr, (bad, r.returncode, r.stderr)
+        r = _run(q, "enqueue", "old", "osm-old-2026-10-01.zim", timeout=60)
+        assert r.returncode == 0, r.stderr
+        r = _run(q, "enqueue", "gamma", "osm-gamma-2026-10-23.zim", timeout=60)   # the round writes a row later
+        assert r.returncode == 0, r.stderr
+    with open(q.tsv, "a") as fh:
+        fh.write(f"gamma\tupload-failed\tosm-gamma-2026-10-23.zim\t{_iso(T0 + 700)}\n")
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    ships = [c["ship"] for c in _calls(q, "ship")]
+    assert ships.count("old") == 1 and "gamma" not in ships, ships
+    assert _status(q)["old"][1] == "published" and "old: enqueued by hand: osm-old-2026-10-01.zim" in log_text(q)
+
+
+@pytest.mark.parametrize("rc,why", [("2", "ship_packs rc=2 (a lock held)"), ("143", "ship_packs.sh was killed (rc=143)")])
+def test_a_lock_held_again_and_again_is_a_loud_failure(q: SimpleNamespace, rc: str, why: str) -> None:
+    """ship_packs.sh exit 2 (a lock held), or a killed run, is tried again, and
+    after QUEUE_MAX_AGAIN times in a row for the same base, a loud failure."""
+    for i in range(2):
+        r = _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
+        assert r.returncode == 0 and _status(q)["beta"][1] == "pending", (i, r.stderr)
+    r = _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
+    assert r.returncode == 1 and f"beta: {why}, 3 times in a row" in r.stderr, r.stderr
+    assert _status(q)["beta"][1] == "failed-again"
+    _run(q, FAKE_SHIP_RC=f"beta:{rc}", QUEUE_MAX_AGAIN="3")
+    assert [c["ship"] for c in _calls(q, "ship")].count("beta") == 3
+
+
+@pytest.mark.parametrize("what", ["preview=prod", "preview=prod/sub", "preview=link-to-prod", "preview=holds-prod",
+                                  "preview=/storage/streetzim", "channel=live", "channel=LIVE", "channel="])
+def test_the_preview_is_never_production(q: SimpleNamespace, tmp_path: Path, what: str) -> None:
+    """A PREVIEW_DIR that is, holds or sits in production (PROD_REPO or
+    /storage/streetzim), or the live channel (or none): refused at the start."""
+    k, v = what.split("=", 1)
+    if k == "preview":
+        (tmp_path / "link").symlink_to(q.prod)
+        v = {"prod": str(q.prod), "prod/sub": str(q.prod / "web" / "x"), "link-to-prod": str(tmp_path / "link"),
+             "holds-prod": str(q.d), "/storage/streetzim": "/storage/streetzim/no-such-preview-dir"}[v]
+        extra = {"PREVIEW_DIR": v}
+    else:
+        extra = {"PREVIEW_CHANNEL": v}
+    r = _run(q, FAKE_SHIP_RC="*:4", timeout=120, **extra)          # (no run is published: nothing would be written there)
+    assert r.returncode == 3 and "refused: PREVIEW_" in r.stderr, (what, r.returncode, r.stderr)
+    assert _calls(q, "ship") == [] and _calls(q, "publish") == [] and _calls(q, "firebase") == []
+    assert not (q.qd / "queue.log").exists()
+
+
+def test_production_settings_only_unless_forced(q: SimpleNamespace, tmp_path: Path) -> None:
+    """Paths other than production's (LANGPACK_WORK, WP_CACHE, ROUND_TSV,
+    MAPS_DIR, PROD_REPO), another webseed or a test's stand-ins (an env.sh or
+    a test's settings left in the shell): refused unless QUEUE_FORCE_WORK=1."""
+    env = dict(q.env)
+    env.pop("QUEUE_FORCE_WORK")
+    extra = {"WP_CACHE": str(tmp_path / "wpc"), "LANGPACK_WEBSEED": "http://127.0.0.1:8787", "QUEUE_DIR": str(tmp_path / "q2")}
+    r = subprocess.run(["bash", str(QUEUE), "--once"], capture_output=True, text=True, timeout=120, env={**env, **extra})
+    assert r.returncode == 3, (r.returncode, r.stderr)
+    for want in (f"LANGPACK_WORK={q.work} is not production's /storage/streetzim/langpack-work",
+                 f"WP_CACHE={tmp_path / 'wpc'} is not production's /storage/streetzim/langpack-work/wpcache",
+                 "LANGPACK_WEBSEED=http://127.0.0.1:8787 is not production's",
+                 f"ROUND_TSV={q.tsv} is not production's /storage/streetzim/rebuild-old.tsv",
+                 f"MAPS_DIR={q.maps} is not production's /storage/streetzim",
+                 f"PROD_REPO={q.prod} is not production's /storage/streetzim",
+                 f"QUEUE_SHIP={q.env['QUEUE_SHIP']}: a test's setting", f"QUEUE_PUBLISH={q.env['QUEUE_PUBLISH']}: a test's setting",
+                 f"QUEUE_DIR={tmp_path / 'q2'}: a test's setting"):
+        assert want in r.stderr, (want, r.stderr)
+    assert _calls(q, "ship") == [] and not (q.qd / "queue.log").exists() and not (tmp_path / "q2").exists()
+
+
+def test_ship_packs_starts_from_a_clean_environment(q: SimpleNamespace) -> None:
+    """Nothing of the queue's environment reaches ship_packs.sh but the login
+    basics: no SHIP_* knob or stand-in left from a test run or the Swiss
+    preview's env.sh; production's items and settings, set here."""
+    poison = {"SHIP_PACK_ITEM": "streetzim-langtest-switzerland-lang", "SHIP_BASE_ITEM": "streetzim-langtest-switzerland",
+              "SHIP_ITEM_TITLE": "PREVIEW (test)", "SHIP_RUN_GATES": "/tmp/fake_gates.py", "SHIP_PREFETCH": "/tmp/fake.py",
+              "SHIP_SKIP_UPLOAD": "1", "SHIP_SKIP_ENV_CHECK": "1", "SHIP_IA_FETCH": "", "SHIP_PROBE_URLS": "",
+              "SHIP_LISTING_POLLS": "1", "SHIP_SOMETHING_NEW": "1", "BUILDER": "/tmp/fake_builder.py", "GATES_PORT": "1",
+              "LANGUAGE_META": "x", "PACK_DATE": "2000-01-01", "UPLOAD_LOCK": "/tmp/x.lock", "CORE": "xx", "REGION_PACKS_MAX": "9",
+              "TORRENTS_OFF": "x", "TMPDIR": "/tmp/e2e-tmp", "PACK_GATE_ZIMCHECK": "/tmp/zimcheck", "KIWIX_SERVE": "/tmp/ks",
+              "NODE": "/tmp/node", "CHROME_PATH": "/tmp/chrome", "PLAYWRIGHT_CORE": "/tmp/pw.mjs", "BROWSER_LIBS": "/tmp/libs",
+              "WIKI_SRC": "/tmp/wiki", "LANGPACK_MIN_FREE_GB": "0", "LANGPACK_ENTRY_BUDGET": "1", "ANYTHING_ELSE": "1"}
+    r = _run(q, FAKE_SHIP_RC="", **poison)
+    assert r.returncode == 0, r.stderr
+    allowed = {"HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "SHELL", "PWD", "OLDPWD", "SHLVL", "_",
+               "LANGPACK_WORK", "WP_CACHE", "LANGPACK_WEBSEED", "SHIP_MAX_BASE_GB", "SHIP_PACK_ITEM", "SHIP_BASE_ITEM"}
+    for rid in ("beta", "alpha", "cont", "fail"):
+        e = _ship_env(q, rid)
+        assert set(e) <= allowed, (rid, sorted(set(e) - allowed))
+        assert e["SHIP_PACK_ITEM"] == f"streetzim-{rid}-lang" and e["SHIP_BASE_ITEM"] == f"streetzim-{rid}", e
+        assert e["LANGPACK_WORK"] == str(q.work) and e["WP_CACHE"] == str(q.work / "wpcache"), e
+        assert e["LANGPACK_WEBSEED"] == "https://streetzim-build-proxy.tiltastech.workers.dev" and e["SHIP_MAX_BASE_GB"] == q.env["QUEUE_MAX_BASE_GB"]
+        assert e["HOME"] == os.environ["HOME"] and e["PATH"] == os.environ["PATH"]

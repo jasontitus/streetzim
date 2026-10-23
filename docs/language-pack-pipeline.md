@@ -494,18 +494,42 @@ replaces them when it ships. The preview's home page is not regenerated.
   The log says so for each: France, Germany, the Nordics and Italy (8.1 GB)
   get no packs in v1.
 - In the order the maps shipped, one run at a time while a round driver
-  builds (the disk is saturated and its scheduler ignores ionice), up to 2
-  (`QUEUE_JOBS`) once none does: a second one starts only with 24 GB of
-  memory available, no memory pressure and room on the disk for its merged
-  files. `ship_packs.sh` takes turns on the shared Wikipedia cache (its
-  prefetch holds a lock).
-- Exit 6 (archive.org listing pending) or 2 (a lock held): tried again after
-  30 min; 4 and 5: logged, skipped for that base; anything else: a loud
-  failure (`queue.log`, stderr), not retried until the queue restarts.
-- Resumable: a map published for the same base UUID is not shipped again; a
-  new file is. State in `$LANGPACK_WORK/pack-queue/` (`status.tsv`,
-  `published.tsv`, `queue.log` in PDT); a file named `stop` there ends it
-  after the current pass. The round's files are only read.
+  builds (the disk is saturated and its scheduler ignores ionice), and only
+  with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
+  pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the
+  same memory rule and with room on the disk for its merged files. The round
+  builds while a driver's pid file (`.rebuild-old.pid`, the parallel
+  runner's `rebuild-par/pids/*.pid`) names a live `rebuild_old_regions.sh`
+  or a process holds `rebuild-par/run.lock` or
+  `sz-tests/rebuild-all/run.lock` (read from `/proc/locks`, never taken).
+  `ship_packs.sh` takes turns on the shared Wikipedia cache (its prefetch
+  holds a lock).
+- Each `ship_packs.sh` starts from a clean environment (`HOME`, `USER`,
+  `PATH`, the locale; then production's items and settings, set by the
+  queue): no `SHIP_*` knob or stand-in from a test shell or the Swiss
+  preview's `env.sh` reaches a production run. The queue refuses to start
+  (exit 3) with a `PREVIEW_DIR` that is, holds or sits in production
+  (`PROD_REPO`, `/storage/streetzim`), with `PREVIEW_CHANNEL` empty or
+  `live`, or, unless `QUEUE_FORCE_WORK=1` (tests), with a `LANGPACK_WORK`,
+  `WP_CACHE`, `LANGPACK_WEBSEED`, `ROUND_TSV`, `MAPS_DIR` or `PROD_REPO`
+  other than production's, or `QUEUE_SHIP`, `QUEUE_PUBLISH` or `QUEUE_DIR`
+  set.
+- Exit 6 (archive.org listing pending): tried again after 30 min. Exit 2 (a
+  lock held), or a run killed or gone without an exit code: tried again
+  after 30 min, a loud failure after 8 in a row (`QUEUE_MAX_AGAIN`). 4 and
+  5: logged, skipped for that base. Anything else: a loud failure
+  (`queue.log`, stderr). A failure is not tried again, in this run or after
+  a restart, unless the queue starts with `QUEUE_RETRY_FAILED=1`.
+- Resumable: a map published for the same base (UUID and file MD5) is not
+  shipped again; a new or rewritten file is. Runs still going when the
+  queue stopped are counted after a restart and finished by the new queue
+  (`runs/`). State in `$LANGPACK_WORK/pack-queue/` (`status.tsv`,
+  `published.tsv`, `queue.log` in PDT). A file named `stop` there: nothing
+  new starts, the running ones finish, then the queue ends (remove it
+  before starting again). The round's files are only read.
+- `pack_queue.sh enqueue REGION ZIM` (while the queue runs, too) makes a map
+  in `/storage/streetzim` a candidate whatever `rebuild-old.tsv` says, until
+  the round writes a new row for that region.
 
 ```bash
 cd /storage/streetzim                # QUEUE_SINCE: count maps the round shipped before this start
