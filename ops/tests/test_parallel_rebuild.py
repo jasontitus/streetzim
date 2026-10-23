@@ -865,6 +865,8 @@ OK_OUT = {
     "kiwix": "  kiwix viewer smoke rc=0\n",
 }
 NAV_TIMEOUT = "TimeoutError: Navigation timeout of 240000 ms exceeded\n"
+MATRIX_FAIL = "PASS  a\nFAIL  b\n        ! search returned 0\n\n1/7 devices FAILED\n"
+KIWIX_FIND_FAIL = "FAIL  Find page returns places from the ZIM\n        clicked=null\n"
 
 
 def _gate(tmp: Path, outputs: dict[str, tuple[str, int]]) -> tuple[int, dict[str, int], str]:
@@ -878,7 +880,11 @@ def _gate(tmp: Path, outputs: dict[str, tuple[str, int]]) -> tuple[int, dict[str
     (gt / "cloud").mkdir()
     (gt / "node").write_text(STUB_NODE)
     (gt / "node").chmod(0o755)
-    (gt / "cloud" / "kiwix_viewer_gate.sh").write_text('exec "$GT/node" kiwix\n')
+    # Both record whether parallel_rebuild.sh --regate's lock (fd 6) reached them.
+    (gt / "ks").write_text('#!/bin/bash\n[ -e /proc/$$/fd/6 ] && echo open >> "$GT/ks.fd6" || echo closed >> "$GT/ks.fd6"\n')
+    (gt / "ks").chmod(0o755)
+    (gt / "cloud" / "kiwix_viewer_gate.sh").write_text(
+        '[ -e /proc/$$/fd/6 ] && echo open >> "$GT/kg.fd6" || echo closed >> "$GT/kg.fd6"\nexec "$GT/node" kiwix\n')
     for name, out in OK_OUT.items():
         (gt / f"{name}.ok").write_text(out)
     for key, (out, rc) in outputs.items():
@@ -887,8 +893,9 @@ def _gate(tmp: Path, outputs: dict[str, tuple[str, int]]) -> tuple[int, dict[str
     script = (text[start:end] + "\n"
               'log(){ echo "$*" >> "$LOG"; }\n'
               'ss(){ :; }; curl(){ echo 200; }; pgrep(){ :; }; sleep(){ :; }\n'
-              f'KS=/bin/true NODE="$GT/node" PY={sys.executable} OV=19901 KW=19902 '
+              f'KS="$GT/ks" NODE="$GT/node" PY={sys.executable} OV=19901 KW=19902 '
               'LOG="$GT/log" TMPDIR="$GT/tmp"\n'
+              'exec 6> "$GT/regate.lock"\n'
               'gate "$GT/osm-x-2026-10-23.zim" Term\n')
     r = subprocess.run(["bash", "-c", script], env={**os.environ, "GT": str(gt)}, cwd=gt,
                        capture_output=True, text=True, timeout=60)
@@ -917,10 +924,11 @@ GATE_CASES = {
         {"device-matrix": 2}, 0, ""),
     "matrix: killed by timeout(1)": (
         {"device-matrix.1": ("PASS  iPhone SE\n", 124)}, {"device-matrix": 2}, 0, ""),
-    "matrix: a real failure beside a timeout": (
-        {"device-matrix.1": ("FAIL  a\n        ! EXC " + NAV_TIMEOUT + "FAIL  b\n        ! search returned 0\n"
-                             "\n2/7 devices FAILED\n", 1)},
-        {"device-matrix": 1}, 1, "device-matrix"),
+    "matrix: a failure under load, then pass": (
+        {"device-matrix.1": (MATRIX_FAIL, 1)}, {"device-matrix": 2}, 0, ""),
+    "matrix: fails twice": (
+        {"device-matrix.1": (MATRIX_FAIL, 1), "device-matrix.2": (MATRIX_FAIL, 1)},
+        {"device-matrix": 2}, 1, "device-matrix"),
     "render: no result, timeout": (
         {"map-health.1": (NAV_TIMEOUT, 1)}, {"map-health": 2}, 0, ""),
     "render: drew too little": (
@@ -929,26 +937,53 @@ GATE_CASES = {
         {"map-health": 1}, 1, "render"),
     "kiwix: timeout": (
         {"kiwix.1": ("TimeoutError: page.goto: Timeout 240000ms exceeded.\n", 1)}, {"kiwix": 2}, 0, ""),
-    "kiwix: a finding": (
-        {"kiwix.1": ("FAIL  find page\n        TimeoutError: Waiting failed: 60000ms exceeded\n", 1)},
-        {"kiwix": 1}, 1, "kiwix"),
-    "kiwix: old viewer": (
-        {"kiwix.1": ("  FAIL: ZIM still carries the OLD viewer\n", 1)}, {"kiwix": 1}, 1, "kiwix"),
+    "kiwix: a failure under load, then pass": (
+        {"kiwix.1": (KIWIX_FIND_FAIL, 1)}, {"kiwix": 2}, 0, ""),
+    "kiwix: old viewer twice": (
+        {"kiwix.1": ("  FAIL: ZIM still carries the OLD viewer\n", 1),
+         "kiwix.2": ("  FAIL: ZIM still carries the OLD viewer\n", 1)}, {"kiwix": 2}, 1, "kiwix"),
+    "kiwix: killed by timeout(1) twice": (
+        {"kiwix.1": ("", 124), "kiwix.2": ("", 124)}, {"kiwix": 2}, 1, "kiwix"),
 }
 
 
 @pytest.mark.parametrize("case", list(GATE_CASES))
-def test_gate_retries_a_timed_out_browser_gate_once_never_a_finding(tmp_path, case):
+def test_gate_retries_once_overlap_and_render_only_on_a_timeout(tmp_path, case):
+    """Overlap/render: once more only when they timed out without a verdict.
+    Device matrix/kiwix: once more on any failure; the second run decides."""
     outputs, want_calls, want_rc, want_failed = GATE_CASES[case]
     rc, calls, log = _gate(tmp_path, outputs)
     expect = {"overlap-check": 3, "device-matrix": 1, "map-health": 1, "kiwix": 1, **want_calls}
     assert (rc, calls) == (want_rc, expect), log
     retried = sum(expect.values()) - 6
-    assert log.count("timed out (not a finding)") == retried, log
+    assert log.count("once more in") == retried, log
     if want_failed:
         assert f"GATES FAILED: {want_failed}" in log, log
     else:
         assert "GATES FAILED" not in log, log
+
+
+def test_gate_logs_both_runs_of_the_matrix_and_the_kiwix_gate(tmp_path):
+    rc, calls, log = _gate(tmp_path, {"device-matrix.1": (MATRIX_FAIL, 1), "kiwix.1": (KIWIX_FIND_FAIL, 1)})
+    assert rc == 0 and calls["device-matrix"] == calls["kiwix"] == 2, log
+    assert "device matrix run 1 FAILED (rc 1, devices failed: 1); once more in" in log
+    assert "! search returned 0" in log and "device matrix: 7/7 PASS (run 2)" in log
+    assert "kiwix in-ZIM gate run 1 FAILED (rc 1: FAIL  Find page returns places from the ZIM)" in log
+    assert "kiwix in-ZIM gate: OK (run 2)" in log
+    tmpd = tmp_path / "gt" / "tmp"
+    assert (tmpd / "ec-osm-x-2026-10-23-matrix.txt.run1").read_text() == MATRIX_FAIL
+    assert (tmpd / "ec-osm-x-2026-10-23-kiwix.txt.run1").read_text() == KIWIX_FIND_FAIL
+    rc, calls, log = _gate(tmp_path / "b", {})
+    assert rc == 0 and "(run 2)" not in log and "device matrix: 7/7 PASS\n" in log, log
+    rc, calls, log = _gate(tmp_path / "c", {"kiwix.1": (KIWIX_FIND_FAIL, 1), "kiwix.2": (KIWIX_FIND_FAIL, 1)})
+    assert rc == 1 and "kiwix in-ZIM gate: FAIL (run 2)" in log, log
+
+
+def test_gate_keeps_the_regate_lock_from_kiwix_serve(tmp_path):
+    _gate(tmp_path, {})
+    gt = tmp_path / "gt"
+    assert (gt / "ks.fd6").read_text().split() == ["closed"]
+    assert (gt / "kg.fd6").read_text().split() == ["closed"]
 
 
 def test_gate_browser_timeouts_raised():
