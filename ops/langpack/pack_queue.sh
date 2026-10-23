@@ -295,8 +295,14 @@ preview_update() {
   want=$(git -C "$PROD_REPO" rev-parse HEAD) || return 1
   have=$(git -C "$PREVIEW_DIR" rev-parse HEAD 2>/dev/null)
   if [ "$want" != "$have" ]; then
-    git -C "$PREVIEW_DIR" fetch -q "$PROD_REPO" HEAD 9>&- && git -C "$PREVIEW_DIR" checkout -q --detach "$want" || return 1
-    say "preview clone moved to $(git -C "$PREVIEW_DIR" rev-parse --short HEAD)"
+    # The channel deploy's predeploy (scripts/sync-drive-viewer.sh) rewrites
+    # tracked files in the clone (web/drive/build-info.js): a plain checkout
+    # refuses once production changed one of them. -f drops such changes;
+    # ignored files (the published recipes in web/build/recipes) are kept.
+    local dirty
+    dirty=$(git -C "$PREVIEW_DIR" status --porcelain --untracked-files=no 2>/dev/null | cut -c4- | tr '\n' ' ')
+    git -C "$PREVIEW_DIR" fetch -q "$PROD_REPO" HEAD 9>&- && git -C "$PREVIEW_DIR" checkout -q -f --detach "$want" || return 1
+    say "preview clone moved to $(git -C "$PREVIEW_DIR" rev-parse --short HEAD)${dirty:+ (local changes dropped: ${dirty% })}"
   fi
 }
 
