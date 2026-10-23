@@ -272,7 +272,9 @@ if [ -f cloud/build_torrent.py ]; then
 fi
 
 # --- 5. prune old dated ZIMs (keep last 2) ---
-"$PYTHON" cloud/cleanup_old_zims.py "streetzim-${id}" --keep 2 \
+# STREETZIM_KEEP_ZIMS: parallel_rebuild.sh keeps 3 during a round, so a region
+# uploaded twice still has its pre-round file to roll back to.
+"$PYTHON" cloud/cleanup_old_zims.py "streetzim-${id}" --keep "${STREETZIM_KEEP_ZIMS:-2}" \
     || echo "WARN cleanup skipped for ${id}"
 
 # --- 6. web deploy ---
