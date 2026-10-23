@@ -42,3 +42,7 @@ tests/test_sw_streaming.mjs
 tests/test_zim_http_source.mjs
 tests/zim_reader_js.test.mjs
 tests/test_drive_viewer_copy.py
+#
+# Tests of core tools against the build host's scripts (the runner's NVMe
+# accounting, host-env.sh's state folder); they move with those scripts.
+tests/langpack/test_nvme.py

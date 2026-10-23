@@ -27,7 +27,7 @@ from tools.langpack.webseed_e2e import free_port, ranged_server
 
 NEED = ("NODE", "CHROME_PATH", "PLAYWRIGHT_CORE")
 if not all(os.environ.get(k) and os.path.exists(os.environ[k]) for k in NEED):
-    pytest.skip(f"the browser stack: set {', '.join(NEED)} (ops/langpack/host-env.sh)", allow_module_level=True)
+    pytest.skip(f"the browser stack: set {', '.join(NEED)} (the build host's settings: docs/language-pack-pipeline.md)", allow_module_level=True)
 
 WS = "https://streetzim-build-proxy.example.workers.dev"
 

@@ -797,7 +797,8 @@ def _nvme(ship: SimpleNamespace, free_gb: int = 500, min_gb: int = 100) -> dict[
         (ship.d / x).mkdir(parents=True, exist_ok=True)
     return {"LANGPACK_SCRATCH": str(ship.d / "nvme" / "packs"), "NVME_SCRATCH": str(ship.d / "nvme" / "acct"),
             "PAR_STATE": str(ship.d / "par"), "PAR_SCRATCH": str(ship.d / "parscratch"),
-            "LANGPACK_NVME_FREE": str(free_gb * GB), "LANGPACK_NVME_MIN_GB": str(min_gb)}
+            "LANGPACK_NVME_FREE": str(free_gb * GB), "LANGPACK_MEM_AVAILABLE": str(64 * GB),
+            "LANGPACK_NVME_MIN_GB": str(min_gb)}
 
 
 def test_the_search_packs_and_gates_work_on_the_nvme(ship: SimpleNamespace) -> None:

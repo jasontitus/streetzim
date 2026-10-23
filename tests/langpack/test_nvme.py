@@ -34,7 +34,8 @@ def nv(tmp_path: Path) -> SimpleNamespace:
     base.write_bytes(os.urandom(1 << 20))
     (d / "packs" / "osm_testland_wiki-de_2026-10-13_aaaaaaaa.zim").write_bytes(b"x" * (1 << 19))
     free = 200 * GB                                    # what the volume has free, here
-    env = {**os.environ, "LANGPACK_NVME_FREE": str(free), "NVME_SCRATCH": str(d / "acct"), "PAR_STATE": str(d / "par"),
+    env = {**os.environ, "LANGPACK_NVME_FREE": str(free), "LANGPACK_MEM_AVAILABLE": str(64 * GB),
+           "NVME_SCRATCH": str(d / "acct"), "PAR_STATE": str(d / "par"),
            "PAR_SCRATCH": str(d / "parscratch"), "LANGPACK_MIN_FREE_GB": "0", "PYTHONDONTWRITEBYTECODE": "1"}
     return SimpleNamespace(d=d, base=base, free=free, env=env)
 
@@ -87,7 +88,7 @@ def test_jobs_are_lowered_to_what_fits(nv: SimpleNamespace) -> None:
     p = _plan(nv, leave / GB)
     assert p["use"] and p["gate_jobs"] == 2, p
     # and to what MemAvailable allows above LANGPACK_MIN_FREE_GB (4 GB a gate job)
-    mem = int(Path("/proc/meminfo").read_text().split("MemAvailable:")[1].split()[0]) * 1024
+    mem = int(nv.env["LANGPACK_MEM_AVAILABLE"])
     p = _plan(nv, 0, LANGPACK_MIN_FREE_GB=str((mem - 9 * GB) / GB))
     assert p["gate_jobs"] == 2, p
 

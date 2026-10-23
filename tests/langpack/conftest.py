@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,17 @@ def tool(name: str, *args: object, env: dict[str, str] | None = None,
     cmd = ([sys.executable, str(path)] if name.endswith(".py") else [str(path)]) + [str(a) for a in args]
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", **(env or {})})
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_memory_pause() -> Iterator[None]:
+    """ops/langpack/host-env.sh pauses pack builds and gates while
+    MemAvailable is below LANGPACK_MIN_FREE_GB (40 by default, the build
+    host's margin): on a machine with less memory a test would wait forever.
+    A test of the pause sets its own value."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("LANGPACK_MIN_FREE_GB", "0")
+        yield
 
 
 @pytest.fixture(scope="session")

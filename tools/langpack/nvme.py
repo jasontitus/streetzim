@@ -32,7 +32,8 @@ was copied from, prints the copy's path. sweep: removes run folders whose
 process is gone. LANGPACK_PAR_STATE: the parallel runner's state folder
 (ops/langpack/host-env.sh sets it; unset, no runner's builds are counted).
 Tests: LANGPACK_NVME_FREE (the free bytes to count, as parallel_rebuild.sh's
-PAR_FREE_GB_CMD), NVME_SCRATCH, PAR_STATE (over LANGPACK_PAR_STATE), PAR_SCRATCH.
+PAR_FREE_GB_CMD), LANGPACK_MEM_AVAILABLE (the MemAvailable bytes to count),
+NVME_SCRATCH, PAR_STATE (over LANGPACK_PAR_STATE), PAR_SCRATCH.
 """
 from __future__ import annotations
 
@@ -136,6 +137,8 @@ def reserved_by_others(own: str | None = None) -> int:
 
 
 def mem_available() -> int:
+    if os.environ.get("LANGPACK_MEM_AVAILABLE"):
+        return int(os.environ["LANGPACK_MEM_AVAILABLE"])
     for line in open("/proc/meminfo"):
         if line.startswith("MemAvailable:"):
             return int(line.split()[1]) * 1024
