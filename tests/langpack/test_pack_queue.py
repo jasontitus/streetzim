@@ -757,3 +757,43 @@ def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -
     assert "beta: published under an older recipe scheme: shipped again for scheme 2" in log_text(q)
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1        # once
+
+
+def test_a_run_records_the_scheme_it_was_started_under(q: SimpleNamespace) -> None:
+    """A ship_packs.sh run started by a queue of the old scheme (its runs/
+    file and exit code say none) and finished by a restarted queue of scheme
+    2 is recorded under scheme 1, so the map ships again for scheme 2; a run
+    of scheme 2 is recorded under 2 and not shipped again."""
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    done = q.qd / "published.tsv"
+    rows = [x.split("\t") for x in done.read_text().splitlines()]
+    row = {r[0]: r for r in rows}
+    done.write_text("".join("\t".join(r[:5] if r[0] in ("beta", "alpha") else r) + "\n" for r in rows))
+    for rid, (runs, rc) in {"beta": ("", "0"), "alpha": (" 2", "0 2")}.items():   # the old queue's, the new one's
+        r = row[rid]
+        (q.qd / "runs" / rid).write_text(f"999999 - {r[3]} {r[1]}/{r[2]}{runs}\n")
+        (q.qd / f"rc-{rid}").write_text(rc + "\n")
+    n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    after = {rid: [r[5] for r in (x.split("\t") for x in done.read_text().splitlines()) if r[0] == rid and len(r) == 6]
+             for rid in n}                                  # (the rows written above have no scheme)
+    assert after["beta"] == ["1", "2"], after          # finished under scheme 1, then shipped again for 2
+    assert after["alpha"] == ["2"], after
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
+    # the queue writes the scheme into a run's file and its exit code
+    import time
+    (q.qd / "published.tsv").write_text("")
+    p = _start(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="3", QUEUE_JOBS="1")
+    try:
+        t0 = time.time()
+        while not (q.qd / "runs" / "beta").exists() and time.time() - t0 < 60:
+            time.sleep(0.05)
+        assert (q.qd / "runs" / "beta").read_text().split()[4] == "2"
+        while not (q.qd / "rc-beta").exists() and time.time() - t0 < 60:
+            time.sleep(0.05)
+        assert (q.qd / "rc-beta").read_text().split() == ["0", "2"]
+        assert p.wait(timeout=120) == 0
+    finally:
+        if p.poll() is None:
+            p.kill()

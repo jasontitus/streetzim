@@ -14,7 +14,9 @@ PACKS_DIR/osm_<R>_search-<langs>[.<L>]_<date>_<first 8 hex of the base's UUID>.z
 with its sidecar and gate (".<L>" unless the set's one language beyond the
 region's is L: search-de-fr-it-ja-rm is ja's, search-de-fr-it-rm.de de's).
 An entry with no pack needs none (the base's own indexes find everything in
-it). Until 2026-10-23 entries with the same packs shared one pack indexed in
+it), and an entry that lacks a pack it must carry (recipe2.wanted_packs: its
+own, a region language's) gets none: make_site.py refuses it (its row says
+which are missing; a later run, once they are built, builds its search pack). Until 2026-10-23 entries with the same packs shared one pack indexed in
 the set's own language, else the base's: Switzerland's de, fr, it, rm and en
 versions all had English stemming; such a pack still serves the version
 whose language it is indexed in. Prints one JSON line per pack, in the
@@ -43,7 +45,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from tools.langpack import index_pack  # noqa: E402
 from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, blob_of, open_pack  # noqa: E402
-from tools.langpack.recipe2 import available_packs, find_search_pack, menu_packs, search_lang  # noqa: E402
+from tools.langpack.recipe2 import available_packs, find_search_pack, menu_packs, search_lang, wanted_packs  # noqa: E402
 
 
 def _into(src: str, dst: str) -> None:
@@ -87,9 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     base_wiki = base_lang if cfg.get("hasWikiArticles") else None
     avail = available_packs(a.packs_dir, a.base, a.region)
     sets: dict[tuple[tuple[str, ...], str], list[str]] = {}       # (pack files, index language) -> entries
+    lacking: list[dict] = []                                         # entries make_site.py will refuse
     for L in [x for x in a.langs.split(",") if x]:
         packs = menu_packs(rl, base_wiki, L, avail)
-        if packs:
+        missing = sorted(wanted_packs(rl, base_wiki, L) - set(packs))
+        if missing:
+            lacking.append({"packs": packs, "entries": [L], "built": False, "missing": missing})
+        elif packs:
             sets.setdefault((tuple(sorted(avail[x] for x in packs)), search_lang(L)), []).append(L)
     u8 = z.header.uuid.hex()[:8]
     rows: list[dict] = []
@@ -120,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
                 pass
         ex = ProcessPoolExecutor(max_workers=min(a.jobs, len(todo)), mp_context=multiprocessing.get_context("spawn"))
         futs = {k: ex.submit(build_one, *x) for k, x in args.items()}
+    for row in lacking:
+        print(json.dumps(row, ensure_ascii=False), flush=True)
     bad = 0
     try:
         for row in rows:                            # in the menu's order, each as soon as it is built

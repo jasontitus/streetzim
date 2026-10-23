@@ -324,10 +324,10 @@ def test_a_search_pack_counts_only_for_its_base_and_exact_packs(sp: SimpleNamesp
 
 def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> None:
     """Each entry's search pack is indexed in its own language: entries with
-    the same packs (fr, th without its pack, en) share none; an entry without
-    packs needs none; a rerun builds nothing again; a pack of the old scheme
-    (one per pack set, indexed in the base's language) still serves the entry
-    of its language."""
+    the same packs (fr, en) share none; an entry without packs needs none, nor
+    one that lacks a pack it must carry (th: make_site.py refuses it); a rerun
+    builds nothing again; a pack of the old scheme (one per pack set, indexed
+    in the base's language) still serves the entry of its language."""
     from tests.langpack import lpzims
     packs = tmp_path / "packs"
     packs.mkdir()
@@ -345,15 +345,17 @@ def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> N
     r = tool("search_packs.py", *args)
     rows = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]   # libzim prints too
     assert r.returncode == 0, r.stderr[-2000:]
-    # de: de+fr; fr, th (no th pack) and en: fr alone, each in its own language; en reuses the old pack
+    # th has no th pack: none (make_site.py refuses it); de: de+fr; fr and en: fr alone, each in its
+    # own language; en reuses the old pack
     u8 = lpzims.read_uuid(lp.base)[:8]
-    got = [(tuple(x["packs"]), tuple(x["entries"]), x["search_pack"], x["built"]) for x in rows]
+    assert rows[0] == {"packs": ["fr"], "entries": ["th"], "built": False, "missing": ["th"]}, rows[0]
+    got = [(tuple(x["packs"]), tuple(x["entries"]), x["search_pack"], x["built"]) for x in rows[1:]]
     assert got == [(("de", "fr"), ("de",), f"osm_testland_search-de-fr_2026-10-22_{u8}.zim", True),
                    (("fr",), ("fr",), f"osm_testland_search-fr.fr_2026-10-22_{u8}.zim", True),
-                   (("fr",), ("th",), f"osm_testland_search-fr.th_2026-10-22_{u8}.zim", True),
                    (("fr",), ("en",), old.name, False)], got
+    assert not list(packs.glob("*search-fr.th*"))
     assert all(x["gate_ok"] and x["index_lang"] == x["entries"][0] for x in rows if x["built"])
-    for x in rows:
+    for x in rows[1:]:
         assert json.loads((packs / (x["search_pack"] + ".json")).read_text())["lang"] == x["entries"][0]
     r2 = tool("search_packs.py", *args)
     assert [json.loads(x)["built"] for x in r2.stdout.splitlines() if x.startswith("{")] == [False] * 4

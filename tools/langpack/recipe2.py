@@ -436,9 +436,15 @@ def blob_of_mapcfg(plan) -> bytes:
     return plan.layout["mapcfg"]
 
 
+def wanted_packs(region_langs: list[str], base_wiki: str | None, L: str) -> set[str]:
+    """The packs entry L must carry: the region's languages, L's own and
+    English, less the base's own Wikipedia. make_site.py refuses an entry
+    that lacks any of them."""
+    return (set(region_langs) | {L, "en"}) - ({base_wiki} if base_wiki else set())
+
+
 def menu_packs(region_langs: list[str], base_wiki: str | None, L: str, available: dict[str, str]) -> list[str]:
-    want = (set(region_langs) | {L, "en"}) - ({base_wiki} if base_wiki else set())
-    return sorted(x for x in want if x in available)
+    return sorted(x for x in wanted_packs(region_langs, base_wiki, L) if x in available)
 
 
 def main(argv=None):
