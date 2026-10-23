@@ -21,8 +21,7 @@ maps.
    multilingual base, and if so, which of the four options below?
 5. **Who builds what.** StreetZim: the format spec, test files, a C++
    splicer for libkiwix and the Zimfarm side. Kiwix: the catalog entries
-   and the download step in each app, about 7-14 developer-weeks (12-23 in
-   all with StreetZim's part; *estimate*).
+   and the download step in each app.
 
 ## Why
 
@@ -121,16 +120,13 @@ Switzerland, 23 languages.
 
 ## What StreetZim offers, what Kiwix would build
 
-All durations are *estimates*.
-
-| work | who | weeks |
-|---|---|---|
-| Format spec, schema, test files (a small base, packs, recipes, expected results) | StreetZim | 1-2 |
-| libkiwix: recipe reader, checks, splicer with resume; StreetZim offers the C++ code | StreetZim, reviewed by libkiwix maintainers | 2-4 |
-| Zimfarm: an offliner for the packs and recipes; uploading recipes | StreetZim, with Zimfarm maintainers | 2-3 |
-| Catalog: the recipe link, the book fields, `.meta4` for the parts, packs kept off the list | Kiwix / openZIM | 1-2 |
-| Kiwix Desktop, Android, iOS: a language choice on a map, the download and splice step | Kiwix | 2-4 each |
-| **Total** | | **12-23** |
+| work | who |
+|---|---|
+| Format spec, schema, test files (a small base, packs, recipes, expected results) | StreetZim |
+| libkiwix: recipe reader, checks, splicer with resume; StreetZim offers the C++ code | StreetZim, reviewed by libkiwix maintainers |
+| Zimfarm: an offliner for the packs and recipes; uploading recipes | StreetZim, with Zimfarm maintainers |
+| Catalog: the recipe link, the book fields, `.meta4` for the parts, packs kept off the list | Kiwix / openZIM |
+| Kiwix Desktop, Android, iOS: a language choice on a map, the download and splice step | Kiwix |
 
 StreetZim keeps building and checking the bases, packs and recipes for
 every region it publishes.
