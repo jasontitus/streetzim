@@ -8,8 +8,10 @@ searches it types and two points it routes between. A hand-written file in
 tools/langpack/regions/ wins (ship_packs.sh looks there first); this
 writes one for any other base, from the base alone:
 
-- city: a place record (category-index/place.json; a base without one:
-  the geo-index's rows, "place" rows as cities) with a Q-ID that the
+- city: a place record (category-index/place.json; a base without one,
+  or none of whose places qualifies: the base's search records of cities,
+  towns and villages, classed as the map's style draws them; a base without
+  those either: the geo-index's rows, "place" rows as cities) with a Q-ID that the
   base's own wiki-geo-index lists (so the base, not only a pack, offers its
   article), inside map-config's clipArea when the base has one. First a
   city or town within 100 km of map-config's center (the registry's main
@@ -33,6 +35,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,6 +45,8 @@ from tools.langpack.merge_zim import blob_of  # noqa: E402
 from tools.langpack.zimfmt import ZimReader  # noqa: E402
 
 CLASS_RANK = {"city": 0, "town": 1}
+SEARCH_CLASSES = ("city", "town", "village")
+PLACE_RECORD = re.compile(rb'"t":\s*"place",\s*"s":\s*"(?:city|town|village)"')
 NEAR_KM = 100.0          # the main city's surroundings come first
 
 
@@ -70,6 +75,47 @@ def blob(z: ZimReader, path: str) -> bytes | None:
     return blob_of(z, (ord("C"), path.encode()))
 
 
+def search_places(z: ZimReader, geo_q: set) -> list[dict]:
+    """The base's search records (search-data/) of cities, towns and villages
+    whose Q-ID the geo-index lists, one per Q-ID (a city's before a town's
+    before a village's, else the first in path order). A big map's search files
+    hold millions of streets and POIs: only the place records are parsed,
+    found in the raw JSON by their leading keys (the builder writes "n",
+    "t", "s" first)."""
+    prefix = b"search-data/"
+    items: dict[int, list[int]] = {}   # cluster -> its blobs, in path order
+    i = z.lower_bound(ord("C"), prefix)
+    while i < z.header.entry_count:
+        d = z.dirent_at(i)
+        if d.ns != ord("C") or not d.path.startswith(prefix):
+            break
+        if not d.is_redirect and d.cluster is not None and d.blob is not None:
+            items.setdefault(d.cluster, []).append(d.blob)
+        i += 1
+    dec = json.JSONDecoder()
+    seen: dict[str, dict] = {}
+    for cluster, blobs in items.items():
+        data = z.cluster_blobs(cluster)
+        for b in blobs:
+            text = data[b]
+            for m in PLACE_RECORD.finditer(text):
+                start = text.rfind(b'{"n"', 0, m.start())
+                end = text.find(b'{"n"', m.end())
+                if start < 0:
+                    continue
+                try:
+                    r, _ = dec.raw_decode(text[start:end if end >= 0 else len(text)].decode("utf-8"))
+                except ValueError:
+                    continue
+                if (isinstance(r, dict) and r.get("t") == "place" and r.get("s") in SEARCH_CLASSES
+                        and r.get("q") in geo_q and r.get("n")
+                        and isinstance(r.get("a"), (int, float)) and isinstance(r.get("o"), (int, float))):
+                    k = r["q"]
+                    if k not in seen or SEARCH_CLASSES.index(r["s"]) < SEARCH_CLASSES.index(seen[k]["s"]):
+                        seen[k] = r
+    return list(seen.values())
+
+
 def region_file(base: str) -> dict:
     z = ZimReader(base)
     cfg = json.loads(blob(z, "map-config.json") or b"{}")
@@ -84,7 +130,13 @@ def region_file(base: str) -> dict:
     cands = [p for p in places if isinstance(p, dict) and p.get("q") in geo_q
              and isinstance(p.get("a"), (int, float)) and isinstance(p.get("o"), (int, float)) and p.get("n")]
     if not cands:
-        # no category files (older bases): the geo-index's own rows, places first
+        # no category file, or none of its places qualifies: the search records'
+        # places, by the class the style draws
+        found = search_places(z, geo_q)
+        if found:
+            places, cands = found, list(found)
+    if not cands:
+        # nor search records: the geo-index's own rows, places first
         cands = [{"n": t.replace("_", " "), "a": r[0], "o": r[1], "q": r[3], "s": "city" if r[2] == "place" else r[2]}
                  for t, r in sorted(geo.items()) if isinstance(r, list) and len(r) >= 4 and isinstance(r[3], str)
                  and isinstance(r[0], (int, float)) and isinstance(r[1], (int, float))]

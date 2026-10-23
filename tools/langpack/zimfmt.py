@@ -24,6 +24,7 @@ dirent
 """
 from __future__ import annotations
 
+import itertools
 import struct
 from dataclasses import dataclass
 from collections.abc import Callable, Iterator
@@ -240,10 +241,31 @@ class ZimReader:
         """Content of one blob, decompressing the cluster stream if needed."""
         off = self.cluster_offset(cluster)
         info = self.read_at(off, 1)[0]
-        comp = info & 0x0F
-        if comp in (0, 1):
+        if info & 0x0F in (0, 1):
             o, n = self.raw_blob(cluster, blob)
             return self.read_at(o, n)
+        exact, offsets = self._cluster_stream(off, info)
+        start, end = offsets[blob], offsets[blob + 1]
+        exact(start - offsets[0])          # skip earlier blobs
+        return exact(end - start)
+
+    def cluster_blobs(self, cluster: int) -> list[bytes]:
+        """Every blob of one cluster, in order, decompressing it once."""
+        off = self.cluster_offset(cluster)
+        info = self.read_at(off, 1)[0]
+        width = 8 if info & 0x10 else 4
+        fmt = U64 if width == 8 else U32
+        if info & 0x0F in (0, 1):
+            first = fmt.unpack(self.read_at(off + 1, width))[0]
+            offsets = [v for (v,) in fmt.iter_unpack(self.read_at(off + 1, first))]
+            return [self.read_at(off + 1 + a, b - a) for a, b in itertools.pairwise(offsets)]
+        exact, offsets = self._cluster_stream(off, info)
+        return [exact(b - a) for a, b in itertools.pairwise(offsets)]
+
+    def _cluster_stream(self, off: int, info: int) -> tuple[Callable[[int], bytes], list[int]]:
+        """A compressed cluster's reader, positioned after its offset table,
+        and the table."""
+        comp = info & 0x0F
         width = 8 if info & 0x10 else 4
         fmt = U64 if width == 8 else U32
         self.f.seek(off + 1)
@@ -280,11 +302,11 @@ class ZimReader:
             return bytes(out)
         first = fmt.unpack(exact(width))[0]
         offsets = [first] + [v for (v,) in fmt.iter_unpack(exact(first - width))]
-        start, end = offsets[blob], offsets[blob + 1]
-        exact(start - first)               # skip earlier blobs
-        return exact(end - start)
+        return exact, offsets
 
-    def find(self, ns: int, path: bytes) -> int | None:
+    def lower_bound(self, ns: int, path: bytes) -> int:
+        """The index of the first dirent whose (namespace, path) is not
+        below the given one (entry_count when none)."""
         lo, hi = 0, self.header.entry_count
         while lo < hi:
             mid = (lo + hi) // 2
@@ -293,6 +315,10 @@ class ZimReader:
                 lo = mid + 1
             else:
                 hi = mid
+        return lo
+
+    def find(self, ns: int, path: bytes) -> int | None:
+        lo = self.lower_bound(ns, path)
         if lo < self.header.entry_count and self.dirent_at(lo).key == (ns, path):
             return lo
         return None

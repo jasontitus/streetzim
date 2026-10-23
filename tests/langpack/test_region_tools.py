@@ -19,7 +19,10 @@ OUTLINE = {"type": "Polygon", "coordinates": [[[19.0, 34.0], [28.0, 34.0], [28.0
 
 
 def _base(path: Path, places: list[dict], geo: dict, cfg: dict, admin: list[dict] | None = None,
-          title: str = "OSM - Testland") -> Path:
+          title: str = "OSM - Testland", search: dict[str, list[dict]] | None = None,
+          raw: tuple[str, ...] = ()) -> Path:
+    """`search`: search-data/<name>.json files, written as the builder does;
+    the names in `raw` stored uncompressed."""
     from libzim.writer import Creator
     with Creator(str(path)).config_indexing(False, "eng") as c:
         c.set_mainpath("index.html")
@@ -31,6 +34,10 @@ def _base(path: Path, places: list[dict], geo: dict, cfg: dict, admin: list[dict
         c.add_item(lpzims._Item("category-index/place.json", "", "application/json", json.dumps(places)))
         c.add_item(lpzims._Item("category-index/admin.json", "", "application/json", json.dumps(admin or [])))
         c.add_item(lpzims._Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
+        for name, rows in (search or {}).items():
+            c.add_item(lpzims._Item(f"search-data/{name}.json", "", "application/json",
+                                    json.dumps(rows, separators=(",", ":"), ensure_ascii=False),
+                                    compress=False if name in raw else None))
     return path
 
 
@@ -87,6 +94,100 @@ def test_region_json_falls_back_to_the_geo_index_and_fails_without_one(tmp_path:
     none = _base(tmp_path / "n.zim", PLACES, {}, {"name": "T", "center": CENTER})
     r2 = tool("region_json.py", none)
     assert r2.returncode == 1 and "no place with a Q-ID" in r2.stderr
+
+
+# osm-balkans-2026-10-23: no category-index/place.json; a neighbourhood's article
+# point is nearer map-config's center than the capital's
+BALKANS_GEO = {"Belgrade": [44.81781, 20.4569, "place", "Q3711", "capital of Serbia"],
+               "Topčidersko_Brdo": [44.78579, 20.44972, "place", "Q655022", "neighborhood"],
+               "Novi_Sad": [45.25514, 19.84517, "place", "Q55630", "city in Serbia"],
+               "Ripanj": [44.6386, 20.5267, "place", "Q1013458", "village in Serbia"],
+               "Zemun": [44.8433, 20.4011, "place", "Q190656", "municipality in Belgrade"]}
+BALKANS_SEARCH = {
+    "be~l~c": [{"n": "Belgrade", "t": "place", "s": "city", "a": 44.81781, "o": 20.4569, "nn": "Београд", "q": "Q3711"},
+               {"n": "Belgrade Fortress", "t": "historic", "s": "castle", "a": 44.823, "o": 20.450, "q": "Q1059"}],
+    "br~d~c": [{"n": "Topčidersko brdo", "t": "place", "s": "neighbourhood", "a": 44.78579, "o": 20.44972,
+                "nn": "Топчидерско брдо", "q": "Q655022"}],
+    "no": [{"n": "Novi Sad", "t": "place", "s": "city", "a": 45.25514, "o": 19.84517, "nn": "Нови Сад", "q": "Q55630"}],
+    "ze": [{"n": "Zemun", "t": "place", "s": "suburb", "a": 44.8433, "o": 20.4011, "q": "Q190656"},
+           {"n": "Zemun", "t": "place", "s": "suburb", "a": 44.8433, "o": 20.4011, "q": "Q190656"}],
+    "ri": [{"n": "Ripanj", "t": "place", "s": "village", "a": 44.6386, "o": 20.5267, "q": "Q1013458"}],
+}
+BALKANS_CFG = {"name": "Balkans", "center": [20.4489, 44.7866]}
+
+
+def test_region_json_without_place_records_reads_the_search_records(tmp_path: Path) -> None:
+    b = _base(tmp_path / "b.zim", [], BALKANS_GEO, BALKANS_CFG, search=BALKANS_SEARCH)
+    r = _rj(b)
+    assert r["city"]["qid"] == "Q3711" and r["generated"] == {
+        "by": "region_json.py", "city": "Belgrade", "class": "city", "base": "b.zim"}
+    assert r["search"]["native"] == {"q": "Београд", "expect": "Belgrade"}     # the record's native name
+    assert r["search"]["english"] == {"q": "Belgrade", "expect": "Belgrade"}
+    assert r["named_qids"] == "Q3711,Q55630"
+    # without the capital's article: the other city, not the nearer neighbourhood, suburb or village
+    geo = {k: v for k, v in BALKANS_GEO.items() if k != "Belgrade"}
+    assert _rj(_base(tmp_path / "b2.zim", [], geo, BALKANS_CFG, search=BALKANS_SEARCH))["generated"]["city"] == "Novi Sad"
+    # only a village drawn: the village
+    only = {"ri": BALKANS_SEARCH["ri"], "br~d~c": BALKANS_SEARCH["br~d~c"]}
+    assert _rj(_base(tmp_path / "b3.zim", [], BALKANS_GEO, BALKANS_CFG, search=only))["generated"]["city"] == "Ripanj"
+
+
+def test_region_json_reads_the_search_records_when_no_category_place_qualifies(tmp_path: Path) -> None:
+    """A place index whose places have no Q-ID the geo-index lists: the search
+    records' city, not the geo-index's nearest row."""
+    unlinked = [{k: v for k, v in r.items() if k != "q"} for r in BALKANS_SEARCH["be~l~c"][:1]]
+    unlinked[0]["s"] = "city"
+    b = _base(tmp_path / "b.zim", unlinked, BALKANS_GEO, BALKANS_CFG, search=BALKANS_SEARCH)
+    assert _rj(b)["generated"] == {"by": "region_json.py", "city": "Belgrade", "class": "city", "base": "b.zim"}
+
+
+def test_region_json_keeps_the_bigger_class_of_records_sharing_a_q_id(tmp_path: Path) -> None:
+    """A village and a town linked to one article (the village first in path
+    order): the town's record is the one kept."""
+    geo = {"Sopot": [44.5194, 20.5753, "place", "Q1013179", "town in Serbia"]}
+    search = {"ro": [{"n": "Rogača", "t": "place", "s": "village", "a": 44.42, "o": 20.53, "q": "Q1013179"}],
+              "so": [{"n": "Sopot", "t": "place", "s": "town", "a": 44.5194, "o": 20.5753, "q": "Q1013179"}]}
+    r = _rj(_base(tmp_path / "b.zim", [], geo, BALKANS_CFG, search=search))
+    assert (r["generated"]["city"], r["generated"]["class"]) == ("Sopot", "town")
+
+
+def test_region_json_reads_search_records_from_any_cluster(tmp_path: Path) -> None:
+    """Search files in compressed and uncompressed clusters, among other
+    entries: each cluster read whole gives the bytes blob by blob reading
+    does, and the place records in either are found."""
+    from tools.langpack.zimfmt import ZimReader
+    search = {**BALKANS_SEARCH, "a": [{"n": "Ada", "t": "poi", "s": "shop", "a": 44.8, "o": 20.4}]}
+    b = _base(tmp_path / "b.zim", [], BALKANS_GEO, BALKANS_CFG, search=search, raw=("be~l~c", "ri"))
+    z = ZimReader(str(b))
+    blobs: dict[int, set[int]] = {}
+    for d in z.iter_dirents():
+        if not d.is_redirect and d.cluster is not None and d.blob is not None:
+            blobs.setdefault(d.cluster, set()).add(d.blob)
+    kinds = {z.cluster_info(c) & 0x0F for c in blobs}
+    assert len(kinds) > 1, kinds                              # both kinds of cluster
+    for c, bs in blobs.items():
+        whole = z.cluster_blobs(c)
+        assert len(whole) >= max(bs) + 1
+        assert [whole[x] for x in sorted(bs)] == [z.blob_bytes(c, x) for x in sorted(bs)]
+    first = z.lower_bound(ord("C"), b"search-data/")
+    assert z.dirent_at(first).path == b"search-data/a.json"
+    assert z.find(ord("C"), b"search-data/") is None
+    assert z.lower_bound(ord("Z"), b"") == z.header.entry_count
+    r = _rj(b)
+    assert r["generated"]["city"] == "Belgrade" and r["named_qids"] == "Q3711,Q55630"
+    geo = {k: v for k, v in BALKANS_GEO.items() if k not in ("Belgrade", "Novi_Sad")}
+    assert _rj(_base(tmp_path / "b2.zim", [], geo, BALKANS_CFG, search=search,
+                     raw=("be~l~c", "ri")))["generated"]["city"] == "Ripanj"
+
+
+def test_region_json_names_the_search_record_not_the_article_title(tmp_path: Path) -> None:
+    geo = {"New_York_City": [40.7127, -74.0059, "place", "Q60", "most populous city in the United States"],
+           "Trenton,_New_Jersey": [40.2170, -74.7429, "place", "Q25330", "capital city of New Jersey"]}
+    search = {"ne": [{"n": "New York", "t": "place", "s": "city", "a": 40.7127, "o": -74.0059, "q": "Q60"}],
+              "tr": [{"n": "Trenton", "t": "place", "s": "city", "a": 40.2170, "o": -74.7429, "q": "Q25330"}]}
+    r = _rj(_base(tmp_path / "b.zim", [], geo, {"name": "East Coast", "center": [-74.0, 40.71]}, search=search))
+    assert r["generated"]["city"] == "New York"
+    assert r["search"]["native"] == {"q": "New York", "expect": "New York"}
 
 
 def _wiki(tmp_path: Path, langs: list[str]) -> Path:
