@@ -2,7 +2,7 @@
 """Build the search packs a region's menu needs (index_pack.py).
 
     search_packs.py BASE.zim PACKS_DIR --region R --langs de,el,... --region-langs el
-        [--cache DIR] [--date YYYY-MM-DD]
+        [--cache DIR] [--date YYYY-MM-DD] [--jobs N] [--work-dir DIR]
 
 Every menu entry L carries the packs recipe2.menu_packs gives it; entries
 with the same packs (on Greece: el and en both carry el alone) share one
@@ -14,15 +14,24 @@ indexes find everything in it).
 
 The index language (libzim's stemmer) is the set's language that is not one
 of the region's (the visitor's), else the base's. Prints one JSON line per
-pack set; exit 1 if a search pack fails its gate.
+pack set, in the menu's order; exit 1 if a search pack fails its gate.
+
+--jobs N builds N packs at a time, each in a process of its own; the base's
+pages are read once first (index_pack.py's index-text cache, with --cache).
+--work-dir DIR (the NVMe scratch): each pack is built and gated there and
+then moved into PACKS_DIR, its sidecars first, each through a temporary name
+in PACKS_DIR, so a reader sees a pack there only with its gate beside it.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
 import json
+import multiprocessing
 import os
+import shutil
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +40,28 @@ if ROOT not in sys.path:
 from tools.langpack import index_pack  # noqa: E402
 from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, blob_of, open_pack  # noqa: E402
 from tools.langpack.recipe2 import available_packs, find_search_pack, menu_packs  # noqa: E402
+
+
+def _into(src: str, dst: str) -> None:
+    """src moved to dst through a temporary name beside dst (dst's folder may be another disk)."""
+    tmp = os.path.join(os.path.dirname(dst), f".{os.path.basename(dst)}.{os.getpid()}.part")
+    shutil.copyfile(src, tmp)
+    os.replace(tmp, dst)
+    os.remove(src)
+
+
+def build_one(base: str, files: list[str], lang: str, region: str, out: str, cache: str | None,
+              work: str | None) -> dict:
+    """index_pack.build, in DIR when given, then moved into out's folder (the
+    pack last: its gate and sidecar are there before it)."""
+    if not work:
+        return index_pack.build(base, files, lang, region, out, Path(cache) if cache else None)
+    os.makedirs(work, exist_ok=True)
+    w = os.path.join(work, os.path.basename(out))
+    side = index_pack.build(base, files, lang, region, w, Path(cache) if cache else None)
+    for ext in (".json", ".gate.json", ""):
+        _into(w + ext, out + ext)
+    return side
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--region-langs", default="")
     ap.add_argument("--cache", default=None)
     ap.add_argument("--date", default=datetime.date.today().isoformat())
+    ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument("--work-dir", default=None)
     a = ap.parse_args(argv)
     rl = [x for x in a.region_langs.split(",") if x]
     z = ZimReader(a.base)
@@ -55,11 +88,13 @@ def main(argv: list[str] | None = None) -> int:
         if packs:
             sets.setdefault(tuple(sorted(avail[x] for x in packs)), []).append(L)
     u8 = z.header.uuid.hex()[:8]
-    bad = 0
+    rows: list[dict] = []
+    todo: list[tuple] = []                          # (row, build_one's arguments)
     for files, entries in sets.items():
         have = find_search_pack(a.packs_dir, a.base, list(files))
         langs = sorted(open_pack(f).lang for f in files)
         row: dict = {"packs": langs, "entries": entries}
+        rows.append(row)
         if have:
             row["search_pack"] = os.path.basename(have)
             row["built"] = False
@@ -67,11 +102,32 @@ def main(argv: list[str] | None = None) -> int:
             own = [x for x in langs if x not in rl]
             lang = own[0] if len(own) == 1 else base_lang
             out = os.path.join(a.packs_dir, f"osm_{a.region}_search-{'-'.join(langs)}_{a.date}_{u8}.zim")
-            side = index_pack.build(a.base, list(files), lang, a.region, out, Path(a.cache) if a.cache else None)
-            row.update(search_pack=os.path.basename(out), built=True, index_lang=lang, bytes=side["bytes"],
-                       seconds=side["seconds"], gate_ok=side["gate"]["ok"], problems=side["gate"]["problems"])
-            bad += not side["gate"]["ok"]
-        print(json.dumps(row, ensure_ascii=False), flush=True)
+            row.update(search_pack=os.path.basename(out), built=True, index_lang=lang)
+            todo.append((row, (a.base, list(files), lang, a.region, out, a.cache, a.work_dir)))
+    args = {id(row): x for row, x in todo}
+    futs = {}
+    ex = None
+    side_by_side = len(todo) > 1 and a.jobs > 1
+    print(f"search packs: {len(todo)} to build, {min(a.jobs, len(todo)) if side_by_side else 1} at a time"
+          + (f", in {a.work_dir}" if a.work_dir else ""), file=sys.stderr, flush=True)
+    if side_by_side:
+        if a.cache:                                 # the base's pages read once, for every build
+            for _ in index_pack.base_entries(a.base, Path(a.cache), lambda m: print(m, file=sys.stderr, flush=True)):
+                pass
+        ex = ProcessPoolExecutor(max_workers=min(a.jobs, len(todo)), mp_context=multiprocessing.get_context("spawn"))
+        futs = {k: ex.submit(build_one, *x) for k, x in args.items()}
+    bad = 0
+    try:
+        for row in rows:                            # in the menu's order, each as soon as it is built
+            if id(row) in args:
+                side = futs[id(row)].result() if ex else build_one(*args[id(row)])
+                row.update(bytes=side["bytes"], seconds=side["seconds"], gate_ok=side["gate"]["ok"],
+                           problems=side["gate"]["problems"])
+                bad += not side["gate"]["ok"]
+            print(json.dumps(row, ensure_ascii=False), flush=True)
+    finally:
+        if ex:
+            ex.shutdown(cancel_futures=True)
     return 1 if bad else 0
 
 

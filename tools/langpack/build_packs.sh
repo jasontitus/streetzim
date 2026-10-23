@@ -11,7 +11,17 @@
 #   --cache; default its own), PACK_DATE (file-name date, default today),
 #   PACK_GATE_ZIMCHECK (the official zimcheck, else zimcheck on PATH; anything
 #   else is refused; the builder gets it as ZIMCHECK_BIN too), BUILDER (tests
-#   substitute a fake), LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it).
+#   substitute a fake), LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it),
+#   LANGPACK_TMP (the builder's TMPDIR; default $LANGPACK_WORK/tmp),
+#   PACK_BUILD_TIMEOUT (seconds a build may take; default 3 h per 3 GB of base,
+#   at least 3 h: during a rebuild round the source ZIMs' random reads share the
+#   disk with the map builds), PACK_GATE_TIMEOUT (pack_gate.py's, 3600),
+#   WIKI_NVME_DIR (/mnt/data/tilemaker/streetzim-wiki: a source ZIM read from
+#   the verified copy parallel_rebuild.sh keeps there of the English one, when
+#   its size and its .verified marker match the original; else from WIKI_SRC).
+# A build that ran out of its time (the builder's or the gate's timeout, exit
+# 124) leaves OUTDIR/.timeout-<L>: ship_packs.sh tells the queue to try that
+# language again later; any other failure leaves none.
 set -uo pipefail
 R=$1; B=$(readlink -f "$2"); LANGS=$4
 T=$(cd "$(dirname "$0")" && pwd)
@@ -37,8 +47,31 @@ DATE=${PACK_DATE:-$(date +%F)}
 # packs for two bases of a region never share a name, on archive.org or here.
 BU8=$(od -An -tx1 -j8 -N4 "$B" | tr -d ' \n')
 [ ${#BU8} = 8 ] || { echo "$(basename "$0"): cannot read the base's UUID from $B" >&2; exit 1; }
-mkdir -p "$LANGPACK_WORK/tmp"
-export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$LANGPACK_WORK/tmp
+TMPD=${LANGPACK_TMP:-$LANGPACK_WORK/tmp}
+mkdir -p "$TMPD"
+export PYTHONDONTWRITEBYTECODE=1 TMPDIR=$TMPD
+BYTES=$(stat -L -c %s "$B")
+TMO=${PACK_BUILD_TIMEOUT:-$(( ( (BYTES + 2999999999) / 3000000000 ) * 10800 ))}
+[ "$TMO" -ge 10800 ] || [ -n "${PACK_BUILD_TIMEOUT:-}" ] || TMO=10800
+GTMO=${PACK_GATE_TIMEOUT:-3600}
+for _v in TMO GTMO; do case "${!_v}" in ''|*[!0-9]*|0) echo "$(basename "$0"): PACK_BUILD_TIMEOUT and PACK_GATE_TIMEOUT are seconds, not '${!_v}'" >&2; exit 1 ;; esac; done
+NVD=${WIKI_NVME_DIR-/mnt/data/tilemaker/streetzim-wiki}
+# L -> the builder's --source: the verified NVMe copy of L's source ZIM when
+# there is one of exactly the original (size, and the "size mtime" of the
+# original its .verified marker records, as parallel_rebuild.sh writes it),
+# else WIKI_SRC (the builder picks the same file there: wiki_pack.pick_source)
+source_for() {
+  local orig copy size
+  [ -n "$NVD" ] && orig=$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1])
+from streetzim.wiki_pack import pick_source; print(pick_source(sys.argv[2], sys.argv[3]))' "$ROOT" "$SRC" "$1" 2>/dev/null) \
+    && size=$(stat -c %s "$orig" 2>/dev/null) || { echo "$SRC"; return; }
+  copy=$NVD/$(basename "$orig")
+  if [ -f "$copy" ] && [ "$(stat -c %s "$copy")" = "$size" ] && [ "$(cat "$copy.verified" 2>/dev/null)" = "$size $(stat -c %Y "$orig")" ]; then
+    echo "$copy"
+  else
+    echo "$SRC"
+  fi
+}
 BUILDER=${BUILDER:-$ROOT/tools/build_wiki_pack.py}  # tests substitute a fake
 CACHE=(); [ -n "${WP_CACHE:-}" ] && CACHE=(--cache "$WP_CACHE")
 LIM=(); command -v prlimit > /dev/null && LIM=(prlimit --as=8589934592 --)
@@ -63,10 +96,13 @@ for L in $LANGS; do
   # this run's stats only (review r3): a stats file left by an earlier build must
   # never excuse this one, so delete it and mark the run's start
   STATS=$OUT/${F%.zim}.stats.json; MARK=$ST/.run-$L
-  rm -f "$STATS"; touch "$MARK"
-  nice -n 19 "${LIM[@]}" timeout 3600 \
+  rm -f "$STATS" "$OUT/.timeout-$L"; touch "$MARK"
+  LSRC=$(source_for "$L")
+  [ "$LSRC" = "$SRC" ] || echo "   source: $LSRC (the verified NVMe copy)"
+  echo "   time limit: $TMO s"
+  nice -n 19 "${LIM[@]}" timeout "$TMO" \
     "$PY" "$BUILDER" "$B" --lang "$L" \
-      --source "$SRC" --region "$R" --images lead --offline \
+      --source "$LSRC" --region "$R" --images lead --offline \
       "${CACHE[@]}" --jobs 4 --workers 2 \
       -o "$ST/$F" --stats "$STATS" \
       > "$OUT/build-$L.log" 2>&1
@@ -75,11 +111,20 @@ for L in $LANGS; do
   # excused (entity false positives; pack_gate re-checks every link with the official zimcheck)
   "$PY" "$T/builder_ok.py" $brc "$STATS" "$ST/$F" "$MARK" > "$OUT/builder-ok-$L.log" 2>&1; bok=$?
   echo "   builder: $(cat "$OUT/builder-ok-$L.log")"
-  if [ $bok = 0 ] && [ -s "$ST/$F" ] && nice -n 19 "${LIM[@]}" timeout 3600 "$PY" "$T/pack_gate.py" "$ST/$F" --base "$B" > "$OUT/gate-$L.log" 2>&1; then
+  grc=-
+  if [ $bok = 0 ] && [ -s "$ST/$F" ]; then
+    nice -n 19 "${LIM[@]}" timeout "$GTMO" "$PY" "$T/pack_gate.py" "$ST/$F" --base "$B" > "$OUT/gate-$L.log" 2>&1
+    grc=$?
+  fi
+  if [ "$grc" = 0 ]; then
     mv "$ST/$F" "$OUT/$F" && mv "$ST/$F.gate.json" "$OUT/$F.gate.json"
     echo "== $L builder_rc=$brc gate=PASS $(TZ=America/Los_Angeles date "+%T %Z") $(stat -c %s "$OUT/$F")"
   else
     echo "== $L builder_rc=$brc builder_ok=$bok gate=FAIL $(TZ=America/Los_Angeles date "+%T %Z") (kept in .staging; not usable)"
+    if [ $brc = 124 ] || [ "$grc" = 124 ]; then
+      echo "   $L ran out of its time ($([ $brc = 124 ] && echo "the builder's $TMO s" || echo "pack_gate.py's $GTMO s")): a later run tries it again"
+      TZ=America/Los_Angeles date "+%F %T %Z" > "$OUT/.timeout-$L"
+    fi
   fi
   exec {LK}>&-  # release the region+language lock
 done

@@ -31,10 +31,12 @@ for _cmd in ("bash", "flock"):
 
 # The pack builder: the prebuilt pack of --lang, and a stats file builder_ok accepts.
 FAKE_BUILDER = r'''
-import argparse, json, os, shutil, sys
+import argparse, json, os, shutil, sys, time
 ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
 a, _ = ap.parse_known_args()
 with open(os.environ["FAKE_BUILD_LOG"], "a") as fh: fh.write(a.lang + "\n")
+if a.lang in os.environ.get("FAKE_SLOW", "").split(","):    # a build that takes longer than its time
+    time.sleep(120)
 src = os.path.join(os.environ["FAKE_PACKS"], f"osm_testland_wiki-{a.lang}_2026-10-13.zim")
 shutil.copyfile(src, a.o)
 open(a.stats, "w").write(json.dumps({"zim_bytes": os.path.getsize(a.o), "check": {"ok": True, "problems": []}}))
@@ -48,7 +50,14 @@ root = os.environ["LP_ROOT"]; sys.path.insert(0, root)
 from tools.langpack.gatelib import md5_file, verdict_path, work_dir
 tag = os.path.basename(base)[:-4]
 out = os.path.join(work_dir(), "gates", tag); os.makedirs(out, exist_ok=True)
-with open(os.environ["FAKE_GATES_LOG"], "a") as fh: fh.write(json.dumps({"langs": langs, "rl": rl, "rj": rj, "titles": os.environ.get("TITLES"), "resume": os.environ.get("RESUME")}) + "\n")
+acct = os.environ.get("NVME_SCRATCH") or ""
+resv = {n: open(os.path.join(acct, n)).read().split() for n in (os.listdir(acct) if os.path.isdir(acct) else [])
+        if n.startswith(".reserve-ml-")}
+io = subprocess.run(["ionice", "-p", str(os.getpid())], capture_output=True, text=True).stdout.strip()
+with open(os.environ["FAKE_GATES_LOG"], "a") as fh: fh.write(json.dumps({"langs": langs, "rl": rl, "rj": rj, "titles": os.environ.get("TITLES"), "resume": os.environ.get("RESUME"),
+    "base": base, "base_md5": md5_file(base), "base_mtime": os.stat(base).st_mtime_ns, "jobs": os.environ.get("GATE_JOBS"),
+    "merged": os.environ.get("LANGPACK_MERGED"), "tmp": os.environ.get("LANGPACK_TMP"), "resv": resv, "io": io,
+    "search_packs": sorted(f for f in os.listdir(packs) if "_search-" in f)}) + "\n")
 menu = subprocess.run([sys.executable, os.path.join(root, "tools/langpack/recipe2.py"), "menu", base, "--packs-dir", packs,
                        "--langs", langs, "--region-langs", rl, "--region", region, "--titles", os.environ.get("TITLES", "{}"),
                        "--language-meta", "map", "--out-dir", os.path.join(work_dir(), "recipes", tag)],
@@ -64,6 +73,7 @@ for line in menu.splitlines():
     p = verdict_path(base, L); os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump(v, open(p, "w"))
 open(os.path.join(out, "summary.txt"), "w").write("fake gates\n")
+__import__("time").sleep(float(os.environ.get("FAKE_GATES_SLEEP", "0")))
 sys.exit(int(os.environ.get("FAKE_GATES_RC", "0")))
 '''
 
@@ -81,7 +91,9 @@ if cmd == "metadata":
     print(json.dumps(meta)); sys.exit(0)
 if cmd == "upload":
     files = [a for a in sys.argv[3:] if not a.startswith("--") and not a.isdigit()]
-    with open(os.environ["FAKE_IA_LOG"], "a") as fh: fh.write(json.dumps({"item": item, "args": sys.argv[3:]}) + "\n")
+    scr = os.environ.get("LANGPACK_SCRATCH") or ""
+    runs = sorted(x for x in os.listdir(scr) if x.startswith("run-")) if os.path.isdir(scr) else None
+    with open(os.environ["FAKE_IA_LOG"], "a") as fh: fh.write(json.dumps({"item": item, "args": sys.argv[3:], "scratch_runs": runs}) + "\n")
     bad = os.environ.get("FAKE_IA_FAIL_ON")
     cut = files.index(bad) if bad in files else None
     rows = [{"name": f, "size": str(os.path.getsize(f)), "md5": hashlib.md5(open(f, "rb").read()).hexdigest()}
@@ -137,7 +149,7 @@ def ship(lp: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:
            "CORE": "de,fr,th,ja,en", "PACK_DATE": "2026-10-21", "FAKE_PACKS": str(fake_packs),
            "FAKE_BUILD_LOG": str(logs["build"]), "FAKE_GATES_LOG": str(logs["gates"]),
            "FAKE_IA_LOG": str(logs["ia"]), "FAKE_PREFETCH_LOG": str(logs["prefetch"]),
-           "UPLOAD_LOCK": str(d / "upload.lock"),
+           "UPLOAD_LOCK": str(d / "upload.lock"), "LANGPACK_SCRATCH": "",
            "PYTHONDONTWRITEBYTECODE": "1"}
     return SimpleNamespace(d=d, base=base, work=work, env=env, logs=logs, tag=base.name[:-4])
 
@@ -773,3 +785,123 @@ def test_two_runs_take_turns_on_the_wikipedia_cache(ship: SimpleNamespace, tmp_p
     assert [p.wait(timeout=900) for p in ps] == [3, 3]
     ev = [x.split() for x in log.read_text().splitlines()]
     assert [e[0] for e in ev] == ["start", "end", "start", "end"], ev       # one after the other, never together
+
+
+GB = 1 << 30
+
+
+def _nvme(ship: SimpleNamespace, free_gb: int = 500, min_gb: int = 100) -> dict[str, str]:
+    """An NVMe of its own for the run: its scratch, the shared reservations'
+    folder and the parallel runner's state, all here."""
+    for x in ("nvme/packs", "nvme/acct", "par/status", "parscratch"):
+        (ship.d / x).mkdir(parents=True, exist_ok=True)
+    return {"LANGPACK_SCRATCH": str(ship.d / "nvme" / "packs"), "NVME_SCRATCH": str(ship.d / "nvme" / "acct"),
+            "PAR_STATE": str(ship.d / "par"), "PAR_SCRATCH": str(ship.d / "parscratch"),
+            "LANGPACK_NVME_FREE": str(free_gb * GB), "LANGPACK_NVME_MIN_GB": str(min_gb)}
+
+
+def test_the_search_packs_and_gates_work_on_the_nvme(ship: SimpleNamespace) -> None:
+    """With room on the NVMe: the search packs and gates read a checked copy
+    of the base there (same name, MD5 and mtime: the same recipes and
+    verdicts), merge into the run's own folder, run four at a time, and the
+    run is reserved where the map builds count it; the folder and the
+    reservation are gone once the gates are done."""
+    r = _run(ship, **_nvme(ship))
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    g = json.loads(_lines(ship.logs["gates"])[0])
+    run = ship.d / "nvme" / "packs" / f"run-testland-{g['base'].split('run-testland-')[1].split('/')[0]}"
+    assert g["base"] == str(run / "base" / ship.base.name), g
+    assert g["base_md5"] == _md5(ship.base) and g["base_mtime"] == ship.base.stat().st_mtime_ns
+    assert g["jobs"] == "4" and g["merged"] == str(run / "merged") and g["tmp"] == str(run / "tmp"), g
+    (name, (b, st)), = g["resv"].items()
+    assert name.startswith(".reserve-ml-langpack-") and int(b) > 0 and st.isdigit(), g["resv"]
+    zims = [x for x in g["search_packs"] if x.endswith(".zim")]       # built on the NVMe, moved beside the packs
+    assert len(zims) == 3 and sorted(g["search_packs"]) == sorted(z + e for z in zims for e in ("", ".json", ".gate.json"))
+    assert not run.exists() and not list((ship.d / "nvme" / "acct").iterdir())
+    log = _log(ship)
+    assert "NVMe scratch: " + str(run) in log and "4 gate and 4 search jobs" in log and "base staged" in log
+    # the recipes and the site name the published base, not the copy
+    rde = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
+    assert rde["base"]["file"] == ship.base.name
+
+
+@pytest.mark.parametrize("why", ["kept-free", "runner", "reservation"])
+def test_without_room_on_the_nvme_everything_stays_on_storage(ship: SimpleNamespace, why: str) -> None:
+    """The NVMe's room is counted as the parallel runner counts it: what it
+    keeps free, what its running builds may still write, and the live
+    reservations; short of room for the base and one job, the run works on
+    LANGPACK_WORK, one job at a time, as before."""
+    env = _nvme(ship, free_gb=500, min_gb=600 if why == "kept-free" else 100)
+    if why == "runner":
+        (ship.d / "par" / "status" / "rome").write_text("running w0 1 2 3 ports=1,2 cpus=0-11 proj=450G\n")
+    if why == "reservation":                                 # a live tile store's, as region-ml-tiles.py writes it
+        me = os.getpid()
+        mine = Path(f"/proc/{me}/stat").read_text()
+        (ship.d / "nvme" / "acct" / f".reserve-ml-{me}").write_text(f"{450 * GB} {mine[mine.rindex(')') + 2:].split()[19]}\n")
+    r = _run(ship, **env)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    g = json.loads(_lines(ship.logs["gates"])[0])
+    assert g["base"] == str(ship.base) and g["jobs"] == "1" and g["merged"] is None, g
+    assert "NVMe scratch: not used" in _log(ship)
+    assert not list((ship.d / "nvme" / "packs").glob("run-*"))
+
+
+def test_a_pack_that_ran_out_of_time_is_listed_for_a_later_run(ship: SimpleNamespace) -> None:
+    """A pack whose build ran out of its time: the run goes on without it and
+    lists it in retry-langs for the queue; the next run builds that one alone
+    and removes the list."""
+    r = _run(ship, FAKE_SLOW="fr", PACK_BUILD_TIMEOUT="3")
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    packs = ship.work / "packs" / ship.tag
+    assert (packs / "retry-langs").read_text().split() == ["fr"]
+    assert "ran out of time: fr" in _log(ship)
+    n = len(_lines(ship.logs["build"]))
+    r = _run(ship)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert _lines(ship.logs["build"])[n:] == ["fr"] and not (packs / "retry-langs").exists()
+
+
+def test_the_io_class_is_best_effort_even_when_started_at_idle(ship: SimpleNamespace) -> None:
+    """mq-deadline serves the idle class only when the disk is idle, which a
+    round's builds never leave it: ship_packs.sh works at best effort, lowest
+    level, even when the queue (or anyone) starts it at the idle class."""
+    r = subprocess.run(["ionice", "-c3", "bash", str(SHIP), "testland", str(ship.base)], capture_output=True, text=True,
+                       timeout=900, env=ship.env)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert json.loads(_lines(ship.logs["gates"])[0])["io"] == "best-effort: prio 7"
+
+
+def test_the_scratch_is_released_before_the_uploads_and_on_a_signal(ship: SimpleNamespace) -> None:
+    """The NVMe folder is gone before the first upload (the uploads may wait
+    hours for archive.org); a run stopped by a signal (the queue's kill, a
+    timeout) removes its folder and its reservation too; the search packs
+    were built there, three at a time."""
+    env = _nvme(ship)
+    r = _run(ship, **env)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    ups = [json.loads(x) for x in _lines(ship.logs["ia"])]
+    assert ups and all(x["scratch_runs"] == [] for x in ups), ups
+    assert "search packs: 3 to build, 3 at a time, in " + str(ship.d / "nvme" / "packs" / "run-testland-") in _log(ship)
+    # a stale list of languages that ran out of time goes once every pack is gated
+    (ship.work / "packs" / ship.tag / "retry-langs").write_text("xx\n")
+    assert _run(ship, **env).returncode == 0 and not (ship.work / "packs" / ship.tag / "retry-langs").exists()
+    # stopped by a signal while the gates run
+    import signal
+    import time
+    shutil.rmtree(ship.work / "verdicts")
+    p = subprocess.Popen(["bash", str(SHIP), "testland", str(ship.base)], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, env={**ship.env, **env, "FAKE_GATES_SLEEP": "60"}, start_new_session=True)
+    try:
+        t0 = time.time()
+        while len(_lines(ship.logs["gates"])) < 3 and time.time() - t0 < 300:
+            time.sleep(0.2)
+        assert list((ship.d / "nvme" / "packs").glob("run-*")) and list((ship.d / "nvme" / "acct").iterdir())
+        os.killpg(p.pid, signal.SIGTERM)
+        assert p.wait(timeout=60) != 0
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    t0 = time.time()
+    while list((ship.d / "nvme" / "acct").iterdir()) and time.time() - t0 < 30:
+        time.sleep(0.2)
+    assert not list((ship.d / "nvme" / "packs").glob("run-*")) and not list((ship.d / "nvme" / "acct").iterdir())

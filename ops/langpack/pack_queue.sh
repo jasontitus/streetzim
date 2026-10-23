@@ -13,7 +13,7 @@
 #       round writes a new row for REGION; works while the queue runs)
 #
 # In the order the maps shipped, one ship_packs.sh run at a time while the
-# round builds (the disk is saturated: its scheduler ignores ionice), and
+# round builds (the disk is saturated), and
 # only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
 # memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
 # run under the same memory rule and with room on LANGPACK_WORK's disk for
@@ -35,7 +35,14 @@
 #     production's items (SHIP_BASE_ITEM=streetzim-<region>,
 #     SHIP_PACK_ITEM=streetzim-<region>-lang), LANGPACK_WORK, WP_CACHE,
 #     LANGPACK_WEBSEED and SHIP_MAX_BASE_GB; host-env.sh gives it the rest.
-#     Under ionice/nice. Exit 0: published; 6 (archive.org listing pending):
+#     At nice 10 and best-effort I/O, lowest level (the HDD's mq-deadline
+#     serves the idle class only when the disk is idle, which a round's builds
+#     never leave it). Exit 0: published; but when ship_packs.sh lists
+#     languages whose pack builds ran out of time
+#     ($LANGPACK_WORK/packs/<base>/retry-langs), published without them,
+#     `published-partial`, and run again after QUEUE_RETRY_SECS for them (the
+#     packs done are not redone), at most QUEUE_PARTIAL_RETRIES (3) times, then
+#     recorded as published with a warning; 6 (archive.org listing pending):
 #     run again after QUEUE_RETRY_SECS; 2 (a lock held), or a run killed or
 #     ended without an exit code: again after QUEUE_RETRY_SECS, a loud
 #     failure after QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
@@ -73,7 +80,7 @@
 # (/storage/experiments/build-preview/streetzim), PREVIEW_CHANNEL
 # (swiss-languages), FIREBASE_PROJECT (streetzim), FIREBASE (firebase),
 # LANGPACK_WEBSEED (https://streetzim-build-proxy.tiltastech.workers.dev),
-# QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8),
+# QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8), QUEUE_PARTIAL_RETRIES (3),
 # QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
 # QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40),
 # QUEUE_SINCE (first run only: count maps shipped since this date, e.g. the
@@ -136,6 +143,7 @@ SHIP=${QUEUE_SHIP:-$ROOT/ops/langpack/ship_packs.sh}
 POLL=${QUEUE_POLL_SECS:-300}
 RETRY=${QUEUE_RETRY_SECS:-1800}
 MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
+PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
 JOBS=${QUEUE_JOBS:-2}
@@ -151,6 +159,7 @@ mkdir -p "$Q/runs" || exit 1
 LOG=$Q/queue.log STATUS=$Q/status.tsv DONE=$Q/published.tsv ENQ=$Q/enqueued.tsv
 say() { echo "$(TZ=America/Los_Angeles date '+%F %T %Z') $*" >> "$LOG"; }
 loud() { say "FAILED: $*"; echo "pack_queue: FAILED: $*" >&2; }
+warn() { say "WARNING: $*"; echo "pack_queue: WARNING: $*" >&2; }
 
 if [ "${1:-}" = enqueue ]; then   # no lock: one short line appended, read at the next pass
   rid=${2:-} zim=${3:-}
@@ -339,7 +348,7 @@ eligible() {  # region zim round-status
   case "$state" in
     refused-*) return 1 ;;
     failed*) [ "$RETRY_FAILED" = 1 ] && [ -z "${FAILED_NOW[$rid]:-}" ] || return 1 ;;
-    pending) [ "$retry" != - ] && [ "$(date +%s)" -lt "$retry" ] && return 1 ;;
+    pending|published-partial) [ "$retry" != - ] && [ "$(date +%s)" -lt "$retry" ] && return 1 ;;
   esac
   if [ "${3:-uploaded}" = upload-pending ] && ! listed "$rid" "$base" "$md5"; then
     [ "$state" = waiting-listing ] || { set_state "$rid" waiting-listing "$zim" "$KEY" - "upload-pending: archive.org does not list it yet"
@@ -413,7 +422,7 @@ start_ship() {  # region zim key
   rm -f "$Q/rc-$rid"
   say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
   ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
-      ionice -c3 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
+      ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
     echo $? > "$Q/rc-$rid" ) 9>&- &
   pid=$!
   RUN_PID[$rid]=$pid; RUN_START[$rid]=$(starttime "$pid"); RUN_ZIM[$rid]=$zim; RUN_KEY[$rid]=$3
@@ -448,9 +457,21 @@ finish() {  # region
     0)
       say "$rid: packs shipped"
       if publish "$rid"; then
-        printf '%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" >> "$DONE"
-        set_state "$rid" published "$zim" "$key"
-        deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
+        local missing n=0 k c
+        missing=$(tr -s ' \n' ' ' < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" 2>/dev/null | sed 's/^ //; s/ $//')
+        [ -s "$Q/partial-$rid" ] && read -r k c < "$Q/partial-$rid" && [ "$k" = "$key" ] && n=$c
+        if [ -n "$missing" ] && [ "$n" -lt "$PARTIAL_MAX" ]; then
+          echo "$key $(( n + 1 ))" > "$Q/partial-$rid"
+          set_state "$rid" published-partial "$zim" "$key" "$(( $(date +%s) + RETRY ))" "without $missing ($(( n + 1 )) of $PARTIAL_MAX)"
+          say "$rid: published without $missing (their pack builds ran out of time): ship_packs.sh runs again after $RETRY s for them ($(( n + 1 )) of $PARTIAL_MAX)"
+          deploy || true
+        else
+          rm -f "$Q/partial-$rid"
+          [ -z "$missing" ] || warn "$rid: published without $missing: their pack builds ran out of time $PARTIAL_MAX times"
+          printf '%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" >> "$DONE"
+          set_state "$rid" published "$zim" "$key" - "${missing:+without $missing}"
+          deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
+        fi
       else
         set_state "$rid" failed-publish "$zim" "$key" - "see queue.log"; FAILED_NOW[$rid]=1; ANY_FAILED=1
       fi ;;

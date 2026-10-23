@@ -30,9 +30,12 @@ LINKS = {"ok": False, "problems": ["zimcheck: url_internal: The following links:
 
 FAKE = r'''
 import argparse, json, os, shutil, sys, time
-ap = argparse.ArgumentParser(); ap.add_argument("-o"); ap.add_argument("--stats")
+ap = argparse.ArgumentParser(); ap.add_argument("-o"); ap.add_argument("--stats"); ap.add_argument("--source")
+ap.add_argument("--lang")
 a, _ = ap.parse_known_args()
 mode, src = os.environ["FAKE_MODE"], os.environ["FAKE_PACK"]
+if os.environ.get("FAKE_SRC_LOG"):
+    open(os.environ["FAKE_SRC_LOG"], "a").write(json.dumps({"lang": a.lang, "source": a.source}) + "\n")
 open(os.path.join(os.path.dirname(a.stats), "zimcheck_bin.txt"), "w").write(os.environ.get("ZIMCHECK_BIN", ""))
 def pack(): shutil.copyfile(src, a.o)
 def stats():
@@ -133,3 +136,83 @@ def test_refuses_a_zimcheck_that_is_not_the_official_one(bp: SimpleNamespace, tm
                                                    "LANGPACK_WORK": str(work)})
     assert r.returncode == 1 and "not the official zimcheck" in r.stderr, r.stderr
     assert not out.exists() and not work.exists()          # refused before creating anything
+
+
+def test_a_build_out_of_time_is_marked_for_a_later_run(bp: SimpleNamespace, tmp_path: Path) -> None:
+    """A build that runs out of its time (PACK_BUILD_TIMEOUT) leaves
+    OUT/.timeout-<L> (ship_packs.sh lists it for the queue to try again); a
+    later build that passes removes it; a build that fails otherwise leaves none."""
+    out = tmp_path / "out"
+    r = _build(bp, out, "slow_good", FAKE_SLEEP="30", PACK_BUILD_TIMEOUT="2")
+    assert "gate=FAIL" in r.stdout and "th ran out of its time (the builder's 2 s)" in r.stdout, r.stdout
+    assert (out / ".timeout-th").exists() and not (out / f"{bp.F}.zim").exists()
+    r = _build(bp, out, "good")
+    assert "gate=PASS" in r.stdout and not (out / ".timeout-th").exists(), r.stdout
+    out2 = tmp_path / "out2"
+    r = _build(bp, out2, "crash", PACK_BUILD_TIMEOUT="2")
+    assert "gate=FAIL" in r.stdout and not (out2 / ".timeout-th").exists() and "ran out of its time" not in r.stdout
+
+
+def test_the_time_limit_grows_with_the_base(bp: SimpleNamespace, tmp_path: Path) -> None:
+    """3 h per 3 GB of base, at least 3 h; PACK_BUILD_TIMEOUT overrides it."""
+    assert "time limit: 10800 s" in _build(bp, tmp_path / "a", "good").stdout
+    big = tmp_path / "big" / bp.base.name
+    big.parent.mkdir()
+    shutil.copy(bp.base, big)
+    os.truncate(big, 7_000_000_000)                       # sparse: a 7 GB base's size, the same header
+    r = subprocess.run([str(TOOLS / "build_packs.sh"), "testland", str(big), str(tmp_path / "b"), "th"],
+                       capture_output=True, text=True, timeout=600, env={**bp.env, "FAKE_MODE": "good"})
+    assert "time limit: 32400 s" in r.stdout, r.stdout + r.stderr
+    assert "time limit: 5 s" in _build(bp, tmp_path / "c", "good", PACK_BUILD_TIMEOUT="5").stdout
+    r = _build(bp, tmp_path / "d", "good", PACK_BUILD_TIMEOUT="3h")
+    assert r.returncode == 1 and "PACK_BUILD_TIMEOUT and PACK_GATE_TIMEOUT are seconds" in r.stderr
+
+
+def test_the_english_wikipedia_is_read_from_the_runners_verified_copy(bp: SimpleNamespace, tmp_path: Path) -> None:
+    """The parallel runner's NVMe copy of the English ZIM, when it is exactly
+    the original (its size, and its .verified marker: "size mtime" of the
+    original); else WIKI_SRC, as for every other language."""
+    src, nv = tmp_path / "wiki-src", tmp_path / "nvme-wiki"
+    src.mkdir()
+    nv.mkdir()
+    name = "wikipedia_en_all_maxi_2026-02.zim"
+    (src / name).write_bytes(b"e" * 4096)
+    (src / "wikipedia_en_all_maxi_2025-11.zim").write_bytes(b"o" * 100)      # an older one: not picked
+    os.utime(src / name, (1_780_000_000, 1_780_000_000))
+    log = tmp_path / "src.log"
+
+    def build(**extra: str) -> list[dict]:
+        log.unlink(missing_ok=True)
+        subprocess.run([str(TOOLS / "build_packs.sh"), "testland", str(bp.base), str(tmp_path / "out"), "en th"],
+                       capture_output=True, text=True, timeout=600,
+                       env={**bp.env, "FAKE_MODE": "good", "WIKI_SRC": str(src), "WIKI_NVME_DIR": str(nv),
+                            "FAKE_SRC_LOG": str(log), **extra})
+        return [json.loads(x) for x in log.read_text().splitlines()]
+
+    shutil.copy(src / name, nv / name)
+    (nv / f"{name}.verified").write_text("4096 1780000000\n")
+    assert build() == [{"lang": "en", "source": str(nv / name)}, {"lang": "th", "source": str(src)}]
+    for broken in ("size", "marker", "mtime"):
+        shutil.copy(src / name, nv / name)
+        (nv / f"{name}.verified").write_text("4096 1780000000\n")
+        if broken == "size":
+            (nv / name).write_bytes(b"e" * 4095)                     # a truncated copy
+        elif broken == "marker":
+            (nv / f"{name}.verified").unlink()                       # a copy not (yet) verified
+        else:
+            os.utime(src / name, (1_790_000_000, 1_790_000_000))     # the original replaced since
+        assert build()[0] == {"lang": "en", "source": str(src)}, broken
+        os.utime(src / name, (1_780_000_000, 1_780_000_000))
+    assert build(WIKI_NVME_DIR="")[0] == {"lang": "en", "source": str(src)}
+
+
+def test_a_pack_gate_out_of_time_is_marked_too(bp: SimpleNamespace, tmp_path: Path) -> None:
+    """pack_gate.py's own time (PACK_GATE_TIMEOUT): out of it, the language is
+    marked for a later run like a builder out of its time."""
+    slow = tmp_path / "zc-slow"
+    slow.write_text(f"#!/bin/bash\n[ \"$1\" = --version ] && {{ echo 'zim-tools 3.8.0'; exit 0; }}\nsleep 30\nexec {bp.env['PACK_GATE_ZIMCHECK']} \"$@\"\n")
+    slow.chmod(0o755)
+    out = tmp_path / "out"
+    r = _build(bp, out, "good", PACK_GATE_TIMEOUT="2", PACK_GATE_ZIMCHECK=str(slow))
+    assert "gate=FAIL" in r.stdout and "th ran out of its time (pack_gate.py's 2 s)" in r.stdout, r.stdout
+    assert (out / ".timeout-th").exists()
