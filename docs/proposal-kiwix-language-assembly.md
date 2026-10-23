@@ -1,8 +1,8 @@
 # Proposal: Kiwix composes a map's language versions on download
 
-Status: proposal for the Kiwix product lead and the openZIM developers,
-2026-10-23. Numbers marked *estimate* are not measured; the others come
-from StreetZim's published maps.
+Status: proposal for the Kiwix team, 2026-10-23. Numbers marked
+*estimate* are not measured; the others come from StreetZim's published
+maps.
 
 ## Summary
 
