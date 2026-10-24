@@ -543,8 +543,20 @@ and the build worker as `LANGPACK_WEBSEED`, then publishes the region into a
 **preview** clone of production (`/storage/experiments/build-preview/streetzim`,
 moved to production's commit first) and redeploys the preview channel
 (`firebase hosting:channel:deploy swiss-languages --expires 30d --project
-streetzim`). Never the live site: production's `web/build/recipes` stays
-empty until the page goes live. A new preview clone starts with the Swiss
+streetzim`). Then the live site (`QUEUE_LIVE=1`, the default since the
+builder page went live on 2026-10-24, except under `QUEUE_FORCE_WORK=1`):
+at the end of each pass every region marked `live-pending-<region>` goes
+into production's `web/` (`publish_site.sh`), and the site is deployed once
+(`web/generate.py --deploy`, as after an upload), so the regions' map cards
+offer "Build in another language". Both run under the site-deploy lock
+(`tmp/.site-deploy.lock`), which `upload_validated.sh` takes for its own
+deploy. A failed deploy puts the builder page's index back as it was,
+without the regions it published; a region that fails 8 times in a row
+(`QUEUE_MAX_AGAIN`) is a loud failure, left as `live-failed-<region>` until
+a restart with `QUEUE_RETRY_FAILED=1`. A run published without some
+languages does not replace what the live site offers for the same base.
+The preview clone stays the place to look first.
+A new preview clone starts with the Swiss
 test recipes the channel shows now (`QUEUE_SEED`, from
 `/storage/experiments/lang-torrents/swiss-site2`); production's Switzerland
 replaces them when it ships. The preview's home page is not regenerated.
@@ -572,7 +584,8 @@ replaces them when it ships. The preview's home page is not regenerated.
   (`PROD_REPO`, `/storage/streetzim`), with `PREVIEW_CHANNEL` empty or
   `live`, or, unless `QUEUE_FORCE_WORK=1` (tests), with a `LANGPACK_WORK`,
   `WP_CACHE`, `LANGPACK_WEBSEED`, `ROUND_TSV`, `MAPS_DIR` or `PROD_REPO`
-  other than production's, or `QUEUE_SHIP`, `QUEUE_PUBLISH` or `QUEUE_DIR`
+  other than production's, or `QUEUE_SHIP`, `QUEUE_PUBLISH`,
+  `QUEUE_LIVE_PUBLISH`, `QUEUE_LIVE_DEPLOY` or `QUEUE_DIR`
   set.
 - Exit 0 with languages whose pack builds ran out of time
   (`packs/<base>/retry-langs`): published and deployed without them

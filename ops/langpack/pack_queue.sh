@@ -4,8 +4,8 @@
 # started, says `uploaded`; or `upload-pending` and archive.org now lists
 # the file with its MD5), this runs ship_packs.sh for it, then
 # publishes its recipes into the PREVIEW site and redeploys the preview
-# channel. Never the live site: production's web/build/recipes stays empty
-# until the page goes live.
+# channel, then puts them on the live builder page (/build/) and deploys the
+# site (below: live).
 #
 #   ops/langpack/pack_queue.sh [--once]
 #   ops/langpack/pack_queue.sh enqueue REGION ZIM   (a map by hand: ZIM, a file
@@ -60,11 +60,30 @@
 #     `firebase hosting:channel:deploy $PREVIEW_CHANNEL --expires 30d
 #     --project $FIREBASE_PROJECT` from it. A failed deploy is tried again
 #     at the next pass (nothing is shipped again for it).
+#   - live (QUEUE_LIVE=1, the default unless QUEUE_FORCE_WORK=1): the region
+#     is marked live-pending-<region>. Once its run ends it goes into
+#     PROD_REPO's web/ (publish_site.sh) if the site-deploy lock is free at
+#     once, else at the end of the pass, when one that failed before is
+#     tried again too,
+#     then the site's pages are built (web/generate.py) and deployed (firebase
+#     deploy --only hosting): generate.py --deploy in two steps, as after an
+#     upload. So its map card offers "Build in another language". All of it
+#     runs under the site-deploy lock (PROD_REPO/tmp/.site-deploy.lock, which
+#     upload_validated.sh takes for its deploy; QUEUE_SITE_LOCK_WAIT, 3600 s);
+#     the steps keep the lock's descriptor, so a restarted queue does not free
+#     it while they run. Pages that cannot be built put the builder page's
+#     index back as it was, without the regions just published (a deploy that
+#     skips generate.py then offers none of them unchecked); a failed deploy
+#     leaves the built pages, to be deployed again. A region that fails QUEUE_MAX_AGAIN times in a
+#     row is a loud failure, kept as live-failed-<region> until a restart with
+#     QUEUE_RETRY_FAILED=1. A run published without some languages
+#     (published-partial) does not replace what the live site already offers
+#     for the same base.
 # Refused at the start (exit 3): a PREVIEW_DIR that is, holds or sits in
 # PROD_REPO or /storage/streetzim; PREVIEW_CHANNEL empty or `live`; unless
 # QUEUE_FORCE_WORK=1 (tests), a LANGPACK_WORK, WP_CACHE, LANGPACK_WEBSEED,
 # ROUND_TSV, MAPS_DIR or PROD_REPO other than production's, or QUEUE_SHIP,
-# QUEUE_PUBLISH or QUEUE_DIR set.
+# QUEUE_PUBLISH, QUEUE_LIVE_PUBLISH, QUEUE_LIVE_BUILD or QUEUE_DIR set.
 # Resumable: a map published for the same base (UUID and file MD5) is not
 # shipped again; a new or rewritten file for the region is. The queue's
 # start (QUEUE_DIR/since) is kept, so a restart still ignores what shipped
@@ -75,7 +94,8 @@
 # (PDT), status.tsv (region, state, zim, base key: uuid/md5 or uuid,
 # updated, retry after, note), published.tsv (region, uuid, md5, zim,
 # time, recipe scheme), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
-# zim, base key, recipe scheme; none: 1), deploy-pending, stop (a file: nothing new starts, the
+# zim, base key, recipe scheme; none: 1), deploy-pending, live-pending-<region> (its failed tries),
+# live-failed-<region>, stop (a file: nothing new starts, the
 # running ones finish, then the queue ends; remove it before starting
 # again), ship-<region>.out. The round's files are only read (ROUND_TSV).
 #
@@ -97,7 +117,9 @@
 # (default rebuild-par/run.lock and sz-tests/rebuild-all/run.lock under
 # /storage/streetzim), IA (the archive.org CLI, for upload-pending rows).
 # Tests: QUEUE_SHIP and QUEUE_PUBLISH (stand-ins for ship_packs.sh and
-# publish_site.sh), QUEUE_DIR, QUEUE_FORCE_WORK=1.
+# publish_site.sh), QUEUE_LIVE_PUBLISH and QUEUE_LIVE_BUILD (for the live
+# step: publish_site.sh and a shell command in place of web/generate.py),
+# QUEUE_DIR, QUEUE_FORCE_WORK=1.
 # Exit: 0; 2 another queue holds the lock; 3 refused (above); 1 (--once) a
 # map failed in this run; enqueue: 1 a bad region or file.
 set -uo pipefail
@@ -115,7 +137,7 @@ if [ "${QUEUE_FORCE_WORK:-0}" != 1 ]; then
     n=${v%%=*} d=${v#*=}
     [ -z "${!n:-}" ] || same_dir "${!n}" "$d" || refuse "$n=${!n} is not production's $d (QUEUE_FORCE_WORK=1 allows it)"
   done
-  for v in QUEUE_SHIP QUEUE_PUBLISH QUEUE_DIR; do       # (QUEUE_DIR: a second queue beside production's)
+  for v in QUEUE_SHIP QUEUE_PUBLISH QUEUE_LIVE_PUBLISH QUEUE_LIVE_BUILD QUEUE_DIR; do   # (QUEUE_DIR: a second queue beside production's)
     [ -z "${!v:-}" ] || refuse "$v=${!v}: a test's setting (QUEUE_FORCE_WORK=1 allows it)"
   done
   [ -z "${LANGPACK_WORK:-}" ] || same_dir "$LANGPACK_WORK" "$PROD_WORK" \
@@ -134,6 +156,9 @@ PREVIEW_DIR=${PREVIEW_DIR:-/storage/experiments/build-preview/streetzim}
 CHANNEL=${PREVIEW_CHANNEL-swiss-languages}
 PROJECT=${FIREBASE_PROJECT:-streetzim}
 FIREBASE=${FIREBASE:-firebase}
+LIVE=${QUEUE_LIVE:-$([ "${QUEUE_FORCE_WORK:-0}" = 1 ] && echo 0 || echo 1)}
+SITE_LOCK=$PROD_REPO/tmp/.site-deploy.lock
+SITE_LOCK_WAIT=${QUEUE_SITE_LOCK_WAIT:-3600}
 # the preview clone is never production, the channel never the live site
 for p in "$PROD_REPO" /storage/streetzim; do
   pv=$(realpath -m "$PREVIEW_DIR") pr=$(realpath -m "$p")
@@ -331,6 +356,108 @@ publish() {  # region
   say "$1: published into $PREVIEW_DIR/web/build/recipes"
 }
 
+# The live site (header: live).
+live_mark() {  # region: a run that ended is a fresh start (no failed try yet)
+  [ "$LIVE" = 1 ] || return 0
+  rm -f "$Q/live-failed-$1"
+  echo 0 > "$Q/live-pending-$1"
+}
+# Does the live site already offer this region's recipes for this very base?
+same_base_live() {  # region
+  "$PY" - "$PROD_REPO/web/build/recipes/$1/region.json" "$LANGPACK_WORK/site/$1/recipes/$1/region.json" <<'PY'
+import json, sys
+try:
+    a, b = (json.load(open(p, encoding="utf-8"))["base"] for p in sys.argv[1:3])
+    sys.exit(0 if a.get("md5") and a.get("md5") == b.get("md5") else 1)
+except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    sys.exit(1)
+PY
+}
+live_count() {  # region: one more failed try in a row
+  local n=0
+  read -r n < "$Q/live-pending-$1" 2>/dev/null || n=0
+  n=$(( ${n:-0} + 1 ))
+  if [ "$n" -ge "$MAX_AGAIN" ]; then
+    mv -f "$Q/live-pending-$1" "$Q/live-failed-$1"
+    loud "$1: not on the live site after $n tries in a row (see $LOG): left until a restart with QUEUE_RETRY_FAILED=1"
+  else
+    echo "$n" > "$Q/live-pending-$1"
+  fi
+}
+# The builder page's index as it was before (BEFORE), without REGIONs.
+unlist() {  # BEFORE INDEX REGION...
+  "$PY" - "$@" <<'PY'
+import json, os, sys, tempfile
+before, idx, drop = sys.argv[1], sys.argv[2], set(sys.argv[3:])
+try:
+    with open(before, encoding="utf-8") as fh:
+        d = json.load(fh)
+except (OSError, ValueError):
+    d = {"format": "streetzim-build-index/1", "regions": []}
+d["regions"] = [r for r in d.get("regions", []) if isinstance(r, dict) and r.get("id") not in drop]
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(idx), prefix="index.json.", suffix=".tmp")
+with os.fdopen(fd, "w", encoding="utf-8") as fh:
+    json.dump(d, fh, ensure_ascii=False, indent=1)
+os.replace(tmp, idx)
+PY
+}
+# [new] (once a run ends): only the regions marked since (no failed try yet),
+# and only if the site-deploy lock is free at once: a deploy holding it does
+# not hold up the next ship; else every pending one not tried in this pass
+# already (LIVE_TRIED, emptied at each pass's start), waiting for the lock.
+declare -A LIVE_TRIED=()
+live_all() {  # [new]
+  [ "$LIVE" = 1 ] || return 0
+  local f rid n pending=() ok=() why= idx=$PROD_REPO/web/build/recipes/index.json before=$Q/index.json.before
+  for f in "$Q"/live-pending-*; do
+    [ -e "$f" ] || continue
+    rid=${f##*/live-pending-}
+    n=0; read -r n < "$f" 2>/dev/null || n=0
+    if [ "${1:-}" = new ]; then [ "${n:-0}" = 0 ] || continue
+    else [ -z "${LIVE_TRIED[$rid]:-}" ] || continue; fi
+    pending+=("$rid")
+  done
+  [ ${#pending[@]} -gt 0 ] || return 0
+  mkdir -p "${SITE_LOCK%/*}"
+  exec 7>> "$SITE_LOCK"
+  if [ "${1:-}" = new ]; then
+    flock -n 7 || { exec 7>&-; say "the site-deploy lock is busy: ${pending[*]} go live at the end of the pass"; return 0; }
+  elif ! flock -w "$SITE_LOCK_WAIT" 7; then
+    exec 7>&-
+    loud "the site-deploy lock $SITE_LOCK stayed busy for $SITE_LOCK_WAIT s: ${pending[*]} wait for the next pass"
+    return 1
+  fi
+  for rid in "${pending[@]}"; do LIVE_TRIED[$rid]=1; done
+  rm -f "$before"; [ ! -f "$idx" ] || cp -p "$idx" "$before"
+  local pub=${QUEUE_LIVE_PUBLISH:-$PROD_REPO/ops/langpack/publish_site.sh}
+  # the steps keep fd 7 (the lock lasts while they run), never fd 9 (the queue's)
+  for rid in "${pending[@]}"; do
+    if LANGPACK_WORK=$LANGPACK_WORK bash "$pub" "$rid" "$PROD_REPO/web" >> "$LOG" 2>&1 9>&-; then ok+=("$rid")
+    else loud "$rid: publish_site.sh into $PROD_REPO/web failed (tried again at the next pass)"; live_count "$rid"; fi
+  done
+  if [ ${#ok[@]} -gt 0 ]; then
+    if [ -n "${QUEUE_LIVE_BUILD:-}" ]; then
+      (cd "$PROD_REPO" && timeout 1800 bash -c "$QUEUE_LIVE_BUILD") >> "$LOG" 2>&1 9>&- || why=build
+    else
+      (cd "$PROD_REPO" && timeout 1800 "$PY" web/generate.py) >> "$LOG" 2>&1 9>&- || why=build
+    fi
+    # (with the publishes, under the hour upload_validated.sh waits for the lock)
+    [ -n "$why" ] || (cd "$PROD_REPO" && timeout 1500 "$FIREBASE" deploy --only hosting) >> "$LOG" 2>&1 9>&- || why=deploy
+    case $why in
+      '') for rid in "${ok[@]}"; do rm -f "$Q/live-pending-$rid"; say "$rid: live on the site's builder page (/build/)"; done ;;
+      build)
+        loud "the site's pages could not be built (${ok[*]}): the builder page's index is put back without them; tried again at the next pass"
+        unlist "$before" "$idx" "${ok[@]}" || loud "could not put back $idx"
+        for rid in "${ok[@]}"; do live_count "$rid"; done ;;
+      deploy)
+        loud "the site's deploy failed (${ok[*]}): its pages are built; deployed again at the next pass"
+        for rid in "${ok[@]}"; do live_count "$rid"; done ;;
+    esac
+  fi
+  rm -f "$before"
+  exec 7>&-
+}
+
 # Is the map to be shipped now? Records why not. Sets KEY (base uuid/md5).
 eligible() {  # region zim round-status
   local rid=$1 zim=$2 base=$MAPS_DIR/$2 uuid ntile md5 st state retry gb
@@ -486,26 +613,28 @@ finish() {  # region
       say "$rid: packs shipped"
       if publish "$rid"; then
         local missing n=0 k c
-        missing=$(tr -s ' \n' ' ' < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" 2>/dev/null | sed 's/^ //; s/ $//')
+        missing=$(tr -s ' \n' ' ' 2>/dev/null < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" | sed 's/^ //; s/ $//')
         [ -s "$Q/partial-$rid" ] && read -r k c < "$Q/partial-$rid" && [ "$k" = "$key" ] && n=$c
         if [ -n "$missing" ] && [ "$n" -lt "$PARTIAL_MAX" ]; then
           echo "$key $(( n + 1 ))" > "$Q/partial-$rid"
           set_state "$rid" published-partial "$zim" "$key" "$(( $(date +%s) + RETRY ))" "without $missing ($(( n + 1 )) of $PARTIAL_MAX)"
           say "$rid: published without $missing (their pack builds ran out of time): ship_packs.sh runs again after $RETRY s for them ($(( n + 1 )) of $PARTIAL_MAX)"
           deploy || true
+          same_base_live "$rid" || live_mark "$rid"
         else
           rm -f "$Q/partial-$rid"
           [ -z "$missing" ] || warn "$rid: published without $missing: their pack builds ran out of time $PARTIAL_MAX times"
           printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rid" "${key%/*}" "${key#*/}" "$zim" "$(TZ=America/Los_Angeles date '+%F %T %Z')" "$scheme" >> "$DONE"
           set_state "$rid" published "$zim" "$key" - "${missing:+without $missing}"
           deploy || set_state "$rid" published-not-deployed "$zim" "$key" - "deploy pending"
+          live_mark "$rid"
         fi
       else
         set_state "$rid" failed-publish "$zim" "$key" - "see queue.log"; FAILED_NOW[$rid]=1; ANY_FAILED=1
       fi ;;
     7)
       local missing n=0 k c
-      missing=$(tr -s ' \n' ' ' < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" 2>/dev/null | sed 's/^ //; s/ $//')
+      missing=$(tr -s ' \n' ' ' 2>/dev/null < "$LANGPACK_WORK/packs/${zim%.zim}/retry-langs" | sed 's/^ //; s/ $//')
       [ -s "$Q/partial-$rid" ] && read -r k c < "$Q/partial-$rid" && [ "$k" = "$key" ] && n=$c
       if [ "$n" -lt "$PARTIAL_MAX" ]; then
         echo "$key $(( n + 1 ))" > "$Q/partial-$rid"
@@ -535,15 +664,18 @@ finish() {  # region
 
 # Finish the runs that ended; with "all", wait for every one.
 reap() {
-  local r
+  local r ended
   while :; do
-    for r in "${!RUN_PID[@]}"; do alive "$r" || finish "$r"; done
+    ended=0
+    for r in "${!RUN_PID[@]}"; do alive "$r" || { finish "$r"; ended=1; }; done
+    [ $ended = 0 ] || live_all new || true              # a region goes live once its own run ends
     [ "${1:-}" = all ] && [ ${#RUN_PID[@]} -gt 0 ] || return 0
     sleep "${QUEUE_REAP_SECS:-5}" 9>&-
   done
 }
 
 pass() {
+  LIVE_TRIED=()
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
   local rid zim t st why
   while IFS=$'\t' read -r rid zim t st <&3; do
@@ -561,6 +693,7 @@ pass() {
     start_ship "$rid" "$zim" "$KEY"
   done 3< <(candidates)
   reap all
+  live_all || true
 }
 
 say "== pack_queue at $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'), maps shipped since $(TZ=America/Los_Angeles date -d @"$SINCE" '+%F %T %Z'), $ROUND_TSV"
@@ -578,6 +711,9 @@ for f in "$Q"/runs/*; do
   if [ "$start" != - ] && alive "$rid"; then say "$rid: its ship_packs.sh run from before the restart is still going (pid $pid): counted"
   else say "$rid: its run from before the restart has ended: its outcome now"; fi
 done
+if [ "$RETRY_FAILED" = 1 ]; then
+  for f in "$Q"/live-failed-*; do [ -e "$f" ] && echo 0 > "$Q/live-pending-${f##*/live-failed-}" && rm -f "$f"; done
+fi
 failed=$(awk -F'\t' '$2 ~ /^failed/ && $4 != "-" {printf "%s ", $1}' "$STATUS")
 [ -z "$failed" ] || say "failed before: ${failed% } ($([ "$RETRY_FAILED" = 1 ] && echo 'tried again: QUEUE_RETRY_FAILED=1' || echo 'not tried again; QUEUE_RETRY_FAILED=1 retries them'))"
 while :; do

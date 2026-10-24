@@ -332,6 +332,18 @@ def _region_dir(root: Path, rid: str, title: str, menu: bool = True) -> None:
     (d / "region.json").write_text(json.dumps({"id": rid, "title": title, "menu": [{"lang": "de"}] if menu else []}))
 
 
+def test_site_index_writes_under_a_temporary_name_of_its_own(tmp_path: Path) -> None:
+    """Another writer of the index (web/generate.py) may be writing at the
+    same time: never a fixed temporary name."""
+    rd = tmp_path / "recipes"
+    _region_dir(rd, "greece", "Greece")
+    (rd / "index.json.tmp").mkdir()                       # a fixed name taken
+    r = tool("site_index.py", rd)
+    assert r.returncode == 0, r.stderr
+    assert [x["id"] for x in json.loads((rd / "index.json").read_text())["regions"]] == ["greece"]
+    assert sorted(p.name for p in rd.iterdir() if p.name.startswith("index.json.")) == ["index.json.tmp"]
+
+
 def test_site_index(tmp_path: Path) -> None:
     rd = tmp_path / "recipes"
     _region_dir(rd, "greece", "Greece")
