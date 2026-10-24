@@ -254,7 +254,7 @@ job_setup() {   # LABEL
   [ "$JOBS" = 1 ] || PORT=$(free_port)
   B=http://127.0.0.1:$PORT; SRV=
   CT=$CT0/$1; mkdir -p "$CT"
-  trap 'unserve; rm -rf "${CT:?}"' EXIT
+  trap 'trap "" TERM INT HUP; unserve; rm -rf "${CT:?}"' EXIT
   trap 'exit 143' TERM INT HUP
 }
 base_job() {
@@ -310,7 +310,18 @@ NRUN=0
 launch() { "$@" & NRUN=$(( NRUN + 1 )); }
 reap_one() { wait -n; NRUN=$(( NRUN - 1 )); }
 CT0=$CT
-trap 'trap - TERM INT HUP; kill $(jobs -p) 2>/dev/null; wait; exit 143' TERM INT HUP
+# A job waits for its command (run under GNU timeout, which leads a process
+# group of its own: a signal to the run's group misses it) before its trap can
+# stop its kiwix-serve. So the jobs are signalled first (a signalled job starts
+# no further command but its EXIT trap's), then, once, the commands they were
+# running.
+stop_jobs() {
+  local j
+  kill $(jobs -p) 2>/dev/null
+  sleep 0.2
+  for j in $(jobs -pr); do kill $(ps -o pid= --ppid "$j" 2>/dev/null) 2>/dev/null; done
+}
+trap 'trap - TERM INT HUP; stop_jobs; wait; exit 143' TERM INT HUP
 trap 'rm -rf "${CT0:?}"' EXIT
 
 # The base alone first. (A base patched in place keeps its name: RESUME

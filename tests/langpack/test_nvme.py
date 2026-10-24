@@ -197,3 +197,15 @@ def test_the_runners_state_comes_from_host_env(nv: SimpleNamespace) -> None:
     r = subprocess.run(["env", "-i", f"HOME={os.environ['HOME']}", f"PATH={os.environ['PATH']}", "bash", "-c",
                         f". {ROOT}/ops/langpack/host-env.sh && echo $LANGPACK_PAR_STATE"], capture_output=True, text=True)
     assert r.stdout.strip() == "/storage/streetzim/rebuild-par", r.stdout + r.stderr
+
+
+def test_memavailable_comes_from_proc_meminfo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without LANGPACK_MEM_AVAILABLE (the build host): /proc/meminfo's
+    MemAvailable, in bytes."""
+    monkeypatch.delenv("LANGPACK_MEM_AVAILABLE", raising=False)
+    from tools.langpack import nvme
+    kib = int(Path("/proc/meminfo").read_text().split("MemAvailable:")[1].split()[0])
+    got = nvme.mem_available()
+    assert abs(got - kib * 1024) <= max(kib * 1024 // 10, 256 << 20), (got, kib)
+    monkeypatch.setenv("LANGPACK_MEM_AVAILABLE", str(5 * GB))
+    assert nvme.mem_available() == 5 * GB
