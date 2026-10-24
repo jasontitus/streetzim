@@ -21,15 +21,19 @@ maps.
    already has the map downloads 0.74-0.84 GB for a language version.
 4. **The ask.** Does Kiwix want per-language versions beyond the
    multilingual base, and if so, which of the four options below?
-5. **Who builds what.** StreetZim: the format spec, test files, a C++
-   splicer for libkiwix and the Zimfarm side. Kiwix: the catalog entries
-   and the download step in each app.
+5. **Who builds what.** The Zimfarm side is built: two offliners in
+   StreetZim's image make the base, the packs and the recipes. StreetZim
+   also offers the format spec, test files and a C++ splicer for libkiwix.
+   Kiwix: the catalog entries and the download step in each app.
 
 ## Why
 
-StreetZim's Zimfarm offliner builds a multilingual base
-(`streetzim --multilingual`): map labels in 21 languages plus the region's
-own, search by those names, and the viewer's interface in 23 languages.
+Zimfarm can build a multilingual base with `streetzim --multilingual`
+([zimfarm.md](zimfarm.md#multilingual-maps---multilingual)): map labels in
+21 languages plus the region's own, search by those names, and the viewer's
+interface in 23 languages. For any Geofabrik extract it picks the region's
+own languages itself, from StreetZim's region table or the country's
+official languages.
 Hosting only that base is the simplest choice. What one file serves poorly
 is Kiwix's own search in each visitor's language: a ZIM has one title index
 and one full-text index, each with one stemmer. Carrying every language's
@@ -115,6 +119,21 @@ libkiwix would give Kiwix Desktop, Android and iOS the recipe reader and
 the splicer; each app keeps its own downloader. Apps without the new step
 can get a version as a plain file from a relay or as a prebuilt file.
 
+**On Zimfarm** a region takes three kinds of task, all in StreetZim's image
+([zimfarm-langpack.md](zimfarm-langpack.md)):
+
+1. the base: `streetzim --multilingual`, published like any ZIM;
+2. one pack task per language, `streetzim-langpack --mode pack`: that
+   language's Wikipedia articles for the base, taken from Kiwix's own
+   Wikipedia ZIM;
+3. one menu task per region once its packs are published,
+   `streetzim-langpack --mode menu`: the search packs and the recipes. Each
+   version is composed and checked (zimcheck, Kiwix search) before anything
+   is published.
+
+Most of a pack task's cost is downloading that language's Wikipedia ZIM
+(German 48.6 GB, English 127 GB); one task could serve several regions.
+
 ## Options compared
 
 Switzerland, 23 languages.
@@ -150,7 +169,8 @@ Switzerland, 23 languages.
 |---|---|
 | Format spec, schema, test files (a small base, packs, recipes, expected results) | StreetZim |
 | libkiwix: recipe reader, checks, splicer with resume; StreetZim offers the C++ code | StreetZim, reviewed by libkiwix maintainers |
-| Zimfarm: an offliner for the packs and recipes; uploading recipes | StreetZim, with Zimfarm maintainers |
+| Zimfarm offliners: `streetzim --multilingual` (the base), `streetzim-langpack` (Wikipedia packs, search packs, recipes) | StreetZim: built |
+| Zimfarm: a region's tasks in order (base, packs, menu), recipes published beside the ZIMs, packs on the mirrors but off the catalog | Zimfarm maintainers, with StreetZim |
 | Catalog: the recipe link, the book fields, `.meta4` for the parts, packs kept off the list | Kiwix / openZIM |
 | Kiwix Desktop, Android, iOS: a language choice on a map, the download and splice step | Kiwix |
 
@@ -171,6 +191,9 @@ every region it publishes.
   design); the recipe format is in `tools/langpack/recipe2.py`, the merger
   in `tools/langpack/merge_zim.py`, the browser's splicer in
   `web/build/assembler-worker.js`, the relay in `build-proxy/`.
+- **Zimfarm.** [zimfarm.md](zimfarm.md#multilingual-maps---multilingual)
+  (the base) and [zimfarm-langpack.md](zimfarm-langpack.md) (packs,
+  search packs and recipes, with measured resources).
 - **Version names.** Each version's Name is `osm_<lang>_<region>`, and a
   multilingual base is `osm_mul_<region>`.
 - **Updates.** A new base or pack means new recipes and new UUIDs; parts on
