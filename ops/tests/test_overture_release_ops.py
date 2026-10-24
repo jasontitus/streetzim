@@ -207,3 +207,49 @@ def test_transport_reaches_the_downloader(tmp_path, env, want):
                    env={**e, **env, "STUB_LOG": str(log)})
     lines = log.read_text().splitlines()
     assert len(lines) == 2 and all(f"--transport {want} " in ln for ln in lines)
+
+
+@pytest.mark.parametrize("value,want", [(None, "2026-08-19.0"), ("2026-10-21.0", "2026-10-21.0"),
+                                        ("latest", None), ("2026-10-21", None), ("../x", None),
+                                        ("x2026-10-21.0", None), ("2026-10-21.0x", None), ("2026-10-21.0\r", None)])
+def test_the_rebuild_driver_takes_a_named_release(tmp_path, value, want):
+    """rebuild_old_regions.sh: the round's pin, unless OVERTURE_RELEASE names
+    a release (set per region by parallel_rebuild.sh); anything else is
+    logged and every listed region gets a row saying so."""
+    text = (ROOT / "ops/cloud/rebuild_old_regions.sh").read_text()
+    rel = next(ln for ln in text.splitlines() if ln.startswith("REL=${OVERTURE_RELEASE:-"))
+    i = text.index('if [ -z "${REBUILD_REGATE_ZIM:-}" ] && ! [[ "$REL" =~')
+    check = text[i:text.index("\nfi\n", i) + 4]
+    log = tmp_path / "calls.log"
+    env = {k: v for k, v in os.environ.items() if k not in ("OVERTURE_RELEASE", "REBUILD_REGATE_ZIM")}
+    if value is not None:
+        env["OVERTURE_RELEASE"] = value
+    r = subprocess.run(["bash", "-c", f"{rel}\n{check}printf %s \"$REL\""], capture_output=True, text=True,
+                       env={**env, "REBUILD_REGATE_ZIM": "/x.zim"})
+    assert r.returncode == 0                                  # a regate run never stops on it
+    body = (f'log() {{ echo "LOG $*" >> "{log}"; }}; row() {{ echo "ROW $*" >> "{log}"; }}\n'
+            f'ORDER="a b"\n{rel}\n{check}printf %s "$REL"')
+    r = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True)
+    calls = [ln for ln in log.read_bytes().decode().split("\n") if ln] if log.exists() else []
+    if want is None:
+        assert r.returncode == 1 and calls[-2:] == ["ROW a bad-overture-release -", "ROW b bad-overture-release -"], calls
+        assert "is not a release name" in calls[0]
+    else:
+        assert (r.returncode, r.stdout, calls) == (0, want, []), r.stderr
+
+
+def test_the_rebuild_driver_builds_on_the_regions_release(tmp_path):
+    """The release the driver downloaded for is the one build-region-fast.sh
+    is given (it names the parquets it reads)."""
+    text = (ROOT / "ops/cloud/rebuild_old_regions.sh").read_text()
+    i = text.index('  TIER=$(echo "$R" | cut -f4)')
+    end = 'row "$ID" build-failed "-"; continue\n  fi\n'
+    block = text[i:text.index(end, i) + len(end)]
+    log = tmp_path / "calls.log"
+    (tmp_path / "build-region-fast.sh").write_text(f'echo "build $OVERTURE_RELEASE $*" >> "{log}"\n')
+    body = ('log() { :; }; row() { :; }\nR=$(printf "r\\tPlain\\t1,2,3,4\\tcountry")\n'
+            'ID=r; BBOX=1,2,3,4; NAME=Plain; LOG=/dev/null; REL=2026-10-21.0\n'
+            f'for _once in 1; do\n{block}done\n')
+    env = {k: v for k, v in os.environ.items() if k != "OVERTURE_RELEASE"}
+    subprocess.run(["bash", "-c", body], cwd=tmp_path, env=env, check=True, capture_output=True, text=True)
+    assert log.read_text().splitlines() == ["build 2026-10-21.0 r 1,2,3,4 Plain"]

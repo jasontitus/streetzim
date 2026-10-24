@@ -32,7 +32,7 @@ FAKE_DRIVER = r"""#!/bin/bash
 # REBUILD_LOG REBUILD_OV_PORT REBUILD_KW_PORT REBUILD_NO_SKIP REBUILD_STAGE_MBTILES
 # REBUILD_REGATE_ZIM
 id=$(head -1 "$REBUILD_LIST")
-echo "start $id $(date +%s.%N) $$ scratch=${BUILD_SCRATCH-unset} ports=$REBUILD_OV_PORT,$REBUILD_KW_PORT ml=${STREETZIM_ML_TILES:-} noskip=${REBUILD_NO_SKIP:-} stage=${REBUILD_STAGE_MBTILES:-} reqwiki=${STREETZIM_REQUIRE_WIKI:-} wikimax=${STREETZIM_WIKI_MAX_PER_MIN:-} keep=${STREETZIM_KEEP_ZIMS:-} wikizim=${BUILD_WIKI_ZIM-unset} ln=${STREETZIM_SEARCH_LN-unset} zstd=${ZSTD_CLEVEL-unset} cache=${STREETZIM_SEARCH_CACHE-unset} cpus=$(taskset -cp $$ | sed 's/.*: //') regate=${REBUILD_REGATE_ZIM-unset}" >> "$FAKE_LOG"
+echo "start $id $(date +%s.%N) $$ scratch=${BUILD_SCRATCH-unset} ports=$REBUILD_OV_PORT,$REBUILD_KW_PORT ml=${STREETZIM_ML_TILES:-} noskip=${REBUILD_NO_SKIP:-} stage=${REBUILD_STAGE_MBTILES:-} reqwiki=${STREETZIM_REQUIRE_WIKI:-} wikimax=${STREETZIM_WIKI_MAX_PER_MIN:-} keep=${STREETZIM_KEEP_ZIMS:-} wikizim=${BUILD_WIKI_ZIM-unset} ln=${STREETZIM_SEARCH_LN-unset} zstd=${ZSTD_CLEVEL-unset} cache=${STREETZIM_SEARCH_CACHE-unset} rel=${OVERTURE_RELEASE-unset} cpus=$(taskset -cp $$ | sed 's/.*: //') regate=${REBUILD_REGATE_ZIM-unset}" >> "$FAKE_LOG"
 echo $$ > "$REBUILD_PIDFILE"
 if [ -n "${BUILD_SCRATCH:-}" ]; then mkdir -p "$BUILD_SCRATCH/tmp"; head -c 1024 /dev/zero > "$BUILD_SCRATCH/tmp/blob"; fi
 if [ -e "$FAKE_DIR/$id.uploading" ]; then bash -c 'exec -a upload_validated.sh sleep 30' & fi
@@ -64,6 +64,7 @@ def _env(tmp: Path, **kw: str) -> dict[str, str]:
         "FAKE_TSV": str(tmp / "rebuild-old.tsv"),
         # must not reach the driver
         "STREETZIM_SEARCH_LN": "0", "ZSTD_CLEVEL": "3", "STREETZIM_SEARCH_CACHE": "/nope",
+        "OVERTURE_RELEASE": "2000-01-01.0",
     })
     env.update(kw)
     return env
@@ -168,7 +169,7 @@ def test_lanes_cap_ports_scratch_cpus_and_scrubbed_env(tmp_path):
     lines = [x[3] for x in runs]
     for line in lines:
         for want in ("ml=1", "noskip=1", "stage=1", "reqwiki=1", "wikimax=40", "keep=3",
-                     "ln=unset", "zstd=unset", "cache=unset", "wikizim=unset"):
+                     "ln=unset", "zstd=unset", "cache=unset", "rel=unset", "wikizim=unset"):
             assert want in line, (want, line)
         assert f"scratch={tmp_path}/state/scratch/w" in line
     ports = {line.split("ports=")[1].split()[0] for line in lines}
@@ -506,10 +507,11 @@ def test_region_env_file_reaches_the_driver(tmp_path):
     _setup(tmp_path, ["a"])
     (tmp_path / "state" / "env").mkdir(parents=True)
     (tmp_path / "state" / "env" / "a").write_text(
-        "# comment\nSTREETZIM_SEARCH_CACHE=/x/sw.jsonl\nbad line\n")
+        "# comment\nSTREETZIM_SEARCH_CACHE=/x/sw.jsonl\nOVERTURE_RELEASE=2026-10-21.0\nbad line\n")
     r = _run(tmp_path, _env(tmp_path))
     assert r.returncode == 0
-    assert "cache=/x/sw.jsonl" in (tmp_path / "fake.log").read_text()
+    log = (tmp_path / "fake.log").read_text()
+    assert "cache=/x/sw.jsonl" in log and "rel=2026-10-21.0" in log
     assert "ignoring bad env line" in (tmp_path / "state" / "run.out").read_text()
 
 
@@ -606,11 +608,32 @@ def _driver_copy(tmp: Path) -> Path:
 
 
 @pytest.mark.parametrize("noskip", ["0", "1"])
+def test_driver_with_a_bad_overture_release_builds_nothing_and_says_so(tmp_path, noskip):
+    """The real driver: the reason in its log, and a row for each listed
+    region it would build (the runner's finish_slot reads that row)."""
+    p = _driver_copy(tmp_path)
+    tsv = tmp_path / "rebuild-old.tsv"
+    tsv.write_text("id\tstatus\tzim\tfinished\nx\tuploaded\tosm-x.zim\tT\n")
+    (tmp_path / "w.list").write_text("x\ny\n")
+    env = {**os.environ, "OVERTURE_RELEASE": "latest", "REBUILD_LIST": str(tmp_path / "w.list"),
+           "REBUILD_LOG": str(tmp_path / "w.log"), "REBUILD_PIDFILE": str(tmp_path / "w.pid"),
+           "REBUILD_OV_PORT": "19999", "REBUILD_KW_PORT": "19998", "REBUILD_NO_SKIP": noskip}
+    r = subprocess.run(["bash", str(p)], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "OVERTURE_RELEASE 'latest' is not a release name" in (tmp_path / "w.log").read_text()
+    rows = [ln.split("\t")[:3] for ln in tsv.read_text().splitlines()[2:]]
+    want = [["y", "bad-overture-release", "-"]] if noskip == "0" else \
+        [["x", "bad-overture-release", "-"], ["y", "bad-overture-release", "-"]]
+    assert rows == want, rows
+
+
+@pytest.mark.parametrize("noskip", ["0", "1"])
 def test_driver_list_log_pidfile_ports_noskip(tmp_path, noskip):
     p = _driver_copy(tmp_path)
     (tmp_path / "rebuild-old.tsv").write_text("id\tstatus\tzim\tfinished\nx\tuploaded\tosm-x.zim\tT\n")
     (tmp_path / "w.list").write_text("x\n")
-    env = {**os.environ, "REBUILD_LIST": str(tmp_path / "w.list"), "REBUILD_LOG": str(tmp_path / "w.log"),
+    env = {**{k: v for k, v in os.environ.items() if k != "OVERTURE_RELEASE"},
+           "REBUILD_LIST": str(tmp_path / "w.list"), "REBUILD_LOG": str(tmp_path / "w.log"),
            "REBUILD_PIDFILE": str(tmp_path / "w.pid"), "REBUILD_OV_PORT": "19999",
            "REBUILD_KW_PORT": "19998", "REBUILD_NO_SKIP": noskip}
     subprocess.run(["bash", str(p)], env=env, cwd=tmp_path, check=True, capture_output=True,

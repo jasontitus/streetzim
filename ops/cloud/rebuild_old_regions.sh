@@ -37,6 +37,10 @@ unset _ops_real _ops_old
 #    are patchable from birth. markers() FAILS a region that lacks them.
 #  * Overture downloads keep the host's s3:// transport
 #    (--transport "${OVERTURE_TRANSPORT:-s3}"; https opts in).
+#  * The Overture release is the round's pin unless OVERTURE_RELEASE names
+#    another (parallel_rebuild.sh sets it per region from $PAR_STATE/env/<id>):
+#    Overture serves only its last few releases, so a region whose parquets for
+#    the pin were never cut, or were cut for an older bbox, needs a current one.
 #  * osmium extracts serialise on tmp/.regions-pbf.lock -- two writers on one
 #    path yield a truncated-but-valid PBF that nothing downstream notices.
 set -uo pipefail
@@ -60,7 +64,7 @@ WORLD_MB=/storage/streetzim/world-data/world-tiles-v3.mbtiles
 # schema-1 world-2026-08-31.jsonl it replaced lacks it, and a build only
 # warns about that.
 WORLD_SEARCH=/storage/streetzim/search_cache/world-2026-08-31.s2.jsonl
-REL=2026-08-19.0
+REL=${OVERTURE_RELEASE:-2026-08-19.0}
 REGISTRY=/storage/streetzim/cloud/regions.tsv
 VARIANTS=/storage/streetzim/cloud/region-variants.tsv
 LOG=${REBUILD_LOG:-/storage/streetzim/rebuild-old.log}
@@ -74,6 +78,17 @@ row(){ { flock -x 3; printf "%s\t%s\t%s\t%s\n" "$1" "$2" "$3" "$(date -Iseconds)
 [ -f "$TSV" ] || printf "id\tstatus\tzim\tfinished\n" > "$TSV"
 
 ORDER=$(cat "${REBUILD_LIST:-/storage/streetzim/rebuild-old.list}")
+# A release name only: anything else would name parquets no one cut (a
+# --regate run reads none).
+if [ -z "${REBUILD_REGATE_ZIM:-}" ] && ! [[ "$REL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$ ]]; then
+  log "OVERTURE_RELEASE '$REL' is not a release name (e.g. 2026-10-21.0): not building"
+  for ID in $ORDER; do
+    # not over the row of a region this run would skip as done
+    [ "${REBUILD_NO_SKIP:-0}" != 1 ] && grep -qP "^$ID\t(uploaded|upload-pending)" "$TSV" 2>/dev/null && continue
+    row "$ID" bad-overture-release "-"
+  done
+  exit 1
+fi
 
 markers(){ "$PY" - "$1" <<'PYEOF'
 import sys
