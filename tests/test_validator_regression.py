@@ -457,14 +457,14 @@ def test_known_good_sv_structural_checks_pass():
 
 
 def _zim_with_tiles(tmp_path: Path, tiles: dict[str, bytes],
-                    bbox=(7.40, 43.72, 7.44, 43.76)) -> Path:
+                    bbox=(7.40, 43.72, 7.44, 43.76), **cfg) -> Path:
     from libzim.writer import Creator
     zim_path = tmp_path / "tiles.zim"
     with Creator(str(zim_path)) as cc:
         cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
         cc.set_mainpath("index.html")
         cc.add_item(_mk_item("map-config.json", "application/json",
-                             json.dumps({"bbox": list(bbox)}).encode()))
+                             json.dumps({"bbox": list(bbox), **cfg}).encode()))
         for path, data in tiles.items():
             cc.add_item(_mk_item(path, "application/x-protobuf", data))
     return zim_path
@@ -506,6 +506,80 @@ def test_large_region_without_z0_tile_still_fails(tmp_path: Path):
     zim = _zim_with_tiles(tmp_path, tiles, bbox=(5.42, 42.74, 9.42, 44.74))
     status, detail = validate_zim._chk_vector_tiles(Archive(str(zim)))
     assert status == "fail", detail
+
+
+def _mvt(layer: str, props: dict) -> bytes:
+    import mapbox_vector_tile
+    return mapbox_vector_tile.encode([{"name": layer, "features": [
+        {"geometry": "LINESTRING(0 0, 100 100)", "properties": props}]}])
+
+
+ROADS = ("transportation", {"class": "motorway"})
+
+
+@pytest.mark.parametrize("case,want", [
+    ("inland", "warn"),             # roads and a state border at zoom 4: nothing for z0 to show
+    ("admin3", "warn"),
+    ("gzip", "warn"),
+    ("z3-glacier", "warn"),         # an inland glacier: tiles from zoom 2 on, still nothing at z0
+    ("z1-glacier", "warn"),         # ... a harmless tile at zoom 1 counts as zoom 1-3 too
+    ("z2-glacier", "warn"),
+    ("ocean", "fail"),              # z0 would have shown the ocean,
+    ("ice-shelf", "fail"),          # an ice shelf,
+    ("continent", "fail"),          # a continent's label,
+    ("border", "fail"),             # or the national border
+    ("z1-ocean", "fail"),
+    ("second-z4-ocean", "fail"),    # every zoom-4 tile over the box counts
+    ("glacier-no-z1-3", "fail"),    # a glacier at zoom 4 but no zoom 2-3 tile: those were lost
+    ("country-no-z1-3", "fail"),
+    ("no-z4", "fail"),              # motorways and state borders start at zoom 4
+    ("no-z14", "fail"),             # deep zooms truncated
+    ("world-tiles", "fail"),        # not a multilingual map
+    ("garbage", "fail"),            # a tile that does not decode
+])
+def test_an_inland_multilingual_map_may_have_nothing_below_zoom_4(tmp_path: Path, case, want):
+    """Multilingual tiles are cut from the region's own extract: an inland
+    region with no national border (Colorado) has nothing at zoom 0-3. That
+    passes with a warning; anything that z0 or zoom 1-3 should have carried,
+    a missing zoom 4, missing deep zooms or a map from the world tiles still
+    fails. The box covers two zoom-4 tiles (7/5 and 8/5)."""
+    import gzip
+    pytest.importorskip("libzim")
+    pytest.importorskip("mapbox_vector_tile")
+    from libzim.reader import Archive
+    tiles = {"tiles/8/133/93.pbf": b"\x1a\x01x",
+             "tiles/11/1066/746.pbf": b"\x1a\x01x",
+             "tiles/14/8529/5973.pbf": b"\x1a\x01x",
+             "tiles/4/8/5.pbf": _mvt(*ROADS),
+             "tiles/4/7/5.pbf": _mvt("boundary", {"admin_level": 4})}
+    z4 = {"admin3": _mvt("boundary", {"admin_level": 3}), "gzip": gzip.compress(_mvt(*ROADS)),
+          "ocean": _mvt("water", {"class": "ocean"}), "ice-shelf": _mvt("landcover", {"class": "ice", "subclass": "ice_shelf"}),
+          "continent": _mvt("place", {"class": "continent"}),
+          "border": _mvt("boundary", {"admin_level": 2}),
+          "glacier-no-z1-3": _mvt("landcover", {"class": "ice", "subclass": "glacier"}),
+          "country-no-z1-3": _mvt("place", {"class": "country"}), "garbage": b"\xff\xfe not a tile"}
+    if case in z4:
+        tiles["tiles/4/8/5.pbf"] = z4[case]
+    elif case == "second-z4-ocean":
+        tiles["tiles/4/7/5.pbf"] = _mvt("water", {"class": "ocean"})
+    elif case in ("z1-glacier", "z2-glacier", "z3-glacier"):
+        upper = {"z1-glacier": "tiles/1/0/0.pbf", "z2-glacier": "tiles/2/2/1.pbf", "z3-glacier": "tiles/3/3/2.pbf"}[case]
+        tiles[upper] = _mvt("boundary", {"admin_level": 4}) if case != "z3-glacier" else \
+            _mvt("landcover", {"class": "ice", "subclass": "glacier"})
+        tiles["tiles/4/8/5.pbf"] = _mvt("landcover", {"class": "ice", "subclass": "glacier"})
+    elif case == "z1-ocean":
+        tiles["tiles/1/0/0.pbf"] = _mvt("water", {"class": "ocean"})
+    elif case == "no-z4":
+        del tiles["tiles/4/8/5.pbf"], tiles["tiles/4/7/5.pbf"]
+        tiles["tiles/5/16/11.pbf"] = _mvt(*ROADS)
+    elif case == "no-z14":
+        del tiles["tiles/14/8529/5973.pbf"]
+    cfg = {} if case == "world-tiles" else {"tileLanguages": ["de", "fr"]}
+    zim = _zim_with_tiles(tmp_path, tiles, bbox=(-0.58, 42.74, 15.42, 44.74), **cfg)
+    status, detail = validate_zim._chk_vector_tiles(Archive(str(zim)))
+    assert status == want, detail
+    if want == "warn":
+        assert "(multilingual tiles: nothing below it)" in detail and "tiles/0/0/0.pbf=missing" in detail
 
 
 # -----------------------------------------------------------------------

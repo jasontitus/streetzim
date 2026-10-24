@@ -124,6 +124,14 @@ tiles reach past the box, where a region's extract has nothing: at zoom
 8-10 landcover has 6-15% fewer features and water 12% fewer at zoom 8
 (the same with the world tiles' own tilemaker build), and below zoom 8 the
 neighbours are missing altogether. The viewer never shows beyond the box.
+A region with no coast, no national border and no continent label has no
+tile at zoom 0 (lakes come from zoom 6; the viewer draws low-zoom lakes
+itself), and often none until zoom 4, where motorways and state borders
+start (Colorado). `cloud/validate_zim.py` passes such a map over a degree
+wide with a warning when it has tiles at zoom 4, its deep zooms are there,
+and no tile at zoom 1-4 over the box carries the ocean, an ice shelf, a
+national border or a continent label (and, without zoom 1-3 tiles, no
+glacier or country label at zoom 4).
 A search cache extracted from a region's tiles differs more than the tiles
 do: Switzerland's had 7.8% more POIs than the world-tile cache (bus 53,039
 -> 82,846: a station's bays and stop positions, each a POI of the same
