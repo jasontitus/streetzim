@@ -293,16 +293,37 @@ for ID in $ORDER; do
   [ "$DATA_ID" = "$ID" ] || log "  variant of $DATA_ID: checks and uses its extracts and Overture parquets"
 
   PBF=world-data/regions/${DATA_ID}.osm.pbf
-  if [ ! -s "$PBF" ] || bbox_stale "$PBF" "$BBOX"; then
+  # The extract, cut with --strategy smart (every member of a multipolygon
+  # reaching the box: region-bbox.sh) when it is missing, cut for another box
+  # or not marked complete. Checked again, cut, renamed and marked under
+  # PBFLOCK: a parent and its Light variant never cut it twice or rename each
+  # other's file.
+  cut_pbf() {
+    if [ ! -s "$PBF" ] || bbox_stale "$PBF" "$BBOX"; then :
+    elif pbf_complete "$PBF"; then log "  pbf present ($(du -h "$PBF" | cut -f1))"; return 0
+    else log "  $(basename "$PBF") was cut without complete multipolygons (not --strategy smart): re-cut"; fi
     log "  osmium extract -> $PBF"
     # -b "$BBOX"; across the antimeridian a two-ring .poly, never -b.
     bbox_osmium_area "$BBOX" "$PBF.poly" \
-      || { log "  POLY FAILED for $ID (bbox $BBOX crosses the antimeridian)"; row "$ID" extract-failed "-"; continue; }
-    flock "$PBFLOCK" osmium extract "${AREA[@]}" "$PLANET" -o "$PBF" --overwrite >> "$LOG" 2>&1 \
-      || { log "  EXTRACT FAILED"; rm -f "$PBF"; row "$ID" extract-failed "-"; continue; }
+      || { log "  POLY FAILED for $ID (bbox $BBOX crosses the antimeridian)"; row "$ID" extract-failed "-"; return 1; }
+    # -f pbf: osmium cannot tell the format of a *.part name.
+    osmium extract "${AREA[@]}" --strategy smart "$PLANET" -o "$PBF.part" -f pbf --overwrite >> "$LOG" 2>&1 \
+      || { log "  EXTRACT FAILED"; rm -f "$PBF.part"; row "$ID" extract-failed "-"; return 1; }
+    rm -f "$PBF.strategy"
+    mv -f "$PBF.part" "$PBF" || { log "  could not rename $PBF.part"; row "$ID" extract-failed "-"; return 1; }
     bbox_mark "$PBF" "$BBOX"
+    pbf_mark_complete "$PBF"
     log "  pbf $(du -h "$PBF" | cut -f1)"
-  else log "  pbf present ($(du -h "$PBF" | cut -f1))"; fi
+  }
+  if [ -s "$PBF" ] && ! bbox_stale "$PBF" "$BBOX" && pbf_complete "$PBF"; then
+    log "  pbf present ($(du -h "$PBF" | cut -f1))"
+  else
+    exec 9>> "$PBFLOCK"
+    flock -x 9
+    cut_pbf; PBF_RC=$?
+    exec 9>&-
+    [ "$PBF_RC" = 0 ] || continue
+  fi
 
   # NEVER `ln -sfn` blindly here. That line was copied from the africa queue,
   # where the four regions were brand new and had no extracts. 50 of the 51

@@ -33,11 +33,19 @@ build, and that compounds for every region on the queue.
 # 1. Extract the regional PBF — do this BEFORE launching build-region-fast.sh
 cd /storage/streetzim
 osmium extract \
-    -b "$BBOX" \
+    -b "$BBOX" --strategy smart \
     world-data/planet-2026-08-31.osm.pbf \
     -o world-data/regions/${ID}.osm.pbf \
-    --overwrite
+    --overwrite \
+  && (. ops/region-bbox.sh && pbf_mark_complete world-data/regions/${ID}.osm.pbf)
 ```
+
+`--strategy smart` keeps every member of a multipolygon that reaches the
+box: without it a lake or forest crossing the box's edge cannot be
+assembled, and the region's own tiles lose it (Chicago's Lake Michigan).
+The `.strategy` sidecar records it with the file's size and mtime; the
+queues re-cut an extract without a matching one, and
+`ops/region-ml-tiles.py` refuses it (`ops/region-bbox.sh`).
 
 For multiple new regions queue them sequentially in one `bash -c` so they
 share the planet PBF page cache:
@@ -48,8 +56,9 @@ for spec in "argentina:-73.5,-55.5,-53.5,-21.5" \
             "south-america:-82.0,-56.0,-32.0,13.5" \
             "indian-subcontinent:60.0,5.0,98.0,38.0"; do
   ID="${spec%%:*}"; BBOX="${spec##*:}"
-  osmium extract -b "$BBOX" world-data/planet-2026-08-31.osm.pbf \
-    -o "world-data/regions/${ID}.osm.pbf" --overwrite
+  osmium extract -b "$BBOX" --strategy smart world-data/planet-2026-08-31.osm.pbf \
+    -o "world-data/regions/${ID}.osm.pbf" --overwrite \
+    && (. ops/region-bbox.sh && pbf_mark_complete "world-data/regions/${ID}.osm.pbf")
 done
 ' > extract-queue.log 2>&1 < /dev/null &
 ```
@@ -68,8 +77,9 @@ box, so cut it as one box each side of 180 with a two-ring .poly:
 
 ```sh
 ./venv-linux/bin/python3 -m streetzim.area poly "$BBOX" "world-data/regions/${ID}.poly"
-osmium extract -p "world-data/regions/${ID}.poly" world-data/planet-2026-08-31.osm.pbf \
-    -o "world-data/regions/${ID}.osm.pbf" --overwrite
+osmium extract -p "world-data/regions/${ID}.poly" --strategy smart world-data/planet-2026-08-31.osm.pbf \
+    -o "world-data/regions/${ID}.osm.pbf" --overwrite \
+  && (. ops/region-bbox.sh && pbf_mark_complete "world-data/regions/${ID}.osm.pbf")
 ```
 
 The queue does this by itself: `build-refresh-queue.sh`,

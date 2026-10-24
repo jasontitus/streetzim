@@ -281,7 +281,7 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   log "=== $ID ($NAME) tier=$TIER bbox=$BBOX"
   if [ $DRY -eq 1 ]; then
     pbf="$REGDIR/$ID.osm.pbf"; st="extract"
-    [ -f "$pbf" ] && [ ! -L "$pbf" ] && [ "$pbf" -nt "$PLANET" ] && st="ok"
+    [ -f "$pbf" ] && [ ! -L "$pbf" ] && [ "$pbf" -nt "$PLANET" ] && pbf_complete "$pbf" && st="ok"
     log "  dry-run: pbf=$st overture=$([ -f overture_cache/places-$ID-$OVERTURE_RELEASE.parquet ] && echo cached || echo download) out=osm-$ID-$TODAY.zim"
     continue
   fi
@@ -291,20 +291,22 @@ while IFS=$'\t' read -r -u 3 ID NAME BBOX TIER SRC DST SEARCH NOTES; do
   link_world "$WORLD_SEARCH"  "$REGDIR/$ID.search.jsonl"
 
   PBF="$REGDIR/$ID.osm.pbf"
-  if [ ! -f "$PBF" ] || [ -L "$PBF" ] || [ ! "$PBF" -nt "$PLANET" ] || bbox_stale "$PBF" "$BBOX"; then
+  if [ ! -f "$PBF" ] || [ -L "$PBF" ] || [ ! "$PBF" -nt "$PLANET" ] || bbox_stale "$PBF" "$BBOX" || ! pbf_complete "$PBF"; then
     log "  extract PBF from $(basename "$PLANET")"
-    rm -f "$PBF"
+    rm -f "$PBF" "$PBF.strategy"
     # -b "$BBOX"; across the antimeridian (minlon > maxlon, e.g. alaska) a
     # two-ring .poly, and never -b (region-bbox.sh).
     if ! bbox_osmium_area "$BBOX" "$PBF.poly"; then
       log "  POLY FAILED for $ID (bbox $BBOX crosses the antimeridian)"; row "$ID" extract-failed 0 - "poly"; n_fail=$((n_fail+1)); continue
     fi
     # -f pbf: osmium cannot tell the format of a *.part name.
-    if ! osmium extract "${AREA[@]}" "$PLANET" -o "$PBF.part" -f pbf --overwrite --strategy complete_ways >> "$LOG" 2>&1; then
+    # smart: every member of a multipolygon reaching the box (region-bbox.sh).
+    if ! osmium extract "${AREA[@]}" "$PLANET" -o "$PBF.part" -f pbf --overwrite --strategy smart >> "$LOG" 2>&1; then
       log "  EXTRACT FAILED"; row "$ID" extract-failed 0 - "osmium extract"; n_fail=$((n_fail+1)); continue
     fi
     mv -f "$PBF.part" "$PBF"
     bbox_mark "$PBF" "$BBOX"
+    pbf_mark_complete "$PBF"
   fi
   log "  PBF: $(du -h "$PBF" | cut -f1)"
 

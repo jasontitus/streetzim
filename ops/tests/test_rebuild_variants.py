@@ -22,6 +22,12 @@ BOX = "5.4,45.7,11.2,48.2"
 OTHER = "5.0,45.0,11.0,48.0"
 
 
+def _mark(pbf: Path) -> None:
+    """ops/region-bbox.sh's pbf_mark_complete: cut with --strategy smart."""
+    st = pbf.stat()
+    Path(str(pbf) + ".strategy").write_text(f"smart {st.st_size} {int(st.st_mtime)}\n")
+
+
 def _block() -> str:
     text = SCRIPT.read_text()
     i = text.index("  # A Light variant")
@@ -38,6 +44,7 @@ def _setup(tmp: Path, *, variant_box: str = BOX, parent_places: bool = True) -> 
     for f in ("p.osm.pbf", "p.mbtiles", "p.search.jsonl"):
         (tmp / "world-data" / "regions" / f).write_text("x")
         (tmp / "world-data" / "regions" / f"{f}.bbox").write_text(BOX + "\n")
+    _mark(tmp / "world-data" / "regions" / "p.osm.pbf")
     (tmp / "world-data" / "regions" / "p.search.jsonl.schema").write_text(
         '{"search_schema": 2, "languages": []}')
     for theme in ("addresses", "places"):
@@ -48,7 +55,8 @@ def _setup(tmp: Path, *, variant_box: str = BOX, parent_places: bool = True) -> 
         pq.with_name(pq.name + ".bbox").write_text(BOX + "\n")
     bin_ = tmp / "bin"
     bin_.mkdir()
-    (bin_ / "osmium").write_text("#!/bin/sh\necho \"osmium $*\" >> \"$STUB_LOG\"\n")
+    (bin_ / "osmium").write_text("#!/bin/sh\necho \"osmium $*\" >> \"$STUB_LOG\"\n"
+                                 "while [ $# -gt 0 ]; do [ \"$1\" = -o ] && echo x > \"$2\"; shift; done\n")
     (bin_ / "osmium").chmod(0o755)
     py = tmp / "py"
     # Fails, unless PY_OK is set: then it writes its --out file (a download).
@@ -63,7 +71,7 @@ def _run(tmp: Path, env: dict[str, str], rid: str, pre: str = "") -> list[str]:
 . {ROOT}/ops/region-bbox.sh
 log() {{ echo "LOG $*" >> "$STUB_LOG"; }}
 row() {{ echo "ROW $*" >> "$STUB_LOG"; }}
-flock() {{ shift; "$@"; }}
+flock() {{ case "$1" in -*) return 0 ;; esac; shift; "$@"; }}
 REGISTRY={tmp}/regions.tsv; VARIANTS={tmp}/variants.tsv
 PLANET={tmp}/planet.osm.pbf; PBFLOCK={tmp}/lock; LOG=/dev/null; REL=rel
 WORLD_MB={tmp}/world.mbtiles; WORLD_SEARCH={tmp}/world.s2.jsonl
@@ -100,6 +108,22 @@ def test_a_variant_uses_its_parents_files_and_makes_none_of_its_own(tmp_path):
     assert all(not (regions / f).is_symlink() and (regions / f).read_text() == "x"
                for f in ("p.osm.pbf", "p.mbtiles", "p.search.jsonl"))
     assert not list(regions.glob("*.stale-*"))
+
+
+def test_a_variant_re_cuts_its_parents_extract_when_it_is_not_complete(tmp_path):
+    """The parent's extract without the --strategy smart mark (an older
+    complete_ways cut): the variant's run re-cuts the parent's extract, under
+    the parent's name, and marks it."""
+    env = _setup(tmp_path)
+    regions = tmp_path / "world-data" / "regions"
+    (regions / "p.osm.pbf.strategy").unlink()
+    calls = _run(tmp_path, env, "v")
+    ext = [c for c in calls if c.startswith("osmium")]
+    assert len(ext) == 1 and "--strategy smart" in ext[0] and "-o world-data/regions/p.osm.pbf.part" in ext[0], calls
+    assert any("p.osm.pbf was cut without complete multipolygons" in c for c in calls), calls
+    st = (regions / "p.osm.pbf").stat()
+    assert (regions / "p.osm.pbf.strategy").read_text() == f"smart {st.st_size} {int(st.st_mtime)}\n"
+    assert not (regions / "v.osm.pbf").exists() and "BUILD p" in calls
 
 
 def test_a_variant_whose_parent_lacks_places_is_refused_for_the_parent(tmp_path):
@@ -156,6 +180,7 @@ def _own_files(tmp: Path, rid: str, *, search_schema: int | None) -> Path:
     for f in (f"{rid}.osm.pbf", f"{rid}.mbtiles", f"{rid}.search.jsonl"):
         (regions / f).write_text("x")
         (regions / f"{f}.bbox").write_text(BOX + "\n")
+    _mark(regions / f"{rid}.osm.pbf")
     if search_schema is not None:
         (regions / f"{rid}.search.jsonl.schema").write_text(
             '{"search_schema": %d, "languages": []}' % search_schema)

@@ -190,6 +190,12 @@ class Host(type(Path())):           # tmp_path that also knows its checkout
     co: Checkout
 
 
+def _mark(pbf: Path) -> None:
+    """ops/region-bbox.sh's pbf_mark_complete: cut with --strategy smart."""
+    st = pbf.stat()
+    Path(str(pbf) + ".strategy").write_text(f"smart {st.st_size} {int(st.st_mtime)}\n")
+
+
 @pytest.fixture
 def host(tmp_path, monkeypatch):
     """A data root with an extract and the shapefiles, a stub docker, a
@@ -200,6 +206,8 @@ def host(tmp_path, monkeypatch):
     regions.mkdir(parents=True)
     (regions / "hispaniola.osm.pbf").write_bytes(b"pbf" * 100)
     (regions / "africa.osm.pbf").write_bytes(b"pbf" * 100)
+    _mark(regions / "hispaniola.osm.pbf")
+    _mark(regions / "africa.osm.pbf")
     for shp in ("coastline/water_polygons.shp",
                 "landcover/ne_10m_urban_areas/ne_10m_urban_areas.shp",
                 "landcover/ne_10m_antarctic_ice_shelves_polys/ne_10m_antarctic_ice_shelves_polys.shp",
@@ -358,6 +366,7 @@ def test_any_input_that_decides_the_tiles_remakes_them(host, monkeypatch):
     assert Path(str(_out(host)) + ".profile").read_text() == _inputs(co) + "\n"
     pbf = host / "root" / "world-data" / "regions" / "hispaniola.osm.pbf"
     os.utime(pbf, ns=(time.time_ns(), time.time_ns() + 10**9))   # a new extract
+    _mark(pbf)
     m.make("hispaniola", "hispaniola", "-74.5,17.5,-68.3,20.2")
     assert len(_runs(host)) == 5
     Path(str(_out(host)) + ".profile").unlink()                  # a sidecar gone
@@ -478,6 +487,9 @@ def test_the_time_limit_grows_with_the_extract(host, monkeypatch):
     (lambda r: ((r / "hispaniola.osm.pbf").unlink(),
                 (r / "hispaniola.osm.pbf").symlink_to(r / "africa.osm.pbf")), "symlink"),
     (lambda r: (r / "hispaniola.osm.pbf.bbox").write_text("1,2,3,4\n"), "cut for bbox 1,2,3,4"),
+    (lambda r: (r / "hispaniola.osm.pbf.strategy").unlink(), "not marked as cut with osmium --strategy smart"),
+    (lambda r: (r / "hispaniola.osm.pbf.strategy").write_text("smart\n"), "not marked as cut"),
+    (lambda r: (r / "hispaniola.osm.pbf").write_bytes(b"other" * 99), "not marked as cut"),
     (lambda r: (r.parents[1] / "coastline" / "water_polygons.shp").unlink(), "water_polygons"),
 ])
 def test_wrong_inputs_stop_before_docker(host, setup, why):

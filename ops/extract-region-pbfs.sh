@@ -18,7 +18,8 @@ unset _ops_real _ops_old
 #        REGISTRY (default cloud/regions.tsv)
 #        BATCH    (default 16 outputs per osmium pass — bounds RAM/open files)
 #
-# Skips regions whose extract is already newer than $PLANET unless --force.
+# Skips regions whose extract is already newer than $PLANET and marked as cut
+# with --strategy smart (ops/region-bbox.sh) unless --force.
 # Output: world-data/regions/<id>.osm.pbf (old symlinks to a parent region
 # are replaced by real extracts, which is what every PBF phase wants — see
 # ops/docs/new-region-setup.md "extract a real regional PBF").
@@ -51,8 +52,9 @@ while IFS=$'\t' read -r id name bbox tier src dst search notes; do
   [ -z "$id" ] || [ "${id:0:1}" = "#" ] && continue
   [ -n "$ONLY" ] && [[ "$ONLY" != *",$id,"* ]] && continue
   out="$OUTDIR/$id.osm.pbf"
-  if [ $FORCE -eq 0 ] && [ -f "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$PLANET" ] && ! bbox_stale "$out" "$bbox"; then
-    echo "skip $id (extract newer than planet)"; continue
+  if [ $FORCE -eq 0 ] && [ -f "$out" ] && [ ! -L "$out" ] && [ "$out" -nt "$PLANET" ] && ! bbox_stale "$out" "$bbox" \
+     && pbf_complete "$out"; then
+    echo "skip $id (extract newer than planet, cut with --strategy smart)"; continue
   fi
   todo+=("$id|$bbox")
 done < "$REGISTRY"
@@ -84,12 +86,14 @@ while [ $i -lt ${#todo[@]} ]; do
     echo "] }"
   } > "$cfg"
   echo "--- pass $((i/BATCH+1)): ${chunk[*]%%|*}"
-  osmium extract -c "$cfg" "$PLANET" --overwrite --strategy complete_ways --progress
+  # smart: every member of a multipolygon reaching a box (region-bbox.sh).
+  osmium extract -c "$cfg" "$PLANET" --overwrite --strategy smart --progress
   for spec in "${chunk[@]}"; do
     id=${spec%%|*}; bbox=${spec#*|}
-    rm -f "$OUTDIR/$id.osm.pbf"           # drops parent-region symlinks too
+    rm -f "$OUTDIR/$id.osm.pbf" "$OUTDIR/$id.osm.pbf.strategy"   # drops parent-region symlinks too
     mv -f "$OUTDIR/$id.osm.pbf.part" "$OUTDIR/$id.osm.pbf"
     bbox_mark "$OUTDIR/$id.osm.pbf" "$bbox"
+    pbf_mark_complete "$OUTDIR/$id.osm.pbf"
     printf "  %-28s %s\n" "$id" "$(du -h "$OUTDIR/$id.osm.pbf" | cut -f1)"
   done
   rm -f "$cfg"
