@@ -593,6 +593,35 @@ def test_precut_first_group_in_pick_order_and_gates_each_build(tmp_path):
     assert "cut x" not in (tmp_path / "fake.log").read_text()      # only the first group
 
 
+def test_precut_leaves_an_extract_without_complete_multipolygons_to_its_build(tmp_path):
+    """With the real region-bbox.sh: an extract marked as cut with
+    --strategy smart is cut into tiles in the background; one without the
+    mark (an older complete_ways extract) is left to its build, which
+    re-cuts it first."""
+    import shutil
+    _setup(tmp_path, "## eu\na\nb\nw\n", variants="w\tb\tno\t13\n")
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nb\tB\t1,2,3,4\tcountry\n"
+                                          "w\tW\t1,2,3,4\tcountry\n")
+    regions = tmp_path / "root" / "world-data" / "regions"
+    regions.mkdir(parents=True)
+    for rid in ("a", "b", "w"):
+        (regions / f"{rid}.osm.pbf").write_text("pbf")
+        (regions / f"{rid}.osm.pbf.bbox").write_text("1,2,3,4\n")
+    for rid in ("a", "w"):        # w's own mark: a Light variant is cut from its parent's (b's) extract
+        st = (regions / f"{rid}.osm.pbf").stat()
+        (regions / f"{rid}.osm.pbf.strategy").write_text(f"smart {st.st_size} {int(st.st_mtime)}\n")
+    (tmp_path / "root" / "ops").mkdir(parents=True)
+    shutil.copy(ROOT / "ops" / "region-bbox.sh", tmp_path / "root" / "ops" / "region-bbox.sh")
+    env = _env(tmp_path, PAR_PRECUT="1", PAR_PRECUT_CMD=f'echo "cut $PRECUT_ID" >> {tmp_path}/fake.log')
+    r = _run(tmp_path, env)
+    assert r.returncode == 0
+    cuts = [ln for ln in (tmp_path / "fake.log").read_text().splitlines() if ln.startswith("cut ")]
+    assert cuts == ["cut a"], cuts
+    out = (tmp_path / "state" / "run.out").read_text()
+    for rid in ("b", "w"):
+        assert f"tiles {rid}: extract missing, cut for another box or without complete multipolygons" in out
+
+
 # ---- the driver's knobs ----------------------------------------------------
 
 def _driver_copy(tmp: Path) -> Path:

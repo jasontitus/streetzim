@@ -701,8 +701,10 @@ precut() {
     bbox=$(awk -F'\t' -v id="$id" '$1 == id {print $3; exit}' "$REGISTRY" 2>/dev/null)
     if [ -z "$bbox" ]; then say "tiles $id: no registry row; left to its build"; : > "$STATE/tiles/$id.skip"; continue; fi
     pbf="$ROOT/world-data/regions/$src.osm.pbf"
-    if [ ! -s "$pbf" ] || { type bbox_stale > /dev/null 2>&1 && bbox_stale "$pbf" "$bbox"; }; then
-      say "tiles $id: extract missing or cut for another box; left to its build"; : > "$STATE/tiles/$id.skip"; continue
+    if [ ! -s "$pbf" ] || { type bbox_stale > /dev/null 2>&1 && bbox_stale "$pbf" "$bbox"; } \
+       || { type pbf_complete > /dev/null 2>&1 && ! pbf_complete "$pbf"; }; then
+      say "tiles $id: extract missing, cut for another box or without complete multipolygons; left to its build"
+      : > "$STATE/tiles/$id.skip"; continue
     fi
     local -a scrub=()
     mapfile -t scrub < <(scrub_args)

@@ -99,6 +99,7 @@ def _stubs(tmp_path: Path, py_fails: bool = False) -> dict[str, str]:
     bin_.mkdir(exist_ok=True)
     (bin_ / "osmium").write_text(
         "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$STUB_LOG\"\n"
+        "[ -z \"$OSMIUM_FAILS\" ] || exit 1\n"
         "while [ $# -gt 0 ]; do [ \"$1\" = -o ] && echo x > \"$2\"; shift; done\n")
     (bin_ / "osmium").chmod(0o755)
     py = tmp_path / "py"
@@ -113,7 +114,7 @@ HARNESS = f'''
 . {ROOT}/ops/region-bbox.sh
 log() {{ echo "LOG $*" >> "$STUB_LOG"; }}
 row() {{ echo "ROW $*" >> "$STUB_LOG"; }}
-flock() {{ shift; "$@"; }}
+flock() {{ case "$1" in -*) return 0 ;; esac; shift; "$@"; }}
 n_fail=0
 '''
 
@@ -150,19 +151,41 @@ def test_extract_step(tmp_path, which):
     planet = tmp_path / "planet.osm.pbf"
     planet.write_bytes(b"x")
     os.utime(planet, (1_000_000, 1_000_000))
-    pre = f'REGDIR={tmp_path}/world-data/regions; PLANET={planet}; LOG=/dev/null'
+    pre = f'REGDIR={tmp_path}/world-data/regions; PLANET={planet}; LOG=/dev/null; PBFLOCK={tmp_path}/lock'
     pbf = tmp_path / "world-data" / "regions" / "r.osm.pbf"
     env = _stubs(tmp_path)
     before = {"queue": f"extract -b {NORMAL} {planet} -o {pbf}.part -f pbf --overwrite "
-                       "--strategy complete_ways",
-              "rebuild": f"extract -b {NORMAL} {planet} -o world-data/regions/r.osm.pbf "
-                         "--overwrite"}[which]
+                       "--strategy smart",
+              "rebuild": f"extract -b {NORMAL} --strategy smart {planet} -o world-data/regions/r.osm.pbf.part "
+                         "-f pbf --overwrite"}[which]
 
     calls = _run(tmp_path, block, NORMAL, env, pre)
     assert [c for c in calls.splitlines() if not c.startswith("LOG")] == [before]
     assert pbf.with_name("r.osm.pbf.bbox").read_text() == NORMAL + "\n"
+    mark = pbf.with_name("r.osm.pbf.strategy")
+    st = pbf.stat()
+    assert mark.read_text() == f"smart {st.st_size} {int(st.st_mtime)}\n"
     # Fresh, sidecar matches: nothing to do.
     assert not _osmium(_run(tmp_path, block, NORMAL, env, pre))
+    # Cut without complete multipolygons (no .strategy, an older extract), or
+    # rewritten since its mark: re-cut and marked.
+    for spoil in (mark.unlink, lambda: pbf.write_text("older extract, longer\n")):
+        spoil()
+        calls = _run(tmp_path, block, NORMAL, env, pre)
+        assert [c for c in calls.splitlines() if not c.startswith("LOG")] == [before]
+        st = pbf.stat()
+        assert pbf.read_text() == "x\n" and mark.read_text() == f"smart {st.st_size} {int(st.st_mtime)}\n"
+    # osmium fails: nothing is marked and the row fails; the driver keeps the
+    # old extract (the queue removes it before cutting, as it always has).
+    mark.unlink()
+    pbf.write_text("old\n")
+    calls = _run(tmp_path, block, NORMAL, {**env, "OSMIUM_FAILS": "1"}, pre)
+    assert "EXTRACT FAILED" in calls and "ROW r extract-failed" in calls, calls
+    assert not mark.exists()
+    if which == "rebuild":
+        assert pbf.read_text() == "old\n" and not pbf.with_name("r.osm.pbf.part").exists()
+    pbf.unlink(missing_ok=True)
+    calls = _run(tmp_path, block, NORMAL, env, pre)
     # An existing extract with no sidecar is trusted for a normal row...
     pbf.with_name("r.osm.pbf.bbox").unlink()
     assert not _osmium(_run(tmp_path, block, NORMAL, env, pre))

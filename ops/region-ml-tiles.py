@@ -345,6 +345,14 @@ def pbf_identity(path):
     return f"{st.st_size} {st.st_mtime_ns}"
 
 
+def extract_complete(pbf):
+    """Whether ``pbf``'s .strategy sidecar marks this very file (size and
+    mtime) as cut with osmium --strategy smart (ops/region-bbox.sh's
+    pbf_mark_complete)."""
+    st = os.stat(pbf)
+    return read_sidecar(pbf + ".strategy") == f"smart {st.st_size} {int(st.st_mtime)}"
+
+
 def read_sidecar(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -799,6 +807,9 @@ def make(rid, src_id, bbox, *, out_dir=None, store_dir=None):
     cut_for = read_sidecar(pbf + ".bbox")
     if cut_for is not None and cut_for != bbox:
         fail(f"{pbf} was cut for bbox {cut_for}, not {bbox}: extract it again first")
+    if not extract_complete(pbf):
+        fail(f"{pbf} is not marked as cut with osmium --strategy smart ({pbf}.strategy): a lake or "
+             "forest crossing the box would be lost; extract it again first (ops/region-bbox.sh)")
     for shp in SHAPEFILES:
         if not os.path.isfile(os.path.join(ROOT, shp)):
             fail(f"{os.path.join(ROOT, shp)} is missing (the tiles would have no "

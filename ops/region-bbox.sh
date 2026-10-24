@@ -39,6 +39,17 @@ bbox_stale() {
 
 # bbox_mark <file> <bbox>: record the bbox <file> was just cut for.
 bbox_mark() { printf '%s\n' "$2" > "$1.bbox"; }
+# Region extracts are cut with osmium's smart strategy, which keeps every
+# member of a multipolygon that reaches the box. Under complete_ways a lake
+# or forest crossing the box's edge arrives with outer ways missing and
+# cannot be assembled, so the region's own tiles (multilingual tiles,
+# ops/region-ml-tiles.py) lose it: Chicago's Lake Michigan lacked 1,127 of
+# its ways. pbf_mark_complete <pbf> records the strategy in <pbf>.strategy,
+# with the file's size and mtime, so a file written since by anything else
+# is not taken for one; pbf_complete <pbf> is true for an extract cut that
+# way (ops/region-ml-tiles.py reads the same mark).
+pbf_complete() { [ -f "$1" ] && [ "$(cat "$1.strategy" 2>/dev/null)" = "smart $(stat -c '%s %Y' "$1")" ]; }
+pbf_mark_complete() { printf 'smart %s\n' "$(stat -c '%s %Y' "$1")" > "$1.strategy"; }
 
 # bbox_osmium_area <bbox> <poly>: set AREA to the osmium extract arguments,
 # `-b <bbox>` for a normal row. A bbox across the antimeridian must never
