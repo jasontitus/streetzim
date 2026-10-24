@@ -728,8 +728,8 @@ def test_webseed_smoke_against_the_local_worker(tmp_path):
     import time
     from tools.langpack import webseed_e2e, webseed_smoke
     node = os.environ.get("NODE") or shutil.which("node")
-    if not node:
-        pytest.skip("no node")
+    if not node or not os.access(node, os.X_OK):
+        pytest.skip(f"no node ({node or 'NODE unset, none on PATH'})")
     s = synth(tmp_path)
     assert lt.main([str(s["site"]), "--base", str(s["base"]), "--packs-dir", str(tmp_path), "--webseed", WEBSEED]) == 0
     files = {f"streetzim-testland/{s['base'].name}": str(s["base"]),

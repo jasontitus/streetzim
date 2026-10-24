@@ -519,26 +519,31 @@ def test_an_entry_waits_while_there_is_room_only_for_the_running_ones(gates: Sim
 
 @pytest.mark.parametrize("how", ["group", "run_gates"])
 def test_a_stopped_run_leaves_no_kiwix_serve(gates: SimpleNamespace, tmp_path: Path, how: str) -> None:
-    """Stopped while entries are being checked, by a signal to its whole
-    process group (timeout's) or to run_gates.sh alone: each job stops its
-    kiwix-serve (which runs in a session of its own)."""
+    """Stopped while two entries are in a browser check (a command under GNU
+    timeout, in a process group of its own), by a signal to its whole
+    process group (timeout's) or to run_gates.sh alone: it ends at once, not
+    when the check would have, and each job stops its kiwix-serve (which
+    runs in a session of its own)."""
     import signal
     import time
-    served = tmp_path / "served.jsonl"
+    served, viewer = tmp_path / "served.jsonl", tmp_path / "viewer.log"
     p = subprocess.Popen([str(TOOLS / "run_gates.sh"), str(gates.base), str(gates.packs), "de,th,en", "en", "testland",
                           str(gates.region), str(_free_port())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          env={**gates.env, "LANGPACK_WORK": str(tmp_path / "work"), "GATE_JOBS": "2",
-                              "KIWIX_STUB_LOG": str(served), "NODE_STUB_SLEEP": "60"}, start_new_session=True)
+                              "KIWIX_STUB_LOG": str(served), "NODE_STUB_LOG": str(viewer), "NODE_STUB_SLEEP": "60"},
+                         start_new_session=True)
     try:
         t0 = time.time()
-        while (not served.exists() or len(served.read_text().splitlines()) < 2) and time.time() - t0 < 300:
+        while (not viewer.exists() or len(viewer.read_text().splitlines()) < 2) and time.time() - t0 < 300:
             time.sleep(0.2)
-        assert len(served.read_text().splitlines()) >= 2
+        assert len(viewer.read_text().splitlines()) >= 2 and len(served.read_text().splitlines()) >= 2
+        t1 = time.time()
         if how == "group":
             os.killpg(p.pid, signal.SIGTERM)
         else:
             os.kill(p.pid, signal.SIGTERM)
-        p.wait(timeout=60)
+        p.wait(timeout=20)
+        assert time.time() - t1 < 20
     finally:
         if p.poll() is None:
             os.killpg(p.pid, signal.SIGKILL)
