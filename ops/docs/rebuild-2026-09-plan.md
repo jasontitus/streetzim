@@ -415,6 +415,17 @@ those reviews found are in the commit after each change.
   now passes such a map over a degree wide with a warning when it looks
   inland (rules in docs/language-ready.md); it failed Colorado before.
 
+### The builder page is live
+- Decision 2026-10-24: `/build/` goes live with its full function. The
+  eight regions published on the preview (balkans, baltics, benelux,
+  carpathians, greece, iceland, poland, switzerland) are in production's
+  `web/build/recipes/` and deployed; their map cards offer "Build in another
+  language" while archive.org's live ZIM is their recipes' base.
+- `pack_queue.sh` publishes each region it ships to production as well and
+  deploys the site (`QUEUE_LIVE=1`, the default).
+- The build worker (`build-proxy/`, deployed from a laptop) should run with
+  its default `SITE_ORIGIN` (production): a plain `npx wrangler@4 deploy`.
+
 ### NVMe and the United States
 - Worker 0 takes the largest region, and the United States projects 144 GiB
   of NVMe scratch, more than the 100 GiB floor ever leaves, so worker 0 sat

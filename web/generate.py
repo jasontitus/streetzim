@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -986,8 +987,8 @@ def write_build_index(live, recipes_dir=None):
     regions.sort(key=lambda r: (str(r.get("title", "")).casefold(), r["id"]))
     idx = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
            "regions": regions}
-    tmp = os.path.join(recipes_dir, "index.json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
+    fd, tmp = tempfile.mkstemp(dir=recipes_dir, prefix="index.json.", suffix=".tmp")   # a name of its own
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(recipes_dir, "index.json"))
     return [r["id"] for r in regions]

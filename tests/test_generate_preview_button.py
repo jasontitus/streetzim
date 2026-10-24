@@ -5,6 +5,7 @@ proxy the /drive/ picker streams archive.org ZIMs through
 that can only report "not configured".
 """
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -53,3 +54,14 @@ def test_preview_url_escapes_odd_filenames():
     region = {**REGION, "zim_file": "osm-a&b 2026.zim"}
     html = gen.render_live_card(region, "1 MB", preview=True)
     assert "/drive/?zim=https://archive.org/download/streetzim-washington-dc/osm-a%26b%202026.zim" in html
+
+
+def test_the_build_index_is_written_under_a_temporary_name_of_its_own(tmp_path):
+    """ops/langpack/publish_site.sh's site_index.py writes the same index:
+    never a fixed temporary name."""
+    rd = tmp_path / "recipes"
+    (rd / "greece").mkdir(parents=True)
+    (rd / "greece" / "region.json").write_text(json.dumps({"id": "greece", "title": "Greece", "menu": [{"lang": "de"}]}))
+    (rd / "index.json.tmp").mkdir()                       # a fixed name taken
+    assert gen.write_build_index({"greece": True}, str(rd)) == ["greece"]
+    assert [r["id"] for r in json.loads((rd / "index.json").read_text())["regions"]] == ["greece"]

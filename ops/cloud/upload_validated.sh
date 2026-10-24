@@ -284,7 +284,12 @@ fi
     || echo "WARN cleanup skipped for ${id}"
 
 # --- 6. web deploy ---
-"$PYTHON" web/generate.py --deploy \
+# Under the site-deploy lock: ops/langpack/pack_queue.sh publishes recipes into
+# web/ and deploys too, and two deploys from one tree read each other's writes.
+# generate.py keeps the lock's descriptor, so the lock lasts while it runs.
+mkdir -p "$PROJECT_DIR/tmp"
+( flock -w 3600 7 || echo "WARN the site-deploy lock stayed busy for an hour — deploying anyway"
+  timeout 3600 "$PYTHON" web/generate.py --deploy ) 7>> "$PROJECT_DIR/tmp/.site-deploy.lock" \
     || echo "WARN web deploy failed for ${id} — continuing"
 
 echo "DONE ${id}"

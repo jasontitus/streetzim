@@ -43,13 +43,16 @@ with open(log, "a") as fh:
     fh.write(json.dumps({"ship": rid, "base": base, "work": os.environ.get("LANGPACK_WORK"),
                          "webseed": os.environ.get("LANGPACK_WEBSEED"), "maxgb": os.environ.get("SHIP_MAX_BASE_GB"),
                          "rc": rc, "t": time.time()}) + "\n")
-time.sleep(float(os.environ.get("FAKE_SHIP_SLEEP", "0")))
+slow = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_SLEEP_FOR", "").split(";") if x)   # "region:secs;..."
+time.sleep(float(slow.get(rid, os.environ.get("FAKE_SHIP_SLEEP", "0"))))
 with open(log, "a") as fh:
     fh.write(json.dumps({"ship_end": rid, "t": time.time()}) + "\n")
 if rc == 0:
     d = os.path.join(os.environ["LANGPACK_WORK"], "site", rid, "recipes", rid)
     os.makedirs(d, exist_ok=True)
-    open(os.path.join(d, "region.json"), "w").write(json.dumps({"id": rid, "base": os.path.basename(base)}))
+    import hashlib
+    md5 = hashlib.md5(open(base, "rb").read()).hexdigest()
+    open(os.path.join(d, "region.json"), "w").write(json.dumps({"id": rid, "base": {"file": os.path.basename(base), "md5": md5}}))
 # FAKE_SHIP_RETRY "region:es fr;...": the languages whose pack builds ran out of time (ship_packs.sh's retry-langs)
 retry = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_RETRY", "").split(";") if x)
 rl = os.path.join(os.environ["LANGPACK_WORK"], "packs", os.path.basename(base)[:-4], "retry-langs")
@@ -78,6 +81,12 @@ import json, os, sys, time
 log = os.environ["FAKE_LOG"]
 n = sum(1 for x in open(log) if '"firebase"' in x) if os.path.exists(log) else 0
 rc = 1 if n < int(os.environ.get("FAKE_FIREBASE_FAILS", "0")) else 0
+if sys.argv[1:4] == ["deploy", "--only", "hosting"]:          # the live site's deploy
+    rc = int(os.environ.get("FAKE_FIREBASE_LIVE_RC", "0"))
+    if os.path.exists("/proc/self/fd/9"):
+        open(log, "a").write(json.dumps({"leak": 9}) + "\n")
+    if not os.path.exists("/proc/self/fd/7"):
+        open(log, "a").write(json.dumps({"no_lock_fd": 7}) + "\n")
 if os.environ.get("FAKE_FIREBASE_SLEEP"):
     open(log, "a").write(json.dumps({"deploying": 1}) + "\n")
     time.sleep(float(os.environ["FAKE_FIREBASE_SLEEP"]))
@@ -157,7 +166,8 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "IA": str(stubs / "ia"), "FAKE_IA_DIR": str(d / "ia"), "QUEUE_SEED": "",
            "QUEUE_FORCE_WORK": "1",                                        # a test's LANGPACK_WORK
            "LANGPACK_SCRATCH": str(d / "nvme"),                            # not the host's NVMe scratch
-           "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": ""}            # not the host's own round
+           "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": "",           # not the host's own round
+           "QUEUE_LIVE": "0"}                                              # not the live site (its own test)
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
                            preview=d / "preview" / "streetzim")
@@ -165,7 +175,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
 
 def _env(q: SimpleNamespace, extra: dict[str, str]) -> dict[str, str]:
     env = {**q.env, **extra}
-    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_RETRY") if k in env))
+    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_SLEEP_FOR", "FAKE_SHIP_RETRY") if k in env))
     return env
 
 
@@ -278,6 +288,272 @@ def test_one_queue_at_a_time(q: SimpleNamespace) -> None:
         r = _run(q)
     assert r.returncode == 2 and "another queue holds" in r.stderr
     assert _calls(q, "ship") == []
+
+
+LIVE_BUILD = (r'echo "{\"live_build\": \"$PWD\"}" >> "$FAKE_LOG"; '
+              r'[ -e /proc/$$/fd/9 ] && echo "{\"leak\": 9}" >> "$FAKE_LOG"; '
+              r'[ -e /proc/$$/fd/7 ] || echo "{\"no_lock_fd\": 7}" >> "$FAKE_LOG"; '
+              r'if [ -n "${FAKE_LIVE_BUILD_FAIL_ONCE:-}" ] && [ ! -e "$FAKE_LIVE_BUILD_FAIL_ONCE" ]; then '
+              r': > "$FAKE_LIVE_BUILD_FAIL_ONCE"; exit 1; fi; '
+              r'sleep "${FAKE_LIVE_BUILD_SLEEP:-0}"; exit "${FAKE_LIVE_BUILD_RC:-0}"')
+# the live step's publish_site.sh: the fake one, failing while FAKE_LIVE_PUBLISH_RC is set, and
+# listing every published folder in the index as site_index.py does
+LIVE_PUBLISH = r"""#!/bin/bash
+[ -z "${FAKE_LIVE_PUBLISH_RC:-}" ] || { echo "{\"live_publish_failed\": \"$1\"}" >> "$FAKE_LOG"; exit "$FAKE_LIVE_PUBLISH_RC"; }
+[ -e /proc/$$/fd/9 ] && echo "{\"leak\": 9}" >> "$FAKE_LOG"
+[ -e /proc/$$/fd/7 ] || echo "{\"no_lock_fd\": 7}" >> "$FAKE_LOG"
+bash "$(dirname "$0")/publish.sh" "$@" || exit
+python3 - "$2/build/recipes" <<'PY'
+import json, os, sys
+d = sys.argv[1]
+ids = sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)))
+json.dump({"format": "streetzim-build-index/1", "regions": [{"id": x} for x in ids]}, open(os.path.join(d, "index.json"), "w"))
+PY
+"""
+
+
+def _live(q: SimpleNamespace) -> dict[str, str]:
+    pub = q.d / "stubs" / "live-publish.sh"
+    if not pub.exists():
+        pub.write_text(LIVE_PUBLISH)
+        pub.chmod(0o755)
+    return {"QUEUE_LIVE": "1", "QUEUE_LIVE_PUBLISH": str(pub), "QUEUE_LIVE_BUILD": LIVE_BUILD}
+
+
+def _live_pubs(q: SimpleNamespace) -> list[str]:
+    return [c["publish"] for c in _calls(q, "publish") if c["web"] == str(q.prod / "web")]
+
+
+def _live_deploys(q: SimpleNamespace) -> list[dict]:
+    return [c for c in _calls(q, "firebase") if c["firebase"][:3] == ["deploy", "--only", "hosting"]]
+
+
+def _index(q: SimpleNamespace) -> list[str]:
+    return [x["id"] for x in json.loads((q.prod / "web" / "build" / "recipes" / "index.json").read_text())["regions"]]
+
+
+def test_published_maps_go_live_and_pages_that_cannot_be_built_are_tried_again(q: SimpleNamespace) -> None:
+    """QUEUE_LIVE=1: a map published to the preview also goes into
+    PROD_REPO's web/; the pages are built and the site deployed from
+    PROD_REPO, the steps holding the site-deploy lock's descriptor (fd 7) but
+    never the queue's (fd 9). Pages that cannot be built are loud, put the
+    builder page's index back without the maps just published (an older
+    entry for one of them too), and the maps are done again at the next pass
+    without shipping them again; a refused or failed ship never goes live;
+    with nothing pending nothing is deployed."""
+    rec = q.prod / "web" / "build" / "recipes"
+    rec.mkdir(parents=True, exist_ok=True)
+    (rec / "index.json").write_text(json.dumps({"format": "streetzim-build-index/1",
+                                                "regions": [{"id": "zeta"}, {"id": "beta", "old": 1}]}))
+    r = _run(q, FAKE_LIVE_BUILD_RC="1", **_live(q))
+    assert "FAILED: the site's pages could not be built (beta)" in r.stderr, r.stderr
+    assert _live_pubs(q) == ["beta"] and (rec / "beta" / "region.json").exists()
+    assert [c["live_build"] for c in _calls(q, "live_build")] == [str(q.prod)] and _live_deploys(q) == []
+    assert _index(q) == ["zeta"]                                          # put back, without beta
+    assert (q.qd / "live-pending-beta").read_text().strip() == "1" and _status(q)["beta"][1] == "published"
+    ships = len(_calls(q, "ship"))
+    r2 = _run(q, **_live(q))
+    assert "beta" not in [c["ship"] for c in _calls(q, "ship")[ships:]], r2.stderr
+    assert sorted(set(_live_pubs(q)[1:])) == ["alpha", "beta"], _live_pubs(q)
+    assert all(c["cwd"] == str(q.prod) for c in _live_deploys(q)) and _live_deploys(q)
+    for rid in ("alpha", "beta"):
+        assert f"{rid}: live on the site's builder page (/build/)" in log_text(q)
+    assert "cont" not in _live_pubs(q) and "fail" not in _live_pubs(q)
+    n = len(_live_deploys(q))
+    _run(q, **_live(q))                                                   # nothing pending: no deploy
+    assert len(_live_deploys(q)) == n and not list(q.qd.glob("live-*")), list(q.qd.glob("live-*"))
+    assert not _calls(q, "leak") and not _calls(q, "no_lock_fd")
+
+
+def test_a_failed_deploy_leaves_the_built_pages_and_is_deployed_again(q: SimpleNamespace) -> None:
+    r = _run(q, FAKE_FIREBASE_LIVE_RC="1", **_live(q))
+    assert "FAILED: the site's deploy failed (beta): its pages are built" in r.stderr, r.stderr
+    assert "beta" in _index(q) and (q.qd / "live-pending-beta").read_text().strip() == "1"
+    _run(q, **_live(q))
+    assert "beta: live on the site's builder page (/build/)" in log_text(q)
+    assert not (q.qd / "live-pending-beta").exists()
+
+
+def test_pages_that_cannot_be_built_leave_a_valid_index_when_there_was_none(q: SimpleNamespace) -> None:
+    _run(q, FAKE_LIVE_BUILD_RC="1", **_live(q))
+    assert json.loads((q.prod / "web" / "build" / "recipes" / "index.json").read_text())["regions"] == []
+
+
+def test_a_map_goes_live_once_its_own_run_ends(q: SimpleNamespace) -> None:
+    """beta's run ends long before alpha's: beta goes live before alpha's run
+    ends, not at the end of the pass."""
+    _run(q, **_live(q), FAKE_SHIP_RC="", FAKE_SHIP_SLEEP_FOR="alpha:4")
+    lines = [json.loads(x) for x in q.log.read_text().splitlines()]
+    beta_live = next(i for i, c in enumerate(lines) if c.get("publish") == "beta" and c.get("web") == str(q.prod / "web"))
+    alpha_end = next(i for i, c in enumerate(lines) if c.get("ship_end") == "alpha")
+    assert beta_live < alpha_end, lines
+
+
+def test_a_map_that_cannot_go_live_is_given_up_after_max_again(q: SimpleNamespace) -> None:
+    """A failing live publish_site.sh: nothing built or deployed for it,
+    counted, a loud failure after QUEUE_MAX_AGAIN in a row, then left alone
+    until a restart with QUEUE_RETRY_FAILED=1."""
+    env = {**_live(q), "QUEUE_MAX_AGAIN": "2", "FAKE_LIVE_PUBLISH_RC": "1"}
+    _run(q, **env)
+    assert (q.qd / "live-pending-beta").read_text().strip() == "1" and _calls(q, "live_build") == []
+    r = _run(q, **env)
+    assert "FAILED: beta: not on the live site after 2 tries in a row" in r.stderr, r.stderr
+    assert (q.qd / "live-failed-beta").exists() and not (q.qd / "live-pending-beta").exists()
+    beta_tries = lambda: len([c for c in _calls(q, "live_publish_failed") if c["live_publish_failed"] == "beta"])  # noqa: E731
+    n = beta_tries()
+    _run(q, **env)
+    assert beta_tries() == n                                              # left alone
+    env.pop("FAKE_LIVE_PUBLISH_RC")
+    _run(q, **env, QUEUE_RETRY_FAILED="1")
+    assert "beta" in _live_pubs(q) and not (q.qd / "live-failed-beta").exists()
+    assert "beta: live on the site's builder page (/build/)" in log_text(q)
+
+
+@pytest.mark.parametrize("live_base", ["none", "same", "older"])
+def test_a_partial_run_goes_live_only_over_another_base(q: SimpleNamespace, live_base: str) -> None:
+    """published-partial goes live when the live site offers no recipes for
+    the region or ones for an older base, but not over its own base's."""
+    rec = q.prod / "web" / "build" / "recipes" / "beta"
+    if live_base == "older":
+        rec.mkdir(parents=True)
+        (rec / "region.json").write_text(json.dumps({"id": "beta", "base": {"file": "osm-beta-old.zim", "md5": "0" * 32}}))
+    env = {**_live(q), "FAKE_SHIP_RC": "", "QUEUE_PARTIAL_RETRIES": "3", "FAKE_SHIP_RETRY": "beta:es"}
+    if live_base == "same":
+        _run(q, **env, QUEUE_RETRY_SECS="3600")
+        f = q.qd / "status.tsv"
+        f.write_text("\n".join("\t".join(x[:5] + ["0"] + x[6:]) if x[0] == "beta" else "\t".join(x)
+                               for x in (y.split("\t") for y in f.read_text().splitlines())) + "\n")
+        n = _live_pubs(q).count("beta")
+        _run(q, **env, QUEUE_RETRY_SECS="3600")
+        assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == 2
+        assert _live_pubs(q).count("beta") == n == 1, _live_pubs(q)
+    else:
+        _run(q, **env, QUEUE_RETRY_SECS="3600")
+        assert _status(q)["beta"][1] == "published-partial" and _live_pubs(q).count("beta") == 1
+
+
+def test_the_live_step_waits_for_the_site_deploy_lock(q: SimpleNamespace) -> None:
+    """Held past QUEUE_SITE_LOCK_WAIT: loud, the map waits; held for less:
+    the queue waits for it and goes on."""
+    import threading
+    lock = q.prod / "tmp" / ".site-deploy.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        r = _run(q, **_live(q), QUEUE_SITE_LOCK_WAIT="1")
+    assert "the site-deploy lock" in r.stderr and "stayed busy for 1 s" in r.stderr, r.stderr
+    assert _live_pubs(q) == [] and (q.qd / "live-pending-beta").exists()
+    fh = open(lock, "w")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    threading.Timer(2.0, fh.close).start()
+    r = _run(q, **_live(q), QUEUE_SITE_LOCK_WAIT="30")
+    assert "stayed busy" not in r.stderr and "beta" in _live_pubs(q), r.stderr
+    assert not (q.qd / "live-pending-beta").exists()
+
+
+def test_a_restarted_queue_does_not_free_the_lock_while_a_live_step_runs(q: SimpleNamespace) -> None:
+    lock = q.prod / "tmp" / ".site-deploy.lock"
+    p = _start(q, **_live(q), FAKE_LIVE_BUILD_SLEEP="6")
+    t0 = time.time()
+    while not _calls(q, "live_build") and time.time() - t0 < 60:
+        time.sleep(0.2)
+    assert _calls(q, "live_build")
+    p.terminate()
+    p.wait(timeout=30)
+    with open(lock, "a") as fh:
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)         # the build still holds it
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                time.sleep(0.5)
+        else:
+            raise AssertionError("the lock was never freed")
+
+
+def test_the_lock_is_freed_after_a_live_step_while_the_queue_runs_on(q: SimpleNamespace) -> None:
+    lock = q.prod / "tmp" / ".site-deploy.lock"
+    p = _start(q, (), **_live(q), QUEUE_POLL_SECS="600")
+    try:
+        t0 = time.time()
+        while "beta: live on the site's builder page" not in ((q.qd / "queue.log").read_text()
+                                                              if (q.qd / "queue.log").exists() else "") and time.time() - t0 < 120:
+            time.sleep(0.3)
+        time.sleep(1.0)
+        with open(lock, "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)          # free, though the queue still runs
+        assert p.poll() is None
+    finally:
+        p.terminate()
+        p.wait(timeout=30)
+
+
+def test_a_busy_lock_does_not_hold_up_the_next_ship(q: SimpleNamespace) -> None:
+    """Once a run ends its region goes live only if the site-deploy lock is
+    free at once (another deploy holding it does not delay the next ship);
+    the end of the pass waits for the lock."""
+    lock = q.prod / "tmp" / ".site-deploy.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        r = _run(q, **_live(q), FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_SITE_LOCK_WAIT="3")
+    lines = [json.loads(x) for x in q.log.read_text().splitlines()]
+    t_end = next(c["t"] for c in lines if c.get("ship_end") == "beta")
+    t_next = next(c["t"] for c in lines if c.get("ship") == "alpha")
+    assert t_next - t_end < 2.5, (t_next - t_end)
+    assert "the site-deploy lock is busy: beta go live at the end of the pass" in log_text(q)
+    assert "stayed busy for 3 s" in r.stderr, r.stderr
+    assert (q.qd / "live-pending-beta").read_text().strip() == "0"        # not a failed try
+
+
+def test_a_new_run_starts_the_count_again(q: SimpleNamespace) -> None:
+    """A region whose live step failed before ships a new base: it goes live
+    once that run ends, not after the other runs of the pass."""
+    from tests.langpack import lpzims
+    _run(q, **_live(q), FAKE_SHIP_RC="", FAKE_FIREBASE_LIVE_RC="1")
+    assert (q.qd / "live-pending-beta").read_text().strip() == "1"
+    lpzims.write_base(q.maps / "osm-beta-2026-10-24.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    lpzims.write_base(q.maps / "osm-alpha-2026-10-24.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    with open(q.tsv, "a") as fh:
+        fh.write(f"alpha\tuploaded\tosm-alpha-2026-10-24.zim\t{_iso(T0 + 400)}\n")
+        fh.write(f"beta\tuploaded\tosm-beta-2026-10-24.zim\t{_iso(T0 + 500)}\n")
+    n = len(q.log.read_text().splitlines())
+    _run(q, **_live(q), FAKE_SHIP_RC="", FAKE_SHIP_SLEEP_FOR="alpha:6")
+    lines = [json.loads(x) for x in q.log.read_text().splitlines()[n:]]
+    beta_live = next(i for i, c in enumerate(lines) if c.get("publish") == "beta" and c.get("web") == str(q.prod / "web"))
+    alpha_end = next(i for i, c in enumerate(lines) if c.get("ship_end") == "alpha")
+    assert beta_live < alpha_end, lines
+
+
+def test_a_failed_region_is_tried_again_at_a_later_pass(q: SimpleNamespace) -> None:
+    """The queue running on: pages that could not be built once are built
+    at a later pass, and the region goes live."""
+    p = _start(q, (), **_live(q), QUEUE_POLL_SECS="1", FAKE_LIVE_BUILD_FAIL_ONCE=str(q.d / "failed-once"))
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 90:
+            if (q.qd / "queue.log").exists() and "beta: live on the site's builder page" in log_text(q):
+                break
+            time.sleep(0.5)
+        assert "beta: live on the site's builder page" in log_text(q), log_text(q)[-2000:]
+        assert (q.d / "failed-once").exists()
+    finally:
+        p.terminate()
+        p.wait(timeout=30)
+
+
+@pytest.mark.parametrize("how", ["QUEUE_LIVE=0", "forced"])
+def test_the_live_site_is_left_alone(q: SimpleNamespace, how: str) -> None:
+    """QUEUE_LIVE=0, or QUEUE_FORCE_WORK=1 (a test's run) without QUEUE_LIVE."""
+    env = _live(q)
+    env["QUEUE_LIVE"] = "0" if how == "QUEUE_LIVE=0" else ""
+    r = _run(q, **env)
+    assert _status(q)["beta"][1] == "published", r.stderr
+    assert _live_pubs(q) == [] and _calls(q, "live_build") == [] and _live_deploys(q) == []
+    assert not list(q.qd.glob("live-pending-*"))
 
 
 def test_a_failed_publish_is_loud_and_not_marked_published(q: SimpleNamespace) -> None:
@@ -613,7 +889,8 @@ def test_production_settings_only_unless_forced(q: SimpleNamespace, tmp_path: Pa
     a test's settings left in the shell): refused unless QUEUE_FORCE_WORK=1."""
     env = dict(q.env)
     env.pop("QUEUE_FORCE_WORK")
-    extra = {"WP_CACHE": str(tmp_path / "wpc"), "LANGPACK_WEBSEED": "http://127.0.0.1:8787", "QUEUE_DIR": str(tmp_path / "q2")}
+    extra = {"WP_CACHE": str(tmp_path / "wpc"), "LANGPACK_WEBSEED": "http://127.0.0.1:8787", "QUEUE_DIR": str(tmp_path / "q2"),
+             "QUEUE_LIVE_PUBLISH": "/x/publish.sh", "QUEUE_LIVE_BUILD": "echo build"}
     r = subprocess.run(["bash", str(QUEUE), "--once"], capture_output=True, text=True, timeout=120, env={**env, **extra})
     assert r.returncode == 3, (r.returncode, r.stderr)
     for want in (f"LANGPACK_WORK={q.work} is not production's /storage/streetzim/langpack-work",
@@ -623,7 +900,8 @@ def test_production_settings_only_unless_forced(q: SimpleNamespace, tmp_path: Pa
                  f"MAPS_DIR={q.maps} is not production's /storage/streetzim",
                  f"PROD_REPO={q.prod} is not production's /storage/streetzim",
                  f"QUEUE_SHIP={q.env['QUEUE_SHIP']}: a test's setting", f"QUEUE_PUBLISH={q.env['QUEUE_PUBLISH']}: a test's setting",
-                 f"QUEUE_DIR={tmp_path / 'q2'}: a test's setting"):
+                 f"QUEUE_DIR={tmp_path / 'q2'}: a test's setting",
+                 "QUEUE_LIVE_PUBLISH=/x/publish.sh: a test's setting", "QUEUE_LIVE_BUILD=echo build: a test's setting"):
         assert want in r.stderr, (want, r.stderr)
     assert _calls(q, "ship") == [] and not (q.qd / "queue.log").exists() and not (tmp_path / "q2").exists()
 
