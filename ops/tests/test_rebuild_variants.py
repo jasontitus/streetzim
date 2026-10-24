@@ -107,7 +107,7 @@ def test_a_variant_whose_parent_lacks_places_is_refused_for_the_parent(tmp_path)
     calls = _run(tmp_path, env, "v")
     py = [c for c in calls if c.startswith("python")]
     assert len(py) == 1 and "--out overture_cache/places-p-rel.parquet" in py[0], calls
-    assert f"--bbox={BOX}" in py[0]
+    assert f"--bbox={BOX}" in py[0] and "--release rel " in py[0]
     assert "ROW v no-places -" in calls and "BUILD p" not in calls, calls
     assert _files(tmp_path, "v") == []
 
