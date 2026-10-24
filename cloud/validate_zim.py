@@ -1046,6 +1046,76 @@ def _chk_map_config(arc) -> tuple[str, str]:
     return ("pass", f"flags={flags}")
 
 
+def _tile_layers(data: bytes) -> dict | None:
+    """A vector tile's layers (mapbox_vector_tile.decode), gunzipped first
+    when it is gzipped; None when it cannot be decoded."""
+    import gzip
+    try:
+        import mapbox_vector_tile
+        if data[:2] == b"\x1f\x8b":
+            data = gzip.decompress(data)
+        return mapbox_vector_tile.decode(data)
+    except Exception:
+        return None
+
+
+def _inland_low_zoom(arc, bbox, to_tile) -> str | None:
+    """For a multilingual map without z0: one of its zoom-4 tiles over the
+    box when the map looks like an inland region's, else None (then z0
+    counts as lost). Inland: there are tiles at zoom 4 (motorways and state
+    borders start there), no tile at zoom 1-4 over the box carries what z0
+    would have shown (the ocean, an Antarctic ice shelf, a national border,
+    a continent's label: resources/tilemaker's minzoom-0 features), and when
+    no tile at zoom 1-3 exists, none at zoom 4 carries what only zoom 1-3
+    add (a glacier, a country's label). Every such tile must decode."""
+    if bbox[0] > bbox[2] or bbox[2] > 180:
+        return None                       # across the antimeridian: not judged
+    def present(z):
+        x0, y1 = to_tile(bbox[0], bbox[1], z)
+        x1, y0 = to_tile(bbox[2], bbox[3], z)
+        out = []
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                p = f"tiles/{z}/{x}/{y}.pbf"
+                try:
+                    d = bytes(arc.get_entry_by_path(p).get_item().content)
+                except KeyError:
+                    continue
+                if d:
+                    out.append((p, d))
+        return out
+    tiles = {z: present(z) for z in (1, 2, 3, 4)}
+    if not tiles[4]:
+        return None
+    upper = any(tiles[z] for z in (1, 2, 3))
+    for z, found in tiles.items():
+        for _, d in found:
+            layers = _tile_layers(d)
+            if layers is None:
+                return None
+            for f in layers.get("water", {}).get("features", []):
+                if f.get("properties", {}).get("class") == "ocean":
+                    return None
+            for f in layers.get("boundary", {}).get("features", []):
+                level = f.get("properties", {}).get("admin_level")
+                if isinstance(level, (int, float)) and level <= 2:
+                    return None
+            for f in layers.get("landcover", {}).get("features", []):
+                if f.get("properties", {}).get("subclass") == "ice_shelf":
+                    return None
+            for f in layers.get("place", {}).get("features", []):
+                if f.get("properties", {}).get("class") == "continent":
+                    return None
+            if z == 4 and not upper:
+                for f in layers.get("landcover", {}).get("features", []):
+                    if f.get("properties", {}).get("subclass") == "glacier":
+                        return None
+                for f in layers.get("place", {}).get("features", []):
+                    if f.get("properties", {}).get("class") == "country":
+                        return None
+    return tiles[4][0][0]
+
+
 def _chk_vector_tiles(arc) -> tuple[str, str]:
     # z0 always required; we also want to confirm mid and high zoom
     # levels exist — a missing z14 usually means tilemaker bailed
@@ -1123,10 +1193,20 @@ def _chk_vector_tiles(arc) -> tuple[str, str]:
                 f"no vector tiles found at probe paths: {misses}")
     if z0 is None:
         # Only a small region can legitimately have nothing at z0; on a
-        # country or continent a missing z0 means tiles were lost.
+        # country or continent a missing z0 means tiles were lost. Except an
+        # inland multilingual map (map-config tileLanguages): its tiles are
+        # cut from the region's own extract, and a region with no coast and
+        # no national border has nothing that tilemaker draws at zoom 0-3
+        # (Colorado). _inland_low_zoom says whether the map looks like that.
         span = (max(bbox[2] - bbox[0], bbox[3] - bbox[1])
                 if bbox and all(v is not None for v in bbox) else None)
-        if span is None or span >= 1.0:
+        low = None
+        if (span is not None and span >= 1.0 and cfg.get("tileLanguages")
+                and len(hits) == len(probes)):
+            low = _inland_low_zoom(arc, bbox, _lonlat_to_tile)
+        if low:
+            hits.insert(0, f"{low} (multilingual tiles: nothing below it)")
+        elif span is None or span >= 1.0:
             return ("fail",
                     f"tiles/0/0/0.pbf missing on a region spanning "
                     f"{span if span is not None else 'unknown'}° (only a "
