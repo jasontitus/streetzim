@@ -360,3 +360,66 @@ those reviews found are in the commit after each change.
 - **Find chips** are bucketed by a hash of the name, so tapping a chip
   fetches and concatenates every bucket: 147.5 MB for east-coast-us "Shops".
   This is the largest phone-memory risk; geographic bucketing is the fix.
+
+## 12. What broke and what changed, 2026-10-23 → 10-24
+
+### Multilingual tile image
+- Multilingual tiles run tilemaker from main's CI image for the build
+  host's tile inputs (docs/language-ready.md). CI had not passed since
+  10-21: a langpack test waited forever for 40 GB of free memory
+  (host-env.sh's margin) on a 16 GB runner, and the core/ops boundary check
+  failed. Once the host's checkout was more than 25 same-input commits past
+  the last image, every region without fresh tiles failed in its first
+  minute (15 regions on 10-23).
+- Fixed: the tests set `LANGPACK_MIN_FREE_GB=0` and `LANGPACK_MEM_AVAILABLE`,
+  the checks job may take 40 minutes, the boundary holds, and a stopped
+  gate run no longer leaves kiwix-serve running. CI is green again and
+  publishes an image per main tip.
+- Until then each region was pinned to the last green commit with the same
+  inputs (`STREETZIM_ML_COMMIT` in `$PAR_STATE/env/<id>`); the pins are gone.
+
+### Overture 2026-08-19.0 retired
+- Overture serves only its last few releases (now 2026-09-23.0/.1 and
+  2026-10-21.0). Regions with 2026-08-19.0 parquets for their bbox keep
+  them; 13 without (taiwan, colorado, pacific-islands, california, texas,
+  west-coast-us, central-us, midwest-us, australia-nz, southeast-asia,
+  indian-subcontinent, china, central-asia) build on 2026-10-21.0
+  (decision 2026-10-24), set by `OVERTURE_RELEASE=2026-10-21.0` in their
+  `$PAR_STATE/env/<id>` (rebuild_old_regions.sh takes it; the default stays
+  2026-08-19.0). Their older cuts are kept in `overture_cache/keep-2026-08-19.0/`.
+
+### Region extracts kept lakes whole only inside the box
+- Region extracts were cut with osmium's default `complete_ways`; a lake or
+  forest crossing the box lost its outside members and could not be
+  assembled, so multilingual tiles (cut from the extract) lost it. Chicago
+  10-24: 569 of 1,122 zoom-14 tiles over Lake Michigan; re-cut with
+  `--strategy smart`, all 1,122, as in the world-tile map.
+- Fixed: every extract is cut with `--strategy smart` and marked
+  (`<pbf>.strategy`: "smart <size> <mtime>"); unmarked extracts are cut
+  again before use and refused by `ops/region-ml-tiles.py`. A smart cut is
+  three planet passes (about 80 minutes per region on the busy disk), so
+  the queue's extracts are re-cut in bulk, 16 per pass
+  (`extract-region-pbfs.sh --only …`, about 75 minutes a pass).
+- Maps shipped before the fix with a visible loss inside their outline are
+  rebuilt (decision 2026-10-24: only those): new-york-state (Lake Erie,
+  Lake Champlain), austria-czech (Lake Constance), baltics (Narva
+  Reservoir, Curonian Lagoon), switzerland and switzerland-light (Lake
+  Garda, Lake Iseo, Lac du Bourget), carpathians (Slovak lakes and
+  reservoirs). Egypt and South Korea were checked and show none; Canada is
+  checked when it finishes.
+
+### Validation of inland multilingual maps
+- Multilingual tiles have nothing below the zoom a region's own features
+  start at: no zoom-0 tile for a region with no coast, national border or
+  continent label (Colorado's first tile is at zoom 4). `validate_zim.py`
+  now passes such a map over a degree wide with a warning when it looks
+  inland (rules in docs/language-ready.md); it failed Colorado before.
+
+### NVMe and the United States
+- Worker 0 takes the largest region, and the United States projects 144 GiB
+  of NVMe scratch, more than the 100 GiB floor ever leaves, so worker 0 sat
+  idle. united-states moved to the last group, beside europe; it needs
+  scratch on /storage (`PAR_HDD_SCRATCH`, as europe) or more free NVMe when
+  it is reached. A running big region (Canada: 108 GiB projected, 22 GB
+  used half way) can hold the other workers back by the same guard.
+

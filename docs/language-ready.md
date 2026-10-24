@@ -71,6 +71,12 @@ rebuild driver, which runs it) cuts a region's tiles itself when
    asking the registry or pulling; any change (bbox, languages, profile, a
    new extract) makes it again. A new commit that leaves the profile alone
    does not.
+   **The extract must be whole:** cut with `osmium extract --strategy smart`
+   and marked so in `<parent>.osm.pbf.strategy` (`ops/region-bbox.sh`;
+   the queues do both). Under osmium's default strategy a multipolygon that
+   crosses the box keeps only its members inside it, cannot be assembled,
+   and disappears from the region's tiles: Lake Michigan from Chicago's,
+   Lake Erie from New York State's. The step refuses an unmarked extract.
 2. **The image** is one CI published for main
    (`ghcr.io/jasontitus/streetzim:sha-<12 hex>`), with the tile profile
    inside it. CI publishes one only for each main tip it tests, so the step
@@ -78,12 +84,21 @@ rebuild driver, which runs it) cuts a region's tiles itself when
    checkout's HEAD or below it (the host's own commits, such as torrents,
    reach main only as a merge's second parent) back to the first one with
    the checkout's tile inputs and a published image. Tile inputs changed
-   in the checkout but not committed are refused. `STREETZIM_ML_COMMIT`
-   names the commit instead, and must have the same inputs.
+   in the checkout but not committed are refused (so is a trial merge left
+   in the build host's checkout). `STREETZIM_ML_COMMIT`
+   names the commit instead, and must have the same inputs. CI publishes
+   an image only when the whole run passes, and the walk gives up after 25
+   commits with the same inputs and no image: while CI is red, pin a green
+   commit with the same inputs per region in `$PAR_STATE/env/<id>`
+   (parallel_rebuild.sh drops `STREETZIM_*` from the environment it gives a
+   build, and adds those files back), and remove the pins once main has an
+   image again. A change to the `Dockerfile` needs a green run of the new
+   tip before any region without fresh tiles can build: push it to main
+   first and update the build host's checkout once the image is there.
 3. The build uses the tiles as `--mbtiles`, with `--tile-languages` from
    `.langs` and `--region-languages` from the table.
 4. Any failure stops the build: no image with these tile inputs, no table
-   row, an extract cut for another bbox, a box across the antimeridian
+   row, an extract cut for another bbox or not cut whole (above), a box across the antimeridian
    (alaska; not supported yet), or tiles that fail the check (an MBTiles
    file, zooms 0-14, bounds = bbox, `name:xx` for the asked languages
    only). It never falls back to the world tiles.

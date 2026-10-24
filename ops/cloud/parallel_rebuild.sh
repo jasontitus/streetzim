@@ -30,7 +30,9 @@
 #    titles stop the build), STREETZIM_WIKI_MAX_PER_MIN=PAR_WIKI_MAX_PER_MIN
 #    (40: three builds stay under the per-IP pace) and STREETZIM_KEEP_ZIMS=3
 #    (a region uploaded twice keeps its pre-round file), plus
-#    $PAR_STATE/env/<id> (KEY=VALUE lines, e.g. STREETZIM_SEARCH_CACHE).
+#    $PAR_STATE/env/<id> (KEY=VALUE lines, e.g. STREETZIM_SEARCH_CACHE,
+#    OVERTURE_RELEASE for a region whose round parquets Overture no longer
+#    serves, STREETZIM_ML_COMMIT to pin the tile image while CI is red).
 #    Rows still go to rebuild-old.tsv, appended under a lock exactly as the
 #    driver writes them; nothing is dropped.
 #
