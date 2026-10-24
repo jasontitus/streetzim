@@ -641,3 +641,21 @@ def test_region_languages_have_iso639_3_codes() -> None:
         for lg in langs.split(","):
             assert len(pack_iso639_3(lg)) == 3, lg
     assert dict(rows)["switzerland"] == "de,fr,it,rm"
+
+
+
+@pytest.mark.parametrize("lang, langs", [("../x", ()), ("/x/y", ()), ("de", ("../x",)), ("de", ("/x/y",)),
+                                         ("de", ("zh-hans/../../y",))])
+def test_wikidata_text_refuses_a_code_that_is_no_language(tmp_path: Path, lang: str, langs: tuple) -> None:
+    """Each language names a file under <cache>/wikidata-text/: a code that
+    is not [a-z]{2,3}(-[a-z]+)? is refused before any file is opened."""
+    cache = tmp_path / "cache"
+    with pytest.raises(ValueError, match="not language codes"):
+        wiki_pack.wikidata_text(["Q1"], lang, cache, langs=langs)
+    assert not cache.exists()
+    assert not (tmp_path / "x").exists() and not Path("/x/y.jsonl").exists()
+
+
+def test_wikidata_text_takes_codes_and_variants(tmp_path: Path) -> None:
+    out, st = wiki_pack.wikidata_text(["Q1"], "de", tmp_path, fetch=None, langs=("zh-hans", "gsw"))
+    assert out == {} and st["complete"] is False

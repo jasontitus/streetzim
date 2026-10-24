@@ -497,7 +497,8 @@ it on archive.org) logs each step in PDT to
    A pack listed with its MD5 is not sent again, and neither is one sent
    before and not listed yet (`$LANGPACK_WORK/uploads/<item>.tsv`; after 72
    hours unlisted the run stops and says so); a name the item holds with
-   another MD5 stops the run. Until archive.org lists every pack with its
+   another MD5 stops the run, and so does an item whose listing cannot be
+   read (exit 8, nothing sent). Until archive.org lists every pack with its
    MD5: exit 6, run it again later; nothing is redone.
 6. `make_site.py` into a staging folder, URLs `{proxy}/<item>/<file>`, the
    base's MD5 in region.json; `site_check.py --recipes-dir` there
@@ -514,7 +515,10 @@ gates (nothing published); 4 a map v1 gives no packs: a continent
 1 before any download, pack build or gate; 5 nothing publishable: every
 entry with a Wikipedia pack that passed its gates is over the per-entry
 budget (each refusal logged as `REFUSED <lang>: ...` before anything is
-sent; the previous site files stay); 1 anything else. Light and ultralight
+sent; the previous site files stay); 7 nothing publishable yet: as 5, while
+some languages' pack builds ran out of time (run again later); 8 the item's
+listing could not be read before the upload (nothing sent; run again
+later); 1 anything else. Light and ultralight
 maps are refused (no Wikipedia in them).
 
 `publish_site.sh REGION` refuses a folder that is not exactly the sealed
@@ -581,8 +585,9 @@ replaces them when it ships. The preview's home page is not regenerated.
   queue sweeps the NVMe scratch folders of ship_packs.sh runs that were
   killed (live runs' are kept).
 - Exit 6 (archive.org listing pending): tried again after 30 min. Exit 2 (a
-  lock held), or a run killed or gone without an exit code: tried again
-  after 30 min, a loud failure after 8 in a row (`QUEUE_MAX_AGAIN`). 4 and
+  lock held), exit 8 (archive.org's metadata unreadable), or a run killed or
+  gone without an exit code: tried again after 30 min, a loud failure after
+  8 in a row (`QUEUE_MAX_AGAIN`). 4 and
   5: logged, skipped for that base. Anything else: a loud failure
   (`queue.log`, stderr). A failure is not tried again, in this run or after
   a restart, unless the queue starts with `QUEUE_RETRY_FAILED=1`.

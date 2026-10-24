@@ -42,7 +42,9 @@
 #      text), one language value per pack language);
 #      a pack already listed with its MD5 is not sent again, and a name the
 #      item holds with another MD5 stops the run (a published recipe may use
-#      that file). Not all listed yet: exit 6, run again later.
+#      that file); the listing must be read first (archive.org's metadata
+#      unavailable: exit 8, nothing sent, run again later). Not all listed
+#      yet: exit 6, run again later.
 #   6. make_site.py into $LANGPACK_WORK/site/<REGION>/recipes/<REGION>/
 #      (URLs "{proxy}/<item>/<file>": the page's proxy, web/drive/preview-config.js),
 #      then, with LANGPACK_WEBSEED set (the build worker's origin, build-proxy/),
@@ -56,10 +58,11 @@
 # ops/langpack/publish_site.sh REGION, then the site's deploy.
 #
 # Exit: 0 recipes ready; 6 packs transferred, archive.org listing pending
-# (run again later; nothing is redone); 2 another run holds the region's lock,
+# (run again later; nothing is redone); 8 the item's listing could not be
+# read before the upload (nothing sent; run again later); 2 another run holds the region's lock,
 # or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
 # gates (a dry run: nothing published); 4 a map v1 gives no packs (a
-# continent, or a base over SHIP_MAX_BASE_GB, 8: refused in step 1, before
+# continent, or a base over SHIP_MAX_BASE_GB (8 GB): refused in step 1, before
 # any download or build); 5 nothing publishable: every entry with a
 # Wikipedia pack that passed its gates is over the per-entry budget
 # (make_site.py's; each refusal is logged as REFUSED, before anything is
@@ -355,7 +358,9 @@ PY
 declare -A MD5
 for f in "${FILES[@]}"; do [ -n "$f" ] && MD5[$f]=$(md5sum "$PACKS/$f" | cut -d' ' -f1); done
 ITEM_META=
-fetch_meta() { ITEM_META=$("$IA" metadata "$ITEM" 2>/dev/null) || ITEM_META='{}'; }
+# The item's listing; a failed `ia metadata` returns 1 and leaves no listing
+# (ITEM_META {}): what archive.org holds is then unknown, not empty.
+fetch_meta() { ITEM_META=$("$IA" metadata "$ITEM" 2>/dev/null) && return 0; ITEM_META='{}'; return 1; }
 listed() { printf '%s' "$ITEM_META" | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$1" "${MD5[$1]}"; }
 name_taken() {   # the item lists this name with another MD5
   printf '%s' "$ITEM_META" | "$PY" -c 'import json,sys
@@ -379,7 +384,9 @@ SENT=$W/uploads/$ITEM.tsv
 mkdir -p "$W/uploads"; touch "$SENT"
 sent_at() { awk -F'\t' -v f="$1" -v m="$2" '$1 == f && $2 == m {t = $3} END {print t}' "$SENT"; }
 SEND=()
-fetch_meta
+# Without the listing, a name archive.org holds with another MD5 would look
+# free and be sent over it: stop, and let the queue run the region again.
+fetch_meta || { say "archive.org metadata unavailable: run again later (\`ia metadata $ITEM\` failed; exit 8)"; exit 8; }
 for f in "${FILES[@]}"; do
   [ -n "$f" ] || continue
   if listed "$f"; then continue; fi
@@ -419,7 +426,7 @@ fi
 # Every pack listed with its MD5, checked a round at a time.
 LEFT=("${FILES[@]}")
 for round in $(seq 1 "${SHIP_LISTING_POLLS:-30}"); do
-  fetch_meta
+  fetch_meta || true          # a failed fetch: nothing counts as listed this round
   NOW=()
   for f in "${LEFT[@]}"; do [ -n "$f" ] && ! listed "$f" && NOW+=("$f"); done
   LEFT=("${NOW[@]}")

@@ -112,11 +112,14 @@ $N $PY "$TL/recipe2.py" menu "$BASE" --packs-dir "$PACKS" --langs "$LANGS" --reg
 zimcheck_merged() {
   $N $ZC -A --threads=1 "$1" > "$2" 2>&1
   local rc=$?
+  printf '%s\n' "$rc" > "$2.rc"          # compose_verdicts.py: a pass needs rc 0
   grep -q 'Overall Test Status:' "$2" && return
   { [ $rc -gt 128 ] && [ $rc != 124 ]; } || return 0
   mv -f "$2" "$2.first"
+  mv -f "$2.rc" "$2.first.rc"
   echo "zimcheck: killed (rc=$rc), run again ($2.first)" >&2
   $N $ZC -A --threads=1 "$1" > "$2" 2>&1
+  printf '%s\n' "$?" > "$2.rc"
 }
 
 B=http://127.0.0.1:$PORT

@@ -547,6 +547,10 @@ def renamed_titles(lang: str, targets: Iterable[str], cache_dir: Path, *, offlin
 
 # ---- wikidata-text: labels and descriptions in xx --------------------------
 
+# A wikidata-text language: a Wikipedia code, with a variant (zh-hans).
+TEXT_CODE_RE = re.compile(r"[a-z]{2,3}(-[a-z]+)?")
+
+
 def _text_cache(cache_dir: Path, lang: str) -> Path:
     return cache_dir / "wikidata-text" / f"{lang}.jsonl"
 
@@ -622,8 +626,11 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
     (JSON lines, so a stopped run keeps what it got). `fetch` None: the
     cache only."""
     from cloud.wikimedia_http import TransientError
-    qids = sorted(set(qids), key=lambda q: int(q[1:]))
     langs = list(dict.fromkeys([lang, *langs]))
+    bad = [lg for lg in langs if not (isinstance(lg, str) and TEXT_CODE_RE.fullmatch(lg))]
+    if bad:     # each names a file in the cache
+        raise ValueError(f"wikidata_text: not language codes: {bad!r}")
+    qids = sorted(set(qids), key=lambda q: int(q[1:]))
     caches = {lg: _load_text_cache(_text_cache(cache_dir, lg)) for lg in langs}
     missing = [q for q in qids if q not in caches[lang]]
     stats: dict[str, Any] = {"qids": len(qids), "asked": len(missing), "requests": 0,

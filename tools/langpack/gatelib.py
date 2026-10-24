@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 
 _md5_cache: dict[tuple, str] = {}
@@ -65,3 +66,15 @@ def zimcheck_version(zc: str) -> str:
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"not runnable: {e}"
     return ((r.stdout + r.stderr).strip().splitlines() or [""])[0].strip()
+
+
+_OVERALL = re.compile(r"(\[INFO\] )?Overall Test Status: Pass")
+
+
+def zimcheck_log_passed(text: str, rc: int | None) -> bool:
+    """zimcheck's verdict in its output: the LAST line holding "Overall Test
+    Status:" is exactly the Pass line (an earlier line may quote a link that
+    reads like one), and its exit code is 0. rc None: a log kept without
+    its exit code, judged by the line alone."""
+    lines = [ln.strip() for ln in text.splitlines() if "Overall Test Status:" in ln]
+    return bool(lines) and _OVERALL.fullmatch(lines[-1]) is not None and rc in (None, 0)

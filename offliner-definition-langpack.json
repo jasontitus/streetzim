@@ -1,0 +1,119 @@
+{
+  "offliner_id": "streetzim-langpack",
+  "stdOutput": true,
+  "stdStats": true,
+  "flags": {
+    "mode": {
+      "type": "string-enum",
+      "required": true,
+      "title": "Mode",
+      "description": "pack: one Wikipedia pack for one base and language. menu: the base and all its packs -> the search packs, every language version merged and checked, and the recipes",
+      "choices": [
+        {
+          "title": "Pack: one Wikipedia pack",
+          "value": "pack",
+          "dependents": [
+            "language",
+            "wikipedia_zim_url",
+            "images",
+            "no_wikidata_text"
+          ]
+        },
+        {
+          "title": "Menu: search packs and recipes",
+          "value": "menu",
+          "dependents": [
+            "pack_url",
+            "languages",
+            "url_template"
+          ]
+        }
+      ]
+    },
+    "base_url": {
+      "type": "url",
+      "required": true,
+      "title": "Base ZIM URL",
+      "description": "The region's multilingual base ZIM (streetzim --multilingual), the very file the packs and recipes are for. A URL; on the command line also a local file, read where it is"
+    },
+    "region": {
+      "type": "string",
+      "required": false,
+      "title": "Region id",
+      "description": "Region id the parts are named after (osm_<region>_wiki-<xx>). Default: from the packs' names, else the base's Name (osm_mul_monaco: monaco); it must agree with both",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "jobs": {
+      "type": "integer",
+      "required": false,
+      "title": "Processes",
+      "description": "Processes: articles read and cleaned at a time (pack), search packs built at a time (menu). Default: 4",
+      "min": 1
+    },
+    "language": {
+      "type": "string",
+      "required": false,
+      "title": "Wikipedia language",
+      "description": "Pack: the Wikipedia language, as Kiwix names its Wikipedia ZIMs (de, fr, ja, ...)",
+      "pattern": "^[a-z]{2,3}$"
+    },
+    "wikipedia_zim_url": {
+      "type": "url",
+      "required": false,
+      "title": "Wikipedia ZIM URL",
+      "description": "Pack: that language's Kiwix Wikipedia ZIM (a full one: every article of the region is looked up in it). Default: the newest wikipedia_<xx>_all_maxi in Kiwix's catalog (library.kiwix.org), else on download.kiwix.org. A URL (download.kiwix.org or a mirror, a path with /zim/, no query) is checked against the SHA-256 in the .meta4 of the same path on download.kiwix.org, and fails without one; on the command line also a local file, read where it is"
+    },
+    "images": {
+      "type": "string-enum",
+      "required": false,
+      "title": "Wikipedia images",
+      "description": "Pack: pictures per article: none, the lead one (default, as StreetZim's own packs), or all (up to 12)",
+      "choices": [
+        "none",
+        "lead",
+        "all"
+      ]
+    },
+    "no_wikidata_text": {
+      "type": "boolean",
+      "required": false,
+      "title": "No Wikidata text",
+      "description": "Pack: leave out the place names and descriptions in the language from Wikidata (wikidata-text.json)"
+    },
+    "pack_url": {
+      "type": "list-of-url",
+      "required": false,
+      "title": "Pack URLs",
+      "description": "Menu: a Wikipedia pack of this base (from --mode pack, named osm_<region>_wiki-<xx>_...zim); one per language, repeated. Each is gated again before use"
+    },
+    "languages": {
+      "type": "string",
+      "required": false,
+      "title": "Menu languages",
+      "description": "Menu: the map languages to offer, comma-separated. Default: StreetZim's core set (the 21 label languages and English). The base's region languages are always offered; a language is offered only with its pack (or in the base)",
+      "pattern": "^[a-z]{2,3}(,[a-z]{2,3})*$"
+    },
+    "url_template": {
+      "type": "string",
+      "required": false,
+      "title": "Part URL template",
+      "description": "Menu: each part's URL in the recipes, {file} its file name (https://download.kiwix.org/zim/maps/{file}). Default: {file}, relative to wherever the recipes are published"
+    },
+    "output": {
+      "type": "string",
+      "required": false,
+      "title": "Output",
+      "description": "Output folder. Default: ./output",
+      "pattern": "^/output$"
+    },
+    "stats_filename": {
+      "type": "string",
+      "required": false,
+      "title": "Stats filename",
+      "description": "Path to store the progress JSON file to",
+      "pattern": "^/output/task_progress\\.json$"
+    }
+  },
+  "modelValidators": [],
+  "zimMetadata": []
+}

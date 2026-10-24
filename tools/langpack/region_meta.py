@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -149,11 +150,15 @@ def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
 
 
 def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_max: int | None = REGION_PACKS_MAX,
-         tier: str | None = None, region: str | None = None) -> dict:
+         tier: str | None = None, region: str | None = None,
+         has: Callable[[str], bool] | None = None) -> dict:
     """`region_max` applies to every tier but UNCAPPED_TIERS (None: never),
-    an unknown one (None) included."""
+    an unknown one (None) included. `has(lang)`: whether a language's
+    Wikipedia is there (default: a Wikipedia ZIM in `wiki_src`;
+    streetzim-langpack's menu passes "a gated pack was given")."""
     if tier in UNCAPPED_TIERS:
         region_max = None
+    present: Callable[[str], bool] = has or (lambda lg: has_wiki(wiki_src, lg))
     z = ZimReader(base)
     cfg = json.loads(blob_of(z, KEY_MAPCFG) or b"{}")
     name = str(cfg.get("name") or Path(base).stem)
@@ -164,7 +169,7 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
     for lg in cfg.get("regionLanguages") or []:
         if not isinstance(lg, str):
             continue
-        if not (lg == base_wiki or has_wiki(wiki_src, lg)):
+        if not (lg == base_wiki or present(lg)):
             dropped.append({"lang": lg, "why": "region language with no Wikipedia ZIM in WIKI_SRC"})
         elif region_max is not None and len([x for x in region_langs if x != base_wiki]) >= region_max \
                 and lg != base_wiki:
@@ -174,12 +179,12 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
             region_langs.append(lg)
     langs = []
     for lg in list(dict.fromkeys([*core, *region_langs, base_lang])):
-        if lg == base_wiki or has_wiki(wiki_src, lg):
+        if lg == base_wiki or present(lg):
             langs.append(lg)
         else:
             dropped.append({"lang": lg, "why": "no Wikipedia ZIM in WIKI_SRC"})
     avail = {lg: "" for lg in langs if lg != base_wiki}
-    if "en" != base_wiki and has_wiki(wiki_src, "en"):
+    if "en" != base_wiki and present("en"):
         avail["en"] = ""
     need: set[str] = set()
     for L in langs:

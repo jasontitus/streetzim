@@ -12,8 +12,11 @@ $LANGPACK_WORK/verdicts/<base>/<L>.json:
    "advisory": [checks recorded but not required], "evidence": {...}}
 search (search_gate.py: Kiwix's search finds pack-only titles) is required
 unless LANGPACK_SEARCH_GATE=report, which records it as advisory.
-zimcheck passes only when its log says "Overall Test Status: Pass" AND the
-zimcheck that wrote it was the official one (zimcheck.version: "zim-tools ...").
+zimcheck passes only when the official zimcheck wrote its log
+(zimcheck.version: "zim-tools ..."), the log's last "Overall Test Status:"
+line is the Pass line, and its exit code (<L>.zimcheck.log.rc, which
+run_gates.sh writes) is 0 (gatelib.zimcheck_log_passed; a log kept without
+an .rc is judged by its last line).
 and prints a table. make_site.py publishes an entry only with all_pass and a
 recipe md5/uuid/size equal to the one it is about to publish.
 """
@@ -28,7 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from tools.langpack.gatelib import md5_file, verdict_path, work_dir  # noqa: E402
+from tools.langpack.gatelib import md5_file, verdict_path, work_dir, zimcheck_log_passed  # noqa: E402
 from tools.langpack.merge_zim import file_md5  # noqa: E402
 
 
@@ -58,6 +61,14 @@ def smoke_ok(p):
 # new viewer cannot change (it lives in three uncompressed slots of the base).
 # Not zimcheck: its link checks read the viewer's HTML (28 s on Greece).
 CARRIED = ("route", "kiwix", "search")
+
+
+def zimcheck_rc(log_path):
+    """The exit code run_gates.sh kept beside a zimcheck log, or None."""
+    try:
+        return int(read(log_path + ".rc").strip())
+    except ValueError:
+        return None
 
 
 def mark(b):
@@ -96,7 +107,8 @@ def main():
             "logs_for_recipe": read(f"{out}/{L}.stamp").split() == [r["md5"], r["uuid"]],
             "recipe_eq_merge": read(f"{out}/{L}.same").strip().endswith("PASS"),
             "verify": bool(vm and vm.group(1) == vm.group(2)),
-            "zimcheck": official and "Overall Test Status: Pass" in read(f"{out}/{L}.zimcheck.log"),
+            "zimcheck": official and zimcheck_log_passed(read(f"{out}/{L}.zimcheck.log"),
+                                                         zimcheck_rc(f"{out}/{L}.zimcheck.log")),
             "route": "route OK" in read(f"{out}/{L}.route.log"),
             "kiwix": bool(kj.get("pass")),
             "search": bool(sj.get("pass")),

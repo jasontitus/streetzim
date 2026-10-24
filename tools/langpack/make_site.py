@@ -165,6 +165,11 @@ def main():
     # The speed probe reads the biggest pack the menu uses: only those are
     # uploaded (ship_packs.sh), and a refused entry's pack may not be.
     used = {x for row in rows for x in row["packs"]} or set(avail)
+    if not used:
+        print(f"make_site.py: no pack in {a.packs_dir} passed its gate for {a.region}: "
+              f"nothing to offer (refused: {json.dumps(refused, ensure_ascii=False)})",
+              file=sys.stderr, flush=True)
+        sys.exit(1)
     biggest = max((avail[x] for x in used), key=lambda p: os.path.getsize(p.path))
     index = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
              "regions": [{"id": a.region, "title": a.region_title,

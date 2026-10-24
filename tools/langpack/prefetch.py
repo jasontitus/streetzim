@@ -16,10 +16,12 @@ timeout of its own (the caller sets one), into the builder's --cache:
   got (JSON lines) and the next round asks only for the rest; up to
   --text-rounds rounds, a minute apart.
 
-Prints one JSON line per language, then a summary line. Exit 0 when every
-language has its title map and complete wikidata-text, 1 otherwise (the
-packs can still be built: an incomplete wikidata-text is said in the
-pack's stats), 2 on bad arguments.
+Prints one JSON line per language, then a summary line, which lists the
+languages whose title map failed ("failed") and those whose wikidata-text
+is incomplete ("text_incomplete"). Exit 0 when every language has its
+title map and complete wikidata-text, 1 otherwise (the packs can still be
+built: an incomplete wikidata-text is said in the pack's stats), 2 on bad
+arguments.
 """
 from __future__ import annotations
 
@@ -65,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     # every Q-ID (Switzerland: 1,360 more requests, ~22 min)
     text_langs = list(dict.fromkeys([*wiki_pack.TEXT_LANGS, *langs]))
     ok = True
+    failed: list[str] = []
+    incomplete: list[str] = []
     for lg in langs:
         t0 = time.time()
         row: dict[str, object] = {"lang": lg}
@@ -74,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             row["titles"] = len(wiki_pack.load_titles(lg, qids, cache, log=log))
         except Exception as e:  # noqa: BLE001 - reported per language, others go on
             row["titles_error"] = f"{type(e).__name__}: {e}"[:300]
+            failed.append(lg)
             ok = False
         complete = False
         for r in range(max(1, a.text_rounds)):
@@ -85,10 +90,13 @@ def main(argv: list[str] | None = None) -> int:
             if r + 1 < a.text_rounds:
                 time.sleep(60)
         ok = ok and complete
+        if not complete:
+            incomplete.append(lg)
         row["seconds"] = round(time.time() - t0, 1)
         print(json.dumps(row, ensure_ascii=False), flush=True)
     print(json.dumps({"base": os.path.basename(a.base), "base_uuid": base.uuid, "qids": len(qids),
-                      "langs": langs, "ok": ok}), flush=True)
+                      "langs": langs, "ok": ok, "failed": failed, "text_incomplete": incomplete}),
+          flush=True)
     return 0 if ok else 1
 
 

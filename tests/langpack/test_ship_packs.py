@@ -88,6 +88,14 @@ cmd, item = sys.argv[1], sys.argv[2]
 path = os.path.join(d, f"ia-{item}.json")
 meta = json.load(open(path)) if os.path.exists(path) else {}
 if cmd == "metadata":
+    # FAKE_IA_META_FAIL=COUNTER:N,...: the Nth metadata call for a -lang item fails
+    fail = os.environ.get("FAKE_IA_META_FAIL")
+    if fail and item.endswith("-lang"):
+        counter, calls = fail.split(":")
+        n = (int(open(counter).read()) if os.path.exists(counter) else 0) + 1
+        open(counter, "w").write(str(n))
+        if str(n) in calls.split(","):
+            print("ia: metadata: connection reset", file=sys.stderr); sys.exit(1)
     print(json.dumps(meta)); sys.exit(0)
 if cmd == "upload":
     files = [a for a in sys.argv[3:] if not a.startswith("--") and not a.isdigit()]
@@ -257,6 +265,32 @@ def test_never_overwrites_a_published_name(ship: SimpleNamespace) -> None:
     assert r.returncode == 1
     assert f"already holds {_pk(ship, 'fr')} with another MD5" in _log(ship)
     assert _lines(ship.logs["ia"]) == []
+
+
+def test_an_unreadable_listing_is_not_an_empty_one(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """The first `ia metadata` of the -lang item fails: archive.org may hold a
+    pack's name with another MD5 (here it does), so nothing is sent and the
+    run stops with exit 8, to run again later."""
+    cache = ship.work / "ia-cache"
+    (cache / "ia-streetzim-testland-lang.json").write_text(json.dumps({"files": [
+        {"name": _pk(ship, "fr"), "size": "1", "md5": "0" * 32}]}))
+    counter = tmp_path / "meta-calls"
+    r = _run(ship, FAKE_IA_META_FAIL=f"{counter}:1")
+    assert counter.read_text() == "1"
+    assert r.returncode == 8, _log(ship)[-2000:]
+    assert "archive.org metadata unavailable: run again later" in _log(ship)
+    assert _lines(ship.logs["ia"]) == []                      # nothing uploaded
+    assert json.loads((cache / "ia-streetzim-testland-lang.json").read_text())["files"][0]["md5"] == "0" * 32
+
+
+def test_a_failed_listing_poll_is_not_listed_yet(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """After the upload, a failed `ia metadata` only means "not listed yet":
+    the next round sees the packs and the run goes on."""
+    counter = tmp_path / "meta-calls"
+    r = _run(ship, FAKE_IA_META_FAIL=f"{counter}:2")
+    assert r.returncode == 0, _log(ship)[-2000:]
+    assert int(counter.read_text()) >= 3 and "archive.org lists every pack" in _log(ship)
+    assert len(_sent(ship)) == len(set(_sent(ship))) > 0      # each pack sent once
 
 
 def test_only_passing_entries_are_published(ship: SimpleNamespace) -> None:
