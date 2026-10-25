@@ -570,7 +570,13 @@ replaces them when it ships. The preview's home page is not regenerated.
   (the builder page drops such a region until its packs ship again): the
   file named by `web/build/recipes/<region>/region.json` in production,
   else by the queue's last `published.tsv` row for the region. Then the
-  rest. Each group goes in the order its maps shipped. One run at a time while a round driver
+  rest. Each group goes in the order its maps shipped; the list is read once
+  a pass. A run that ends while the next map waits sends the pass back to
+  the top of its list: a map whose retry is due (e.g. archive.org's listing
+  was pending 30 min ago) takes the free slot first. A map is started at
+  most twice in a pass, so retries that keep failing cannot hold up the
+  rest (`QUEUE_RETRY_IN_PASS=0`: each map at most once a pass, as the tests
+  do with no retry wait). One run at a time while a round driver
   builds (the disk is saturated), and only
   with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
   pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the

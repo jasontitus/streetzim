@@ -16,7 +16,14 @@
 # the builder page drops such a region until its packs are shipped again), on
 # the live builder page (PROD_REPO's web/build/recipes/REGION/region.json) or
 # else as last published here; then the others; each in the order the maps
-# shipped. One ship_packs.sh run at a time while the round builds (the disk is
+# shipped; the list is read once a pass. A run that ends while the next map
+# waits for room sends the pass back to the top of its list: a map whose
+# retry time has come (passed over earlier in the pass, or its own run ended
+# in it, e.g. archive.org's listing pending; or archive.org lists its
+# upload-pending base now) takes the slot before the later ones (so does a run
+# that ends while the pass reads on); a map is started at most twice in a pass, so retries that keep
+# failing cannot hold up the rest (QUEUE_RETRY_IN_PASS=0: each map at most
+# once a pass). One ship_packs.sh run at a time while the round builds (the disk is
 # saturated), and
 # only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
 # memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
@@ -110,7 +117,7 @@
 # LANGPACK_WEBSEED (https://streetzim-build-proxy.tiltastech.workers.dev),
 # QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8), QUEUE_PARTIAL_RETRIES (3),
 # QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
-# QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40),
+# QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40), QUEUE_RETRY_IN_PASS (1),
 # QUEUE_SINCE (first run only: count maps shipped since this date, e.g. the
 # round's start, instead of since now), QUEUE_SEED (REGION=SITE_DIR ...: site
 # folders, SITE_DIR/recipes/REGION sealed by ship_packs.sh, published into a
@@ -183,6 +190,7 @@ PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
 JOBS=${QUEUE_JOBS:-2}
+IN_PASS=${QUEUE_RETRY_IN_PASS:-1}
 MIN_MEM_GB=${QUEUE_MIN_MEM_GB:-24}
 DISK_MARGIN_GB=${QUEUE_DISK_MARGIN_GB:-40}
 PY=${PYTHON:-python3}
@@ -697,21 +705,39 @@ reap() {
 pass() {
   LIVE_TRIED=()
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
-  local rid zim t st why
-  while IFS=$'\t' read -r rid zim t st <&3; do
+  local rid zim t st n i=0 said= top list=()
+  local -A tries=() passed=()
+  mapfile -t list < <(candidates)
+  while [ "$i" -lt ${#list[@]} ]; do
+    IFS=$'\t' read -r rid zim t st <<< "${list[$i]}"
+    i=$(( i + 1 ))
     [ -n "$rid" ] || continue
+    # back from the top (header): a map started or passed over in this pass goes again only
+    # for its retry, and is started at most twice in a pass
+    if [ -n "${passed[$rid]:-}" ] || [ "${tries[$rid]:-0}" -gt 0 ]; then
+      [ "${tries[$rid]:-0}" -lt 2 ] || continue
+      case "$(awk -F'\t' -v r="$rid" '$1 == r {print $2}' "$STATUS")" in pending|published-partial|waiting-listing) ;; *) continue ;; esac
+    fi
+    n=${#RUN_PID[@]}
     reap
     stopping && break
-    eligible "$rid" "$zim" "$st" || continue
+    [ "$IN_PASS" = 1 ] && [ ${#RUN_PID[@]} -lt "$n" ] && [ "$i" -gt 1 ] && { i=0; continue; }   # a run ended: from the top
+    eligible "$rid" "$zim" "$st" || { passed[$rid]=1; continue; }
     # in this order: wait here until there is room for this one
-    why=
+    n=${#RUN_PID[@]} top=
     until room_for "$MAPS_DIR/$zim"; do
-      [ -n "$why" ] || { why=$WHY; say "$rid: waiting: $WHY"; }
+      [ "$said" = "$rid" ] || { said=$rid; say "$rid: waiting: $WHY"; }
       sleep "${QUEUE_REAP_SECS:-5}" 9>&-; reap
       stopping && break 2
+      if [ ${#RUN_PID[@]} -lt "$n" ]; then
+        [ "$IN_PASS" = 1 ] && { top=1; break; }
+        n=${#RUN_PID[@]}
+      fi
     done
+    [ -z "$top" ] || { i=0; continue; }      # a run ended: from the top (this map too, if still first)
     start_ship "$rid" "$zim" "$KEY"
-  done 3< <(candidates)
+    tries[$rid]=$(( ${tries[$rid]:-0} + 1 )) said=
+  done
   reap all
   live_all || true
 }

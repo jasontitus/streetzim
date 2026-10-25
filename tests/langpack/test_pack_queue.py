@@ -70,9 +70,10 @@ echo "{\"publish\": \"$1\", \"web\": \"$2\", \"work\": \"$LANGPACK_WORK\"}" >> "
 mkdir -p "$2/build/recipes" && rm -rf "$2/build/recipes/$1" && cp -a "$LANGPACK_WORK/site/$1/recipes/$1" "$2/build/recipes/$1"
 '''
 # firebase: logs where and what; fails while FAKE_FIREBASE_FAILS > the calls so far; FAKE_FIREBASE_SLEEP
-# archive.org's CLI: `metadata ITEM` prints FAKE_IA_DIR/ITEM.json (or an empty item)
+# archive.org's CLI: `metadata ITEM` prints FAKE_IA_DIR/ITEM.json (or an empty item), after FAKE_IA_SLEEP s
 FAKE_IA = r'''#!PY
-import os, sys
+import os, sys, time
+time.sleep(float(os.environ.get("FAKE_IA_SLEEP", "0")))
 p = os.path.join(os.environ["FAKE_IA_DIR"], sys.argv[2] + ".json")
 print(open(p).read() if sys.argv[1] == "metadata" and os.path.exists(p) else "{}")
 '''
@@ -167,6 +168,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "QUEUE_FORCE_WORK": "1",                                        # a test's LANGPACK_WORK
            "LANGPACK_SCRATCH": str(d / "nvme"),                            # not the host's NVMe scratch
            "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": "",           # not the host's own round
+           "QUEUE_RETRY_IN_PASS": "0",       # with QUEUE_RETRY_SECS=0, each map once a pass (its own test)
            "QUEUE_LIVE": "0"}                                              # not the live site (its own test)
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
@@ -307,6 +309,69 @@ def test_a_rebuilt_map_of_a_published_region_ships_first(q: SimpleNamespace) -> 
     assert _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1").returncode == 0
     got = [c["ship"] for c in _calls(q, "ship")[n:]]
     assert got == ["epsilon", "beta", "alpha", "gamma", "cont", "fail"], got
+
+
+def _wait_or_kill(p: subprocess.Popen[bytes], secs: float = 120) -> None:
+    try:
+        p.wait(timeout=secs)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+
+
+@pytest.mark.parametrize(("in_pass", "how"), [("1", "listing"), ("0", "listing"), ("1", "partial")])
+def test_a_retry_that_comes_due_goes_before_the_later_maps(q: SimpleNamespace, in_pass: str, how: str) -> None:
+    """A map whose run ended with archive.org's listing pending, or
+    published without a language that ran out of time, ships again in the
+    same pass once its retry time has come, before the maps after it; a map
+    that shipped while the pass ran waits for the next pass; with
+    QUEUE_RETRY_IN_PASS=0 the retry does too."""
+    env = ({"FAKE_SHIP_RC": "beta:6,0;cont:4;fail:1"} if how == "listing"
+           else {"FAKE_SHIP_RC": "cont:4;fail:1", "FAKE_SHIP_RETRY": "beta:es"})
+    p = _start(q, **env, QUEUE_RETRY_SECS="2", QUEUE_JOBS="1", FAKE_SHIP_SLEEP_FOR="alpha:4", QUEUE_RETRY_IN_PASS=in_pass)
+    _until(lambda: "alpha" in [c["ship"] for c in _calls(q, "ship")], "alpha's run")
+    with open(q.tsv, "a") as fh:                        # shipped while alpha's run goes
+        fh.write(f"gamma\tuploaded\tosm-gamma-2026-10-23.zim\t{_iso(T0 + 400)}\n")
+    _wait_or_kill(p)
+    got = [c["ship"] for c in _calls(q, "ship")]
+    assert got == (["beta", "alpha", "beta", "cont", "fail"] if in_pass == "1" else ["beta", "alpha", "cont", "fail"]), got
+    want = {"listing": "published" if in_pass == "1" else "pending", "partial": "published-partial"}[how]
+    assert _status(q)["beta"][1] == want and "gamma" not in _status(q)
+
+
+def test_a_base_listed_during_the_pass_ships_in_it(q: SimpleNamespace) -> None:
+    """An upload-pending map passed over because archive.org did not list
+    its base yet ships in the same pass once it does, before the maps after it."""
+    p = _start(q, FAKE_SHIP_RC="cont:4;fail:1", QUEUE_RETRY_SECS="2", QUEUE_JOBS="1",
+               FAKE_SHIP_SLEEP_FOR="alpha:4", QUEUE_RETRY_IN_PASS="1")
+    _until(lambda: (q.qd / "status.tsv").exists() and _status(q).get("delta", ["", ""])[1] == "waiting-listing", "delta passed over")
+    z = q.maps / "osm-delta-2026-10-23.zim"
+    (q.d / "ia" / "streetzim-delta.json").write_text(json.dumps({"files": [
+        {"name": z.name, "md5": hashlib.md5(z.read_bytes()).hexdigest(), "size": str(z.stat().st_size)}]}))
+    _wait_or_kill(p)
+    got = [c["ship"] for c in _calls(q, "ship")]
+    assert got == ["beta", "alpha", "delta", "cont", "fail"], got
+
+
+def test_a_run_that_ends_while_the_pass_reads_on_frees_its_slot_for_a_due_retry(q: SimpleNamespace) -> None:
+    """alpha's run ends while archive.org is asked about delta's base: the
+    next map does not take the slot; the pass goes back to the top, where
+    beta's retry has come due."""
+    p = _start(q, FAKE_SHIP_RC="beta:6,0;cont:4;fail:1", QUEUE_RETRY_SECS="2", QUEUE_JOBS="1",
+               FAKE_SHIP_SLEEP_FOR="alpha:1", FAKE_IA_SLEEP="4", QUEUE_RETRY_IN_PASS="1")
+    _wait_or_kill(p, 180)
+    got = [c["ship"] for c in _calls(q, "ship")]
+    assert got == ["beta", "alpha", "beta", "cont", "fail"], got
+
+
+def test_retries_that_keep_failing_do_not_hold_up_the_rest(q: SimpleNamespace) -> None:
+    """Two maps whose listing stays pending: each is started at most twice
+    in a pass, then the maps after them ship and the pass ends."""
+    p = _start(q, FAKE_SHIP_RC="beta:6;alpha:6;cont:4;fail:1", QUEUE_RETRY_SECS="2", QUEUE_JOBS="1",
+               FAKE_SHIP_SLEEP_FOR="beta:4;alpha:4", QUEUE_RETRY_IN_PASS="1")
+    _wait_or_kill(p)
+    got = [c["ship"] for c in _calls(q, "ship")]
+    assert got == ["beta", "alpha", "beta", "alpha", "cont", "fail"], got
 
 
 def test_a_failed_deploy_is_tried_again_without_shipping_again(q: SimpleNamespace) -> None:
