@@ -242,6 +242,61 @@ def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None
     assert "packs: all gated for this base already" in _log(ship)
 
 
+def test_a_prefetch_ahead_then_the_run_skips_it(ship: SimpleNamespace) -> None:
+    """SHIP_PREFETCH_ONLY=1 (the queue's prefetch ahead): the languages and
+    the network step only, then exit 0 with the base's packs/<base>/prefetched
+    naming the pack languages; the run after it skips the network step for
+    them, and a run for other pack languages does it again."""
+    r = _run(ship, SHIP_PREFETCH_ONLY="1")
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    mark = ship.work / "packs" / ship.tag / "prefetched"
+    st = ship.base.stat()
+    assert mark.read_text() == f"de,fr,th\n{st.st_size} {st.st_mtime_ns // 10**9}.{st.st_mtime_ns % 10**9:09d}\n"
+    assert len(_lines(ship.logs["prefetch"])) == 1
+    assert _lines(ship.logs["build"]) == [] and _lines(ship.logs["gates"]) == [] and _lines(ship.logs["ia"]) == []
+    assert "prefetch only (SHIP_PREFETCH_ONLY=1): done" in _log(ship)
+    r2 = _run(ship)
+    assert r2.returncode == 0, r2.stdout[-2000:] + r2.stderr[-2000:]
+    assert len(_lines(ship.logs["prefetch"])) == 1 and sorted(_lines(ship.logs["build"])) == ["de", "fr", "th"]
+    assert "prefetch: done already for de,fr,th" in _log(ship)
+    assert (ship.work / "packs" / ship.tag / "prefetch.ended").exists()      # skipped: its step 2 is over too
+    mark.write_text("de\n" + mark.read_text().splitlines()[1] + "\n")     # done for other pack languages
+    assert _run(ship, SHIP_PREFETCH_ONLY="1").returncode == 0
+    assert len(_lines(ship.logs["prefetch"])) == 2 and mark.read_text().startswith("de,fr,th\n")
+    os.utime(ship.base, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))      # the file rewritten
+    assert _run(ship, SHIP_PREFETCH_ONLY="1").returncode == 0
+    assert len(_lines(ship.logs["prefetch"])) == 3
+
+
+@pytest.mark.parametrize(("lines", "rc", "marked"), [
+    ([{"titles_done": True, "failed": ["de"]}, {"failed": ["de"], "text_incomplete": []}], 1, False),
+    ([{"titles_done": True, "failed": []}, {"failed": [], "text_incomplete": ["de"]}], 1, True),
+    ([{"titles_done": True, "failed": []}], 124, True),          # the 6 h limit, every title map in
+    ([{"lang": "de", "titles": 1}], 124, False)])                 # the 6 h limit before that
+def test_a_failed_title_map_is_fetched_again_and_throttled_text_is_not(ship: SimpleNamespace, tmp_path: Path,
+                                                                     lines: list, rc: int, marked: bool) -> None:
+    """A language whose dumps or title map failed, or the 6 h limit before
+    every title map was in, leaves no mark (a later run fetches again, and an
+    older mark goes); Wikidata text left incomplete by throttling, or cut
+    short by the limit after every title map, is recorded as done. The end
+    of step 2 is recorded either way (prefetch.ended)."""
+    pf = tmp_path / "prefetch-1.py"
+    pf.write_text("import json, os, sys\nopen(os.environ['FAKE_PREFETCH_LOG'], 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                  + "".join(f"print(json.dumps({x!r}))\n" for x in lines) + f"sys.exit({rc})\n")
+    mark = ship.work / "packs" / ship.tag / "prefetched"
+    mark.parent.mkdir(parents=True)
+    mark.write_text("de\nan older file\n")
+    r = _run(ship, SHIP_PREFETCH_ONLY="1", SHIP_PREFETCH=str(pf))
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    assert mark.exists() is marked
+    assert not (mark.parent / "prefetch.ended").exists()           # a run's, not a prefetch ahead's
+    assert _run(ship, SHIP_PREFETCH_ONLY="1", SHIP_PREFETCH=str(pf)).returncode == 0
+    assert len(_lines(ship.logs["prefetch"])) == (1 if marked else 2)
+    assert _run(ship, SHIP_PREFETCH=str(pf)).returncode in (0, 1)             # a run: its step 2's end marked
+    st = ship.base.stat()
+    assert (mark.parent / "prefetch.ended").read_text() == f"{st.st_size} {st.st_mtime_ns // 10**9}.{st.st_mtime_ns % 10**9:09d}\n"
+
+
 def test_listing_pending_then_rerun(ship: SimpleNamespace) -> None:
     r = _run(ship, FAKE_IA_PENDING="1")
     assert r.returncode == 6, r.stdout[-2000:] + r.stderr[-2000:]

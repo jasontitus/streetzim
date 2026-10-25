@@ -35,13 +35,37 @@ FAKE_SHIP = r'''#!PY
 import json, os, sys, time
 rid, base = sys.argv[1], sys.argv[2]
 log = os.environ["FAKE_LOG"]
+mark = os.path.join(os.environ["LANGPACK_WORK"], "packs", os.path.basename(base)[:-4], "prefetched")
+st = os.stat(base)
+file_id = f"{st.st_size} {st.st_mtime_ns // 10**9}.{st.st_mtime_ns % 10**9:09d}"
+marked = os.path.exists(mark) and open(mark).read().splitlines()[1:2] == [file_id]
+if os.environ.get("SHIP_PREFETCH_ONLY") == "1":
+    # the queue's prefetch ahead: FAKE_PREFETCH_SLEEP_FOR "region:secs;...", FAKE_PREFETCH_RC "region:rc;..." (no mark)
+    slow = dict(x.split(":", 1) for x in os.environ.get("FAKE_PREFETCH_SLEEP_FOR", "").split(";") if x)
+    prc = int(dict(x.split(":", 1) for x in os.environ.get("FAKE_PREFETCH_RC", "").split(";") if x).get(rid, "0"))
+    open(log, "a").write(json.dumps({"prefetch": rid, "base": os.path.basename(base), "t": time.time()}) + "\n")
+    time.sleep(float(slow.get(rid, "0")))
+    if prc == 0:
+        os.makedirs(os.path.dirname(mark), exist_ok=True)
+        open(mark, "w").write("de\n" + file_id + "\n")
+    open(log, "a").write(json.dumps({"prefetch_end": rid, "t": time.time()}) + "\n")
+    sys.exit(prc)
+# its step 2: FAKE_SHIP_STEP2 "region:secs" long; FAKE_SHIP_MARKS=1: it fetched and marked the file; then its end marked
+step2 = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_STEP2", "").split(";") if x)
+open(log, "a").write(json.dumps({"run_start": rid, "t": time.time()}) + "\n")
+time.sleep(float(step2.get(rid, "0")))
+os.makedirs(os.path.dirname(mark), exist_ok=True)
+if os.environ.get("FAKE_SHIP_MARKS") == "1" and not os.path.exists(mark):
+    open(mark, "w").write("de\n" + file_id + "\n")
+open(os.path.join(os.path.dirname(mark), "prefetch.ended"), "w").write(file_id + "\n")
+open(log, "a").write(json.dumps({"step2_end": rid, "t": time.time()}) + "\n")
 calls = [json.loads(x) for x in open(log)] if os.path.exists(log) else []
 n = sum(1 for c in calls if c.get("ship") == rid)
 plan = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_RC", "").split(";") if x)
 rcs = (plan.get(rid) or plan.get("*") or "0").split(",")
 rc = int(rcs[min(n, len(rcs) - 1)])
 with open(log, "a") as fh:
-    fh.write(json.dumps({"ship": rid, "base": base, "work": os.environ.get("LANGPACK_WORK"),
+    fh.write(json.dumps({"ship": rid, "base": base, "work": os.environ.get("LANGPACK_WORK"), "prefetched": marked,
                          "webseed": os.environ.get("LANGPACK_WEBSEED"), "maxgb": os.environ.get("SHIP_MAX_BASE_GB"),
                          "rc": rc, "t": time.time()}) + "\n")
 slow = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_SLEEP_FOR", "").split(";") if x)   # "region:secs;..."
@@ -158,6 +182,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
     qd.mkdir(parents=True)
     (qd / "since").write_text(f"{T0}\n")
     log = d / "fake.log"
+    (d / "pressure").write_text("some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")
     (d / "ia").mkdir()
     env = {**os.environ, "LANGPACK_WORK": str(work), "ROUND_TSV": str(tsv), "MAPS_DIR": str(maps), "PROD_REPO": str(prod),
            "PREVIEW_DIR": str(d / "preview" / "streetzim"), "FIREBASE": str(stubs / "firebase"),
@@ -170,6 +195,8 @@ def q(tmp_path: Path) -> SimpleNamespace:
            "LANGPACK_SCRATCH": str(d / "nvme"),                            # not the host's NVMe scratch
            "QUEUE_ROUND_PIDFILES": "", "QUEUE_ROUND_LOCKS": "",           # not the host's own round
            "QUEUE_RETRY_IN_PASS": "0",       # with QUEUE_RETRY_SECS=0, each map once a pass (its own test)
+           "QUEUE_PREFETCH_AHEAD": "0",      # its own tests
+           "QUEUE_PRESSURE_FILE": str(d / "pressure"),                     # not the host's memory pressure
            "QUEUE_LIVE": "0"}                                              # not the live site (its own test)
     env.pop("LANGPACK_WEBSEED", None)
     return SimpleNamespace(d=d, tsv=tsv, maps=maps, prod=prod, git=git, work=work, qd=qd, log=log, env=env,
@@ -178,7 +205,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
 
 def _env(q: SimpleNamespace, extra: dict[str, str]) -> dict[str, str]:
     env = {**q.env, **extra}
-    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_SLEEP_FOR", "FAKE_SHIP_RETRY") if k in env))
+    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_SLEEP_FOR", "FAKE_SHIP_RETRY", "FAKE_PREFETCH_SLEEP_FOR", "FAKE_PREFETCH_RC", "FAKE_SHIP_MARKS", "FAKE_SHIP_STEP2") if k in env))
     return env
 
 
@@ -363,6 +390,198 @@ def test_a_run_that_ends_while_the_pass_reads_on_frees_its_slot_for_a_due_retry(
     _wait_or_kill(p, 180)
     got = [c["ship"] for c in _calls(q, "ship")]
     assert got == ["beta", "alpha", "beta", "cont", "fail"], got
+
+
+def test_the_next_maps_prefetch_runs_beside_the_current_run(q: SimpleNamespace) -> None:
+    """QUEUE_PREFETCH_AHEAD=1: each eligible map's network step runs once,
+    one at a time in the list's order, beside the run going (alpha's while
+    beta ships); each run starts once its map's prefetch is done."""
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1",
+             FAKE_SHIP_SLEEP_FOR="beta:4", FAKE_PREFETCH_SLEEP_FOR="alpha:2")
+    assert r.returncode == 0, r.stderr
+    assert [c["prefetch"] for c in _calls(q, "prefetch")] == ["beta", "alpha", "cont", "fail"]
+    ships = [c for c in _calls(q, "ship") if "ship" in c]
+    assert [c["ship"] for c in ships] == ["beta", "alpha", "cont", "fail"] and all(c["prefetched"] for c in ships), ships
+    t = {(k, c[k]): c["t"] for k in ("prefetch", "prefetch_end", "ship_end") for c in _calls(q, k)}
+    assert t[("prefetch", "alpha")] < t[("ship_end", "beta")]               # side by side
+    assert "alpha: prefetch ahead: ship_packs.sh alpha" in log_text(q)
+
+
+def _mark(q: SimpleNamespace, rid: str, zim: str = "") -> None:
+    """packs/<base>/prefetched as ship_packs.sh writes it: the pack languages, then the file's size and mtime."""
+    z = q.maps / (zim or f"osm-{rid}-2026-10-23.zim")
+    st = z.stat()
+    m = q.work / "packs" / z.name[:-4] / "prefetched"
+    m.parent.mkdir(parents=True, exist_ok=True)
+    m.write_text(f"de\n{st.st_size} {st.st_mtime_ns // 10**9}.{st.st_mtime_ns % 10**9:09d}\n")
+
+
+def test_a_map_whose_prefetch_is_done_goes_before_one_still_prefetching(q: SimpleNamespace) -> None:
+    for rid in ("alpha", "cont"):                       # prefetched before (an earlier run)
+        _mark(q, rid)
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_PREFETCH_SLEEP_FOR="beta:4")
+    assert r.returncode == 0, r.stderr
+    assert [c["prefetch"] for c in _calls(q, "prefetch")] == ["beta", "fail"]
+    assert [c["ship"] for c in _calls(q, "ship")] == ["alpha", "cont", "beta", "fail"]
+    assert "beta: waiting for its prefetch ahead" in log_text(q)
+
+
+def test_a_new_file_of_a_region_is_prefetched_again(q: SimpleNamespace) -> None:
+    """A mark names a file: beta rebuilt (a new file) is prefetched ahead
+    again; a mark left for another file (same name, rewritten) counts for nothing."""
+    env = {"FAKE_SHIP_RC": "", "QUEUE_JOBS": "1", "QUEUE_PREFETCH_AHEAD": "1"}
+    assert _run(q, **env).returncode == 0
+    lpzims.write_base(q.maps / "osm-beta-2026-10-30.zim", cfg_extra={"tileLanguages": ["de"]})
+    with open(q.tsv, "a") as fh:
+        fh.write(f"beta\tuploaded\tosm-beta-2026-10-30.zim\t{_iso(T0 + 500)}\n")
+    assert _run(q, **env).returncode == 0
+    pre = [(c["prefetch"], c["base"]) for c in _calls(q, "prefetch")]
+    assert pre.count(("beta", "osm-beta-2026-10-30.zim")) == 1, pre
+    last = [c for c in _calls(q, "ship") if c["ship"] == "beta"][-1]
+    assert Path(last["base"]).name == "osm-beta-2026-10-30.zim" and last["prefetched"]
+    lpzims.write_base(q.maps / "osm-alpha-2026-10-23.zim",   # alpha rewritten in place: its old mark is for another file
+                      cfg_extra={"tileLanguages": ["de", "fr"]})
+    with open(q.tsv, "a") as fh:
+        fh.write(f"alpha\tuploaded\tosm-alpha-2026-10-23.zim\t{_iso(T0 + 600)}\n")
+    assert _run(q, **env).returncode == 0
+    assert [c["prefetch"] for c in _calls(q, "prefetch")].count("alpha") == 2
+
+
+def test_a_prefetch_that_ends_without_its_mark_is_tried_twice_then_the_run_fetches_itself(q: SimpleNamespace) -> None:
+    """Then beta's run starts once no prefetch goes, and none starts while it
+    waits or before its step 2 is over (packs/<base>/prefetch.ended: its own
+    prefetch would wait on the cache's lock)."""
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_PREFETCH_RC="beta:1",
+             FAKE_SHIP_SLEEP_FOR="beta:3", FAKE_PREFETCH_SLEEP_FOR="alpha:2")
+    assert r.returncode == 0, r.stderr
+    assert [c["prefetch"] for c in _calls(q, "prefetch")].count("beta") == 2
+    b = [c for c in _calls(q, "ship") if c["ship"] == "beta"]
+    assert len(b) == 1 and not b[0]["prefetched"]
+    assert "beta: prefetch ahead ended without its mark (try 2 of 2" in log_text(q)
+    t = {(k, c[k]): c["t"] for k in ("prefetch", "prefetch_end", "ship", "ship_end") for c in _calls(q, k)}
+    assert t[("ship", "beta")] <= t[("prefetch", "alpha")] < t[("ship_end", "beta")]
+
+
+def test_the_prefetch_ahead_does_no_slow_check_of_its_own(q: SimpleNamespace) -> None:
+    """The pass finds the maps eligible; picking the next prefetch takes no
+    MD5 or listing of its own, so a ready map starts at once."""
+    for rid in ("beta", "alpha"):
+        _mark(q, rid)
+    p = _start(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", PATH=_slow_md5sum(q),
+               FAKE_MD5_ON="osm-cont-", FAKE_MD5_SLEEP="15")
+    t0 = time.time()
+    try:
+        _until(lambda: bool(_calls(q, "ship")), "beta's run", 60)
+        assert _calls(q, "ship")[0]["ship"] == "beta" and _calls(q, "ship")[0]["t"] - t0 < 8
+    finally:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+
+
+def test_a_retry_due_while_a_long_prefetch_goes_does_not_wait_for_it(q: SimpleNamespace) -> None:
+    """At the end of the list the pass looks again every QUEUE_POLL_SECS:
+    alpha's retry comes due while cont's prefetch still goes (and no run)."""
+    for rid in ("beta", "alpha"):
+        _mark(q, rid)
+    r = _run(q, FAKE_SHIP_RC="alpha:6,0", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_RETRY_IN_PASS="1",
+             QUEUE_RETRY_SECS="5", QUEUE_POLL_SECS="3", FAKE_PREFETCH_SLEEP_FOR="cont:30")
+    assert r.returncode == 0, r.stderr
+    again = [c["t"] for c in _calls(q, "ship") if c["ship"] == "alpha"][1]
+    assert again < next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "cont")
+
+
+def test_no_prefetch_starts_before_the_step_2_of_a_run_that_fetches_itself_ends(q: SimpleNamespace) -> None:
+    """beta fetches itself (two failed prefetches ahead): during its first
+    run's step 2, and its retry's (an earlier run's end-of-step-2 mark does
+    not count), no prefetch ahead starts."""
+    r = _run(q, FAKE_SHIP_RC="beta:6,0", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_RETRY_IN_PASS="1",
+             QUEUE_RETRY_SECS="1", FAKE_PREFETCH_RC="beta:1", FAKE_SHIP_STEP2="beta:3",
+             FAKE_PREFETCH_SLEEP_FOR="alpha:1;cont:1;fail:1")
+    assert r.returncode == 0, r.stderr
+    starts = [c["t"] for c in _calls(q, "run_start") if c["run_start"] == "beta"]
+    ends = [c["t"] for c in _calls(q, "step2_end") if c["step2_end"] == "beta"]
+    pre = [c["t"] for c in _calls(q, "prefetch") if c["prefetch"] != "beta"]
+    assert len(starts) == 2 == len(ends) and len(pre) == 3, (starts, ends, pre)
+    assert not [p for p in pre for a, b in zip(starts, ends) if a <= p < b], (starts, ends, pre)
+
+
+def test_a_map_marked_by_its_own_run_does_not_wait_for_a_prefetch(q: SimpleNamespace) -> None:
+    """beta's prefetch ahead fails twice; its run fetches itself, marks its
+    file and ends listing pending; its retry, marked now, does not wait for
+    alpha's long prefetch."""
+    r = _run(q, timeout=180, FAKE_SHIP_RC="beta:6,0", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_RETRY_IN_PASS="1",
+             QUEUE_RETRY_SECS="3", QUEUE_POLL_SECS="2", FAKE_PREFETCH_RC="beta:1", FAKE_PREFETCH_SLEEP_FOR="alpha:20",
+             FAKE_SHIP_MARKS="1")
+    assert r.returncode == 0, r.stderr
+    b = [c for c in _calls(q, "ship") if c["ship"] == "beta"]
+    assert len(b) == 2 and not b[0]["prefetched"] and b[1]["prefetched"]
+    assert b[1]["t"] - b[0]["t"] < 10, [c["t"] for c in b]
+
+
+def test_a_map_that_fetches_itself_holds_the_prefetch_ahead_while_it_waits_for_room(q: SimpleNamespace) -> None:
+    """Pass 1 leaves cont fetching itself (two failed prefetches ahead) with
+    a retry. Pass 2: eps runs; gamma's prefetch waits for memory; cont waits
+    for room. The pressure eases while cont waits: gamma's prefetch does not
+    start beside cont's run (cont's own prefetch would wait on the lock)."""
+    lpzims.write_base(q.maps / "osm-eps-2026-10-23.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    p = _start(q, (), FAKE_SHIP_RC="cont:6,0", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_RETRY_SECS="0",
+               QUEUE_POLL_SECS="8", FAKE_PREFETCH_RC="cont:1", FAKE_PREFETCH_SLEEP_FOR="gamma:15", FAKE_SHIP_SLEEP_FOR="eps:6")
+    try:
+        _until(lambda: (q.qd / "queue.log").exists() and "cont: ship_packs rc=6" in log_text(q), "pass 1: cont rc 6", 120)
+        _until(lambda: (q.qd / "published.tsv").exists() and len((q.qd / "published.tsv").read_text().splitlines()) == 3,
+               "pass 1 done", 60)
+        (q.d / "pressure").write_text("full avg10=20.00 avg60=0.00 avg300=0.00 total=0\n")
+        _mark(q, "eps")
+        with open(q.tsv, "a") as fh:
+            fh.write(f"eps\tuploaded\tosm-eps-2026-10-23.zim\t{_iso(T0 + 72)}\n")
+            fh.write(f"gamma\tuploaded\tosm-gamma-2026-10-23.zim\t{_iso(T0 + 75)}\n")
+        n0 = len(log_text(q))
+        _until(lambda: "cont: waiting: 1 runs going" in log_text(q)[n0:], "cont waiting for room in pass 2", 60)
+        (q.d / "pressure").write_text("full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")
+        _until(lambda: [c["ship"] for c in _calls(q, "ship")].count("cont") == 2, "cont's second run", 90)
+        (q.qd / "stop").touch()
+        p.wait(timeout=90)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    c2 = [c for c in _calls(q, "ship") if c["ship"] == "cont"][1]
+    g = [c["t"] for c in _calls(q, "prefetch") if c["prefetch"] == "gamma"]
+    g_end = [c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "gamma"]
+    assert not c2["prefetched"] and not (g and g[0] <= c2["t"] <= (g_end or [float("inf")])[0]), (g, g_end, c2["t"])
+
+
+def test_the_prefetch_ahead_minds_memory_as_a_second_run_does(q: SimpleNamespace) -> None:
+    """Under memory pressure a prefetch starts only when no run goes and no
+    round builds (as room_for lets a first run start): never during a run."""
+    (q.d / "pressure").write_text("full avg10=20.00 avg60=0.00 avg300=0.00 total=0\n")
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_SHIP_SLEEP_FOR="beta:2;alpha:2;cont:2",
+             FAKE_PREFETCH_SLEEP_FOR="beta:1;alpha:1;cont:1;fail:1")
+    assert r.returncode == 0, r.stderr
+    assert [c["ship"] for c in _calls(q, "ship")] == ["beta", "alpha", "cont", "fail"]
+    runs = [(a["t"], b["t"]) for a, b in zip(_calls(q, "ship"), _calls(q, "ship_end"))]
+    starts = [c["t"] for c in _calls(q, "prefetch")]
+    assert len(starts) == 4 and not [p for p in starts for a, b in runs if a < p < b], (starts, runs)
+
+
+def test_a_restart_counts_the_prefetch_going(q: SimpleNamespace) -> None:
+    """The killed queue's prefetch ahead goes on: the restart neither starts
+    another for that map nor ships it before it ends."""
+    p = _start(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_PREFETCH_SLEEP_FOR="beta:6")
+    _until(lambda: bool(_calls(q, "prefetch")), "beta's prefetch")
+    os.kill(p.pid, signal.SIGKILL)
+    p.wait()
+    try:
+        r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_PREFETCH_SLEEP_FOR="beta:6")
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    assert r.returncode == 0, r.stderr
+    assert [c["prefetch"] for c in _calls(q, "prefetch")].count("beta") == 1
+    assert "beta: its prefetch ahead from before the restart is still going" in log_text(q)
+    end = next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "beta")
+    assert next(c["t"] for c in _calls(q, "ship") if c["ship"] == "beta") >= end
 
 
 def test_retries_that_keep_failing_do_not_hold_up_the_rest(q: SimpleNamespace) -> None:
@@ -808,6 +1027,27 @@ def test_while_the_round_builds_the_first_run_waits_for_memory_too(q: SimpleName
     assert _calls(q, "ship") == [] and "stop file: starting nothing new" in log_text(q)
 
 
+def test_memory_pressure_holds_back_a_run_while_the_round_builds(q: SimpleNamespace, tmp_path: Path) -> None:
+    (q.d / "pressure").write_text("full avg10=20.00 avg60=0.00 avg300=0.00 total=0\n")
+    lock = tmp_path / "run.lock"
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        p = _start(q, FAKE_SHIP_RC="", QUEUE_ROUND_LOCKS=str(lock))
+        try:
+            _until(lambda: (q.qd / "queue.log").exists() and "beta: waiting: memory pressure (full avg10=20)" in log_text(q),
+                   "the queue to wait", 60)
+            time.sleep(1)
+            assert _calls(q, "ship") == []
+            (q.d / "pressure").write_text("full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")
+            _until(lambda: bool(_calls(q, "ship")), "beta's run once the pressure eases", 60)
+            (q.qd / "stop").touch()
+            p.wait(timeout=60)
+        finally:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+    assert _calls(q, "ship")[0]["ship"] == "beta"
+
+
 def test_the_stop_file_starts_nothing_new_and_the_running_finish(q: SimpleNamespace) -> None:
     p = _start(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="2", QUEUE_JOBS="1")
     try:
@@ -857,11 +1097,11 @@ def test_a_restart_counts_the_runs_still_going(q: SimpleNamespace) -> None:
 
 
 def _slow_md5sum(q: SimpleNamespace) -> str:
-    """A PATH whose md5sum waits FAKE_MD5_SLEEP s (default 30) on beta's base first (the HDD at idle priority)."""
+    """A PATH whose md5sum waits FAKE_MD5_SLEEP s (default 30) on FAKE_MD5_ON's base (beta's) first (the HDD at idle priority)."""
     slow = q.d / "slow-bin"
     slow.mkdir(exist_ok=True)
     (slow / "md5sum").write_text(f'#!/bin/bash\necho \'{{"md5sum": 1}}\' >> "$FAKE_LOG"\n'
-                                 f'case "$1" in *osm-beta-*) sleep "${{FAKE_MD5_SLEEP:-30}}" ;; esac\n'
+                                 f'case "$1" in *"${{FAKE_MD5_ON:-osm-beta-}}"*) sleep "${{FAKE_MD5_SLEEP:-30}}" ;; esac\n'
                                  f'exec {shutil.which("md5sum")} "$@"\n')
     (slow / "md5sum").chmod(0o755)
     return f"{slow}:{os.environ['PATH']}"

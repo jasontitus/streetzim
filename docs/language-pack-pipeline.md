@@ -451,6 +451,9 @@ it on archive.org) logs each step in PDT to
    language from the Wikidata cache, else the base's Title).
 2. `prefetch.py`: the SQL dumps, title maps and Wikidata text those packs
    read (network, no timeout of its own; the builds then run `--offline`).
+   Then `packs/<base>/prefetched` names those pack languages, and a later
+   run for this base skips the step for them. `SHIP_PREFETCH_ONLY=1` runs
+   steps 1 and 2 only (the queue's prefetch ahead, below).
 3. `build_packs.sh` for each pack language without a gated pack for this
    base in `$LANGPACK_WORK/packs/<base>/`. Packs are named
    `osm_<region>_wiki-<L>_<date>_<first 8 hex of the base's UUID>.zim`, so two
@@ -587,6 +590,23 @@ replaces them when it ships. The preview's home page is not regenerated.
   `sz-tests/rebuild-all/run.lock` (read from `/proc/locks`, never taken).
   `ship_packs.sh` takes turns on the shared Wikipedia cache (its prefetch
   holds a lock).
+- Prefetch ahead (`QUEUE_PREFETCH_AHEAD=1`, the default): Wikidata throttles
+  its API for hours on some days, and a map with 170,000 places then spent
+  its whole 6-hour prefetch in the one run slot while the disk sat idle. The
+  queue now runs the network step for the next maps beside the run going,
+  one at a time, in the list's order (`ship_packs.sh` with
+  `SHIP_PREFETCH_ONLY=1`; log `pack-queue/prefetch-<region>.out`), with the
+  memory a second run needs. A map's run starts once its prefetch is done,
+  and skips the step; a later map whose prefetch is done goes before one
+  still prefetching. `packs/<base>/prefetched` names the base file (size and
+  mtime) and is written only when every language's dumps and title map are
+  in the cache (`prefetch.py` does all of those first and says so; Wikidata
+  text left incomplete by throttling, or cut short by the 6-hour limit after
+  that, counts as done): a failed dump, or the limit before then, leaves
+  none, the queue tries twice, then the map's run fetches itself, with no
+  prefetch starting until its step 2 is over (`packs/<base>/prefetch.ended`;
+  it would wait on the cache's lock). A restarted queue counts the prefetch
+  still going (`pack-queue/prefetch`).
 - Each `ship_packs.sh` starts from a clean environment (`HOME`, `USER`,
   `PATH`, the locale; then production's items and settings, set by the
   queue): no `SHIP_*` knob or stand-in from a test shell or the Swiss
@@ -624,7 +644,7 @@ replaces them when it ships. The preview's home page is not regenerated.
   before starting again). The round's files are only read.
 - To restart the queue, stop only the `pack_queue.sh` whose parent is
   init (pid 1): each run's wrapper subshell shows the same command line and
-  must keep going. To stop one region's run, stop its `ship_packs.sh` and
+  must keep going (so does a prefetch ahead). To stop one region's run, stop its `ship_packs.sh` and
   then its prefetch (`timeout 21600 … prefetch.py … <the map>`), which
   outlives it and keeps the cache's prefetch lock, holding up the next run
   for up to 6 hours. The cache's files are written through `.tmp`/`.part`

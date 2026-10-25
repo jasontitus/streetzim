@@ -395,7 +395,19 @@ def test_prefetch_retries_text_and_reports(tmp_path: Path, monkeypatch: pytest.M
     rc = prefetch.main(["base.zim", "--langs", "de,el", "--cache", str(tmp_path), "--text-rounds", "3"])
     assert rc == 0 and calls["text"] == ["de", "el", "el"]
     assert ("de", "redirect") in calls["dump"]
-    assert _summary(capsys) == {"failed": [], "text_incomplete": []}
+    out = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
+    # every title map first, then a line saying so, then the text: a run cut short lacks only text
+    assert out[0] == {"titles_done": True, "failed": []} and [r["lang"] for r in out[1:3]] == ["de", "el"]
+    assert {k: out[-1][k] for k in ("failed", "text_incomplete")} == {"failed": [], "text_incomplete": []}
+    order: list[str] = []
+    monkeypatch.setattr(wiki_pack, "build_title_map", lambda lg, c, **k: order.append(f"titles {lg}"))
+    monkeypatch.setattr(wiki_pack, "wikidata_text", lambda q, lg, c, fetch=None, langs=(), log=None:
+                        (order.append(f"text {lg}"), {"qids": 2, "asked": 0, "requests": 0, "missing": 0, "complete": True})[1:] and
+                        ({}, {"qids": 2, "asked": 0, "requests": 0, "missing": 0, "complete": True}))
+    assert prefetch.main(["base.zim", "--langs", "de,el", "--cache", str(tmp_path), "--text-rounds", "1"]) == 0
+    assert order == ["titles de", "titles el", "text de", "text el"], order
+    capsys.readouterr()
+    monkeypatch.setattr(wiki_pack, "wikidata_text", text)
     # a language whose dumps fail: exit 1 (its text complete)
     assert prefetch.main(["base.zim", "--langs", "zz", "--cache", str(tmp_path), "--text-rounds", "1"]) == 1
     assert _summary(capsys) == {"failed": ["zz"], "text_incomplete": ["zz"]}

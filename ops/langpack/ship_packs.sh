@@ -15,7 +15,20 @@
 #      have a Wikipedia ZIM; a language without one is skipped and logged),
 #      the packs they need, the merged files' titles.
 #   2. prefetch.py: SQL dumps, title maps and Wikidata text for those packs
-#      (network; the pack builds then run offline).
+#      (network; the pack builds then run offline). When it ends with every
+#      language's dumps and title map in the cache (exit 0; or 1, or cut short
+#      by the 6 h limit after prefetch.py's titles_done line, with only
+#      Wikidata text incomplete: throttled), $LANGPACK_WORK/packs/<base>/prefetched
+#      names those pack languages and the base file (size, mtime), and a later
+#      run for that file skips this step for them (a rerun; or the queue's
+#      prefetch ahead: SHIP_PREFETCH_ONLY=1 runs steps 1 and 2 only and exits 0,
+#      so the Wikidata waits overlap another map's run); else (a failed dump
+#      or title map, the 6 h limit before every title map was in) a later run
+#      fetches again, and the Wikidata text already cached is not asked for
+#      twice. Either way a run (not SHIP_PREFETCH_ONLY=1) then writes
+#      packs/<base>/prefetch.ended naming the file: it takes the cache's lock no
+#      more (pack_queue.sh, which removes the file as it starts a run, waits
+#      for that).
 #   3. build_packs.sh for every pack language without a gated pack for this
 #      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done). A
 #      language whose build ran out of its time (exit 124, build_packs.sh's
@@ -85,7 +98,8 @@
 # volume keeps free, as parallel_rebuild.sh). I/O at best effort, lowest
 # level (ionice -c2 -n7; CPU at nice 19): the HDD's scheduler (mq-deadline)
 # serves the idle class only when the disk is idle, which a rebuild round's
-# builds never leave it. Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
+# builds never leave it. SHIP_PREFETCH_ONLY=1: steps 1 and 2 only (step 2).
+# Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
 # and SHIP_RUN_GATES (stand-ins for prefetch.py and run_gates.sh), BUILDER
 # (build_packs.sh's), SHIP_IA_FETCH= and SHIP_PROBE_URLS= (site_check.py
 # reads $LANGPACK_WORK/ia-cache only and probes nothing), SHIP_LISTING_POLLS,
@@ -148,15 +162,46 @@ say "menu: $LANGS; region languages: ${RL:-none}; packs: $PACK_LANGS"
   | while read -r l; do say "$l"; done
 [ -n "$LANGS" ] || { say "no languages to offer"; exit 1; }
 
-# 2. network first
-if [ -n "$PACK_LANGS" ]; then
+# 2. network first (once per base file and pack languages: step 2 above)
+PF_MARK=$PACKS/prefetched
+PF_ID=$(printf '%s\n%s' "$PACK_LANGS" "$(stat -c '%s %.9Y' "$BASE")")
+# prefetch.py's titles_done or summary line (its last JSON line naming "failed"): every language's dumps
+# and title map are in
+titles_ok() { "$PY" - "$1" <<'PY'
+import json, sys
+rows = []
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        rows.append(json.loads(line))
+    except ValueError:
+        pass
+s = [r for r in rows if isinstance(r, dict) and "failed" in r]
+sys.exit(0 if s and s[-1]["failed"] == [] else 1)
+PY
+}
+if [ -n "$PACK_LANGS" ] && [ "$(head -n 2 "$PF_MARK" 2> /dev/null)" = "$PF_ID" ]; then
+  say "prefetch: done already for $PACK_LANGS ($(TZ=America/Los_Angeles date -r "$PF_MARK" '+%F %T %Z'))"
+elif [ -n "$PACK_LANGS" ]; then
   say "prefetch: $PACK_LANGS"
   # one prefetch at a time on a cache (ship_packs.sh runs side by side,
   # ops/langpack/pack_queue.sh): it downloads into and appends to shared files
   mkdir -p "$WP_CACHE"
   "${LOW[@]}" flock "$WP_CACHE/.prefetch.lock" "${LIM[@]}" timeout 21600 "$PY" "${SHIP_PREFETCH:-$TL/prefetch.py}" "$BASE" --langs "$PACK_LANGS" --cache "$WP_CACHE" \
-    >> "$LOG" 2>&1 || say "prefetch incomplete (see above); the packs say what they lack"
+    2>&1 | tee -a "$LOG" > "$PACKS/prefetch.out"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" = 0 ] || { { [ "$rc" = 1 ] || [ "$rc" = 124 ]; } && titles_ok "$PACKS/prefetch.out"; }; then
+    [ "$rc" = 0 ] || say "prefetch: Wikidata text incomplete (throttled: see above); the packs say what they lack"
+    printf '%s\n' "$PF_ID" > "$PF_MARK.tmp" && mv -f "$PF_MARK.tmp" "$PF_MARK"
+  else
+    rm -f "$PF_MARK"
+    say "prefetch incomplete (exit $rc: see above): a later run for this base fetches again; the packs say what they lack"
+  fi
 fi
+if [ "${SHIP_PREFETCH_ONLY:-0}" = 1 ]; then
+  say "prefetch only (SHIP_PREFETCH_ONLY=1): done"
+  exit 0
+fi
+stat -c '%s %.9Y' "$BASE" > "$PACKS/prefetch.ended.tmp" && mv -f "$PACKS/prefetch.ended.tmp" "$PACKS/prefetch.ended"
 
 # The region's name in each language is in the Wikidata cache only now.
 META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --cache "$WP_CACHE" "${CORE_ARG[@]}") \

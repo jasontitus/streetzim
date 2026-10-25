@@ -16,9 +16,11 @@ timeout of its own (the caller sets one), into the builder's --cache:
   got (JSON lines) and the next round asks only for the rest; up to
   --text-rounds rounds, a minute apart.
 
-Prints one JSON line per language, then a summary line, which lists the
-languages whose title map failed ("failed") and those whose wikidata-text
-is incomplete ("text_incomplete"). Exit 0 when every language has its
+Every language's dumps and title map come first, then a line
+{"titles_done": true, "failed": [...]} (a run cut short later lacks only
+Wikidata text), then the text. Prints one JSON line per language, then a
+summary line, which lists the languages whose title map failed ("failed")
+and those whose wikidata-text is incomplete ("text_incomplete"). Exit 0 when every language has its
 title map and complete wikidata-text, 1 otherwise (the packs can still be
 built: an incomplete wikidata-text is said in the pack's stats), 2 on bad
 arguments.
@@ -69,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     ok = True
     failed: list[str] = []
     incomplete: list[str] = []
+    # every language's dumps and title map first, then the Wikidata text (throttled for hours on
+    # some days): a run cut short by its caller's time limit then lacks only text, as the line
+    # printed in between says
+    rows: dict[str, dict[str, object]] = {}
     for lg in langs:
         t0 = time.time()
         row: dict[str, object] = {"lang": lg}
@@ -80,6 +86,12 @@ def main(argv: list[str] | None = None) -> int:
             row["titles_error"] = f"{type(e).__name__}: {e}"[:300]
             failed.append(lg)
             ok = False
+        row["seconds"] = round(time.time() - t0, 1)
+        rows[lg] = row
+    print(json.dumps({"titles_done": True, "failed": failed}), flush=True)
+    for lg in langs:
+        t0 = time.time()
+        row = rows[lg]
         complete = False
         for r in range(max(1, a.text_rounds)):
             _, st = wiki_pack.wikidata_text(qids, lg, cache, fetch=wiki_pack.api_fetcher(log), langs=text_langs, log=log)
@@ -92,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         ok = ok and complete
         if not complete:
             incomplete.append(lg)
-        row["seconds"] = round(time.time() - t0, 1)
+        row["text_seconds"] = round(time.time() - t0, 1)
         print(json.dumps(row, ensure_ascii=False), flush=True)
     print(json.dumps({"base": os.path.basename(a.base), "base_uuid": base.uuid, "qids": len(qids),
                       "langs": langs, "ok": ok, "failed": failed, "text_incomplete": incomplete}),

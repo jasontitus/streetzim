@@ -23,7 +23,20 @@
 # upload-pending base now) takes the slot before the later ones (so does a run
 # that ends while the pass reads on); a map is started at most twice in a pass, so retries that keep
 # failing cannot hold up the rest (QUEUE_RETRY_IN_PASS=0: each map at most
-# once a pass). One ship_packs.sh run at a time while the round builds (the disk is
+# once a pass). Prefetch ahead (QUEUE_PREFETCH_AHEAD=1, the default): the
+# network step of ship_packs.sh (Wikipedia dumps, Wikidata labels, whose
+# throttling can take hours) runs for the next maps beside the runs, one at a
+# time (ship_packs.sh SHIP_PREFETCH_ONLY=1, in the list's order, for the first
+# map the pass found eligible whose packs/<base>/prefetched does not name its
+# file; with the memory a second run needs while the round builds or a run
+# goes, and not while a run going may still prefetch itself: until its
+# packs/<base>/prefetch.ended names its file); a map starts once its prefetch is done (its run
+# then skips the step), and a later map whose prefetch is done goes before
+# one still prefetching; a map whose prefetch ended twice without the mark
+# (a failed dump, the 6 h limit) starts once no prefetch goes (none starts
+# while it waits, or while a run going lacks its mark), and its run fetches
+# itself; at the end of the list the pass waits for a prefetch or a
+# run to end, or QUEUE_POLL_SECS. One ship_packs.sh run at a time while the round builds (the disk is
 # saturated), and
 # only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
 # memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
@@ -106,7 +119,8 @@
 # updated, retry after, note), published.tsv (region, uuid, md5, zim,
 # time, recipe scheme), enqueued.tsv (region, zim, epoch, the round file's line count then), runs/<region> (pid, start time,
 # zim, base key, recipe scheme; none: 1), deploy-pending, live-pending-<region> (its failed tries),
-# live-failed-<region>, stop (a file: nothing new starts, the
+# live-failed-<region>, prefetch (the prefetch ahead going: pid, start time, region, zim; a restart
+# counts it while it goes), prefetch-<region>.out, stop (a file: nothing new starts, the
 # running ones finish, then the queue ends; remove it before starting
 # again), ship-<region>.out. The round's files are only read (ROUND_TSV).
 #
@@ -118,6 +132,7 @@
 # QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8), QUEUE_PARTIAL_RETRIES (3),
 # QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
 # QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40), QUEUE_RETRY_IN_PASS (1),
+# QUEUE_PREFETCH_AHEAD (1),
 # QUEUE_SINCE (first run only: count maps shipped since this date, e.g. the
 # round's start, instead of since now), QUEUE_SEED (REGION=SITE_DIR ...: site
 # folders, SITE_DIR/recipes/REGION sealed by ship_packs.sh, published into a
@@ -127,7 +142,7 @@
 # rebuild-par/pids/*.pid, TEXT rebuild_old_regions.sh), QUEUE_ROUND_LOCKS
 # (default rebuild-par/run.lock and sz-tests/rebuild-all/run.lock under
 # /storage/streetzim), IA (the archive.org CLI, for upload-pending rows).
-# Tests: QUEUE_SHIP and QUEUE_PUBLISH (stand-ins for ship_packs.sh and
+# Tests: QUEUE_PRESSURE_FILE (read in place of /proc/pressure/memory), QUEUE_SHIP and QUEUE_PUBLISH (stand-ins for ship_packs.sh and
 # publish_site.sh), QUEUE_LIVE_PUBLISH and QUEUE_LIVE_BUILD (for the live
 # step: publish_site.sh and a shell command in place of web/generate.py),
 # QUEUE_DIR, QUEUE_FORCE_WORK=1.
@@ -191,6 +206,7 @@ RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
 JOBS=${QUEUE_JOBS:-2}
 IN_PASS=${QUEUE_RETRY_IN_PASS:-1}
+AHEAD=${QUEUE_PREFETCH_AHEAD:-1}
 MIN_MEM_GB=${QUEUE_MIN_MEM_GB:-24}
 DISK_MARGIN_GB=${QUEUE_DISK_MARGIN_GB:-40}
 PY=${PYTHON:-python3}
@@ -233,8 +249,8 @@ if [ ! -s "$Q/since" ]; then
 fi
 SINCE=$(cat "$Q/since")
 touch "$STATUS" "$DONE"
-declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=()
-ANY_FAILED=0 STOP_SAID=
+declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=() PF_TRIES=() PF_WANT=()
+ANY_FAILED=0 STOP_SAID= PF_PID= PF_RID= PF_ZIM= PF_START= PF_SCAN= PF_ENDS=0 list=()
 # what a ship_packs.sh run starts from: the login basics, then production's settings
 SHIP_ENV=()
 for v in HOME USER LOGNAME PATH LANG LC_ALL SHELL; do [ -n "${!v+x}" ] && SHIP_ENV+=("$v=${!v}"); done
@@ -571,7 +587,7 @@ room_for() {  # base
   avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
   [ "${avail:-0}" -ge $(( MIN_MEM_GB * 1048576 )) ] \
     || { WHY="$(( ${avail:-0} / 1048576 )) GB of memory available, under QUEUE_MIN_MEM_GB=$MIN_MEM_GB${ROUND_WHY:+ while $ROUND_WHY}"; return 1; }
-  full=$(awk '/^full/ {sub("avg10=", "", $2); print int($2)}' /proc/pressure/memory 2>/dev/null)
+  full=$(awk '/^full/ {sub("avg10=", "", $2); print int($2)}' "${QUEUE_PRESSURE_FILE:-/proc/pressure/memory}" 2>/dev/null)
   [ "${full:-0}" -lt 5 ] || { WHY="memory pressure (full avg10=$full)"; return 1; }
   [ "$n" = 0 ] && return 0                                   # the first run: ship_packs.sh minds the disk itself
   need=$(( $(stat -c %s "$1") / 1024 * 2 + DISK_MARGIN_GB * 1048576 ))
@@ -597,7 +613,8 @@ stopping() {
 start_ship() {  # region zim key
   local rid=$1 zim=$2 base=$MAPS_DIR/$2 pid
   set_state "$rid" shipping "$zim" "$3"
-  rm -f "$Q/rc-$rid"
+  # an earlier run's mark of its step 2's end is not this run's (pf_tick)
+  rm -f "$Q/rc-$rid" "$LANGPACK_WORK/packs/${zim%.zim}/prefetch.ended"
   say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
   ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
       ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
@@ -694,9 +711,76 @@ finish() {  # region
 }
 
 # Finish the runs that ended; with "all", wait for every one.
+# Prefetch ahead (header): one at a time, beside the runs.
+pf_marked() {  # zim: does packs/<base>/prefetched name this very file? (ship_packs.sh step 2)
+  local id
+  id=$(stat -L -c '%s %.9Y' "$MAPS_DIR/$1" 2> /dev/null) || return 1
+  [ "$(sed -n 2p "$LANGPACK_WORK/packs/${1%.zim}/prefetched" 2> /dev/null)" = "$id" ]
+}
+pf_ended() {  # zim: is a run's step 2 over for this file? (packs/<base>/prefetch.ended: it takes the lock no more)
+  local id
+  id=$(stat -L -c '%s %.9Y' "$MAPS_DIR/$1" 2> /dev/null) || return 1
+  [ "$(head -n 1 "$LANGPACK_WORK/packs/${1%.zim}/prefetch.ended" 2> /dev/null)" = "$id" ]
+}
+prefetched() {  # region zim: may its run start? (its prefetch done; none going for the region)
+  [ "$PF_RID" != "$1" ] || return 1
+  [ "$AHEAD" = 1 ] || return 0
+  pf_marked "$2" && return 0
+  if [ "${PF_TRIES[$1 $2]:-0}" -ge 2 ]; then [ -z "$PF_PID" ]; return; fi   # its run fetches itself
+  return 1
+}
+pf_alive() {
+  local s; s=$(starttime "$PF_PID") || return 1
+  [ -z "$PF_START" ] || [ "$s" = "$PF_START" ]
+}
+pf_start() {  # region zim
+  local rid=$1 base=$MAPS_DIR/$2
+  say "$rid: prefetch ahead: ship_packs.sh $rid $base with SHIP_PREFETCH_ONLY=1 (beside the runs)"
+  ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" SHIP_PREFETCH_ONLY=1 \
+      ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/prefetch-$rid.out" 2>&1 < /dev/null ) 9>&- &
+  PF_PID=$! PF_RID=$rid PF_ZIM=$2
+  PF_START=$(starttime "$PF_PID")
+  echo "$PF_PID ${PF_START:--} $rid $2" > "$Q/prefetch.tmp" && mv -f "$Q/prefetch.tmp" "$Q/prefetch"
+}
+# (from reap) the prefetch that ended; in a pass, the next one: the first map of its list the
+# pass found eligible (PF_WANT) whose file has no prefetch, while the host has the memory a
+# second run needs and no run going may still prefetch itself (it would wait on the cache's lock)
+pf_tick() {
+  if [ -n "$PF_PID" ]; then
+    pf_alive && return 0
+    PF_TRIES[$PF_RID $PF_ZIM]=$(( ${PF_TRIES[$PF_RID $PF_ZIM]:-0} + 1 ))
+    if pf_marked "$PF_ZIM"; then say "$PF_RID: prefetch ahead done"
+    else say "$PF_RID: prefetch ahead ended without its mark (try ${PF_TRIES[$PF_RID $PF_ZIM]} of 2; see $Q/prefetch-$PF_RID.out and its ship log)"; fi
+    PF_ENDS=$(( PF_ENDS + 1 )) PF_SCAN=1 PF_PID= PF_RID= PF_ZIM= PF_START=
+    rm -f "$Q/prefetch"
+  fi
+  [ "$AHEAD" = 1 ] && [ -n "$PF_SCAN" ] && [ ${#PF_WANT[@]} -gt 0 ] || return 0
+  stopping && return 0
+  local j r z rest avail full
+  for r in "${!RUN_PID[@]}"; do pf_marked "${RUN_ZIM[$r]}" || pf_ended "${RUN_ZIM[$r]}" || return 0; done
+  for r in "${!PF_WANT[@]}"; do                 # a map that runs next and fetches itself
+    [ "${PF_TRIES[$r ${PF_WANT[$r]}]:-0}" -lt 2 ] || pf_marked "${PF_WANT[$r]}" || return 0
+  done
+  if [ ${#RUN_PID[@]} -gt 0 ] || round_running; then   # the memory a second run needs (room_for)
+    avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+    [ "${avail:-0}" -ge $(( MIN_MEM_GB * 1048576 )) ] || return 0
+    full=$(awk '/^full/ {sub("avg10=", "", $2); print int($2)}' "${QUEUE_PRESSURE_FILE:-/proc/pressure/memory}" 2>/dev/null)
+    [ "${full:-0}" -lt 5 ] || return 0
+  fi
+  PF_SCAN=
+  for j in "${list[@]}"; do
+    IFS=$'\t' read -r r z rest <<< "$j"
+    [ -n "$r" ] && [ "${PF_WANT[$r]:-}" = "$z" ] && [ -z "${RUN_PID[$r]:-}" ] || continue
+    pf_marked "$z" && continue
+    pf_start "$r" "$z"
+    break
+  done
+}
+
 reap() {
   local r ended
   while :; do
+    pf_tick
     ended=0
     for r in "${!RUN_PID[@]}"; do alive "$r" || { finish "$r"; ended=1; }; done
     [ $ended = 0 ] || live_all new || true              # a region goes live once its own run ends
@@ -708,24 +792,48 @@ reap() {
 pass() {
   LIVE_TRIED=()
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
-  local rid zim t st n i=0 said= top list=()
+  local rid zim t st n i=0 said= top notready= ends wstart= list=()
   local -A tries=() passed=()
   mapfile -t list < <(exec 9>&-; candidates)
-  while [ "$i" -lt ${#list[@]} ]; do
+  PF_SCAN=1 PF_WANT=() ends=$PF_ENDS
+  while :; do
+    if [ "$i" -ge ${#list[@]} ]; then
+      # maps waiting for their prefetch ahead: wait for one (or a run) to end, then from the top
+      [ -n "$notready" ] || break
+      stopping && break
+      if [ "$PF_ENDS" = "$ends" ]; then
+        [ -n "$PF_PID" ] || [ ${#RUN_PID[@]} -gt 0 ] || break    # neither going: the next pass
+        [ -n "$wstart" ] || wstart=$SECONDS
+        n=${#RUN_PID[@]}
+        sleep "${QUEUE_REAP_SECS:-5}" 9>&-; reap
+        [ ${#RUN_PID[@]} -lt "$n" ] || [ "$PF_ENDS" != "$ends" ] || [ $(( SECONDS - wstart )) -ge "$POLL" ] || continue
+      fi
+      i=0 notready= ends=$PF_ENDS wstart=
+      continue
+    fi
     IFS=$'\t' read -r rid zim t st <<< "${list[$i]}"
     i=$(( i + 1 ))
     [ -n "$rid" ] || continue
     # back from the top (header): a map started or passed over in this pass goes again only
-    # for its retry, and is started at most twice in a pass
+    # for its retry, and is started at most twice in a pass (QUEUE_RETRY_IN_PASS=0: not again)
     if [ -n "${passed[$rid]:-}" ] || [ "${tries[$rid]:-0}" -gt 0 ]; then
-      [ "${tries[$rid]:-0}" -lt 2 ] || continue
+      [ "$IN_PASS" = 1 ] && [ "${tries[$rid]:-0}" -lt 2 ] || continue
       case "$(awk -F'\t' -v r="$rid" '$1 == r {print $2}' "$STATUS")" in pending|published-partial|waiting-listing) ;; *) continue ;; esac
     fi
     n=${#RUN_PID[@]}
     reap
     stopping && break
-    [ "$IN_PASS" = 1 ] && [ ${#RUN_PID[@]} -lt "$n" ] && [ "$i" -gt 1 ] && { i=0; continue; }   # a run ended: from the top
+    [ "$IN_PASS" = 1 ] && [ ${#RUN_PID[@]} -lt "$n" ] && [ "$i" -gt 1 ] && { i=0 notready= ends=$PF_ENDS; continue; }   # a run ended: from the top
     eligible "$rid" "$zim" "$st" || { passed[$rid]=1; continue; }
+    if ! prefetched "$rid" "$zim"; then
+      [ "${PF_WANT[$rid]:-}" = "$zim" ] || PF_SCAN=1
+      notready=1 PF_WANT[$rid]=$zim
+      pf_tick                                   # its prefetch (or an earlier map's) now, not at the next reap
+      [ "$said" = "$rid prefetch" ] || { said="$rid prefetch"; say "$rid: waiting for its prefetch ahead (a later map whose prefetch is done goes first)"; }
+      continue
+    fi
+    # one that fetches itself holds the prefetch ahead while it waits (pf_tick)
+    [ "$AHEAD" = 1 ] && ! pf_marked "$zim" && PF_WANT[$rid]=$zim
     # in this order: wait here until there is room for this one
     n=${#RUN_PID[@]} top=
     until room_for "$MAPS_DIR/$zim"; do
@@ -737,8 +845,9 @@ pass() {
         n=${#RUN_PID[@]}
       fi
     done
-    [ -z "$top" ] || { i=0; continue; }      # a run ended: from the top (this map too, if still first)
+    [ -z "$top" ] || { i=0 notready= ends=$PF_ENDS; continue; }      # a run ended: from the top (this map too, if still first)
     start_ship "$rid" "$zim" "$KEY"
+    unset "PF_WANT[$rid]"
     tries[$rid]=$(( ${tries[$rid]:-0} + 1 )) said=
   done
   reap all
@@ -760,6 +869,13 @@ for f in "$Q"/runs/*; do
   if [ "$start" != - ] && alive "$rid"; then say "$rid: its ship_packs.sh run from before the restart is still going (pid $pid): counted"
   else say "$rid: its run from before the restart has ended: its outcome now"; fi
 done
+# the prefetch ahead from before a restart: counted while it goes
+if [ -f "$Q/prefetch" ]; then
+  read -r PF_PID PF_START PF_RID PF_ZIM < "$Q/prefetch" || true
+  if [ -n "$PF_PID" ] && [ -n "$PF_RID" ] && [ -n "$PF_ZIM" ] && [ "$PF_START" != - ] && pf_alive; then
+    say "$PF_RID: its prefetch ahead from before the restart is still going (pid $PF_PID): counted"
+  else PF_PID= PF_RID= PF_ZIM= PF_START=; rm -f "$Q/prefetch"; fi
+fi
 if [ "$RETRY_FAILED" = 1 ]; then
   for f in "$Q"/live-failed-*; do [ -e "$f" ] && echo 0 > "$Q/live-pending-${f##*/live-failed-}" && rm -f "$f"; done
 fi
