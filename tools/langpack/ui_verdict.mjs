@@ -52,3 +52,13 @@ export function labelsVerdict(f) {
     && (f.ownLang || f.bilingual > 0 || vacuous) && f.bilingualWrong === 0;
   return { pass, vacuous };
 }
+
+// The search check's place among the results: a row whose shown name, or
+// whose data-name (the record's own name, whatever the map's language: a map
+// in German shows Warsaw as Warschau), is the name the region file expects (a
+// name or a list), alone or followed by more ("Warsaw Chopin").
+export function searchFound(rows, expect) {
+  const want = [].concat(expect).filter((e) => typeof e === 'string' && e);
+  const is = (n) => typeof n === 'string' && want.some((e) => n === e || n.startsWith(e + ' '));
+  return rows.some((r) => is(r.shown) || is(r.name));
+}

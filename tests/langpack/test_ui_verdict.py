@@ -89,3 +89,28 @@ def test_the_labels_verdict_has_a_vacuous_case() -> None:
     assert r.returncode == 0, r.stderr
     for (facts, ok, vacuous), v in zip(LABEL_CASES, json.loads(r.stdout)):
         assert (v["pass"], v["vacuous"]) == (ok, vacuous), (facts, v)
+
+
+SEARCH_CASES = [
+    # (rows: [shown name, data-name], the region file's expect, found)
+    ([["Warschau", "Warsaw"], ["Warszawa", "Warszawa"]], "Warsaw", True),         # German on Poland: the city's data-name
+    ([["Warszawa", "Warszawa"], ["Warszawa Centralna", "Warszawa Centralna"]], "Warsaw", False),   # other records only
+    ([["Warsaw", "Warsaw"]], "Warsaw", True),                                     # English
+    ([["ลอสแอนเจลิส", "Los Angeles"]], "ลอสแอนเจลิส", True),                       # a hand-written expect: the shown name
+    ([["Warsaw Chopin", "Warsaw Chopin Airport"]], "Warsaw", True),               # the name, then more
+    ([["Warsawski", "Warsawski"]], "Warsaw", False),                              # a longer word is not the name
+    ([["Warschau", "Warsaw"]], ["Varsovie", "Warsaw"], True),                     # a list
+    ([], "Warsaw", False),
+]
+
+
+def test_the_search_check_finds_the_place_by_its_shown_name_or_its_records_name() -> None:
+    """Poland's 21 non-English entries failed search_native: a German map
+    shows Warsaw as Warschau; the row's data-name is still the record's name."""
+    script = ("import { searchFound } from " + json.dumps(str(ROOT / "tools" / "langpack" / "ui_verdict.mjs")) + ";\n"
+              "console.log(JSON.stringify(JSON.parse(process.argv[1]).map(([rows, e]) =>\n"
+              "  searchFound(rows.map(([shown, name]) => ({ shown, name })), e))));\n")
+    r = subprocess.run([NODE, "--input-type=module", "-e", script, json.dumps([[n, e] for n, e, _ in SEARCH_CASES])],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == [ok for _, _, ok in SEARCH_CASES]

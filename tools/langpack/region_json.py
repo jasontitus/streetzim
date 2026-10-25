@@ -20,7 +20,9 @@ writes one for any other base, from the base alone:
   tries other zooms when the label is hidden there.
 - search.native: the city's native-script name ("nn") when the record has
   one, else its name; search.english: its name. Both expect the name the
-  result list shows (the record's "n").
+  result list shows (the record's "n"), which the UI gate also finds in a
+  row's data-name (a map in another language shows the place under that
+  language's name: Warschau).
 - route: from the city to the nearest other place record 1.5-8 km away
   (a suburb or village: on the road graph), else to a point 2 km north.
 - named_qids: the city and the next such place.

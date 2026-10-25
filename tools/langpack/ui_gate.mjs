@@ -31,7 +31,7 @@
 // CHROME_PATH: the Chromium to drive; BROWSER_LIBS: extra LD_LIBRARY_PATH for it.
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 import fs from 'node:fs';
-import { labelsVerdict, uiVerdict } from './ui_verdict.mjs';
+import { labelsVerdict, searchFound, uiVerdict } from './ui_verdict.mjs';
 
 const [ORIGIN, LANG, REGION, MODE] = process.argv.slice(2);
 const R = JSON.parse(fs.readFileSync(REGION, 'utf8'));
@@ -264,13 +264,14 @@ try {
           const first = n && n.firstChild && n.firstChild.nodeType === 3 ? n.firstChild.textContent : (n ? n.textContent : e.textContent);
           return first.trim();
         });
-        return { pending, none, n: rows.length, names };
+        const records = rows.map((e) => e.getAttribute('data-name') || '');
+        return { pending, none, n: rows.length, names, records };
       });
       if (!st.pending && (st.n > 0 || st.none)) break;
     }
-    const found = st.names.some((n) => n === expect || n.startsWith(expect + ' '));
+    const found = searchFound(st.names.map((shown, i) => ({ shown, name: st.records[i] })), expect);
     return { q, expect, finished: !st.pending && (st.n > 0 || st.none), n: st.n, noResults: st.none,
-             names: st.names.slice(0, 5), found, pass: !st.pending && st.n > 0 && found };
+             names: st.names.slice(0, 5), records: st.records.slice(0, 5), found, pass: !st.pending && st.n > 0 && found };
   }
   await step('search_native', () => search(R.search.native));
   await step('search_english', () => search(R.search.english));
