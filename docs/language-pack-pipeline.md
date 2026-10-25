@@ -563,9 +563,14 @@ replaces them when it ships. The preview's home page is not regenerated.
 
 - Eligible: not a light map, at most 8 GB, multilingual tiles
   (`tileLanguages`); `ship_packs.sh` refuses continents itself (exit 4).
-  The log says so for each: France, Germany, the Nordics and Italy (8.1 GB)
-  get no packs in v1.
-- In the order the maps shipped, one run at a time while a round driver
+  The log says so for each. Of the 2026-10 round's border-clipped maps,
+  France (8.4 GB) gets no packs in v1; Germany (7.4 GB), the Nordics and
+  Italy do.
+- First the rebuilt maps of regions whose recipes are for another file
+  (the builder page drops such a region until its packs ship again): the
+  file named by `web/build/recipes/<region>/region.json` in production,
+  else by the queue's last `published.tsv` row for the region. Then the
+  rest. Each group goes in the order its maps shipped. One run at a time while a round driver
   builds (the disk is saturated), and only
   with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
   pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the
@@ -611,6 +616,14 @@ replaces them when it ships. The preview's home page is not regenerated.
   `published.tsv`, `queue.log` in PDT). A file named `stop` there: nothing
   new starts, the running ones finish, then the queue ends (remove it
   before starting again). The round's files are only read.
+- To restart the queue, stop only the `pack_queue.sh` whose parent is
+  init (pid 1): each run's wrapper subshell shows the same command line and
+  must keep going. To stop one region's run, stop its `ship_packs.sh` and
+  then its prefetch (`timeout 21600 … prefetch.py … <the map>`), which
+  outlives it and keeps the cache's prefetch lock, holding up the next run
+  for up to 6 hours. The cache's files are written through `.tmp`/`.part`
+  names, so stopping it loses nothing. The queue runs the region again
+  after 30 min.
 - `pack_queue.sh enqueue REGION ZIM` (while the queue runs, too) makes a map
   in `/storage/streetzim` a candidate whatever `rebuild-old.tsv` says, until
   the round writes a new row for that region.
