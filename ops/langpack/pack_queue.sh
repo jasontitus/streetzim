@@ -220,8 +220,10 @@ case "${1:-}" in
   --once) ONCE=1 ;;
   *) echo "usage: pack_queue.sh [--once] | enqueue REGION ZIM" >&2; exit 1 ;;
 esac
-# fd 9 holds the lock: every child that may outlive a killed queue (sleeps, md5sum, firebase, the
-# runs) is started without it, so a restart is not locked out; -w for the brief ones
+# fd 9 holds the lock: every child that may outlive a killed queue (sleeps, md5sum and the subshell
+# around it, the base and listing reads, firebase, the runs) is started without it, so a restart is
+# not locked out (a subshell drops it with exec 9>&-: a function call's 9>&- keeps a copy to restore);
+# -w for the brief ones
 exec 9> "$Q/lock"
 flock -w 10 9 || { echo "pack_queue: another queue holds $Q/lock" >&2; exit 2; }
 # the start: now, or QUEUE_SINCE (a date, e.g. the round's start) on the first run
@@ -315,14 +317,15 @@ PY
 
 # The local file's MD5, computed once per file (name, inode, size, mtime in ns).
 file_md5() {
-  local f=$1 k
+  local f=$1 k t
   k=$Q/md5/$(basename "$f").$(stat -c %i.%s "$f").$(stat -c %.9Y "$f")
-  [ -s "$k" ] || { mkdir -p "$Q/md5" && ionice -c3 nice -n19 md5sum "$f" 9>&- | cut -d' ' -f1 > "$k.tmp" && mv -f "$k.tmp" "$k"; } || return 1
+  t=$k.$BASHPID.tmp                     # its own: a killed queue's md5 of this base may still be going
+  [ -s "$k" ] || { mkdir -p "$Q/md5" && ionice -c3 nice -n19 md5sum "$f" 9>&- | cut -d' ' -f1 > "$t" && mv -f "$t" "$k"; } || { rm -f "$t"; return 1; }
   cat "$k"
 }
 # Does archive.org list the region's file with the local file's MD5? (an upload-pending row)
 listed() {  # region base md5
-  timeout 300 "$IA" metadata "streetzim-$1" 2>/dev/null 9>&- | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$(basename "$2")" "$3"
+  timeout 300 "$IA" metadata "streetzim-$1" 2>/dev/null 9>&- | "$PY" "$ROOT/ops/cloud/archive_has_file.py" "$(basename "$2")" "$3" 9>&-
 }
 
 # QUEUE_SEED's site folders into a new preview clone (what the channel shows already)
@@ -356,8 +359,8 @@ preview_update() {
     # refuses once production changed one of them. -f drops such changes;
     # ignored files (the published recipes in web/build/recipes) are kept.
     local dirty
-    dirty=$(git -C "$PREVIEW_DIR" status --porcelain --untracked-files=no 2>/dev/null | cut -c4- | tr '\n' ' ')
-    git -C "$PREVIEW_DIR" fetch -q "$PROD_REPO" HEAD 9>&- && git -C "$PREVIEW_DIR" checkout -q -f --detach "$want" || return 1
+    dirty=$(exec 9>&-; git -C "$PREVIEW_DIR" status --porcelain --untracked-files=no 2>/dev/null | cut -c4- | tr '\n' ' ')
+    git -C "$PREVIEW_DIR" fetch -q "$PROD_REPO" HEAD 9>&- && git -C "$PREVIEW_DIR" checkout -q -f --detach "$want" 9>&- || return 1
     say "preview clone moved to $(git -C "$PREVIEW_DIR" rev-parse --short HEAD)${dirty:+ (local changes dropped: ${dirty% })}"
   fi
 }
@@ -450,7 +453,7 @@ live_all() {  # [new]
   exec 7>> "$SITE_LOCK"
   if [ "${1:-}" = new ]; then
     flock -n 7 || { exec 7>&-; say "the site-deploy lock is busy: ${pending[*]} go live at the end of the pass"; return 0; }
-  elif ! flock -w "$SITE_LOCK_WAIT" 7; then
+  elif ! flock -w "$SITE_LOCK_WAIT" 7 9>&-; then
     exec 7>&-
     loud "the site-deploy lock $SITE_LOCK stayed busy for $SITE_LOCK_WAIT s: ${pending[*]} wait for the next pass"
     return 1
@@ -496,7 +499,7 @@ eligible() {  # region zim round-status
     [ "$(state_of "$rid" - | cut -f1)" = missing ] || { loud "$rid: $base is not on disk"; set_state "$rid" missing "$zim" - - "not in $MAPS_DIR"; }
     ANY_FAILED=1; return 1
   fi
-  read -r uuid ntile < <(baseinfo "$base") || true
+  read -r uuid ntile < <(exec 9>&-; baseinfo "$base") || true
   if [ -z "${uuid:-}" ]; then loud "$rid: could not read $base"; set_state "$rid" failed "$zim" - - "unreadable"; ANY_FAILED=1; return 1; fi
   # whatever the file's bytes: the size and the tiles (logged once per base)
   gb=$("$PY" -c 'import sys; print(f"{int(sys.argv[1]) / 1e9:.2f}")' "$(stat -c %s "$base")")
@@ -509,7 +512,7 @@ eligible() {  # region zim round-status
     [ "$(state_of "$rid" "$uuid" | cut -f1)" = ineligible-no-ml-tiles ] && return 1
     set_state "$rid" ineligible-no-ml-tiles "$zim" "$uuid" - "no tileLanguages"; say "$rid: $zim has no multilingual tiles: no packs"; return 1
   fi
-  md5=$(file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
+  md5=$(exec 9>&-; file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
   KEY=$uuid/$md5
   # published for this base already, under this recipe scheme; under an older one: shipped again
   # (ship_packs.sh redoes only what the scheme changes)
@@ -707,7 +710,7 @@ pass() {
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
   local rid zim t st n i=0 said= top list=()
   local -A tries=() passed=()
-  mapfile -t list < <(candidates)
+  mapfile -t list < <(exec 9>&-; candidates)
   while [ "$i" -lt ${#list[@]} ]; do
     IFS=$'\t' read -r rid zim t st <<< "${list[$i]}"
     i=$(( i + 1 ))
@@ -745,7 +748,7 @@ pass() {
 say "== pack_queue at $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'), maps shipped since $(TZ=America/Los_Angeles date -d @"$SINCE" '+%F %T %Z'), $ROUND_TSV"
 # the NVMe scratch's folders of ship_packs.sh runs that were killed (tools/langpack/nvme.py; live runs' are kept)
 SCR=${LANGPACK_SCRATCH-/mnt/data/tilemaker/streetzim-packs}
-[ -z "$SCR" ] || [ ! -d "$SCR" ] || "$PY" "$ROOT/tools/langpack/nvme.py" sweep --scratch "$SCR" 2>&1 | while read -r l; do say "NVMe scratch: $l"; done
+[ -z "$SCR" ] || [ ! -d "$SCR" ] || while read -r l; do say "NVMe scratch: $l"; done < <(exec 9>&-; "$PY" "$ROOT/tools/langpack/nvme.py" sweep --scratch "$SCR" 2>&1)
 # runs from before a restart: counted while they go, finished here when they end
 for f in "$Q"/runs/*; do
   [ -f "$f" ] || continue

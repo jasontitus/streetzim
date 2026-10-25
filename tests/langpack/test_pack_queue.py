@@ -10,6 +10,7 @@ import json
 import os
 import random
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -855,12 +856,47 @@ def test_a_restart_counts_the_runs_still_going(q: SimpleNamespace) -> None:
     assert not list((q.qd / "runs").iterdir())
 
 
-@pytest.mark.parametrize("during", ["sleep", "deploy"])
+def _slow_md5sum(q: SimpleNamespace) -> str:
+    """A PATH whose md5sum waits FAKE_MD5_SLEEP s (default 30) on beta's base first (the HDD at idle priority)."""
+    slow = q.d / "slow-bin"
+    slow.mkdir(exist_ok=True)
+    (slow / "md5sum").write_text(f'#!/bin/bash\necho \'{{"md5sum": 1}}\' >> "$FAKE_LOG"\n'
+                                 f'case "$1" in *osm-beta-*) sleep "${{FAKE_MD5_SLEEP:-30}}" ;; esac\n'
+                                 f'exec {shutil.which("md5sum")} "$@"\n')
+    (slow / "md5sum").chmod(0o755)
+    return f"{slow}:{os.environ['PATH']}"
+
+
+def _session_has(pid: int, prefix: str) -> bool:
+    """Is a process of session PID's command line starting with PREFIX alive?"""
+    for d in Path("/proc").iterdir():
+        try:
+            if d.name.isdigit() and os.getsid(int(d.name)) == pid and \
+                    (d / "cmdline").read_bytes().replace(b"\0", b" ").startswith(prefix.encode()):
+                return True
+        except (OSError, ProcessLookupError):
+            continue
+    return False
+
+
+@pytest.mark.parametrize("during", ["sleep", "deploy", "md5", "site-lock"])
 def test_a_killed_queue_does_not_lock_out_its_restart(q: SimpleNamespace, during: str) -> None:
-    """Killed while it sleeps between passes (QUEUE_POLL_SECS) or while a
-    deploy runs, the queue's children do not hold its lock: a restart right
-    away gets it."""
-    if during == "sleep":
+    """Killed while it sleeps between passes (QUEUE_POLL_SECS), while a
+    deploy runs, while it takes a new base's MD5 or while its live step waits
+    for the site-deploy lock, the queue's children do not hold its lock: a
+    restart right away gets it."""
+    held = None
+    if during == "site-lock":                          # upload_validated.sh deploys the site meanwhile
+        lock = q.prod / "tmp" / ".site-deploy.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        held = open(lock, "w")
+        fcntl.flock(held, fcntl.LOCK_EX)
+        p = _start(q, FAKE_SHIP_RC="", QUEUE_SITE_LOCK_WAIT="60", **_live(q))
+        done = lambda: _session_has(p.pid, "flock -w 60 7")  # noqa: E731
+    elif during == "md5":
+        p = _start(q, FAKE_SHIP_RC="", PATH=_slow_md5sum(q))
+        done = lambda: bool(_calls(q, "md5sum"))  # noqa: E731
+    elif during == "sleep":
         p = _start(q, (), FAKE_SHIP_RC="", QUEUE_POLL_SECS="300")
         done = lambda: (q.qd / "published.tsv").exists() and len((q.qd / "published.tsv").read_text().splitlines()) == 4  # noqa: E731
     else:
@@ -879,7 +915,29 @@ def test_a_killed_queue_does_not_lock_out_its_restart(q: SimpleNamespace, during
             os.killpg(p.pid, signal.SIGKILL)                       # the sleep left over (a deploy: timeout's own group)
         except ProcessLookupError:
             pass
+        if held:
+            held.close()
     assert r.returncode == 0 and "another queue holds" not in r.stderr, r.stderr
+
+
+def test_a_restart_and_the_killed_queues_md5_of_the_same_base_do_not_collide(q: SimpleNamespace) -> None:
+    """The killed queue's MD5 of a base ends while the restart's MD5 of it
+    still runs: each writes its own temporary file, so the restart's ends
+    well too."""
+    path = _slow_md5sum(q)
+    p = _start(q, FAKE_SHIP_RC="", PATH=path, FAKE_MD5_SLEEP="5")
+    _until(lambda: bool(_calls(q, "md5sum")), "the first MD5")
+    os.kill(p.pid, signal.SIGKILL)
+    p.wait()
+    try:
+        r = _run(q, FAKE_SHIP_RC="", PATH=path, FAKE_MD5_SLEEP="12", timeout=300)
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    assert r.returncode == 0 and "for its MD5" not in r.stderr, r.stderr
+    assert not list((q.qd / "md5").glob("*.tmp"))
 
 
 def test_a_run_gone_without_an_exit_code_runs_again(q: SimpleNamespace) -> None:
