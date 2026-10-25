@@ -1377,6 +1377,17 @@ def test_ship_packs_starts_at_best_effort_io(q: SimpleNamespace) -> None:
     assert (q.d / "ship-env" / "beta.io").read_text().strip() == "best-effort: prio 7"
 
 
+def test_a_bases_md5_is_read_at_best_effort_io(q: SimpleNamespace) -> None:
+    """So is the queue's MD5 of a new base: at the idle class it waited for
+    hours behind the round's builds, and the pass with it."""
+    io = q.d / "io-bin"
+    io.mkdir()
+    (io / "md5sum").write_text(f'#!/bin/bash\nionice -p $$ >> {q.d / "md5.io"}\nexec {shutil.which("md5sum")} "$@"\n')
+    (io / "md5sum").chmod(0o755)
+    assert _run(q, FAKE_SHIP_RC="", PATH=f"{io}:{os.environ['PATH']}").returncode == 0
+    assert set((q.d / "md5.io").read_text().splitlines()) == {"best-effort: prio 7"}
+
+
 def test_nothing_publishable_yet_is_run_again_within_bounds(q: SimpleNamespace) -> None:
     """ship_packs.sh exit 7 (a region language's pack ran out of time: no
     entry publishable yet): run again after QUEUE_RETRY_SECS, at most

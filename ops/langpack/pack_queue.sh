@@ -336,7 +336,8 @@ file_md5() {
   local f=$1 k t
   k=$Q/md5/$(basename "$f").$(stat -c %i.%s "$f").$(stat -c %.9Y "$f")
   t=$k.$BASHPID.tmp                     # its own: a killed queue's md5 of this base may still be going
-  [ -s "$k" ] || { mkdir -p "$Q/md5" && ionice -c3 nice -n19 md5sum "$f" 9>&- | cut -d' ' -f1 > "$t" && mv -f "$t" "$k"; } || { rm -f "$t"; return 1; }
+  # best effort, as the runs: behind the round's builds the HDD served the idle class a trickle (hours for 5 GB)
+  [ -s "$k" ] || { mkdir -p "$Q/md5" && ionice -c2 -n7 nice -n19 md5sum "$f" 9>&- | cut -d' ' -f1 > "$t" && mv -f "$t" "$k"; } || { rm -f "$t"; return 1; }
   cat "$k"
 }
 # Does archive.org list the region's file with the local file's MD5? (an upload-pending row)
