@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     regions.sort(key=lambda r: (str(r.get("title", "")).casefold(), r["id"]))
     out = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(), "regions": regions}
     fd, tmp = tempfile.mkstemp(dir=d, prefix="index.json.", suffix=".tmp")   # a name of its own
+    os.fchmod(fd, 0o644)                  # a site file: mkstemp's 0600 otherwise
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(d, "index.json"))

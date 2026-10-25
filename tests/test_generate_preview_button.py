@@ -65,3 +65,4 @@ def test_the_build_index_is_written_under_a_temporary_name_of_its_own(tmp_path):
     (rd / "index.json.tmp").mkdir()                       # a fixed name taken
     assert gen.write_build_index({"greece": True}, str(rd)) == ["greece"]
     assert [r["id"] for r in json.loads((rd / "index.json").read_text())["regions"]] == ["greece"]
+    assert (rd / "index.json").stat().st_mode & 0o777 == 0o644               # served: readable by all

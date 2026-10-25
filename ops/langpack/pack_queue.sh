@@ -12,8 +12,12 @@
 #       in MAPS_DIR, is a candidate whatever the round's file says, until the
 #       round writes a new row for REGION; works while the queue runs)
 #
-# In the order the maps shipped, one ship_packs.sh run at a time while the
-# round builds (the disk is saturated), and
+# First the maps of regions whose recipes are for another file (rebuilt maps:
+# the builder page drops such a region until its packs are shipped again), on
+# the live builder page (PROD_REPO's web/build/recipes/REGION/region.json) or
+# else as last published here; then the others; each in the order the maps
+# shipped. One ship_packs.sh run at a time while the round builds (the disk is
+# saturated), and
 # only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
 # memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
 # run under the same memory rule and with room on LANGPACK_WORK's disk for
@@ -238,11 +242,12 @@ state_of() { awk -F'\t' -v r="$1" -v k="$2" '$1 == r && $4 == k {print $2 "\t" $
 
 # region <TAB> zim <TAB> epoch <TAB> status: the maps whose latest row, written since the start, is
 # `uploaded` or `upload-pending` (archive.org's listing to be checked), or enqueued by hand
-# after that row was written (`enqueued`), in that order
+# after that row was written (`enqueued`); first those whose region's recipes are for another
+# file (header), each in that order
 candidates() {
-  "$PY" - "$ROUND_TSV" "$SINCE" "$ENQ" <<'PY'
-import datetime, sys
-tsv, since, enq = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+  "$PY" - "$ROUND_TSV" "$SINCE" "$ENQ" "$DONE" "$PROD_REPO/web/build/recipes" <<'PY'
+import datetime, json, os, sys
+tsv, since, enq, done, recipes = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
 
 def lines(p):
     try:
@@ -264,7 +269,21 @@ for line in lines(enq):  # an enqueue wins over the rows the round's file had th
     f = line.split("\t")
     if len(f) == 4 and f[2].isdigit() and f[3].isdigit() and last.get(f[0], (0, "", "", -1))[3] < int(f[3]):
         rows[f[0]] = (float(f[2]), f[1], "enqueued", -1)
-for t, rid, z, st in sorted((v[0], rid, v[1], v[2]) for rid, v in rows.items()):
+published = {}  # region -> the file of its last published.tsv row
+for line in lines(done):
+    f = line.split("\t")
+    if len(f) > 3 and f[0]:
+        published[f[0]] = f[3]
+
+def rebuilt(rid, z):  # are the region's recipes, live or else published here, for another file?
+    try:
+        with open(os.path.join(recipes, rid, "region.json"), encoding="utf-8") as fh:
+            old = json.load(fh)["base"]["file"]
+    except (OSError, ValueError, KeyError, TypeError):
+        old = published.get(rid)
+    return old is not None and old != z
+
+for _, t, rid, z, st in sorted((not rebuilt(rid, v[1]), v[0], rid, v[1], v[2]) for rid, v in rows.items()):
     print(f"{rid}\t{z}\t{int(t)}\t{st}")
 PY
 }
@@ -396,6 +415,7 @@ except (OSError, ValueError):
     d = {"format": "streetzim-build-index/1", "regions": []}
 d["regions"] = [r for r in d.get("regions", []) if isinstance(r, dict) and r.get("id") not in drop]
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(idx), prefix="index.json.", suffix=".tmp")
+os.fchmod(fd, 0o644)                      # a site file: mkstemp's 0600 otherwise
 with os.fdopen(fd, "w", encoding="utf-8") as fh:
     json.dump(d, fh, ensure_ascii=False, indent=1)
 os.replace(tmp, idx)
@@ -683,7 +703,7 @@ pass() {
     reap
     stopping && break
     eligible "$rid" "$zim" "$st" || continue
-    # in the order they shipped: wait here until there is room for this one
+    # in this order: wait here until there is room for this one
     why=
     until room_for "$MAPS_DIR/$zim"; do
       [ -n "$why" ] || { why=$WHY; say "$rid: waiting: $WHY"; }

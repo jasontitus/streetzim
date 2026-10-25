@@ -269,6 +269,46 @@ def test_a_new_file_ships_again_and_the_preview_follows_production(q: SimpleName
     assert (q.preview / "web" / "build" / "recipes" / "alpha").exists()   # what was published stays
 
 
+def test_a_rebuilt_map_of_a_published_region_ships_first(q: SimpleNamespace) -> None:
+    """A region whose recipes are for another file (the builder page drops
+    it until its packs are shipped again), as last published here or on the
+    live builder page, ships before the maps of other regions that shipped
+    earlier; each group in the order its maps shipped. A map shipped again
+    for the same file (a new recipe scheme) is not moved up."""
+    assert _run(q, FAKE_SHIP_RC="").returncode == 0
+    n = len(_calls(q, "ship"))
+    rows = []
+    for rid, t in (("beta", 500), ("alpha", 600), ("epsilon", 450)):
+        lpzims.write_base(q.maps / f"osm-{rid}-2026-10-24.zim", cfg_extra={"tileLanguages": ["de"]})
+        rows.append(f"{rid}\tuploaded\tosm-{rid}-2026-10-24.zim\t{_iso(T0 + t)}\n")
+    live = q.prod / "web" / "build" / "recipes" / "epsilon"   # live for an older file, put there by hand
+    live.mkdir(parents=True)
+    (live / "region.json").write_text(json.dumps({"id": "epsilon", "base": {"file": "osm-epsilon-2026-10-20.zim"}}))
+    rows.append(f"gamma\tuploaded\tosm-gamma-2026-10-23.zim\t{_iso(T0 + 400)}\n")   # never published
+    rows.append(f"cont\tuploaded\tosm-cont-2026-10-23.zim\t{_iso(T0 + 700)}\n")     # the same file again
+    rows.append(f"fail\tuploaded\tosm-fail-2026-10-23.zim\t{_iso(T0 + 800)}\n")     # and again
+    with open(q.tsv, "a") as fh:
+        fh.write("".join(rows))
+    # both under an older scheme; cont published for an older file before its current one; fail last
+    # published here for an older file, but the live page's recipes are for its current one
+    done = q.qd / "published.tsv"
+    out = []
+    for r in (x.split("\t") for x in done.read_text().splitlines()):
+        if r[0] == "cont":
+            out += [[r[0], "0" * 32, "0" * 32, "osm-cont-2026-10-01.zim", r[4], "2"], r[:5]]
+        elif r[0] == "fail":
+            out.append([*r[:3], "osm-fail-2026-10-01.zim", r[4]])
+        else:
+            out.append(r)
+    done.write_text("".join("\t".join(r) + "\n" for r in out))
+    live = q.prod / "web" / "build" / "recipes" / "fail"
+    live.mkdir(parents=True)
+    (live / "region.json").write_text(json.dumps({"id": "fail", "base": {"file": "osm-fail-2026-10-23.zim"}}))
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1").returncode == 0
+    got = [c["ship"] for c in _calls(q, "ship")[n:]]
+    assert got == ["epsilon", "beta", "alpha", "gamma", "cont", "fail"], got
+
+
 def test_a_failed_deploy_is_tried_again_without_shipping_again(q: SimpleNamespace) -> None:
     r = _run(q, FAKE_SHIP_RC="", FAKE_FIREBASE_FAILS="100")
     assert "FAILED: the preview deploy failed" in r.stderr, r.stderr
@@ -350,6 +390,7 @@ def test_published_maps_go_live_and_pages_that_cannot_be_built_are_tried_again(q
     assert _live_pubs(q) == ["beta"] and (rec / "beta" / "region.json").exists()
     assert [c["live_build"] for c in _calls(q, "live_build")] == [str(q.prod)] and _live_deploys(q) == []
     assert _index(q) == ["zeta"]                                          # put back, without beta
+    assert (rec / "index.json").stat().st_mode & 0o777 == 0o644          # served: readable by all
     assert (q.qd / "live-pending-beta").read_text().strip() == "1" and _status(q)["beta"][1] == "published"
     ships = len(_calls(q, "ship"))
     r2 = _run(q, **_live(q))

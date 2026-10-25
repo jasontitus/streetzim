@@ -988,6 +988,7 @@ def write_build_index(live, recipes_dir=None):
     idx = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
            "regions": regions}
     fd, tmp = tempfile.mkstemp(dir=recipes_dir, prefix="index.json.", suffix=".tmp")   # a name of its own
+    os.fchmod(fd, 0o644)                  # a site file: mkstemp's 0600 otherwise
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(recipes_dir, "index.json"))

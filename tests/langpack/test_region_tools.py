@@ -342,6 +342,7 @@ def test_site_index_writes_under_a_temporary_name_of_its_own(tmp_path: Path) -> 
     assert r.returncode == 0, r.stderr
     assert [x["id"] for x in json.loads((rd / "index.json").read_text())["regions"]] == ["greece"]
     assert sorted(p.name for p in rd.iterdir() if p.name.startswith("index.json.")) == ["index.json.tmp"]
+    assert (rd / "index.json").stat().st_mode & 0o777 == 0o644               # served: readable by all
 
 
 def test_site_index(tmp_path: Path) -> None:
