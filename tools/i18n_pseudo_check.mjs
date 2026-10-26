@@ -41,14 +41,10 @@ const LANGS = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
   .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
 const MACHINE_ALL = LANGS.filter((l) => table(l)._machine === true);
 // A ZIM carries the tables of the base languages and its own only
-// (cloud/viewer_slots.py ui_languages): the checks below take those it has.
-const servedIndex = await (await fetch(origin + '/index.html')).text();
-const blockMatch = /<script type="application\/json" id="sz-i18n">([\s\S]*?)<\/script>/.exec(servedIndex);
-const CARRIED = new Set(blockMatch ? Object.keys(JSON.parse(blockMatch[1]).t || {}) : []);
-const MACHINE = MACHINE_ALL.filter((l) => CARRIED.has(l));
-const LANGS_HERE = LANGS.filter((l) => CARRIED.has(l));
-const NOT_HERE = LANGS.filter((l) => !CARRIED.has(l));
-if (NOT_HERE.length) console.log(`tables this ZIM does not carry (another map's): ${NOT_HERE.join(',')}`);
+// (cloud/viewer_slots.py ui_languages): the checks below take those it has
+// (read from the page itself, once the browser is up).
+let MACHINE = [];
+let LANGS_HERE = [];
 const RTL = ['ar', 'fa', 'he'];
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
@@ -144,6 +140,15 @@ try {
   const ctx = browser.defaultBrowserContext();
   await ctx.overridePermissions(new URL(origin).origin, ['geolocation']);
   const page = await browser.newPage();
+  await page.goto(origin + '/index.html', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const carried = new Set(await page.evaluate(() => {
+    const el = document.getElementById('sz-i18n');
+    return el ? Object.keys(JSON.parse(el.textContent).t || {}) : [];
+  }));
+  MACHINE = MACHINE_ALL.filter((l) => carried.has(l));
+  LANGS_HERE = LANGS.filter((l) => carried.has(l));
+  const notHere = LANGS.filter((l) => !carried.has(l));
+  if (notHere.length) console.log(`tables this ZIM does not carry (another map's): ${notHere.join(',')}`);
   await page.setViewport({ width: 420, height: 860 });
   await page.setGeolocation({ latitude: ORIGIN[0], longitude: ORIGIN[1], accuracy: 10 });
   const errors = [];
