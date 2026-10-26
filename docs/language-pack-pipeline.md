@@ -190,6 +190,29 @@ otherwise deletes DST. The sidecar records SRC's UUID as the parent. It
 carries SRC's own parents forward only from a sidecar that checks out, so a
 pack built against the unswapped base still fits.
 
+**Rolling a viewer change out to built maps** (2026-10-26, Europe's own UI
+tables). For each map built before the change, one at a time:
+1. `swap_base_viewer.py osm-<id>-<old>.zim osm-<id>-<today>.zim
+   /storage/streetzim <rev>`: a reflink copy on /storage (XFS: seconds, no
+   bytes copied) with the new viewer (the map's UI tables), a fresh UUID and
+   the lineage sidecar.
+2. Check the new file's viewer carries the tables its map-config asks for
+   (`cloud/viewer_slots.py` `ui_languages`).
+3. `ops/cloud/parallel_rebuild.sh --regate <id> osm-<id>-<today>.zim`: the
+   round's gates (validate, render, the in-ZIM Kiwix gate) and upload, and the
+   round's row, so the pack queue ships the region again (a new file of a
+   region on `/build/`: first). The page drops the region between the upload
+   and that run.
+
+The packs still fit (the lineage), so the run redoes the gates and the
+recipes, not the packs. Its prefetch for the new file is the parent's (the
+swap changed only the viewer): writing `packs/<new base>/prefetched` with
+the parent's pack languages and the new file's size and mtime saves a
+prefetch ahead that would wait behind another map's. A new dated name is
+used, not the old one: an in-place re-upload under the same name with other
+bytes is refused for a base with published recipes (upload_validated.sh exit
+7).
+
 ## Tests
 
 `pytest tests/langpack` writes small ZIMs with python-libzim: a base and

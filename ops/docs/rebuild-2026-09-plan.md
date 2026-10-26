@@ -434,3 +434,44 @@ those reviews found are in the commit after each change.
   it is reached. A running big region (Canada: 108 GiB projected, 22 GB
   used half way) can hold the other workers back by the same guard.
 
+## 13. What changed, 2026-10-25 → 10-26
+
+### The runner pauses on any code merge
+- `parallel_rebuild.sh` records HEAD at its start and starts nothing new once
+  a commit touches anything outside `FREEZE_IGNORE` (web/torrents,
+  ops/langpack, tools/langpack, tests/langpack, web/build, docs). A one-line
+  `web/generate.py` change merged at 18:22 PDT 10-24 left the three workers
+  idle until 07:15 the next morning. After merging such a change, restart the
+  runner (TERM only the `bash ops/cloud/parallel_rebuild.sh` whose parent is
+  init; it re-adopts the running drivers, which run in their own sessions).
+
+### Language packs: the queue
+- Rebuilt maps of regions already on `/build/` ship first; a retry that comes
+  due takes the next free slot (at most two starts per map per pass); the
+  network step (Wikipedia dumps, Wikidata labels, throttled for hours on
+  some days) runs for the next maps beside the run going (prefetch ahead);
+  a killed queue's children no longer hold its lock; a base's MD5 is read at
+  best-effort I/O (at the idle class Iberia's 5.3 GB took over an hour and
+  held up the pass). docs/language-pack-pipeline.md has the details.
+- The UI gate's native-name search expected the city's English name among
+  the names shown; a map in another language shows Warsaw as Warschau, so
+  every non-English Poland entry failed and Poland offered English only. It
+  now also matches each result's record name (`data-name`).
+
+### Region languages need an interface table
+- A region's own languages (Lithuanian on the Baltics, Serbian on the
+  Balkans, Romanian on the Carpathians, Icelandic, Irish and Welsh, ...) failed
+  the UI gate's `html_lang` check: the viewer had no table for them. Decision
+  2026-10-25: translate the interface first, Europe now, the other regions as
+  their maps come up in the round. 31 machine-translated tables are in
+  (docs/i18n.md); a ZIM carries the base tables and its own (the first six of
+  its `regionLanguages` with a table), since all of them do not fit the
+  viewer slots.
+- Maps built after the merge (da356f8) carry them. The thirteen European
+  maps built before were swapped (docs/language-pack-pipeline.md, "Rolling
+  a viewer change out to built maps"): iceland, baltics, caucasus, iran,
+  carpathians, balkans, benelux, ukraine, austria-czech, iberia,
+  britain-ireland, italy, nordics.
+- CI's checks job now has 50 minutes: the tables add ~2.5 minutes to its
+  Python tests, which already took ~37 of its 40.
+
