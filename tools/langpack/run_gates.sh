@@ -301,7 +301,7 @@ PY
   wait_mem
   zimcheck_merged "$M" "$OUT/$L.zimcheck.log"
   if [ "$LIGHT" = 0 ]; then
-    $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src "$ROUTE_SRC" --dst "$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
+    $N $PY "$LP_ROOT/cloud/route_cli.py" --zim "$M" --src="$ROUTE_SRC" --dst="$ROUTE_DST" --mode astar > "$OUT/$L.route.log" 2>&1
     $N $PY "$TL/search_gate.py" "$M" "$BASE" --lang "$L" > "$OUT/$L.search.json" 2>&1
   fi
   if [ -s "$M" ]; then serve "$L" "$M"; LIGHT=$LIGHT browser_checks "$M" "$L"; unserve; fi

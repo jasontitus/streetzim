@@ -92,7 +92,7 @@ def gates(lp: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory) -> Simp
     zc = lpzims.fake_zimcheck(d / "zc", "pass", "[INFO] Overall Test Status: Pass\n", rc=0)
     region = d / "region.json"
     region.write_text(json.dumps({"search": {"english": {"q": "Alpha Town", "expect": "Alpha Town"}}, "named_qids": "Q1",
-                                  "route": {"src": "10.0,20.0", "dst": "10.1,20.1"}}))
+                                  "route": {"src": "-10.0,-20.0", "dst": "-10.1,-20.1"}}))   # south of the equator
     work = d / "work"
     env = {**os.environ, "LANGPACK_WORK": str(work), "PYTHON": sys.executable, "KIWIX_SERVE": str(ks),
            "NODE": str(node), "PACK_GATE_ZIMCHECK": zc, "LANGUAGE_META": "map",
@@ -117,6 +117,9 @@ def test_every_step_ran(lang: str, gates: SimpleNamespace) -> None:
     assert all(ok.values()), (ok, (out / f"{lang}.verify.log").read_text()[-2000:])
     # the stand-ins cannot route or answer kiwix-serve's search: those must FAIL, and so the verdict
     assert v["checks"]["route"] is False and v["checks"]["kiwix"] is False and v["all_pass"] is False
+    # but route_cli.py took the endpoints: "-10.0,-20.0" after a bare --src read as an option
+    # (East Polynesia: every entry failed its route check with a usage error)
+    assert "usage:" not in (out / f"{lang}.route.log").read_text()
     # no search pack here (run_gates.sh does not build them): Kiwix cannot find the pack articles
     # (search_gate.py), a required check, so FAIL; the English entry of an English base carries
     # no pack, so nothing is missed
