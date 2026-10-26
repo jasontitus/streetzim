@@ -12,7 +12,11 @@ Packs: N article titles of the ~w/<L>/ pack that no base entry carries
 does: found when one of the first 10 suggestions, and one of the first 25
 full-text results (kiwix-serve's first page), is an entry under ~w/<L>/
 (full text only for a title libzim can index: no folded word over 64
-bytes, FULLTEXT_MAX_WORD).
+bytes, FULLTEXT_MAX_WORD). A title the merged file's full text misses where
+the base's own full text already fills that first page with entries whose
+titles hold each of its words ("Vatnajökull": 1,000+ pages of "Vatnajökull
+National Park" in the Iceland base) is set aside and the next pack-only
+title sampled: no file could show the pack article there.
 L is the map language, or (an entry whose language has no pack, e.g.
 English on an English base) the first pack in the file.
 
@@ -25,7 +29,7 @@ PASS when every sampled pack title is found both ways and parity holds. A
 file with no pack passes (its indexes are the base's). Prints one JSON
 line: {"lang", "titles", "suggest_found", "fulltext_found", "rows",
 "base": {"pages", "redirects", "base_found", "merged_found", "missed"},
-"title_index", "fulltext_index", "pass"}. Exit 0 = PASS, 1 = FAIL, 2 = packs
+"crowded", "title_index", "fulltext_index", "pass"}. Exit 0 = PASS, 1 = FAIL, 2 = packs
 but no pack-only article to sample.
 """
 from __future__ import annotations
@@ -34,6 +38,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -48,11 +53,31 @@ SUGGEST_TOP, FULLTEXT_TOP, MERGED_TOP = 10, 25, 20
 # นานาชาติเจนีวา" is one 66-byte word), cannot be found by full text in any
 # libzim file. Suggestions still find it (the title index allows longer).
 FULLTEXT_MAX_WORD = 64
+WORD = re.compile(r"\w+")
 
 
 def fulltext_indexable(title: str) -> bool:
     from tools.langpack.index_pack import fold
     return all(len(w.encode("utf-8")) <= FULLTEXT_MAX_WORD for w in fold(title).split())
+
+
+def base_crowds(b, searcher, title: str) -> bool:
+    """The base's own full text fills kiwix-serve's first page for this title
+    with entries whose titles hold each of its words (one place in many
+    pieces): no merged file can show the pack article on that page. Words,
+    not substrings: "Brahmower Landgraben" crowds nothing for "Brahmow", nor
+    the English stem's "Hunting Lodge" for "Hunt"."""
+    from libzim.search import Query
+    from tools.langpack.index_pack import fold
+    want = set(WORD.findall(fold(title)))
+    if not want:
+        return False
+    try:
+        top = list(searcher.search(Query().set_query(title)).getResults(0, FULLTEXT_TOP))
+        return len(top) == FULLTEXT_TOP and all(want <= set(WORD.findall(fold(b.get_entry_by_path(p).title)))
+                                                for p in top)
+    except Exception:  # noqa: BLE001 - no usable full-text index in the base
+        return False
 
 
 def pack_langs(a) -> list[str]:
@@ -148,19 +173,29 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(out, ensure_ascii=False))
         return 2
     step = max(1, len(titles) // max(1, a.n))
-    sample = titles[::step][:a.n]
+    spread = titles[::step][:a.n]
+    taken = set(spread)
+    bs = Searcher(b) if b.has_fulltext_index else None
     ss, se = SuggestionSearcher(m), Searcher(m)
-    rows = []
-    for t in sample:
+    rows, crowded = [], []
+    for t in spread + [t for t in titles if t not in taken]:      # the spread first, then the rest in order
+        if len(rows) == a.n:
+            break
         sug = list(ss.suggest(t).getResults(0, SUGGEST_TOP))
         try:
-            ful = list(se.search(Query().set_query(t)).getResults(0, FULLTEXT_TOP)) if m.has_fulltext_index else []
+            ful = list(se.search(Query().set_query(t)).getResults(0, FULLTEXT_TOP)) if m.has_fulltext_index else None
         except Exception:  # noqa: BLE001 - no usable full-text index
-            ful = []
-        rows.append({"title": t, "suggest": any(p.startswith(f"~w/{lang}/") for p in sug),
-                     "fulltext": any(p.startswith(f"~w/{lang}/") for p in ful),
-                     "fulltext_indexable": fulltext_indexable(t),
-                     "suggest_top": sug[:3], "fulltext_top": ful[:3]})
+            ful = None
+        row = {"title": t, "suggest": any(p.startswith(f"~w/{lang}/") for p in sug),
+               "fulltext": any(p.startswith(f"~w/{lang}/") for p in ful or []),
+               "fulltext_indexable": fulltext_indexable(t),
+               "suggest_top": sug[:3], "fulltext_top": (ful or [])[:3]}
+        if (ful is not None and not row["fulltext"] and row["fulltext_indexable"] and bs is not None
+                and base_crowds(b, bs, t)):
+            crowded.append(t)           # missed only where the base itself fills the page
+            continue
+        rows.append(row)
+    out["crowded"] = crowded
     out.update({"titles": len(rows), "suggest_found": sum(r["suggest"] for r in rows),
                 "fulltext_found": sum(r["fulltext"] for r in rows),
                 "fulltext_unindexable": sum(not r["fulltext_indexable"] for r in rows), "rows": rows})
@@ -168,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     out["pass"] = (out["suggest_found"] == len(rows)
                    and all(r["fulltext"] for r in rows if r["fulltext_indexable"])
                    and out["base"]["merged_found"] == out["base"]["base_found"])
+    if not rows:
+        out["pass"], out["why"] = False, "every pack-only title is crowded off by the base's own full text"
     print(json.dumps(out, ensure_ascii=False))
     return 0 if out["pass"] else 1
 

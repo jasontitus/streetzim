@@ -439,3 +439,61 @@ def test_each_version_is_stemmed_in_its_own_language(lp: SimpleNamespace, tmp_pa
     assert "~w/de/wiki-article/Bruecke_Testdorf" in found("de", "Brücken")
     assert "~w/de/wiki-article/Kirche_Testdorf" not in found("en", "Kirchen")
     assert "~w/de/wiki-article/Kirche_Testdorf" in found("en", "Kirche")       # the word itself, either way
+
+
+def test_a_title_the_base_crowds_off_full_text_is_not_sampled(tmp_path: Path) -> None:
+    """Iceland's is, en, tr and vi entries: the base has 1,000+ pages of
+    "Vatnajökull National Park", so full text for "Vatnajökull" fills
+    kiwix-serve's first page with them in any file and the pack article
+    never shows there. The gate samples the next pack-only title instead,
+    only for a title the merged file misses ("Zeta", crowded in the base but
+    found, is sampled); a base that mentions a title only in its pages' text
+    ("Epsilon"), or holds it only inside other words ("Hunting Lodge" for
+    "Hunt"), crowds nothing; and a pack whose every title is crowded off
+    fails."""
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+
+    from tests.langpack import lpzims
+    from tools.langpack.search_gate import base_crowds
+    pages = [(f"search/delta-park-{i}.html", f"Delta Park · Deltagarður {i}", "Delta Park, a national park in Delta.")
+             for i in range(30)]
+    pages += [(f"search/page-{i}.html", f"Page {i}", "Near Epsilon, by Epsilon road.") for i in range(30)]
+    pages += [(f"search/zeta-park-{i}.html", f"Zeta Park {i}", "A park.") for i in range(30)]
+    pages += [(f"search/hunting-{i}.html", f"Hunting Lodge {i}", "A lodge for hunting.") for i in range(30)]
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base, pages=pages, fulltext=True)
+
+    def merged(name: str, articles: list[tuple[str, str]], bodies: dict[str, str] | None = None) -> Path:
+        pack = tmp_path / f"osm_testland_wiki-de_2026-10-13_{name}.zim"
+        lpzims.write_pack(pack, "de", u, articles=articles, bodies=bodies)
+        idx = tmp_path / f"osm_testland_search-de_2026-10-13_{name}.zim"
+        index_pack.build(str(base), [str(pack)], "de", "testland", str(idx), None, log=lambda m: None)
+        m = tmp_path / f"m-{name}.zim"
+        r = tool("merge_zim.py", base, pack, "--index", idx, "-o", m, "--lang", "de", "--region", "testland")
+        assert r.returncode == 0, r.stdout + r.stderr
+        return m
+
+    def gate(m: Path, *more: str) -> tuple[int, dict]:
+        r = tool("search_gate.py", m, base, "--lang", "de", *more)
+        return r.returncode, json.loads(r.stdout.strip().splitlines()[-1])
+
+    b = Archive(base)
+    crowds = {t: base_crowds(b, Searcher(b), t) for t in ("Delta", "Zeta", "Epsilon", "Hunt")}
+    assert crowds == {"Delta": True, "Zeta": True, "Epsilon": False, "Hunt": False}, crowds
+    assert len(list(Searcher(b).search(Query().set_query("Hunt")).getResults(0, 25))) == 25    # by the English stem
+    m = merged("a", [("Alpha_Stadt", "Alpha Stadt"), ("Beta_Gipfel", "Beta Gipfel"), ("Delta", "Delta"),
+                     ("Epsilon", "Epsilon"), ("Hunt", "Hunt"), ("Zeta", "Zeta")], {"Zeta": " ".join(["Zeta"] * 20)})
+    top = list(Searcher(Archive(m)).search(Query().set_query("Delta")).getResults(0, 25))
+    assert len(top) == 25 and not any(p.startswith("~w/") for p in top), top      # crowded off in the merged file
+    rc, g = gate(m)
+    assert rc == 0 and g["pass"] and g["crowded"] == ["Delta"], g
+    assert [r["title"] for r in g["rows"]] == ["Alpha Stadt", "Beta Gipfel", "Epsilon", "Hunt", "Zeta"], g
+    assert g["fulltext_found"] == g["titles"] == 5, g
+    rc, g = gate(m, "--n", "3")             # the spread is Alpha Stadt, Delta, Hunt: Beta Gipfel takes Delta's place
+    assert rc == 0 and g["crowded"] == ["Delta"], g
+    assert [r["title"] for r in g["rows"]] == ["Alpha Stadt", "Hunt", "Beta Gipfel"], g
+    rc, g = gate(merged("b", [("Delta", "Delta")]))
+    assert rc == 1 and not g["pass"] and g["titles"] == 0 and "crowded off" in g["why"], g
+    rc, g = gate(tmp_path / "osm_testland_wiki-de_2026-10-13_b.zim")      # no full-text index: nothing set aside
+    assert rc == 1 and g["crowded"] == [] and g["titles"] == 1 and g["fulltext_found"] == 0, g

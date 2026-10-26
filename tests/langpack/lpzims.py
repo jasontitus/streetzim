@@ -88,13 +88,16 @@ VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
 
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
                extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
-               front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None) -> str:
+               front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None,
+               pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
     (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
     (path, title, target) redirects in the title index, as a base's other
-    names for its places ("Δήμος Παλλήνης" -> the Pallini page)."""
-    with Creator(str(path)).config_indexing(False, "eng") as c:
+    names for its places ("Δήμος Παλλήνης" -> the Pallini page); `pages`: more
+    front pages (path, title, text); `fulltext`: with libzim's full-text index,
+    as published bases carry it."""
+    with Creator(str(path)).config_indexing(fulltext, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
                      ("Description", description), ("Creator", "OpenStreetMap"), ("Publisher", "StreetZim"),
@@ -124,6 +127,8 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                 c.add_item(_Item(f"wiki-article/{p}", t, "text/html", _page(t, 1), front=True))
                 geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
             c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: False})
+        for pp, pt, px in pages or []:
+            c.add_item(_Item(pp, pt, "text/html", _page(pt, pp.count("/"), px), front=True))
         for rp, rt, tgt in front_redirects or []:
             c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: True})
         c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
@@ -133,8 +138,10 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
 
 
 def write_pack(path: Path, lang: str, base_uuid: str, *, region: str = REGION,
-               articles: list[tuple[str, str]] | None = None, title: str | None = None) -> str:
-    """A Wikipedia pack under ~w/<lang>/ for the base with base_uuid; returns its UUID (hex)."""
+               articles: list[tuple[str, str]] | None = None, title: str | None = None,
+               bodies: dict[str, str] | None = None) -> str:
+    """A Wikipedia pack under ~w/<lang>/ for the base with base_uuid; returns its UUID (hex).
+    `bodies`: more text for some articles {path: text}."""
     arts = ARTICLES[lang] if articles is None else articles
     pre = f"~w/{lang}/"
     iso3 = {"de": "deu", "fr": "fra", "th": "tha", "en": "eng", "es": "spa", "rm": "roh"}[lang]
@@ -150,7 +157,8 @@ def write_pack(path: Path, lang: str, base_uuid: str, *, region: str = REGION,
         for i, (p, t) in enumerate(arts):
             depth = 3 + p.count("/")
             c.add_item(_Item(f"{pre}wiki-article/{p}", t, "text/html",
-                             _page(t, depth, f"<img src='{'../' * (depth - 2)}images/{i}.webp'>"), front=True))
+                             _page(t, depth, (bodies or {}).get(p, "") + f"<img src='{'../' * (depth - 2)}images/{i}.webp'>"),
+                             front=True))
             c.add_item(_Item(f"{pre}images/{i}.webp", "", "image/webp", _webp(f"{lang}{i}".encode())))
             geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
         if arts:
