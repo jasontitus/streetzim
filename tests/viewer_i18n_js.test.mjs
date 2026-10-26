@@ -19,13 +19,13 @@ const ZH = table('zh');
 const NEW_MACHINE = ['el', 'es', 'fr', 'ja', 'ko'];
 // The core languages' tables added 2026-10-21 (docs/i18n.md), and Swedish.
 const CORE_NEW = ['ar', 'fa', 'he', 'hi', 'id', 'it', 'nl', 'pl', 'pt', 'ru', 'sv', 'tr', 'uk', 'vi'];
-const RTL = ['ar', 'fa', 'he'];
+const RTL = ['ar', 'fa', 'he', 'glk', 'mzn'];
 // Every table in resources/viewer/i18n but English.
 const ALL = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
   .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
 const TABLES = Object.fromEntries(ALL.map((l) => [l, table(l)]));
 // A language with no table (falls back to English).
-const NO_TABLE = 'sw';
+const NO_TABLE = 'qu';
 
 let pass = 0;
 async function ok(name, fn) {
@@ -423,6 +423,43 @@ await ok('Arabic and Persian write numbers and dates in Latin digits (_nu)', () 
   assert.strictEqual(hi.api.szCompactNum(1234), '1,234');
 });
 
+await ok('a language Intl has no data for: English plurals, numbers and dates, not the device locale', () => {
+  // a device whose own locale is Japanese: Intl falls back to it for a locale it does not know
+  const dev = (C) => {
+    const F = function (loc, o) { const l = [].concat(loc || []); return new C(C.supportedLocalesOf(l).length ? l : 'ja', o); };
+    F.supportedLocalesOf = (l) => C.supportedLocalesOf(l);
+    return F;
+  };
+  const fake = { PluralRules: dev(Intl.PluralRules), NumberFormat: dev(Intl.NumberFormat),
+                 DateTimeFormat: dev(Intl.DateTimeFormat), DisplayNames: Intl.DisplayNames };
+  const run = (lang) => {
+    const document = { documentElement: { lang: '' }, querySelectorAll: () => [],
+                       getElementById: (id) => (id === 'sz-i18n' ? { textContent: INDEX_TABLES } : null) };
+    const api = new Function('document', 'window', 'Intl', RUNTIME + `
+      return { szSetUiLanguage, szTn, szLocaleNum, szMonthYear };`)(document, {}, fake);
+    assert.strictEqual(api.szSetUiLanguage(lang, ''), lang);
+    return api;
+  };
+  // a count whose forms differ in these tables (their one and other match elsewhere)
+  const K = 'wiki.none_yours_in_view', F = { one: '{n} in one other language', other: '{n} in others' };
+  const want = (lang, cat, n) => TABLES[lang][K][cat].replace('{language}', 'X').replace('{n}', String(n));
+  const got = (api, n) => api.szTn(K, n, F, { language: 'X' }).replace(/[⁦-⁩]/g, '');
+  for (const lang of ['ty', 'ht', 'glk']) {
+    const api = run(lang);
+    assert.notStrictEqual(TABLES[lang][K].one, TABLES[lang][K].other, lang);
+    assert.strictEqual(got(api, 1), want(lang, 'one', 1), lang);                // not "other", the Japanese rule
+    assert.strictEqual(got(api, 2), want(lang, 'other', 2), lang);
+    assert.strictEqual(api.szMonthYear(2026, 6), 'July 2026', lang);           // not 2026年7月
+  }
+  // Mazanderani: Intl has numbers but no plural rules; its table asks for Latin digits and the
+  // Gregorian calendar (its Persian default has no month names of its own: "AP 1405 Tir")
+  const mzn = run('mzn');
+  assert.strictEqual(got(mzn, 1), want('mzn', 'one', 1));
+  assert.doesNotMatch(mzn.szMonthYear(2026, 6), /AP|[۰-۹]/);
+  assert.match(mzn.szMonthYear(2026, 6), /2026/);
+  assert.strictEqual(mzn.szLocaleNum(1234567).replace(/[^0-9]/g, ''), '1234567');
+});
+
 await ok('plural categories: Arabic six, Russian / Polish / Ukrainian four, Hebrew dual', () => {
   const F = { one: '{n} link', other: '{n} links' };
   const want = {
@@ -644,7 +681,7 @@ await ok('arrow keys follow the reading direction: the carousel and travel-mode 
   }
 });
 
-await ok('a language without a table falls back along SZ_UI_FALLBACK (rm -> de), not straight to English', () => {
+await ok('a language without a table falls back along SZ_UI_FALLBACK (gsw -> de), not straight to English', () => {
   const mk = () => {
     const docEl = {};
     const api = new Function('document', 'window', RUNTIME + `
@@ -653,19 +690,21 @@ await ok('a language without a table falls back along SZ_UI_FALLBACK (rm -> de),
       { documentElement: docEl, getElementById: () => ({ textContent: INDEX_TABLES }) }, {});
     return { api, docEl };
   };
-  for (const tag of ['rm', 'RM', 'rm-CH', 'gsw']) {
+  for (const tag of ['gsw', 'GSW', 'gsw-CH']) {
     const { api, docEl } = mk();
     assert.strictEqual(api.szSetUiLanguage(tag, ''), 'de', tag);
     assert.strictEqual(docEl.lang, 'de', tag);   // the UI text is German
     assert.strictEqual(api.szT('routing.clear', 'Clear route'), DE['routing.clear'], tag);
   }
-  // No table and no fallback: English. ?uilang=rm also falls back.
-  let r = mk(); assert.strictEqual(r.api.szSetUiLanguage('sw', ''), 'en');
-  r = mk(); assert.strictEqual(r.api.szSetUiLanguage('en', '?uilang=rm'), 'de');
+  // A table of its own wins over the fallback: Romansh (rm -> de where a map carries no rm table).
+  let r = mk(); assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'rm');
+  // No table and no fallback: English. ?uilang=gsw also falls back.
+  r = mk(); assert.strictEqual(r.api.szSetUiLanguage(NO_TABLE, ''), 'en');
+  r = mk(); assert.strictEqual(r.api.szSetUiLanguage('en', '?uilang=gsw'), 'de');
   // Data-driven, and a cycle in the map cannot hang the page.
   r = mk(); r.api.setFallback({ xx: 'yy', yy: 'xx' }); assert.strictEqual(r.api.szSetUiLanguage('xx', ''), 'en');
   r = mk(); r.api.setFallback({ xx: 'fr' }); assert.strictEqual(r.api.szSetUiLanguage('xx', ''), 'fr');
-  r = mk(); r.api.setFallback({}); assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'en');
+  r = mk(); r.api.setFallback({}); assert.strictEqual(r.api.szSetUiLanguage('gsw', ''), 'en');
 });
 
 await ok('link roads: an exit or an on-ramp only beside a motorway or trunk (szLinkKind)', () => {
@@ -814,12 +853,12 @@ await ok('route engines: segments carry flags and class, roads their classes at 
 // search ranks names in it as the visitor's (300-search.js, _szVisitorLangs).
 await ok('the language asked for is kept beside the one shown', () => {
   let r = load(INDEX_TABLES);
-  assert.strictEqual(r.api.szSetUiLanguage('rm', ''), 'de');
-  assert.strictEqual(r.api.asked, 'rm');
+  assert.strictEqual(r.api.szSetUiLanguage('gsw', ''), 'de');
+  assert.strictEqual(r.api.asked, 'gsw');
   r = load(INDEX_TABLES);
-  r.api.szSetUiLanguage('en', '?uilang=sw-KE');
+  r.api.szSetUiLanguage('en', '?uilang=qu-PE');
   assert.strictEqual(r.api.lang, 'en');
-  assert.strictEqual(r.api.asked, 'sw');
+  assert.strictEqual(r.api.asked, 'qu');
   r = load(INDEX_TABLES);
   r.api.szSetUiLanguage(undefined, '');
   assert.strictEqual(r.api.asked, 'en');

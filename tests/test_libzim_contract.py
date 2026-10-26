@@ -26,7 +26,7 @@ libzim = pytest.importorskip("libzim")
 from libzim.reader import Archive  # noqa: E402
 from libzim.writer import Creator, Hint, Item, StringProvider  # noqa: E402
 
-from cloud.viewer_slots import pad_to_slot, slot_needle  # noqa: E402
+from cloud.viewer_slots import pad_to_slot, slot_needle, viewer_page  # noqa: E402
 
 
 class _Item(Item):
@@ -74,7 +74,9 @@ def test_trailing_md5_is_what_the_inplace_patcher_expects(tmp_path):
 
 
 def test_viewer_slot_roundtrips_through_libzim(tmp_path):
-    html = (ROOT / "resources/viewer/index.html").read_bytes()
+    # as a map with no table of its own carries it (cloud/viewer_slots.py ui_languages): the
+    # built file, with every table, is the website's copy and no longer fits a slot
+    html = viewer_page("index.html", ROOT / "resources" / "viewer", None)
     slotted = pad_to_slot("index.html", html)
     path = _build(tmp_path, [("index.html", "text/html", slotted, False)])
     assert slot_needle("index.html") in path.read_bytes()

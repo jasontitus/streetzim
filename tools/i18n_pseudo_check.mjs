@@ -45,7 +45,7 @@ const MACHINE_ALL = LANGS.filter((l) => table(l)._machine === true);
 // (read from the page itself, once the browser is up).
 let MACHINE = [];
 let LANGS_HERE = [];
-const RTL = ['ar', 'fa', 'he'];
+const RTL = ['ar', 'fa', 'he', 'glk', 'mzn'];
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
 const ORIGIN = pt(process.env.ORIGIN, '43.7396,7.4246');
@@ -354,7 +354,7 @@ try {
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
     const v = await viewerState();
     check(v.lang === tag, `${lang}: <html lang="${tag}">`, v.lang);
-    // Arabic, Persian, Hebrew: right to left (runtime.js SZ_RTL_LANGS).
+    // Arabic, Persian, Hebrew, Gilaki, Mazanderani: right to left (runtime.js SZ_RTL_LANGS).
     const rtl = RTL.includes(lang);
     check((v.dir === 'rtl') === rtl, `${lang}: <html dir> ${rtl ? 'rtl' : 'not rtl'}`, v.dir);
     if (rtl) {

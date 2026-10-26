@@ -69,17 +69,57 @@ PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "o
                 "eu": {"one", "other"},
                 "ga": {"one", "two", "few", "many", "other"},
                 "gl": {"one", "other"},
-                "no": {"one", "other"}}
+                "no": {"one", "other"},
+                "af": {"one", "other"},
+                "am": {"one", "other"},
+                "bi": {"one", "other"},
+                "din": {"one", "other"},
+                "ff": {"one", "other"},
+                "fj": {"one", "other"},
+                "ha": {"one", "other"},
+                "haw": {"one", "other"},
+                "hif": {"one", "other"},
+                "ht": {"one", "other"},
+                "ig": {"other"},
+                "jam": {"one", "other"},
+                "jv": {"other"},
+                "kab": {"one", "other"},
+                "kg": {"one", "other"},
+                "ln": {"one", "other"},
+                "ms": {"other"},
+                "my": {"other"},
+                "ny": {"one", "other"},
+                "om": {"one", "other"},
+                "pap": {"one", "other"},
+                "pcm": {"one", "other"},
+                "rm": {"one", "other"},
+                "sg": {"other"},
+                "sn": {"one", "other"},
+                "so": {"one", "other"},
+                "su": {"other"},
+                "sw": {"one", "other"},
+                "ti": {"one", "other"},
+                "tl": {"one", "other"},
+                "tpi": {"other"},
+                "ty": {"one", "other"},
+                "xh": {"one", "other"},
+                "yo": {"other"},
+                "zu": {"one", "other"},
+                "av": {"one", "other"},
+                "ce": {"one", "other"},
+                "glk": {"one", "other"},
+                "mzn": {"one", "other"},
+                "zgh": {"one", "other"}}
 # Tables made by machine translation (their "_machine": true shows the note);
 # German is reviewed by a person.
 MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh",
-           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi", "bs", "hr", "mk", "sl", "sr", "bg", "cs", "hu", "ro", "sk", "et", "fi", "is", "lt", "lv", "da", "fy", "lb", "mt", "sc", "az", "hy", "ka", "ku", "sq", "ca", "cy", "eu", "ga", "gl", "no"}
+           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi", "bs", "hr", "mk", "sl", "sr", "bg", "cs", "hu", "ro", "sk", "et", "fi", "is", "lt", "lv", "da", "fy", "lb", "mt", "sc", "az", "hy", "ka", "ku", "sq", "ca", "cy", "eu", "ga", "gl", "no", "af", "am", "bi", "din", "ff", "fj", "ha", "haw", "hif", "ht", "ig", "jam", "jv", "kab", "kg", "ln", "ms", "my", "ny", "om", "pap", "pcm", "rm", "sg", "sn", "so", "su", "sw", "ti", "tl", "tpi", "ty", "xh", "yo", "zu", "av", "ce", "glk", "mzn", "zgh"}
 # The core languages (docs/language-packs.md): the viewer has a UI table for
 # each, so a merged map in any of them shows its interface in that language.
 CORE = {"ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl",
         "pt", "ru", "th", "tr", "uk", "vi", "zh"}
 # Written right to left: runtime.js SZ_RTL_LANGS gives the page dir="rtl".
-RTL = {"ar", "fa", "he"}
+RTL = {"ar", "fa", "he", "glk", "mzn"}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 

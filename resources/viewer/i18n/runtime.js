@@ -19,7 +19,7 @@ var SZ_UI_RTL = false;      // the UI language is written right to left
 var SZ_NUM_LANG = 'en';     // the locale numbers and dates are formatted in
 // Right-to-left languages: the page gets <html dir="rtl"> (and its CSS
 // mirrors the panels) when the UI is in one of them.
-var SZ_RTL_LANGS = { ar: 1, fa: 1, he: 1, ur: 1, ps: 1, ckb: 1, yi: 1, dv: 1, sd: 1, ug: 1 };
+var SZ_RTL_LANGS = { ar: 1, fa: 1, he: 1, ur: 1, ps: 1, ckb: 1, yi: 1, dv: 1, sd: 1, ug: 1, glk: 1, mzn: 1 };
 // A language without a table of its own shows another its readers read,
 // rather than English: Romansh and Swiss German readers read German. Each
 // step is tried in turn (rm -> de); extend it here.
@@ -205,8 +205,14 @@ function szSetUiLanguage(lang, search) {
   }
   SZ_UI_LANG = SZ_I18N ? base : 'en';
   SZ_UI_RTL = !!(SZ_I18N && SZ_RTL_LANGS[SZ_UI_LANG] === 1);
-  // A table's _nu ("latn") picks the digits numbers are written in.
-  SZ_NUM_LANG = SZ_I18N && typeof SZ_I18N._nu === 'string' ? SZ_UI_LANG + '-u-nu-' + SZ_I18N._nu : SZ_UI_LANG;
+  // Numbers and dates in the UI language where Intl knows it, else English
+  // (ty, ht, glk, av: the device's digits and month names otherwise); a
+  // table's _nu ("latn") picks the digits, _ca ("gregory") the calendar.
+  var fmt = SZ_UI_LANG, ext = [];
+  try { if (SZ_I18N && !Intl.NumberFormat.supportedLocalesOf([SZ_UI_LANG]).length) fmt = 'en'; } catch (e) {}
+  if (SZ_I18N && typeof SZ_I18N._ca === 'string') ext.push('ca-' + SZ_I18N._ca);
+  if (SZ_I18N && typeof SZ_I18N._nu === 'string') ext.push('nu-' + SZ_I18N._nu);
+  SZ_NUM_LANG = ext.length ? fmt + '-u-' + ext.join('-') : fmt;
   // <html lang> is the table's _lang when it gives one (zh-Hans: the
   // device then draws Han characters with its Simplified Chinese font).
   var tag = SZ_I18N && typeof SZ_I18N._lang === 'string' ? SZ_I18N._lang : SZ_UI_LANG;
@@ -280,7 +286,12 @@ function szT(key, en, vars) {
 // String(n) unless vars gives it.
 function szPluralCategory(n) {
   if (SZ_I18N) {
-    try { return new Intl.PluralRules(SZ_UI_LANG).select(n); } catch (e) {}
+    // A language Intl has no rules for (ty, ht, glk, mzn, zgh) would get
+    // the device's (other alone on a Japanese phone): its table has one and
+    // other, English's rule.
+    try {
+      if (Intl.PluralRules.supportedLocalesOf([SZ_UI_LANG]).length) return new Intl.PluralRules(SZ_UI_LANG).select(n);
+    } catch (e) {}
   }
   return n === 1 ? 'one' : 'other';
 }

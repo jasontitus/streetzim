@@ -33,7 +33,7 @@ const BUILT = '<html><head></head><body><nav class="sz-back"><a href="../../../i
   'onclick="x">&#8592; Back to map</a></nav><p>Pack body.</p></body></html>';
 
 await ok('English, no language, or one without a table: the old bar, byte for byte', () => {
-  for (const lang of [undefined, '', 'en', 'EN', 'sw', 'qqx', 42]) {
+  for (const lang of [undefined, '', 'en', 'EN', 'qu', 'qqx', 42]) {
     assert.strictEqual(api.backBarHtml(lang), OLD_BAR, String(lang));
     const out = run(BARE, lang);
     assert.ok(out.includes('<body>' + OLD_BAR + '<p>x</p>'), String(lang));
@@ -58,7 +58,7 @@ await ok('a map in a language with a UI table: the bar in that language, added o
 });
 
 await ok('right-to-left languages: the words in their direction, the arrow pointing right', () => {
-  for (const lang of ['ar', 'fa', 'he']) {
+  for (const lang of ['ar', 'fa', 'he', 'glk', 'mzn'].filter((x) => api.BACK_TO_MAP[x])) {
     for (const l of [lang, lang.toUpperCase(), lang + '-x']) {
       const words = api.backToMapText(l);
       assert.strictEqual(words, '<span dir="rtl">&#8594; ' + api.BACK_TO_MAP[lang] + '</span>', l);
@@ -68,8 +68,9 @@ await ok('right-to-left languages: the words in their direction, the arrow point
   assert.ok(api.backToMapText('it').startsWith('&#8592; '));
 });
 
-await ok('Romansh and Swiss German maps get the German bar, as the viewer falls back', () => {
-  for (const l of ['rm', 'rm-CH', 'gsw']) assert.strictEqual(api.backToMapText(l), '&#8592; ' + api.BACK_TO_MAP.de, l);
+await ok('Swiss German maps get the German bar, as the viewer falls back; Romansh has its own words', () => {
+  for (const l of ['gsw', 'gsw-CH']) assert.strictEqual(api.backToMapText(l), '&#8592; ' + api.BACK_TO_MAP.de, l);
+  for (const l of ['rm', 'rm-CH']) assert.strictEqual(api.backToMapText(l), '&#8592; ' + api.BACK_TO_MAP.rm, l);
 });
 
 await ok('a bar that does not say "Back to map" is left as it is', () => {

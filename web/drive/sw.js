@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-cbd77f4810';
+const SHELL_CACHE = 'streetzim-drive-shell-6cab2f33e2';
 
 const SHELL_URLS = [
   './',
@@ -439,66 +439,106 @@ const OPTIONAL_PROBE_PATHS = new Set([
 // tests/sw_back_bar_js.test.mjs keeps them in step). English, and a
 // language without an entry, keep the words the build writes.
 const BACK_TO_MAP = {
+  af: 'Terug na die kaart',
+  am: 'ወደ ካርታው ተመለስ',
   ar: 'العودة إلى الخريطة',
+  av: 'Картаялде тӀадбуссине',
   az: 'Xəritəyə qayıt',
   bg: 'Назад към картата',
+  bi: 'Gobak long map',
   bs: 'Nazad na mapu',
   ca: 'Torna al mapa',
+  ce: 'Карте юхадерза',
   cs: 'Zpět na mapu',
   cy: 'Yn ôl i’r map',
   da: 'Tilbage til kortet',
   de: 'Zurück zur Karte',
+  din: 'Dhuk në map',
   el: 'Επιστροφή στον χάρτη',
   es: 'Volver al mapa',
   et: 'Tagasi kaardile',
   eu: 'Itzuli mapara',
   fa: 'بازگشت به نقشه',
+  ff: 'Rutto e kartal',
   fi: 'Takaisin karttaan',
+  fj: 'Lesu ki na mape',
   fr: 'Retour à la carte',
   fy: 'Werom nei de kaart',
   ga: 'Ar ais chuig an léarscáil',
   gl: 'Volver ao mapa',
+  glk: 'نقشه ره واگردستن',
+  ha: 'Koma taswira',
+  haw: 'Hoʻi i ka palapala ʻāina',
   he: 'חזרה למפה',
   hi: 'मानचित्र पर लौटें',
+  hif: 'Naksa pe waapas jao',
   hr: 'Natrag na kartu',
+  ht: 'Tounen sou kat la',
   hu: 'Vissza a térképhez',
   hy: 'Վերադառնալ քարտեզին',
   id: 'Kembali ke peta',
+  ig: 'Laghachi na maapụ',
   is: 'Aftur á kortið',
   it: 'Torna alla mappa',
   ja: '地図に戻る',
+  jam: 'Go bak a di map',
+  jv: 'Bali menyang peta',
   ka: 'რუკაზე დაბრუნება',
+  kab: 'Uɣal ɣer tkarḍa',
+  kg: 'Vutuka ku kalati',
   ko: '지도로 돌아가기',
   ku: 'Vegere nexşeyê',
   lb: 'Zréck op d’Kaart',
+  ln: 'Zonga na kárte',
   lt: 'Atgal į žemėlapį',
   lv: 'Atpakaļ uz karti',
   mk: 'Назад кон мапата',
+  ms: 'Kembali ke peta',
   mt: 'Lura għall-mappa',
+  my: 'မြေပုံသို့ ပြန်သွားရန်',
+  mzn: 'نقشه ره برگردستن',
   nl: 'Terug naar de kaart',
   no: 'Tilbake til kartet',
+  ny: 'Bwererani ku mapu',
+  om: 'Gara kaartaatti deebi\'i',
+  pap: 'Bolbe na e mapa',
+  pcm: 'Go bak to di map',
   pl: 'Wróć do mapy',
   pt: 'Voltar ao mapa',
+  rm: 'Enavos a la charta',
   ro: 'Înapoi la hartă',
   ru: 'Назад к карте',
   sc: 'Torra a sa mapa',
+  sg: 'Kîri na kârâte',
   sk: 'Späť na mapu',
   sl: 'Nazaj na zemljevid',
+  sn: 'Dzokera kumepu',
+  so: 'Ku noqo khariidadda',
   sq: 'Kthehu te harta',
   sr: 'Назад на мапу',
+  su: 'Balik deui ka peta',
   sv: 'Tillbaka till kartan',
+  sw: 'Rudi kwenye ramani',
   th: 'กลับไปที่แผนที่',
+  ti: 'ናብ ካርታ ተመለስ',
+  tl: 'Bumalik sa mapa',
+  tpi: 'Go bek long map',
   tr: 'Haritaya dön',
+  ty: 'Hoʻi i te hōhoʻa fenua',
   uk: 'Назад до карти',
   vi: 'Quay lại bản đồ',
+  xh: 'Buyela kwimaphu',
+  yo: 'Padà sí máàpù',
+  zgh: 'ⴰⵖⵓⵍ ⵖⵔ ⵜⴽⴰⵔⴹⴰ',
   zh: '返回地图',
+  zu: 'Buyela emephini',
 };
 // Right-to-left: the words in their own direction, the arrow pointing
 // back toward the line's start, which is on the right.
-const BACK_TO_MAP_RTL = { ar: 1, fa: 1, he: 1 };
+const BACK_TO_MAP_RTL = { ar: 1, fa: 1, he: 1, glk: 1, mzn: 1 };
 // A language without words of its own takes another its readers read, as
-// the viewer does (runtime.js SZ_UI_FALLBACK): Romansh and Swiss German, German.
-const BACK_TO_MAP_FALLBACK = { rm: 'de', gsw: 'de' };
+// the viewer does (runtime.js SZ_UI_FALLBACK): Swiss German, German.
+const BACK_TO_MAP_FALLBACK = { gsw: 'de' };
 const BACK_TO_MAP_EN = '&#8592; Back to map';
 function backToMapText(lang) {
   const l = typeof lang === 'string' ? lang.toLowerCase() : '';

@@ -67,7 +67,10 @@ PLURAL_CATEGORIES = ("zero", "one", "two", "few", "many", "other")
 #   _nu: "latn"       the digits numbers and dates are written in (Intl's
 #                     -u-nu-), where the language's default would mix
 #                     with the digits code writes directly (ar, fa)
-META_KEYS: dict[str, type] = {"_machine": bool, "_lang": str, "_compact": str, "_nu": str}
+#   _ca: "gregory"    the calendar dates are written in (Intl's -u-ca-),
+#                     where the language's default has no month names of
+#                     its own (mzn: "AP 1405 Mehr")
+META_KEYS: dict[str, type] = {"_machine": bool, "_lang": str, "_compact": str, "_nu": str, "_ca": str}
 
 class I18nError(Exception):
     pass
@@ -332,6 +335,8 @@ def _check_meta(lang: str, table: dict[str, Any], origin: Path) -> None:
             raise I18nError(f"{origin}: _compact {v!r} must be \"intl\" or \"intl-long\"")
         if k == "_nu" and v != "latn":
             raise I18nError(f"{origin}: _nu {v!r} must be \"latn\"")
+        if k == "_ca" and v != "gregory":
+            raise I18nError(f"{origin}: _ca {v!r} must be \"gregory\"")
 
 
 def languages() -> dict[str, dict[str, Any]]:

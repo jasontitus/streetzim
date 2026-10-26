@@ -404,7 +404,9 @@ function _wikiIsOther(lang) {
 function _wikiLangLabel(lang) {
   try {
     if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
-      var n = new Intl.DisplayNames([SZ_UI_LANG], { type: 'language' }).of(lang);
+      // in the UI language where Intl knows it, else English (not the device's)
+      var dl = Intl.DisplayNames.supportedLocalesOf([SZ_UI_LANG]).length ? SZ_UI_LANG : 'en';
+      var n = new Intl.DisplayNames([dl], { type: 'language' }).of(lang);
       if (n && n !== lang) return n;
     }
   } catch (e) {}

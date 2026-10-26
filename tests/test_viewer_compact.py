@@ -46,7 +46,9 @@ def _norm(kind: str, text: str) -> str:
 
 
 def test_built_file_is_smaller_and_current() -> None:
-    assert len(BUILT) < len(SOURCE) * 0.8
+    # the UI tables' block (compressed, the same in both) aside: what the compaction strips
+    tables = re.compile(r'<script type="application/json" id="sz-i18n">.*?</script>', re.S)
+    assert len(tables.sub("", BUILT)) < len(tables.sub("", SOURCE)) * 0.8
     assert BUILT.encode("utf-8") == build_viewer.build()
 
 
