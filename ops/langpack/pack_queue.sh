@@ -72,8 +72,8 @@
 #     packs ran out of time, e.g. a region language's, which every entry
 #     needs): run again after QUEUE_RETRY_SECS within the same
 #     QUEUE_PARTIAL_RETRIES, then a loud failure; 6 (archive.org listing pending):
-#     run again after QUEUE_RETRY_SECS; 2 (a lock held), 8 (archive.org's
-#     metadata unreadable, nothing sent), or a run killed or ended without an
+#     run again after QUEUE_RETRY_SECS; 2 (a lock held), 8 (archive.org
+#     unreachable: its metadata, or an upload), or a run killed or ended without an
 #     exit code: again after QUEUE_RETRY_SECS, a loud failure after
 #     QUEUE_MAX_AGAIN (8) in a row; 4 and 5 (v1 gives this map
 #     no packs, or nothing is publishable): logged, skipped for this base;
@@ -703,7 +703,7 @@ finish() {  # region
       set_state "$rid" pending "$zim" "$key" "$(( $(date +%s) + RETRY ))" "ship_packs rc=6"
       say "$rid: ship_packs rc=6 (archive.org listing pending): again after $RETRY s" ;;
     2) again "$rid" "$zim" "$key" "ship_packs rc=2 (a lock held)" ;;
-    8) again "$rid" "$zim" "$key" "ship_packs rc=8 (archive.org metadata unavailable)" ;;
+    8) again "$rid" "$zim" "$key" "ship_packs rc=8 (archive.org unreachable: its listing or an upload)" ;;
     '') again "$rid" "$zim" "$key" "the run ended without an exit code (the queue or the host stopped)" ;;
     129|1[3-5][0-9]) again "$rid" "$zim" "$key" "ship_packs.sh was killed (rc=$rc)" ;;
     4|5)

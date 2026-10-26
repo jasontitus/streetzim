@@ -1275,7 +1275,7 @@ def test_enqueue_a_map_by_hand(q: SimpleNamespace) -> None:
 
 
 @pytest.mark.parametrize("rc,why", [("2", "ship_packs rc=2 (a lock held)"), ("143", "ship_packs.sh was killed (rc=143)"),
-                                    ("8", "ship_packs rc=8 (archive.org metadata unavailable)")])
+                                    ("8", "ship_packs rc=8 (archive.org unreachable: its listing or an upload)")])
 def test_a_lock_held_again_and_again_is_a_loud_failure(q: SimpleNamespace, rc: str, why: str) -> None:
     """ship_packs.sh exit 2 (a lock held) or 8 (archive.org's metadata
     unreadable), or a killed run, is tried again, and after QUEUE_MAX_AGAIN
@@ -1297,7 +1297,7 @@ def test_the_loud_failure_names_each_cause(q: SimpleNamespace) -> None:
         r = _run(q, FAKE_SHIP_RC="beta:2,2,8", QUEUE_MAX_AGAIN="3")
     assert r.returncode == 1, r.stderr
     assert ("beta: 3 times in a row: ship_packs rc=2 (a lock held) x2; "
-            "ship_packs rc=8 (archive.org metadata unavailable) x1") in r.stderr, r.stderr
+            "ship_packs rc=8 (archive.org unreachable: its listing or an upload) x1") in r.stderr, r.stderr
     assert _status(q)["beta"][1] == "failed-again"
 
 

@@ -598,9 +598,11 @@ def test_a_failed_upload_sends_nothing_twice(ship: SimpleNamespace) -> None:
     """Review M-c: an upload cut off at the fr pack; the packs sent before it
     are recorded, so the rerun sends only what was not sent (one batch call
     recorded nothing and sent them all again, a second copy each while
-    archive.org's tasks were pending)."""
+    archive.org's tasks were pending). The failed upload exits 8, so the
+    queue runs the region again (East Polynesia: an archive.org timeout after
+    every gate passed was a failure left until a restart)."""
     r = _run(ship, FAKE_IA_PENDING="1", FAKE_IA_FAIL_ON=_pk(ship, "fr"))
-    assert r.returncode == 1, _log(ship)[-2000:]
+    assert r.returncode == 8, _log(ship)[-2000:]
     log1 = _log(ship)
     r2 = _run(ship, FAKE_IA_PENDING="1")
     assert r2.returncode == 6, _log(ship)[-2000:]

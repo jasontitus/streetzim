@@ -60,7 +60,9 @@
 #      a pack already listed with its MD5 is not sent again, and a name the
 #      item holds with another MD5 stops the run (a published recipe may use
 #      that file); the listing must be read first (archive.org's metadata
-#      unavailable: exit 8, nothing sent, run again later). Not all listed
+#      unavailable: exit 8, nothing sent, run again later), and an upload
+#      that fails (archive.org timing out) exits 8 too: the packs sent before
+#      it are recorded, so the run again sends only the rest. Not all listed
 #      yet: exit 6, run again later.
 #   6. make_site.py into $LANGPACK_WORK/site/<REGION>/recipes/<REGION>/
 #      (URLs "{proxy}/<item>/<file>": the page's proxy, web/drive/preview-config.js),
@@ -75,8 +77,9 @@
 # ops/langpack/publish_site.sh REGION, then the site's deploy.
 #
 # Exit: 0 recipes ready; 6 packs transferred, archive.org listing pending
-# (run again later; nothing is redone); 8 the item's listing could not be
-# read before the upload (nothing sent; run again later); 2 another run holds the region's lock,
+# (run again later; nothing is redone); 8 archive.org unreachable: the item's
+# listing could not be read before the upload (nothing sent), or an upload
+# failed (what was sent before it is not sent again): run again later; 2 another run holds the region's lock,
 # or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
 # gates (a dry run: nothing published); 4 a map v1 gives no packs (a
 # continent, or a base over SHIP_MAX_BASE_GB (8 GB): refused in step 1, before
@@ -549,7 +552,7 @@ if [ ${#SEND[@]} -gt 0 ]; then
         --metadata="title:${SHIP_ITEM_TITLE:-StreetZim $TITLE: Wikipedia language packs}" \
         "${LANG_META[@]}" \
         --metadata="description:Wikipedia packs for the StreetZim map of $TITLE, assembled into a map in your language by https://streetzim.web.app/build/" \
-        >> "$LOG" 2>&1 ) || { say "ia upload of $f failed (the packs sent before it are recorded in $SENT)"; exit 1; }
+        >> "$LOG" 2>&1 ) || { say "ia upload of $f failed (the packs sent before it are recorded in $SENT): run again later (exit 8)"; exit 8; }
     printf '%s\t%s\t%s\n' "$f" "${MD5[$f]}" "$(date +%s)" >> "$SENT"
   done
 fi
