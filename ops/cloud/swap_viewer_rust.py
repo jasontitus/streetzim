@@ -173,7 +173,7 @@ def _is_chip_entry(path: str) -> bool:
 # cloud/patch_viewer_inplace.py overwrite it later without re-packing the ZIM
 # (~2h for europe, 0.1s patched). Uncompressed is required: bytes in a
 # compressed cluster do not map to file offsets.
-from cloud.viewer_slots import pad_to_slot as _pad_to_slot  # noqa: E402
+from cloud.viewer_slots import pad_to_slot as _pad_to_slot, viewer_page  # noqa: E402
 
 
 def _homes(name: str) -> tuple[str, str]:
@@ -876,14 +876,19 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
         if src_sharded_cats:
             print(f"  already sharded, keeping: {', '.join(sorted(src_sharded_cats))}")
 
-    # Collect viewer replacements from disk.
+    # Collect viewer replacements from disk: the UI tables of the base
+    # languages and the map's own (its map-config; cloud/viewer_slots.py).
+    try:
+        src_cfg = json.loads(_src_bytes("map-config.json"))
+    except (KeyError, RuntimeError, ValueError):
+        src_cfg = None
     replacements: dict[str, bytes] = {}
     for name in ("index.html", "places.html", "routing-worker.js"):
         p = VIEWER_DIR / name
         if not p.exists():
             print(f"  warning: {p} missing; that viewer file will NOT be swapped")
             continue
-        replacements[name] = p.read_bytes()
+        replacements[name] = viewer_page(name, VIEWER_DIR, src_cfg)
         print(f"  will swap {name} ← {p} ({len(replacements[name])} B)")
 
     # Resolve the source's main page (typically a redirect chain ending

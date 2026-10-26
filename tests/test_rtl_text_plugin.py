@@ -87,7 +87,9 @@ def test_a_tampered_copy_fails_the_build(tmp_path):
 
 
 def test_viewer_fits_its_slot_with_headroom():
-    html = (zim_writer.VIEWER_DIR / "index.html").read_bytes()
+    # as a map with no table of its own carries it (cloud/viewer_slots.py ui_languages)
+    from cloud.viewer_slots import viewer_page
+    html = viewer_page("index.html", zim_writer.VIEWER_DIR, None)
     assert len(pad_to_slot("index.html", html)) == SLOT_SIZES["index.html"]
     # Room for at least as much again: published ZIMs cannot grow the slot
     # without a full re-pack (docs/viewer-slots.md).

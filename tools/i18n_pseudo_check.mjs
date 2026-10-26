@@ -39,7 +39,16 @@ const DE = table('de');
 // The tables marked as machine-translated, and every table, by code.
 const LANGS = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
   .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();
-const MACHINE = LANGS.filter((l) => table(l)._machine === true);
+const MACHINE_ALL = LANGS.filter((l) => table(l)._machine === true);
+// A ZIM carries the tables of the base languages and its own only
+// (cloud/viewer_slots.py ui_languages): the checks below take those it has.
+const servedIndex = await (await fetch(origin + '/index.html')).text();
+const blockMatch = /<script type="application\/json" id="sz-i18n">([\s\S]*?)<\/script>/.exec(servedIndex);
+const CARRIED = new Set(blockMatch ? Object.keys(JSON.parse(blockMatch[1]).t || {}) : []);
+const MACHINE = MACHINE_ALL.filter((l) => CARRIED.has(l));
+const LANGS_HERE = LANGS.filter((l) => CARRIED.has(l));
+const NOT_HERE = LANGS.filter((l) => !CARRIED.has(l));
+if (NOT_HERE.length) console.log(`tables this ZIM does not carry (another map's): ${NOT_HERE.join(',')}`);
 const RTL = ['ar', 'fa', 'he'];
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
@@ -372,7 +381,7 @@ try {
   // ---- 4. The navigation HUD on a 320 px phone, in every language: its
   // buttons do not shrink, so a long "Exit" leaves the distance no room.
   await page.setViewport({ width: 320, height: 640 });
-  for (const lang of LANGS) {
+  for (const lang of LANGS_HERE) {
     await page.goto(origin + '/index.html?uilang=' + lang, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForFunction(() => window.__szMap && window.streetzimRouting, { timeout: 60000 });
     // The map-name box keeps an 8 px gap to the About button, whose width

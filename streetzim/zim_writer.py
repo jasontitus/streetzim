@@ -13,7 +13,7 @@ from functools import wraps
 from pathlib import Path
 from typing import NamedTuple
 
-from cloud.viewer_slots import pad_to_slot as _pad_to_slot
+from cloud.viewer_slots import map_ui_tables, pad_to_slot as _pad_to_slot
 from streetzim.search_extract import build_location_index
 from streetzim import area as _area
 from streetzim import clip as _clip
@@ -1596,11 +1596,13 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
     # Until now only swap_viewer_rust.py wrote slots, so every freshly
     # built region was born without them and owed one full re-pack at the
     # next viewer change.
+    # The UI tables of the base languages and this map's own only
+    # (cloud/viewer_slots.py ui_languages): all of them would not fit.
     print("    Adding viewer HTML (slotted)...")
     creator.add_item(MapItem(
         "index.html", name, "text/html",
         _pad_to_slot("index.html",
-                     open(str(viewer_html_path), "rb").read()),
+                     map_ui_tables(open(str(viewer_html_path), "rb").read(), map_config)),
         is_front=True, compress=False,
     ))
     routing_worker_path = VIEWER_DIR / "routing-worker.js"
@@ -1624,7 +1626,7 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         print("    Adding places.html (find-places mini-app, slotted)...")
         creator.add_item(MapItem(
             "places.html", "Find places", "text/html",
-            _pad_to_slot("places.html", places_path.read_bytes()),
+            _pad_to_slot("places.html", map_ui_tables(places_path.read_bytes(), map_config)),
             is_front=False, compress=False,
         ))
 

@@ -45,7 +45,7 @@ if str(SCRIPT_DIR) not in sys.path:
 # the source manifest had already been skipped, leaving the output
 # ZIM without ANY category-index/manifest.json.
 from cloud.chip_rules import CHIP_RULES, record_matches_chip  # noqa: E402
-from cloud.viewer_slots import check_viewer_fits, pad_to_slot as _pad_to_slot  # noqa: E402
+from cloud.viewer_slots import check_viewer_fits, pad_to_slot as _pad_to_slot, viewer_page  # noqa: E402
 from streetzim.tile_alias import TileAliaser, max_alias_bytes  # noqa: E402
 from streetzim import viewer_assets  # noqa: E402
 from cloud.chip_shards import (  # noqa: E402
@@ -404,10 +404,15 @@ def repackage(src_path: str, dst_path: str,
     # else passes through from the source ZIM unchanged).
     replacements = {}
     if swap_viewer:
+        # the UI tables of the base languages and the map's own (its map-config)
+        try:
+            src_cfg = json.loads(bytes(src.get_entry_by_path("map-config.json").get_item().content))
+        except (KeyError, RuntimeError, ValueError):
+            src_cfg = None
         for name in ("index.html", "places.html", "routing-worker.js"):
             p = VIEWER_DIR / name
             if p.exists():
-                raw = p.read_bytes()
+                raw = viewer_page(name, VIEWER_DIR, src_cfg)
                 # Pad into the fixed viewer slot, exactly as create_osm_zim.py
                 # and swap_viewer_rust.py do. Without this, repackage silently
                 # UNDID the slots the build had just written: build-region.sh

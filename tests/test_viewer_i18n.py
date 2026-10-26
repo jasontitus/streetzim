@@ -38,11 +38,42 @@ PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "o
                 "it": {"one", "other"}, "nl": {"one", "other"},
                 "pl": {"one", "few", "many", "other"}, "pt": {"one", "other"},
                 "ru": {"one", "few", "many", "other"}, "sv": {"one", "other"},
-                "tr": {"one", "other"}, "uk": {"one", "few", "many", "other"}, "vi": {"other"}}
+                "tr": {"one", "other"}, "uk": {"one", "few", "many", "other"}, "vi": {"other"},
+                "bs": {"one", "few", "other"},
+                "hr": {"one", "few", "other"},
+                "mk": {"one", "other"},
+                "sl": {"one", "two", "few", "other"},
+                "sr": {"one", "few", "other"},
+                "bg": {"one", "other"},
+                "cs": {"one", "few", "many", "other"},
+                "hu": {"one", "other"},
+                "ro": {"one", "few", "other"},
+                "sk": {"one", "few", "many", "other"},
+                "et": {"one", "other"},
+                "fi": {"one", "other"},
+                "is": {"one", "other"},
+                "lt": {"one", "few", "many", "other"},
+                "lv": {"zero", "one", "other"},
+                "da": {"one", "other"},
+                "fy": {"one", "other"},
+                "lb": {"one", "other"},
+                "mt": {"one", "two", "few", "many", "other"},
+                "sc": {"one", "other"},
+                "az": {"one", "other"},
+                "hy": {"one", "other"},
+                "ka": {"one", "other"},
+                "ku": {"one", "other"},
+                "sq": {"one", "other"},
+                "ca": {"one", "other"},
+                "cy": {"zero", "one", "two", "few", "many", "other"},
+                "eu": {"one", "other"},
+                "ga": {"one", "two", "few", "many", "other"},
+                "gl": {"one", "other"},
+                "no": {"one", "other"}}
 # Tables made by machine translation (their "_machine": true shows the note);
 # German is reviewed by a person.
 MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh",
-           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi"}
+           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi", "bs", "hr", "mk", "sl", "sr", "bg", "cs", "hu", "ro", "sk", "et", "fi", "is", "lt", "lv", "da", "fy", "lb", "mt", "sc", "az", "hy", "ka", "ku", "sq", "ca", "cy", "eu", "ga", "gl", "no"}
 # The core languages (docs/language-packs.md): the viewer has a UI table for
 # each, so a merged map in any of them shows its interface in that language.
 CORE = {"ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl",
@@ -96,7 +127,7 @@ def test_plural_forms_are_what_intl_gives(lang: str) -> None:
     out = subprocess.run([node, "-e", "console.log(JSON.stringify(new Intl.PluralRules(process.argv[1])"
                           ".resolvedOptions().pluralCategories))", lang],
                          capture_output=True, text=True, timeout=60, check=True).stdout
-    intl = set(json.loads(out)) - ({"many"} if lang in ("es", "fr", "it", "pt") else set())
+    intl = set(json.loads(out)) - ({"many"} if lang in ("ca", "es", "fr", "it", "pt") else set())
     assert PLURAL_FORMS[lang] == intl, (lang, sorted(intl))
 
 

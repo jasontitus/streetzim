@@ -17,6 +17,7 @@ Usage:
 """
 import argparse
 import hashlib
+import json
 import mmap
 import os
 import sys
@@ -25,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cloud.viewer_slots import (  # noqa: E402
-    VIEWER_FILES, comment_delims, slot_header, slot_needle)
+    VIEWER_FILES, comment_delims, slot_header, slot_needle, viewer_page)
 # libzim writes a 16-byte MD5 of everything before it as the final bytes.
 CHECKSUM_LEN = 16
 
@@ -76,6 +77,14 @@ def main() -> int:
     if not zim.is_file():
         raise SystemExit(f"no such ZIM: {zim}")
 
+    # The UI tables of the base languages and the map's own (its map-config;
+    # cloud/viewer_slots.py), read before the file is opened for writing.
+    from libzim.reader import Archive
+    try:
+        cfg = json.loads(bytes(Archive(str(zim)).get_entry_by_path("map-config.json").get_item().content))
+    except (KeyError, RuntimeError, ValueError):
+        cfg = None
+
     t0 = time.time()
     size = zim.stat().st_size
     mode = "rb" if args.dry_run else "r+b"
@@ -91,7 +100,7 @@ def main() -> int:
                         f"{name}: no viewer slot in this ZIM. It was built "
                         f"before slots existed -- it needs a full viewer swap (re-pack).")
                 start, slot_len, head_len, is_js = found
-                new = (vdir / name).read_bytes()
+                new = viewer_page(name, vdir, cfg)
                 _opener, closer = comment_delims(name)
                 head = slot_header(name, slot_len)
                 overhead = len(head) + len(closer)
