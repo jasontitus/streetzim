@@ -164,6 +164,30 @@ def test_make_site_skips_an_ungated_pack(site: SimpleNamespace, lp: SimpleNamesp
     assert any(x.get("lang") == "th" and "missing packs" in x["why"] for x in refused)
 
 
+def test_make_site_takes_the_pack_the_gates_take(site: SimpleNamespace, lp: SimpleNamespace, tmp_path: Path) -> None:
+    """Two gated packs of one language: the recipes use the newest, the one
+    recipe2.available_packs gives the gates, not the last name (a pack named
+    later but older left the gates' verdicts for another recipe: every
+    entry refused, an English-only site)."""
+    from tools.langpack.recipe2 import available_packs
+    packs = tmp_path / "packs"
+    shutil.copytree(site.packs, packs)
+    late = packs / "osm_testland_wiki-de_2099-01-01_ffffffff.zim"           # last by name, oldest
+    lpzims.write_pack(late, "de", lpzims.read_uuid(lp.base), articles=[("Alpha_Stadt", "Alpha Stadt")])
+    Path(f"{late}.gate.json").write_text(json.dumps({"ok": True, "pack_md5": lpzims.md5_of(late)}))
+    os.utime(late, (1_000_000_000, 1_000_000_000))
+    gated = available_packs(str(packs), str(lp.base), "testland")["de"]
+    assert os.path.basename(gated) == lp.packs["de"].name
+    out = tmp_path / "site"
+    r = tool("make_site.py", lp.base, "--packs-dir", packs, "--region", "testland", "--region-title", "Testland",
+             "--region-langs", "en", "--langs", "de", "--titles", TITLES, "--language-meta", "map",
+             "--url-template", f"{DL}/p/{{file}}", "--base-download", f"{DL}/b/{lp.base.name}",
+             "-o", out / "recipes", env=site.env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    text = "".join(p.read_text() for p in (out / "recipes").rglob("*.json"))
+    assert lp.packs["de"].name in text and late.name not in text
+
+
 def _jedit(path: Path, fn) -> None:  # noqa: ANN001
     d = json.loads(path.read_text())
     fn(d)

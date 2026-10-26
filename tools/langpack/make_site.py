@@ -106,15 +106,18 @@ def main():
     base_wiki = (cfg.get("language") or "en") if cfg.get("hasWikiArticles") else None
     base_articles = sum(1 for d in zb.iter_dirents()
                         if d.ns == ord("C") and d.path.startswith(b"wiki-article/") and not d.is_redirect)
-    avail, refused = {}, []
+    avail, refused, newest = {}, [], {}
     for f in sorted(os.listdir(a.packs_dir)):
         if f.endswith(".zim") and f.startswith(f"osm_{a.region}_wiki-"):
-            ok, why = pack_gate_ok(os.path.join(a.packs_dir, f))      # review S1
+            fp = os.path.join(a.packs_dir, f)
+            ok, why = pack_gate_ok(fp)      # review S1
             if not ok:
                 refused.append({"pack": f, "why": why})
                 continue
-            p = open_pack(os.path.join(a.packs_dir, f))
-            avail[p.lang] = p
+            p = open_pack(fp)
+            key = (os.path.getmtime(fp), fp)    # the newest of a language, as the gates take it (recipe2.available_packs)
+            if p.lang not in newest or key > newest[p.lang]:
+                avail[p.lang], newest[p.lang] = p, key
     menu, rows = [], []
     overrides = dict(o.split("=", 1) for o in a.url_override)
     for L in a.langs.split(","):
