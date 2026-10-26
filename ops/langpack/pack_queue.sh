@@ -35,9 +35,11 @@
 # one still prefetching; a map whose prefetch ended twice without the mark
 # (a failed dump, the 6 h limit) starts once no prefetch goes (none starts
 # while it waits, or while a run going lacks its mark), and its run fetches
-# itself; at the end of the list the pass waits for a prefetch or a
-# run to end, or QUEUE_POLL_SECS. One ship_packs.sh run at a time while the round builds (the disk is
-# saturated), and
+# itself; while a map waits for room the pass looks one map further ahead
+# per wait (so the maps after it are prefetched meanwhile); at the end of the
+# list the pass waits for a prefetch or a run to end, or QUEUE_POLL_SECS. One ship_packs.sh run at a time while the round builds (the disk is
+# saturated; QUEUE_ROUND_JOBS more, each past the first under the memory and
+# disk rules below), and
 # only while the host has QUEUE_MIN_MEM_GB (24) of memory available and no
 # memory pressure; up to QUEUE_JOBS (2) once no round driver runs, a second
 # run under the same memory rule and with room on LANGPACK_WORK's disk for
@@ -132,7 +134,8 @@
 # QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8), QUEUE_PARTIAL_RETRIES (3),
 # QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
 # QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40), QUEUE_RETRY_IN_PASS (1),
-# QUEUE_PREFETCH_AHEAD (1),
+# QUEUE_PREFETCH_AHEAD (1), QUEUE_ROUND_JOBS (1: runs at once while the round builds, each
+# past the first under the memory and disk rules; QUEUE_JOBS still the most),
 # QUEUE_SINCE (first run only: count maps shipped since this date, e.g. the
 # round's start, instead of since now), QUEUE_SEED (REGION=SITE_DIR ...: site
 # folders, SITE_DIR/recipes/REGION sealed by ship_packs.sh, published into a
@@ -205,6 +208,8 @@ PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
 JOBS=${QUEUE_JOBS:-2}
+ROUND_JOBS=${QUEUE_ROUND_JOBS:-1}
+[[ $ROUND_JOBS =~ ^[0-9]+$ ]] || ROUND_JOBS=1
 IN_PASS=${QUEUE_RETRY_IN_PASS:-1}
 AHEAD=${QUEUE_PREFETCH_AHEAD:-1}
 MIN_MEM_GB=${QUEUE_MIN_MEM_GB:-24}
@@ -249,7 +254,7 @@ if [ ! -s "$Q/since" ]; then
 fi
 SINCE=$(cat "$Q/since")
 touch "$STATUS" "$DONE"
-declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=() PF_TRIES=() PF_WANT=()
+declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=() PF_TRIES=() PF_WANT=() PF_AHEAD=()
 ANY_FAILED=0 STOP_SAID= PF_PID= PF_RID= PF_ZIM= PF_START= PF_SCAN= PF_ENDS=0 list=()
 # what a ship_packs.sh run starts from: the login basics, then production's settings
 SHIP_ENV=()
@@ -582,7 +587,7 @@ room_for() {  # base
   local n=${#RUN_PID[@]} rnd=0 avail full need free r
   WHY=
   round_running && rnd=1
-  [ "$n" = 0 ] || [ $rnd = 0 ] || { WHY="one run at a time while $ROUND_WHY"; return 1; }
+  [ "$n" -lt "$ROUND_JOBS" ] || [ $rnd = 0 ] || { WHY="$( [ "$ROUND_JOBS" = 1 ] && echo 'one run at a time' || echo "$n runs going (QUEUE_ROUND_JOBS=$ROUND_JOBS)") while $ROUND_WHY"; return 1; }
   [ "$n" -lt "$JOBS" ] || { WHY="$n runs going (QUEUE_JOBS=$JOBS)"; return 1; }
   [ "$n" = 0 ] && [ $rnd = 0 ] && return 0                   # the first run while no round builds
   avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
@@ -755,7 +760,7 @@ pf_tick() {
     PF_ENDS=$(( PF_ENDS + 1 )) PF_SCAN=1 PF_PID= PF_RID= PF_ZIM= PF_START=
     rm -f "$Q/prefetch"
   fi
-  [ "$AHEAD" = 1 ] && [ -n "$PF_SCAN" ] && [ ${#PF_WANT[@]} -gt 0 ] || return 0
+  [ "$AHEAD" = 1 ] && [ -n "$PF_SCAN" ] && [ $(( ${#PF_WANT[@]} + ${#PF_AHEAD[@]} )) -gt 0 ] || return 0
   stopping && return 0
   local j r z rest avail full
   for r in "${!RUN_PID[@]}"; do pf_marked "${RUN_ZIM[$r]}" || pf_ended "${RUN_ZIM[$r]}" || return 0; done
@@ -771,7 +776,8 @@ pf_tick() {
   PF_SCAN=
   for j in "${list[@]}"; do
     IFS=$'\t' read -r r z rest <<< "$j"
-    [ -n "$r" ] && [ "${PF_WANT[$r]:-}" = "$z" ] && [ -z "${RUN_PID[$r]:-}" ] || continue
+    [ -n "$r" ] && [ -z "${RUN_PID[$r]:-}" ] || continue
+    [ "${PF_WANT[$r]:-}" = "$z" ] || { [ "${PF_AHEAD[$r]:-}" = "$z" ] && [ "${PF_TRIES[$r $z]:-0}" = 0 ]; } || continue
     pf_marked "$z" && continue
     pf_start "$r" "$z"
     break
@@ -790,13 +796,36 @@ reap() {
   done
 }
 
+# (pass, while a map waits for room) the next map of the list after it, one a wait (from the
+# waiting map on at each new wait): eligible and not prefetched, it goes into PF_AHEAD and its
+# prefetch ahead can start now, not once the pass reaches it; one try only before then, and it
+# never holds the picker as a map that fetches itself (KEY, eligible's, is kept for the map
+# that waits)
+look_ahead() {
+  [ "$AHEAD" = 1 ] && [ -z "$PF_PID" ] || return 0
+  local r z tt s key=${KEY:-}
+  [ "$ahead" -ge "$i" ] || ahead=$i
+  while [ "$ahead" -lt ${#list[@]} ]; do
+    IFS=$'\t' read -r r z tt s <<< "${list[$ahead]}"
+    ahead=$(( ahead + 1 ))
+    [ -n "$r" ] && [ -z "${passed[$r]:-}" ] && [ "${tries[$r]:-0}" = 0 ] && [ -z "${RUN_PID[$r]:-}" ] \
+      && [ -z "${PF_WANT[$r]:-}" ] && [ -z "${PF_AHEAD[$r]:-}" ] || continue
+    if eligible "$r" "$z" "$s" && ! prefetched "$r" "$z"; then
+      PF_AHEAD[$r]=$z PF_SCAN=1
+      pf_tick
+    fi
+    break
+  done
+  KEY=$key
+}
+
 pass() {
   LIVE_TRIED=()
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
-  local rid zim t st n i=0 said= top notready= ends wstart= list=()
+  local rid zim t st n i=0 said= top notready= ends wstart= ahead=0 list=()
   local -A tries=() passed=()
   mapfile -t list < <(exec 9>&-; candidates)
-  PF_SCAN=1 PF_WANT=() ends=$PF_ENDS
+  PF_SCAN=1 PF_WANT=() PF_AHEAD=() ends=$PF_ENDS
   while :; do
     if [ "$i" -ge ${#list[@]} ]; then
       # maps waiting for their prefetch ahead: wait for one (or a run) to end, then from the top
@@ -835,8 +864,8 @@ pass() {
     fi
     # one that fetches itself holds the prefetch ahead while it waits (pf_tick)
     [ "$AHEAD" = 1 ] && ! pf_marked "$zim" && PF_WANT[$rid]=$zim
-    # in this order: wait here until there is room for this one
-    n=${#RUN_PID[@]} top=
+    # in this order: wait here until there is room for this one (looking ahead from it)
+    n=${#RUN_PID[@]} top= ahead=$i
     until room_for "$MAPS_DIR/$zim"; do
       [ "$said" = "$rid" ] || { said=$rid; say "$rid: waiting: $WHY"; }
       sleep "${QUEUE_REAP_SECS:-5}" 9>&-; reap
@@ -845,10 +874,11 @@ pass() {
         [ "$IN_PASS" = 1 ] && { top=1; break; }
         n=${#RUN_PID[@]}
       fi
+      look_ahead
     done
     [ -z "$top" ] || { i=0 notready= ends=$PF_ENDS; continue; }      # a run ended: from the top (this map too, if still first)
     start_ship "$rid" "$zim" "$KEY"
-    unset "PF_WANT[$rid]"
+    unset "PF_WANT[$rid]" "PF_AHEAD[$rid]"
     tries[$rid]=$(( ${tries[$rid]:-0} + 1 )) said=
   done
   reap all

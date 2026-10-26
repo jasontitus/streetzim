@@ -603,7 +603,9 @@ replaces them when it ships. The preview's home page is not regenerated.
   most twice in a pass, so retries that keep failing cannot hold up the
   rest (`QUEUE_RETRY_IN_PASS=0`: each map at most once a pass, as the tests
   do with no retry wait). One run at a time while a round driver
-  builds (the disk is saturated), and only
+  builds (the disk is saturated; `QUEUE_ROUND_JOBS` more, each past the first
+  under the memory and disk rules: a swapped base's run redoes only gates
+  and recipes), and only
   with 24 GB of memory available (`QUEUE_MIN_MEM_GB`) and no memory
   pressure; up to 2 (`QUEUE_JOBS`) once none builds, a second one under the
   same memory rule and with room on the disk for its merged files. The round
@@ -621,7 +623,9 @@ replaces them when it ships. The preview's home page is not regenerated.
   `SHIP_PREFETCH_ONLY=1`; log `pack-queue/prefetch-<region>.out`), with the
   memory a second run needs. A map's run starts once its prefetch is done,
   and skips the step; a later map whose prefetch is done goes before one
-  still prefetching. `packs/<base>/prefetched` names the base file (size and
+  still prefetching; while a map waits for room the pass looks one map
+  further ahead per wait, so the maps after it are prefetched meanwhile (one
+  try before the pass reaches them). `packs/<base>/prefetched` names the base file (size and
   mtime) and is written only when every language's dumps and title map are
   in the cache (`prefetch.py` does all of those first and says so; Wikidata
   text left incomplete by throttling, or cut short by the 6-hour limit after

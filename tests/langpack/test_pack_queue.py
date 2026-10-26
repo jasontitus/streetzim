@@ -563,6 +563,23 @@ def test_the_prefetch_ahead_minds_memory_as_a_second_run_does(q: SimpleNamespace
     assert len(starts) == 4 and not [p for p in starts for a, b in runs if a < p < b], (starts, runs)
 
 
+def test_maps_after_one_waiting_for_room_are_prefetched_meanwhile(q: SimpleNamespace) -> None:
+    """beta runs, alpha (prefetched) waits for room: the pass looks ahead,
+    and cont's prefetch runs while alpha waits, not once it starts."""
+    for rid in ("beta", "alpha"):
+        _mark(q, rid)
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_SHIP_SLEEP_FOR="beta:4",
+             FAKE_PREFETCH_SLEEP_FOR="cont:1")
+    assert r.returncode == 0, r.stderr
+    assert [c["ship"] for c in _calls(q, "ship")] == ["beta", "alpha", "cont", "fail"]
+    t = {(k, c[k]): c["t"] for k in ("prefetch", "ship_end") for c in _calls(q, k)}
+    assert t[("prefetch", "cont")] < t[("ship_end", "beta")], t
+    # each map published under its own base's key (looking ahead checks another map meanwhile)
+    for row in (x.split("\t") for x in (q.qd / "published.tsv").read_text().splitlines()):
+        z = q.maps / row[3]
+        assert row[1:3] == [z.read_bytes()[8:24].hex(), hashlib.md5(z.read_bytes()).hexdigest()], row
+
+
 def test_a_restart_counts_the_prefetch_going(q: SimpleNamespace) -> None:
     """The killed queue's prefetch ahead goes on: the restart neither starts
     another for that map nor ships it before it ends."""
@@ -1005,6 +1022,31 @@ def test_one_run_at_a_time_while_the_round_builds(q: SimpleNamespace, tmp_path: 
     assert _overlap(q) is not builds, how
     if builds:
         assert "alpha: waiting: one run at a time while the round builds" in log_text(q), log_text(q)
+
+
+def test_a_map_looked_at_ahead_gets_one_try_and_holds_up_no_other(q: SimpleNamespace) -> None:
+    """beta runs, alpha waits: cont's prefetch, looked at ahead, fails; the
+    pass looks on (fail's prefetch runs meanwhile) and tries cont again only
+    once it reaches it."""
+    for rid in ("beta", "alpha"):
+        _mark(q, rid)
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", FAKE_SHIP_SLEEP_FOR="beta:4",
+             FAKE_PREFETCH_RC="cont:1")
+    assert r.returncode == 0, r.stderr
+    pre = [(c["prefetch"], c["t"]) for c in _calls(q, "prefetch")]
+    t = {(k, c[k]): c["t"] for k in ("ship", "ship_end") for c in _calls(q, k)}
+    assert [p for p, _ in pre].count("cont") == 2, pre
+    assert next(tt for p, tt in pre if p == "fail") < t[("ship_end", "beta")], (pre, t)
+    assert [tt for p, tt in pre if p == "cont"][1] > t[("ship", "alpha")], (pre, t)
+
+
+def test_two_runs_at_a_time_while_the_round_builds_with_queue_round_jobs(q: SimpleNamespace, tmp_path: Path) -> None:
+    lock = tmp_path / "run.lock"
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        r = _run(q, FAKE_SHIP_RC="", FAKE_SHIP_SLEEP="2", QUEUE_JOBS="2", QUEUE_ROUND_JOBS="2", QUEUE_ROUND_LOCKS=str(lock))
+    assert r.returncode == 0, r.stderr
+    assert _overlap(q)
 
 
 def test_while_the_round_builds_the_first_run_waits_for_memory_too(q: SimpleNamespace, tmp_path: Path) -> None:
