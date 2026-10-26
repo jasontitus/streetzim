@@ -352,8 +352,9 @@ def test_a_retry_that_comes_due_goes_before_the_later_maps(q: SimpleNamespace, i
     """A map whose run ended with archive.org's listing pending, or
     published without a language that ran out of time, ships again in the
     same pass once its retry time has come, before the maps after it; a map
-    that shipped while the pass ran waits for the next pass; with
-    QUEUE_RETRY_IN_PASS=0 the retry does too."""
+    uploaded while the pass ran joins it once it goes back to the top, after
+    the maps listed before it; with QUEUE_RETRY_IN_PASS=0 (never back to the
+    top here) the retry and the new map wait for the next pass."""
     env = ({"FAKE_SHIP_RC": "beta:6,0;cont:4;fail:1"} if how == "listing"
            else {"FAKE_SHIP_RC": "cont:4;fail:1", "FAKE_SHIP_RETRY": "beta:es"})
     p = _start(q, **env, QUEUE_RETRY_SECS="2", QUEUE_JOBS="1", FAKE_SHIP_SLEEP_FOR="alpha:4", QUEUE_RETRY_IN_PASS=in_pass)
@@ -362,9 +363,10 @@ def test_a_retry_that_comes_due_goes_before_the_later_maps(q: SimpleNamespace, i
         fh.write(f"gamma\tuploaded\tosm-gamma-2026-10-23.zim\t{_iso(T0 + 400)}\n")
     _wait_or_kill(p)
     got = [c["ship"] for c in _calls(q, "ship")]
-    assert got == (["beta", "alpha", "beta", "cont", "fail"] if in_pass == "1" else ["beta", "alpha", "cont", "fail"]), got
+    assert got == (["beta", "alpha", "beta", "cont", "fail", "gamma"] if in_pass == "1"
+                   else ["beta", "alpha", "cont", "fail"]), got
     want = {"listing": "published" if in_pass == "1" else "pending", "partial": "published-partial"}[how]
-    assert _status(q)["beta"][1] == want and "gamma" not in _status(q)
+    assert _status(q)["beta"][1] == want and ("gamma" in _status(q)) == (in_pass == "1")
 
 
 def test_a_base_listed_during_the_pass_ships_in_it(q: SimpleNamespace) -> None:
@@ -424,6 +426,104 @@ def test_a_map_whose_prefetch_is_done_goes_before_one_still_prefetching(q: Simpl
     assert [c["prefetch"] for c in _calls(q, "prefetch")] == ["beta", "fail"]
     assert [c["ship"] for c in _calls(q, "ship")] == ["alpha", "cont", "beta", "fail"]
     assert "beta: waiting for its prefetch ahead" in log_text(q)
+
+
+def test_a_map_uploaded_while_the_pass_waits_is_taken_in_that_pass(q: SimpleNamespace) -> None:
+    """The pass reads the round's file again each time it goes back to the
+    top: eps, uploaded while beta's long prefetch goes, ships before it ends,
+    and so does alpha's new file, though alpha's first was shipped in this
+    pass (a map is a region and a file) (Hispaniola and Hawaii, swapped and
+    uploaded mid-pass, waited behind maps still prefetching, 2026-10-26)."""
+    for rid in ("alpha", "cont", "fail", "delta"):
+        _mark(q, rid)
+    lpzims.write_base(q.maps / "osm-eps-2026-10-23.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    _mark(q, "eps")
+    lpzims.write_base(q.maps / "osm-alpha-2026-10-25.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    _mark(q, "alpha", "osm-alpha-2026-10-25.zim")
+    p = _start(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_POLL_SECS="1",
+               FAKE_PREFETCH_SLEEP_FOR="beta:12")
+    try:
+        _until(lambda: "beta: waiting for its prefetch ahead" in log_text(q) if (q.qd / "queue.log").exists() else False,
+               "beta waiting for its prefetch")
+        _until(lambda: any(c["ship"] == "alpha" for c in _calls(q, "ship")), "alpha's first run")
+        with open(q.tsv, "a") as fh:
+            fh.write(f"eps\tuploaded\tosm-eps-2026-10-23.zim\t{_iso(T0 + 600)}\n"
+                     f"alpha\tuploaded\tosm-alpha-2026-10-25.zim\t{_iso(T0 + 610)}\n")
+        assert p.wait(timeout=300) == 0
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGTERM)
+    ship = {c["ship"]: c["t"] for c in _calls(q, "ship")}
+    beta_fetched = next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "beta")
+    assert "eps" in ship and ship["eps"] < beta_fetched, (ship, beta_fetched)
+    alpha = [(c["base"].rsplit("/", 1)[-1], c["t"]) for c in _calls(q, "ship") if c["ship"] == "alpha"]
+    assert [b for b, _ in alpha] == ["osm-alpha-2026-10-23.zim", "osm-alpha-2026-10-25.zim"], alpha
+    assert alpha[1][1] < beta_fetched, (alpha, beta_fetched)
+
+
+def test_a_new_file_that_comes_while_the_old_one_ships_follows_it(q: SimpleNamespace) -> None:
+    """alpha's new file is uploaded while alpha's run for the old one goes:
+    not passed over for the rest of the pass, it ships once that run ends,
+    before beta's long prefetch is done."""
+    for rid in ("alpha", "cont", "fail", "delta"):
+        _mark(q, rid)
+    lpzims.write_base(q.maps / "osm-alpha-2026-10-25.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    _mark(q, "alpha", "osm-alpha-2026-10-25.zim")
+    p = _start(q, FAKE_SHIP_RC="", QUEUE_JOBS="2", QUEUE_PREFETCH_AHEAD="1", QUEUE_POLL_SECS="1",
+               QUEUE_RETRY_IN_PASS="1", FAKE_PREFETCH_SLEEP_FOR="beta:20", FAKE_SHIP_SLEEP_FOR="alpha:6")
+    try:
+        _until(lambda: any(c["run_start"] == "alpha" for c in _calls(q, "run_start")), "alpha's run")
+        with open(q.tsv, "a") as fh:
+            fh.write(f"alpha\tuploaded\tosm-alpha-2026-10-25.zim\t{_iso(T0 + 610)}\n")
+        assert p.wait(timeout=300) == 0
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGTERM)
+    alpha = [(c["base"].rsplit("/", 1)[-1], c["t"]) for c in _calls(q, "ship") if c["ship"] == "alpha"]
+    beta_fetched = next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "beta")
+    assert [b for b, _ in alpha] == ["osm-alpha-2026-10-23.zim", "osm-alpha-2026-10-25.zim"], alpha
+    assert alpha[1][1] < beta_fetched, (alpha, beta_fetched)
+
+
+def test_a_long_pass_tries_a_failed_live_step_again(q: SimpleNamespace) -> None:
+    """A pass held open by a long prefetch does its end's chores every
+    QUEUE_PASS_CHORES_SECS: beta, whose pages could not be built in the last
+    pass, goes live while eps still prefetches, not after."""
+    r = _run(q, FAKE_LIVE_BUILD_RC="1", **_live(q))
+    assert (q.qd / "live-pending-beta").read_text().strip() == "1", r.stderr
+    lpzims.write_base(q.maps / "osm-eps-2026-10-23.zim", cfg_extra={"tileLanguages": ["de", "fr"]})
+    with open(q.tsv, "a") as fh:
+        fh.write(f"eps\tuploaded\tosm-eps-2026-10-23.zim\t{_iso(T0 + 600)}\n")
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_POLL_SECS="1",
+             QUEUE_PASS_CHORES_SECS="1", FAKE_PREFETCH_SLEEP_FOR="eps:10", **_live(q))
+    assert r.returncode == 0, r.stderr
+    live = [ln for ln in log_text(q).splitlines() if "beta: live on the site's builder page" in ln]
+    eps_fetched = next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "eps")
+    when = datetime.datetime.strptime(live[-1][:19], "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles")).timestamp()
+    assert live and when < eps_fetched, (live, eps_fetched)
+
+
+def test_a_viewer_swap_takes_its_parents_prefetch_mark(q: SimpleNamespace) -> None:
+    """alpha swapped (osm-alpha-2026-10-24.zim, its .parent.json naming the
+    prefetched osm-alpha-2026-10-23.zim): no prefetch ahead for it, its run
+    finds it marked; beta's sidecar names a parent never prefetched: fetched."""
+    _mark(q, "alpha")
+    for rid in ("alpha", "beta"):
+        new = q.maps / f"osm-{rid}-2026-10-24.zim"
+        shutil.copy(q.maps / f"osm-{rid}-2026-10-23.zim", new)
+        os.utime(new, (T0 + 100, T0 + 100))
+        Path(f"{new}.parent.json").write_text(json.dumps({"parent_file": f"osm-{rid}-2026-10-23.zim",
+                                                          "child_uuid": lpzims.read_uuid(new)}))
+        with open(q.tsv, "a") as fh:
+            fh.write(f"{rid}\tuploaded\tosm-{rid}-2026-10-24.zim\t{_iso(T0 + 700)}\n")
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1")
+    assert r.returncode == 0, r.stderr
+    pre = [(c["prefetch"], c["base"]) for c in _calls(q, "prefetch")]
+    assert ("alpha", "osm-alpha-2026-10-24.zim") not in pre and ("beta", "osm-beta-2026-10-24.zim") in pre, pre
+    run = next(c for c in _calls(q, "ship") if c["ship"] == "alpha")
+    assert run["prefetched"] and run["base"].endswith("osm-alpha-2026-10-24.zim"), run
+    assert "osm-alpha-2026-10-24: its prefetch mark taken from its viewer swap's parent" in log_text(q)
 
 
 def test_a_new_file_of_a_region_is_prefetched_again(q: SimpleNamespace) -> None:

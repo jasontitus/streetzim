@@ -254,7 +254,7 @@ if [ ! -s "$Q/since" ]; then
 fi
 SINCE=$(cat "$Q/since")
 touch "$STATUS" "$DONE"
-declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=() PF_TRIES=() PF_WANT=() PF_AHEAD=()
+declare -A FAILED_NOW=() RUN_PID=() RUN_START=() RUN_ZIM=() RUN_KEY=() RUN_SCHEME=() PF_TRIES=() PF_WANT=() PF_AHEAD=() PF_NOPARENT=()
 ANY_FAILED=0 STOP_SAID= PF_PID= PF_RID= PF_ZIM= PF_START= PF_SCAN= PF_ENDS=0 list=()
 # what a ship_packs.sh run starts from: the login basics, then production's settings
 SHIP_ENV=()
@@ -721,7 +721,16 @@ finish() {  # region
 pf_marked() {  # zim: does packs/<base>/prefetched name this very file? (ship_packs.sh step 2)
   local id
   id=$(stat -L -c '%s %.9Y' "$MAPS_DIR/$1" 2> /dev/null) || return 1
-  [ "$(sed -n 2p "$LANGPACK_WORK/packs/${1%.zim}/prefetched" 2> /dev/null)" = "$id" ]
+  [ "$(sed -n 2p "$LANGPACK_WORK/packs/${1%.zim}/prefetched" 2> /dev/null)" = "$id" ] && return 0
+  # a viewer swap's file takes its parent's mark (ops/langpack/prefetch_mark.py): its Wikipedia
+  # is the parent's, in the cache already (once a pass: a parent without one stays without)
+  [ -e "$MAPS_DIR/$1.parent.json" ] && [ -z "${PF_NOPARENT[$1 $id]:-}" ] || return 1
+  if "$PY" "$ROOT/ops/langpack/prefetch_mark.py" "$MAPS_DIR/$1" "$LANGPACK_WORK/packs" > /dev/null 2>&1 9>&-; then
+    say "${1%.zim}: its prefetch mark taken from its viewer swap's parent (nothing to fetch again)"
+    return 0
+  fi
+  PF_NOPARENT[$1 $id]=1
+  return 1
 }
 pf_ended() {  # zim: is a run's step 2 over for this file? (packs/<base>/prefetch.ended: it takes the lock no more)
   local id
@@ -808,7 +817,7 @@ look_ahead() {
   while [ "$ahead" -lt ${#list[@]} ]; do
     IFS=$'\t' read -r r z tt s <<< "${list[$ahead]}"
     ahead=$(( ahead + 1 ))
-    [ -n "$r" ] && [ -z "${passed[$r]:-}" ] && [ "${tries[$r]:-0}" = 0 ] && [ -z "${RUN_PID[$r]:-}" ] \
+    [ -n "$r" ] && [ -z "${passed[$r $z]:-}" ] && [ "${tries[$r $z]:-0}" = 0 ] && [ -z "${RUN_PID[$r]:-}" ] \
       && [ -z "${PF_WANT[$r]:-}" ] && [ -z "${PF_AHEAD[$r]:-}" ] || continue
     if eligible "$r" "$z" "$s" && ! prefetched "$r" "$z"; then
       PF_AHEAD[$r]=$z PF_SCAN=1
@@ -819,13 +828,24 @@ look_ahead() {
   KEY=$key
 }
 
+# (pass, going back to the top) the round's maps again, with what it uploaded since; a prefetch
+# wanted for a map no longer listed (a newer row not uploaded yet) is wanted no more
+relist() {
+  local e r z
+  local -A have=()
+  mapfile -t list < <(exec 9>&-; candidates)
+  for e in "${list[@]}"; do IFS=$'\t' read -r r z _ <<< "$e"; [ -z "$r" ] || have[$r $z]=1; done
+  for r in "${!PF_WANT[@]}"; do [ -n "${have[$r ${PF_WANT[$r]}]:-}" ] || unset "PF_WANT[$r]"; done
+  for r in "${!PF_AHEAD[@]}"; do [ -n "${have[$r ${PF_AHEAD[$r]}]:-}" ] || unset "PF_AHEAD[$r]"; done
+}
+
 pass() {
   LIVE_TRIED=()
   [ -e "$Q/deploy-pending" ] && { preview_update && deploy || true; }
-  local rid zim t st n i=0 said= top notready= ends wstart= ahead=0 list=()
+  local rid zim t st n i=0 said= top notready= ends wstart= ahead=0 list=() chores=$SECONDS
   local -A tries=() passed=()
   mapfile -t list < <(exec 9>&-; candidates)
-  PF_SCAN=1 PF_WANT=() PF_AHEAD=() ends=$PF_ENDS
+  PF_SCAN=1 PF_WANT=() PF_AHEAD=() PF_NOPARENT=() ends=$PF_ENDS
   while :; do
     if [ "$i" -ge ${#list[@]} ]; then
       # maps waiting for their prefetch ahead: wait for one (or a run) to end, then from the top
@@ -839,22 +859,32 @@ pass() {
         [ ${#RUN_PID[@]} -lt "$n" ] || [ "$PF_ENDS" != "$ends" ] || [ $(( SECONDS - wstart )) -ge "$POLL" ] || continue
       fi
       i=0 notready= ends=$PF_ENDS wstart=
+      relist
+      # a pass held open by prefetches (hours) does what its end does, every QUEUE_PASS_CHORES_SECS:
+      # a region whose going live failed is tried again
+      if [ $(( SECONDS - chores )) -ge "${QUEUE_PASS_CHORES_SECS:-3600}" ]; then
+        chores=$SECONDS LIVE_TRIED=() PF_NOPARENT=()
+        live_all || true
+      fi
       continue
     fi
     IFS=$'\t' read -r rid zim t st <<< "${list[$i]}"
     i=$(( i + 1 ))
     [ -n "$rid" ] || continue
-    # back from the top (header): a map started or passed over in this pass goes again only
-    # for its retry, and is started at most twice in a pass (QUEUE_RETRY_IN_PASS=0: not again)
-    if [ -n "${passed[$rid]:-}" ] || [ "${tries[$rid]:-0}" -gt 0 ]; then
-      [ "$IN_PASS" = 1 ] && [ "${tries[$rid]:-0}" -lt 2 ] || continue
+    # back from the top (header): a map (region and file: a new file of the region is another)
+    # started or passed over in this pass goes again only for its retry, and is started at
+    # most twice in a pass (QUEUE_RETRY_IN_PASS=0: not again)
+    if [ -n "${passed[$rid $zim]:-}" ] || [ "${tries[$rid $zim]:-0}" -gt 0 ]; then
+      [ "$IN_PASS" = 1 ] && [ "${tries[$rid $zim]:-0}" -lt 2 ] || continue
       case "$(awk -F'\t' -v r="$rid" '$1 == r {print $2}' "$STATUS")" in pending|published-partial|waiting-listing) ;; *) continue ;; esac
     fi
     n=${#RUN_PID[@]}
     reap
     stopping && break
-    [ "$IN_PASS" = 1 ] && [ ${#RUN_PID[@]} -lt "$n" ] && [ "$i" -gt 1 ] && { i=0 notready= ends=$PF_ENDS; continue; }   # a run ended: from the top
-    eligible "$rid" "$zim" "$st" || { passed[$rid]=1; continue; }
+    [ "$IN_PASS" = 1 ] && [ ${#RUN_PID[@]} -lt "$n" ] && [ "$i" -gt 1 ] && { i=0 notready= ends=$PF_ENDS; relist; continue; }   # a run ended: from the top
+    # a new file of a region whose run for another goes: again once that run ends
+    [ -n "${RUN_PID[$rid]:-}" ] && [ "${RUN_ZIM[$rid]:-}" != "$zim" ] && { notready=1; continue; }
+    eligible "$rid" "$zim" "$st" || { passed[$rid $zim]=1; continue; }
     if ! prefetched "$rid" "$zim"; then
       [ "${PF_WANT[$rid]:-}" = "$zim" ] || PF_SCAN=1
       notready=1 PF_WANT[$rid]=$zim
@@ -876,10 +906,10 @@ pass() {
       fi
       look_ahead
     done
-    [ -z "$top" ] || { i=0 notready= ends=$PF_ENDS; continue; }      # a run ended: from the top (this map too, if still first)
+    [ -z "$top" ] || { i=0 notready= ends=$PF_ENDS; relist; continue; }   # a run ended: from the top (this map too, if still first)
     start_ship "$rid" "$zim" "$KEY"
     unset "PF_WANT[$rid]" "PF_AHEAD[$rid]"
-    tries[$rid]=$(( ${tries[$rid]:-0} + 1 )) said=
+    tries[$rid $zim]=$(( ${tries[$rid $zim]:-0} + 1 )) said=
   done
   reap all
   live_all || true

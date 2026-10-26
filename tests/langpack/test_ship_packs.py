@@ -786,7 +786,7 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     foreign = old_dir / "osm_testland_wiki-fr_2099-01-01_ffffffff.zim"     # gated, newest, but for another base
     lpzims.write_pack(foreign, "fr", "f" * 32)
     Path(f"{foreign}.gate.json").write_text(json.dumps({"ok": True, "pack_md5": _md5(foreign)}))
-    builds, sends = _lines(ship.logs["build"]), _lines(ship.logs["ia"])
+    builds, sends, fetches = _lines(ship.logs["build"]), _lines(ship.logs["ia"]), _lines(ship.logs["prefetch"])
     r = run(new)
     assert r.returncode == 0, r.stdout[-3000:]
     log = (ship.work / "logs" / f"ship-testland-{new.name[:-4]}.log").read_text()
@@ -796,6 +796,7 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     assert reg["base"]["md5"] == _md5(new) and reg["base"]["file"] == new.name
     if case in ("swapped", "reswapped"):
         assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends   # nothing rebuilt or sent
+        assert _lines(ship.logs["prefetch"]) == fetches and "takes the mark of" in log    # nothing fetched again
         assert f"of {base.name[:-4]} (its viewer-swap parent" in log and "packs: all gated for this base already" in log
         for name in parents:
             assert (new_dir / name).stat().st_ino == (old_dir / name).stat().st_ino     # hard links, not copies

@@ -186,6 +186,11 @@ s = [r for r in rows if isinstance(r, dict) and "failed" in r]
 sys.exit(0 if s and s[-1]["failed"] == [] else 1)
 PY
 }
+# a viewer swap's file takes its parent's mark (ops/langpack/prefetch_mark.py): its Wikipedia is
+# the parent's, in the cache already
+if [ -n "$PACK_LANGS" ] && [ "$(head -n 2 "$PF_MARK" 2> /dev/null)" != "$PF_ID" ] && [ -e "$BASE.parent.json" ]; then
+  "$PY" "$ROOT/ops/langpack/prefetch_mark.py" "$BASE" "$W/packs" --langs "$PACK_LANGS" >> "$LOG" 2>&1 || true
+fi
 if [ -n "$PACK_LANGS" ] && [ "$(head -n 2 "$PF_MARK" 2> /dev/null)" = "$PF_ID" ]; then
   say "prefetch: done already for $PACK_LANGS ($(TZ=America/Los_Angeles date -r "$PF_MARK" '+%F %T %Z'))"
 elif [ -n "$PACK_LANGS" ]; then
