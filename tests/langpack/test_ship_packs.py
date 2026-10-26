@@ -719,6 +719,85 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     assert reg2["base"]["md5"] == _md5(base) != reg1["base"]["md5"]
 
 
+@pytest.mark.parametrize("case", ["swapped", "stale-sidecar", "own-packs"])
+def test_a_viewer_swap_reuses_the_parents_packs(ship: SimpleNamespace, tmp_path: Path, case: str) -> None:
+    """swap_base_viewer.py gives the base a new file name and UUID: its run
+    takes the parent's packs and search packs (hard links; they fit by
+    lineage), builds none and sends none, and publishes recipes for the new
+    base. Not when the sidecar no longer names the base (patched since: the
+    packs are built), nor for languages it has packs of its own for (a base
+    swapped and shipped before: two fitting packs per language would let the
+    gates and the recipes pick different ones)."""
+    from tests.langpack.test_viewer_slots import V2
+    base = tmp_path / "bases-s" / "osm-testland-2026-10-13.zim"
+    base.parent.mkdir()
+    lpzims.write_base(base, slots=lpzims.VIEWER_V1)
+    builder = tmp_path / "builder-s.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+open(os.environ["FAKE_BUILD_LOG"], "a").write(a.lang + "\\n")
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    def listed(b: Path) -> None:
+        (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+            {"files": [{"name": b.name, "size": str(b.stat().st_size), "md5": _md5(b)}]}))
+    def run(b: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", str(SHIP), "testland", str(b)], capture_output=True, text=True,
+                              timeout=900, env={**ship.env, "BUILDER": str(builder)})
+    listed(base)
+    assert run(base).returncode == 0
+    vexp = tmp_path / "viewer-export"                      # a viewer that fits the test slots
+    (vexp / "cloud").mkdir(parents=True)
+    (vexp / "cloud" / "patch_viewer_inplace.py").symlink_to(ROOT / "cloud" / "patch_viewer_inplace.py")
+    (vexp / "resources" / "viewer").mkdir(parents=True)
+    for name, data in V2.items():                         # (a viewer for language packs: WIKI_PACKS)
+        (vexp / "resources" / "viewer" / name).write_bytes(data + (b"<!-- WIKI_PACKS -->" if name == "index.html" else b""))
+    new = base.with_name("osm-testland-2026-10-26.zim")
+    sw = subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "swap_base_viewer.py"), str(base), str(new),
+                         str(vexp), "test", "--allow-full-copy"], capture_output=True, text=True, timeout=600)
+    assert sw.returncode == 0, sw.stdout[-2000:] + sw.stderr[-2000:]
+    assert lpzims.read_uuid(new) != lpzims.read_uuid(base)
+    listed(new)                                         # the round uploaded the swapped base
+    side = new.with_name(new.name + ".parent.json")
+    if case == "stale-sidecar":
+        d = json.loads(side.read_text())
+        side.write_text(json.dumps({**d, "child_md5": "0" * 32}))
+    elif case == "own-packs":                           # shipped once before the sidecar counted
+        side.rename(side.with_name("aside.json"))
+        assert run(new).returncode == 0
+        side.with_name("aside.json").rename(side)
+    old_dir, new_dir = ship.work / "packs" / base.name[:-4], ship.work / "packs" / new.name[:-4]
+    parents = sorted(p.name for p in old_dir.glob("osm_testland_*.zim"))
+    foreign = old_dir / "osm_testland_wiki-fr_2099-01-01_ffffffff.zim"     # gated, newest, but for another base
+    lpzims.write_pack(foreign, "fr", "f" * 32)
+    Path(f"{foreign}.gate.json").write_text(json.dumps({"ok": True, "pack_md5": _md5(foreign)}))
+    builds, sends = _lines(ship.logs["build"]), _lines(ship.logs["ia"])
+    r = run(new)
+    assert r.returncode == 0, r.stdout[-3000:]
+    log = (ship.work / "logs" / f"ship-testland-{new.name[:-4]}.log").read_text()
+    assert not (new_dir / foreign.name).exists()
+    assert parents and any("_search-" in p for p in parents), parents
+    reg = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "region.json").read_text())
+    assert reg["base"]["md5"] == _md5(new) and reg["base"]["file"] == new.name
+    if case == "swapped":
+        assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends   # nothing rebuilt or sent
+        assert f"of {base.name[:-4]} (its viewer-swap parent" in log and "packs: all gated for this base already" in log
+        for name in parents:
+            assert (new_dir / name).stat().st_ino == (old_dir / name).stat().st_ino     # hard links, not copies
+    else:
+        assert not any((new_dir / name).exists() for name in parents), sorted(p.name for p in new_dir.iterdir())
+        assert "viewer-swap parent" not in log
+        if case == "stale-sidecar":
+            assert f"not reused: the packs of {base.name[:-4]}" in log
+            assert len(_lines(ship.logs["build"])) > len(builds)              # built for this base instead
+        else:
+            assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends
+
+
 def test_language_torrents_ship_and_publish(ship: SimpleNamespace, tmp_path: Path) -> None:
     """LANGPACK_WEBSEED set: a webseeded torrent per entry beside the recipes,
     checked by site_check.py, sealed and published with them."""

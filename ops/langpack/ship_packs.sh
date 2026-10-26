@@ -30,7 +30,11 @@
 #      more (pack_queue.sh, which removes the file as it starts a run, waits
 #      for that).
 #   3. build_packs.sh for every pack language without a gated pack for this
-#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done). A
+#      base in $LANGPACK_WORK/packs/<base>/ (a rerun skips the ones done; a
+#      base from a viewer swap, with a <base>.parent.json naming it, first
+#      gets there, as hard links, the parent's packs for the languages it has
+#      none for yet and their search packs: they fit by lineage, so nothing is
+#      built or sent again). A
 #      language whose build ran out of its time (exit 124, build_packs.sh's
 #      .timeout-<L>) and still has no pack is listed in
 #      $LANGPACK_WORK/packs/<base>/retry-langs: the run goes on without it and
@@ -208,6 +212,87 @@ META=$("${LOW[@]}" "$PY" "$TL/region_meta.py" "$BASE" --wiki-src "$WIKI_SRC" --c
   || { say "region_meta.py failed"; exit 1; }
 printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
 say "titles: $(mget titles)"
+
+# A base made from another by a viewer swap (tools/langpack/swap_base_viewer.py; its sidecar
+# <base>.parent.json names the parent's file) first gets, as hard links with their sidecars and
+# gates, the parent's gated packs for the languages it has no fitting pack for yet (the newest
+# name of each), and the parent's search packs built on exactly those packs: only when the
+# sidecar names this base (merge_zim.base_lineage checks its child UUID and MD5) and only packs
+# built for a base of its lineage. They fit it, so nothing is built or sent again.
+reuse_parent_packs() { "$PY" - "$BASE" "$PACKS" "$REGION" "$W/packs" "$TAG" <<'PY'
+import glob, json, os, sys
+sys.path.insert(0, os.environ["LP_ROOT"])
+from tools.langpack.gatelib import pack_gate_ok
+from tools.langpack.merge_zim import base_lineage, open_pack
+from tools.langpack.zimfmt import ZimReader
+base, packs, region, root, tag = sys.argv[1:6]
+try:
+    side = json.load(open(os.path.realpath(base) + ".parent.json"))
+    parent = str(side.get("parent_file") or "")
+    puuid = str(side.get("parent_uuid") or "").replace("-", "").lower()
+except (OSError, ValueError, AttributeError):
+    sys.exit(0)
+ptag = parent[:-4] if parent.endswith(".zim") and "/" not in parent else ""
+src = os.path.join(root, ptag)
+if not ptag or ptag == tag or not os.path.isdir(src):
+    sys.exit(0)
+lineage = base_lineage(base, ZimReader(base).header.uuid)
+if puuid not in lineage:
+    print(f"not reused: the packs of {ptag} (its .parent.json does not name this base)")
+    sys.exit(0)
+
+
+def fit_lang(p):
+    """The pack's language when it passes its gate and was built for this lineage, else None."""
+    try:
+        if pack_gate_ok(p)[0]:
+            pk = open_pack(p)
+            if pk.base_uuid in lineage:
+                return pk.lang
+    except Exception:  # noqa: BLE001 - an unreadable pack does not fit
+        pass
+    return None
+
+
+def link(p):
+    n = 0
+    for x in (p, p + ".json", p + ".gate.json"):
+        d = os.path.join(packs, os.path.basename(x))
+        if os.path.isfile(x) and not os.path.lexists(d):
+            os.link(x, d)
+            n += 1
+    return n
+
+
+wiki = f"osm_{region}_wiki-"
+have = {fit_lang(p) for p in glob.glob(os.path.join(packs, wiki + "*.zim"))} - {None}
+langs, n, searches = [], 0, 0
+for p in sorted(glob.glob(os.path.join(src, wiki + "*.zim")), reverse=True):     # the newest name first
+    L = fit_lang(p)
+    if L and L not in have:
+        n += link(p)
+        have.add(L)
+        langs.append(L)
+for p in sorted(glob.glob(os.path.join(src, f"osm_{region}_search-*.zim"))):
+    try:
+        s = json.load(open(p + ".json"))
+        named = list(s.get("packs") or {})
+        ok = (bool(named) and str(s.get("base_uuid", "")).replace("-", "").lower() in lineage
+              and all("/" not in f and os.path.isfile(os.path.join(packs, f))
+                      and os.path.samefile(os.path.join(packs, f), os.path.join(src, f)) for f in named)
+              and pack_gate_ok(p)[0])
+    except (OSError, ValueError, AttributeError, TypeError):
+        ok = False
+    if ok and (k := link(p)):
+        n += k
+        searches += 1
+if n:
+    print(f"reused {n} pack files of {ptag} (its viewer-swap parent; they fit by lineage): "
+          f"packs {','.join(sorted(langs)) or '-'}, {searches} search packs")
+PY
+}
+REUSED=$(reuse_parent_packs) || say "reusing the parent's packs failed: they are built"
+[ -z "$REUSED" ] || say "$REUSED"
 
 # 3. packs not yet built and gated for this base
 todo_langs() { "$PY" - "$BASE" "$PACKS" "$REGION" "$PACK_LANGS" <<'PY'
