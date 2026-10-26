@@ -933,9 +933,10 @@ def build_page_regions(recipes_dir=None):
     for the builder page (/build/): web/build/recipes/<id>/region.json, as
     ops/langpack/publish_site.sh leaves it; {} when there is none.
 
-    A region is offered only while archive.org's live ZIM is that very file
-    (name and MD5): the builder downloads the base, archive.org's keep-2
-    cleanup deletes older ones, and an in-place re-upload keeps the name.
+    A region is offered only while archive.org serves that very file (name
+    and MD5) as one of the item's two newest ZIMs (builder_link): the
+    builder downloads the base, archive.org's keep-2 cleanup deletes older
+    ones, and an in-place re-upload keeps the name.
     """
     out = {}
     recipes_dir = recipes_dir or build_recipes_dir()
@@ -954,24 +955,58 @@ def build_page_regions(recipes_dir=None):
     return out
 
 
-def builder_link(builder, region_id, zim_filename, zim_md5):
+# A ZIM file name's date (osm-greece-2026-10-15.zim, a same-day re-roll
+# 2026-10-15b), as the live-file pick and cloud/cleanup_old_zims.py read it.
+ZIM_DATE = re.compile(r'-(\d{4}-\d{2}(?:-\d{2})?[a-z]?)\.zim$')
+# The ZIMs an item keeps (cloud/cleanup_old_zims.py --keep 2; a round keeps
+# 3, so 2 is the safe count): an older one is being deleted, though the
+# listing may name it until archive.org's delete task has run.
+BUILDER_KEEP = 2
+
+
+def newest_zims(item_files, keep=BUILDER_KEEP):
+    """The names of the `keep` newest dated ZIMs of an item's listing."""
+    dated = []
+    for f in item_files or []:
+        name = str(f.get("name") or "") if isinstance(f, dict) else ""
+        m = ZIM_DATE.search(name)
+        if m and "history/" not in name:
+            dated.append((m.group(1), name))
+    return {name for _, name in sorted(dated)[-keep:]}
+
+
+def builder_link(builder, region_id, zim_filename, zim_md5, item_files=None):
     """Whether a live card links to the builder page: the region's recipes
-    (build_page_regions) were made from this very ZIM, by name and MD5."""
+    (build_page_regions) were made from this very ZIM, by name and MD5, or
+    from one archive.org still serves and keeps (`item_files`, the item's
+    listing: by name and MD5, one of its two newest ZIMs): a newer upload (a
+    viewer swap, a rebuild) keeps the previous base until keep-2 deletes it,
+    so the region stays on the builder page with its working recipes until
+    ship_packs.sh publishes new ones."""
     b = builder.get(region_id)
-    return bool(b and zim_filename and zim_md5 and b["file"] == zim_filename
-                and b["md5"] == str(zim_md5).lower())
+    if not b or not b["md5"]:
+        return False
+    if zim_filename and zim_md5 and b["file"] == zim_filename and b["md5"] == str(zim_md5).lower():
+        return True
+    return b["file"] in newest_zims(item_files) and any(
+        isinstance(f, dict) and f.get("name") == b["file"] and str(f.get("md5") or "").lower() == b["md5"]
+        for f in item_files or [])
 
 
 # region id -> True when the builder may offer it (filled while the pages are
 # rendered; write_build_index writes the page's region list from it)
 BUILDER_LIVE = {}
+# region id -> the live ZIM, where the builder still offers the one before it
+BUILDER_NEWER = {}
 
 
-def write_build_index(live, recipes_dir=None):
-    """web/build/recipes/index.json: the published regions whose base is
-    archive.org's live ZIM (`live`: {region id: True}), by title. Written at
-    every site build, so a pruned or re-uploaded base leaves the builder
-    page with the next deploy. Returns the region ids listed."""
+def write_build_index(live, recipes_dir=None, newer=None):
+    """web/build/recipes/index.json: the published regions whose base
+    archive.org serves (`live`: {region id: True}; builder_link), by title,
+    each with "newer": the live ZIM where that is a newer one (`newer`) than
+    the recipes' base. Written at every site build, so a pruned or
+    re-uploaded base leaves the builder page with the next deploy. Returns
+    the region ids listed."""
     recipes_dir = recipes_dir or build_recipes_dir()
     if not os.path.isdir(recipes_dir):
         return []
@@ -983,6 +1018,8 @@ def write_build_index(live, recipes_dir=None):
         except (OSError, ValueError):
             continue
         if isinstance(r, dict) and r.get("id") == rid and r.get("menu") and live.get(rid):
+            if (newer or {}).get(rid):
+                r["newer"] = newer[rid]
             regions.append(r)
     regions.sort(key=lambda r: (str(r.get("title", "")).casefold(), r["id"]))
     idx = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
@@ -1142,8 +1179,8 @@ def build_page():
     for lang, _name, sub in LANGUAGES:
         _write_page(archive_items, lang, sub)
     if os.path.isdir(build_recipes_dir()):
-        listed = write_build_index(BUILDER_LIVE)
-        print(f"Builder page lists {len(listed)} regions whose base is live: {listed}")
+        listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER)
+        print(f"Builder page lists {len(listed)} regions whose base archive.org serves: {listed}")
 
 
 def render_lang_picker(lang):
@@ -1319,14 +1356,20 @@ def _write_page(archive_items, lang, sub):
                 torrent_ok=torrent_ok,
                 build_date=zim_build_date(zim_filename, zim_file_meta),
                 preview=preview, lang=lang,
-                build_page=builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"))))
+                build_page=builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
+                                        (details or {}).get("files"))))
             if region["id"] in builder:
-                ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"))
+                ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
+                                  (details or {}).get("files"))
                 BUILDER_LIVE[region["id"]] = BUILDER_LIVE.get(region["id"], False) or ok
                 if not ok:
-                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, the live ZIM is "
-                          f"{zim_filename!r} md5 {(zim_file_meta or {}).get('md5')} — off the builder page "
+                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, which archive.org "
+                          f"no longer serves (live ZIM {zim_filename!r}) — off the builder page "
                           f"(run ops/langpack/ship_packs.sh)")
+                elif builder[region["id"]]["file"] != zim_filename:
+                    BUILDER_NEWER[region["id"]] = zim_filename
+                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]['file']}, still on "
+                          f"archive.org beside the live {zim_filename!r}: kept on the builder page until new ones")
             live_count += 1
         else:
             cards.append(render_upcoming_card(region, lang))

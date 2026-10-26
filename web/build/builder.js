@@ -327,6 +327,11 @@
     const a = document.createElement('a');
     a.href = b.download; a.textContent = b.file; a.rel = 'noopener';
     $('baseInfo').append('Open your copy of ', a, ` (${fmtMB(b.size)}): only Wikipedia is downloaded, and the page checks that it is the right file.`);
+    // A newer map is on the map page (index.json "newer", web/generate.py): these recipes are
+    // for the one before it until ship_packs.sh publishes new ones; a copy of the newer one
+    // is not this file.
+    if (typeof region.newer === 'string' && region.newer)
+      $('baseInfo').append(` This page still builds from that version; the newer ${region.newer} on the map page gets its languages soon.`);
     // The language list as a download page: one link per language. A link
     // opens ?region=&lang=&go=1, which starts at once; clicked here it
     // starts in place.

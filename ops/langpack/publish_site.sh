@@ -12,8 +12,9 @@
 # folder is put back. The recipes are site data, not source (gitignored).
 # Then deploy the site as usual (python3 web/generate.py --deploy): a map
 # card gets its "Build in another language" link, and the region stays on
-# the page, only while archive.org's live ZIM is the recipes' base (name
-# and MD5).
+# the page, only while archive.org serves the recipes' base (name and MD5)
+# as one of the item's two newest ZIMs (a newer upload keeps it on until
+# new recipes are published; index.json names the newer map).
 # Exit: 0 published; 1 refused or failed (nothing changed).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
