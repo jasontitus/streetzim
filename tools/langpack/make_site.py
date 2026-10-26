@@ -32,7 +32,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, blob_of, open_pack, peak_rss_mb  # noqa: E402
+from tools.langpack.merge_zim import KEY_MAPCFG, ZimReader, base_lineage, blob_of, open_pack, peak_rss_mb  # noqa: E402
 from tools.langpack.recipe2 import build_recipe, find_search_pack, menu_packs, search_lang, wanted_packs  # noqa: E402
 from tools.langpack import gatelib  # noqa: E402
 from tools.langpack.gatelib import entry_verdict_ok, pack_gate_ok  # noqa: E402
@@ -107,6 +107,7 @@ def main():
     base_articles = sum(1 for d in zb.iter_dirents()
                         if d.ns == ord("C") and d.path.startswith(b"wiki-article/") and not d.is_redirect)
     avail, refused, newest = {}, [], {}
+    lineage = base_lineage(a.base, zb.header.uuid)
     for f in sorted(os.listdir(a.packs_dir)):
         if f.endswith(".zim") and f.startswith(f"osm_{a.region}_wiki-"):
             fp = os.path.join(a.packs_dir, f)
@@ -115,6 +116,9 @@ def main():
                 refused.append({"pack": f, "why": why})
                 continue
             p = open_pack(fp)
+            if p.base_uuid not in lineage:      # merge_zim refuses it for this base
+                refused.append({"pack": f, "why": f"built for another base ({p.base_uuid[:8]})"})
+                continue
             key = (os.path.getmtime(fp), fp)    # the newest of a language, as the gates take it (recipe2.available_packs)
             if p.lang not in newest or key > newest[p.lang]:
                 avail[p.lang], newest[p.lang] = p, key

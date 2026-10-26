@@ -272,9 +272,12 @@ def plan_inputs(plan: Plan) -> dict[str, str]:
 def available_packs(packs_dir: str, base_path: str, region: str | None) -> dict[str, str]:
     """{lang: file} of the gated Wikipedia packs in packs_dir for this base
     (or region): one per language, the published naming osm_<region>_wiki-<xx>
-    first, then the newest."""
-    from tools.langpack.merge_zim import ZimReader, blob_of, open_pack
-    base_uuid = ZimReader(base_path).header.uuid.hex()
+    first, then the newest; only packs built for this base or a parent it
+    records (merge_zim.base_lineage: merge_zim refuses any other, so a newer
+    pack left for another base would fail every entry)."""
+    from tools.langpack.merge_zim import ZimReader, base_lineage, blob_of, open_pack
+    bu = ZimReader(base_path).header.uuid
+    base_uuid, lineage = bu.hex(), base_lineage(base_path, bu)
     cands: dict[str, list] = {}
     for f in sorted(os.listdir(packs_dir)):
         fp = os.path.join(packs_dir, f)
@@ -288,6 +291,9 @@ def available_packs(packs_dir: str, base_path: str, region: str | None) -> dict[
         pj = json.loads(blob_of(p.z, (67, p.prefix + b"pack.json")) or b"{}")
         same_base = pj.get("base_uuid", "").replace("-", "") == base_uuid
         if not same_base and region and pj.get("region") != region and f"_{region}_" not in f:
+            continue
+        if p.base_uuid not in lineage:
+            print(f"skip {f}: built for another base ({p.base_uuid[:8]})", file=sys.stderr)
             continue
         ok, why = pack_gate_ok(fp)            # review S1: a pack must pass its own gate
         if not ok:
