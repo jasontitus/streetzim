@@ -13,10 +13,11 @@ does: found when one of the first 10 suggestions, and one of the first 25
 full-text results (kiwix-serve's first page), is an entry under ~w/<L>/
 (full text only for a title libzim can index: no folded word over 64
 bytes, FULLTEXT_MAX_WORD). A title the merged file's full text misses where
-the base's own full text already fills that first page with entries whose
-titles hold each of its words ("Vatnajökull": 1,000+ pages of "Vatnajökull
-National Park" in the Iceland base) is set aside and the next pack-only
-title sampled: no file could show the pack article there.
+that first page is all entries whose titles hold each of its words, the
+base's own ("Vatnajökull": 1,000+ pages of "Vatnajökull National Park" in
+the Iceland base) or another pack's (Iberia's French "Rectoria" behind the
+Catalan pack's "Rectoria de ..." articles), is set aside and the next
+pack-only title sampled: no rank could show the pack article there.
 L is the map language, or (an entry whose language has no pack, e.g.
 English on an English base) the first pack in the file.
 
@@ -77,6 +78,21 @@ def base_crowds(b, searcher, title: str) -> bool:
         return len(top) == FULLTEXT_TOP and all(want <= set(WORD.findall(fold(b.get_entry_by_path(p).title)))
                                                 for p in top)
     except Exception:  # noqa: BLE001 - no usable full-text index in the base
+        return False
+
+
+def others_crowd(m, top: list[str], title: str, lang: str) -> bool:
+    """The merged file's own first page for this title (`top`) is all other
+    entries, the base's or another pack's, whose titles hold each of its
+    words."""
+    from tools.langpack.index_pack import fold
+    want = set(WORD.findall(fold(title)))
+    if not want or len(top) < FULLTEXT_TOP:
+        return False
+    try:
+        return all(not p.startswith(f"~w/{lang}/")
+                   and want <= set(WORD.findall(fold(m.get_entry_by_path(p).title))) for p in top)
+    except Exception:  # noqa: BLE001 - an entry it cannot read: not crowded
         return False
 
 
@@ -190,9 +206,9 @@ def main(argv: list[str] | None = None) -> int:
                "fulltext": any(p.startswith(f"~w/{lang}/") for p in ful or []),
                "fulltext_indexable": fulltext_indexable(t),
                "suggest_top": sug[:3], "fulltext_top": (ful or [])[:3]}
-        if (ful is not None and not row["fulltext"] and row["fulltext_indexable"] and bs is not None
-                and base_crowds(b, bs, t)):
-            crowded.append(t)           # missed only where the base itself fills the page
+        if (ful is not None and not row["fulltext"] and row["fulltext_indexable"]
+                and ((bs is not None and base_crowds(b, bs, t)) or others_crowd(m, ful, t, lang))):
+            crowded.append(t)           # missed only where same-named entries fill the page
             continue
         rows.append(row)
     out["crowded"] = crowded

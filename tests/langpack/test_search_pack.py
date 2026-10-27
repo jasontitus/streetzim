@@ -497,3 +497,32 @@ def test_a_title_the_base_crowds_off_full_text_is_not_sampled(tmp_path: Path) ->
     assert rc == 1 and not g["pass"] and g["titles"] == 0 and "crowded off" in g["why"], g
     rc, g = gate(tmp_path / "osm_testland_wiki-de_2026-10-13_b.zim")      # no full-text index: nothing set aside
     assert rc == 1 and g["crowded"] == [] and g["titles"] == 1 and g["fulltext_found"] == 0, g
+
+
+def test_a_title_another_pack_crowds_off_full_text_is_not_sampled(tmp_path: Path) -> None:
+    """Iberia's fr entry: every entry carries the Catalan pack, whose
+    "Rectoria de ..." articles fill full text's first page for the French
+    "Rectoria": set aside as one the base crowds off."""
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+
+    from tests.langpack import lpzims
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base, fulltext=True)
+    de = tmp_path / f"osm_testland_wiki-de_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(de, "de", u, articles=[("Alpha_Stadt", "Alpha Stadt"), ("Omega", "Omega"),
+                                            ("Beta_Gipfel", "Beta Gipfel")])
+    th = tmp_path / f"osm_testland_wiki-th_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(th, "th", u, articles=[(f"Omega_Haus_{i}", f"Omega Haus {i}") for i in range(30)],
+                      bodies={f"Omega_Haus_{i}": "Omega Haus, an Omega house." for i in range(30)})
+    idx = tmp_path / "osm_testland_search-de-th_2026-10-13_x.zim"
+    index_pack.build(str(base), [str(de), str(th)], "de", "testland", str(idx), None, log=lambda m: None)
+    m = tmp_path / "m.zim"
+    r = tool("merge_zim.py", base, de, th, "--index", idx, "-o", m, "--lang", "de", "--region", "testland")
+    assert r.returncode == 0, r.stdout + r.stderr
+    top = list(Searcher(Archive(m)).search(Query().set_query("Omega")).getResults(0, 25))
+    assert len(top) == 25 and not any(p.startswith("~w/de/") for p in top), top      # crowded off by th
+    r = tool("search_gate.py", m, base, "--lang", "de")
+    g = json.loads(r.stdout.strip().splitlines()[-1])
+    assert r.returncode == 0 and g["pass"] and g["crowded"] == ["Omega"], g
+    assert [x["title"] for x in g["rows"]] == ["Alpha Stadt", "Beta Gipfel"], g
