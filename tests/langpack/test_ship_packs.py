@@ -613,7 +613,7 @@ def test_a_failed_upload_sends_nothing_twice(ship: SimpleNamespace) -> None:
 
 
 def test_uploads_hold_the_host_upload_lock(ship: SimpleNamespace) -> None:
-    """Review r3 L-1: uploads wait for the host's upload lock."""
+    """Uploads wait for the packs' upload lock (UPLOAD_LOCK)."""
     import fcntl
     with open(ship.env["UPLOAD_LOCK"], "w") as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)

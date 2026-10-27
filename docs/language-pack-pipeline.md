@@ -519,7 +519,9 @@ it on archive.org) logs each step in PDT to
 5. archive.org: the packs the passing entries use go to
    `streetzim-<REGION>-lang` (made on the first upload: mediatype data,
    collection opensource_media like the bases, licence CC BY-SA 4.0 for
-   Wikipedia's text, title, one language per pack), under the host's upload lock.
+   Wikipedia's text, title, one language per pack), under the packs' upload lock
+   (`/storage/streetzim/.langpack-upload.lock`: one pack at a time, beside the bases' uploads,
+   which hold the host's `.retrofit-upload.lock` through archive.org's listing wait).
    A pack listed with its MD5 is not sent again, and neither is one sent
    before and not listed yet (`$LANGPACK_WORK/uploads/<item>.tsv`; after 72
    hours unlisted the run stops and says so); a name the item holds with

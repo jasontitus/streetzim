@@ -95,8 +95,10 @@
 # core languages, comma-separated; default region_meta.py's), REGION_PACKS_MAX
 # (a continent or multi-country map's most spoken languages every entry
 # carries; default 3; a country map carries all its languages), IA (the
-# archive.org CLI; default venv-linux's ia), UPLOAD_LOCK (the host's upload
-# lock, default /storage/streetzim/.retrofit-upload.lock), SHIP_RESEND_AFTER_H
+# archive.org CLI; default venv-linux's ia), UPLOAD_LOCK (the packs' upload
+# lock, default /storage/streetzim/.langpack-upload.lock: pack uploads take
+# turns among themselves, beside the bases' uploads, which hold the host's
+# .retrofit-upload.lock through archive.org's listing wait too), SHIP_RESEND_AFTER_H
 # (72), SHIP_SKIP_UPLOAD=1 (stop after
 # the gates: a dry run), PACK_DATE (pack file names; default today),
 # GATES_PORT (default a free port), LANGPACK_SCRATCH (the NVMe scratch,
@@ -120,7 +122,7 @@ REGION=${1:?usage: ship_packs.sh REGION BASE.zim}
 BASE=$(readlink -f "${2:?usage: ship_packs.sh REGION BASE.zim}")
 PY=${PYTHON:-python3}
 IA=${IA:-/storage/streetzim/venv-linux/bin/ia}
-UPLOAD_LOCK=${UPLOAD_LOCK:-/storage/streetzim/.retrofit-upload.lock}
+UPLOAD_LOCK=${UPLOAD_LOCK:-/storage/streetzim/.langpack-upload.lock}
 export PYTHONDONTWRITEBYTECODE=1
 case "$REGION" in *[!a-z0-9-]*|"") echo "ship_packs: region id '$REGION': a-z 0-9 - only" >&2; exit 1 ;; esac
 # Light and ultralight maps carry no Wikipedia: no packs for them (the
@@ -548,7 +550,8 @@ if [ ${#SEND[@]} -gt 0 ]; then
   # One pack per `ia upload`, recorded as soon as it is sent: a run that
   # fails part way never sends again what it sent before the failure (one
   # batch call recorded nothing then, so a rerun sent them all again).
-  # Behind the host's upload lock, as every upload (MAINTAINING.md).
+  # Behind the packs' upload lock (UPLOAD_LOCK): one pack upload at a time, beside the
+  # bases', which no longer hold them up through their listing waits.
   for p in "${SEND[@]}"; do
     f=${p##*/}
     ( cd "$PACKS" && flock "$UPLOAD_LOCK" "${LOW[@]}" "$IA" upload "$ITEM" "$f" --retries 5 --checksum \
