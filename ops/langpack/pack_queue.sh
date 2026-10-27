@@ -861,9 +861,10 @@ pass() {
       i=0 notready= ends=$PF_ENDS wstart=
       relist
       # a pass held open by prefetches (hours) does what its end does, every QUEUE_PASS_CHORES_SECS:
-      # a region whose going live failed is tried again
+      # a region whose going live failed is tried again, and a map started twice in it (a listing
+      # still pending) may start again (else it waited for the pass's end, never)
       if [ $(( SECONDS - chores )) -ge "${QUEUE_PASS_CHORES_SECS:-3600}" ]; then
-        chores=$SECONDS LIVE_TRIED=() PF_NOPARENT=()
+        chores=$SECONDS LIVE_TRIED=() PF_NOPARENT=() tries=() passed=()
         live_all || true
       fi
       continue

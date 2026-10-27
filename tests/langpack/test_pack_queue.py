@@ -504,6 +504,23 @@ def test_a_long_pass_tries_a_failed_live_step_again(q: SimpleNamespace) -> None:
     assert live and when < eps_fetched, (live, eps_fetched)
 
 
+def test_a_long_pass_lets_a_map_started_twice_start_again(q: SimpleNamespace) -> None:
+    """alpha's listing stays pending three runs in a row: in a pass held open
+    by beta's long prefetch, the chores every QUEUE_PASS_CHORES_SECS let it
+    start a third time and ship, before beta's prefetch ends (Iberia, NYC
+    Metro, South Korea, Florida, Midwest US waited ten hours, 2026-10-27)."""
+    for rid in ("alpha", "cont", "fail", "delta"):
+        _mark(q, rid)
+    r = _run(q, FAKE_SHIP_RC="alpha:6,6,0", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1", QUEUE_POLL_SECS="1",
+             QUEUE_RETRY_IN_PASS="1", QUEUE_RETRY_SECS="1", QUEUE_PASS_CHORES_SECS="2",
+             FAKE_PREFETCH_SLEEP_FOR="beta:20")
+    assert r.returncode == 0, r.stderr
+    alpha = [(c["rc"], c["t"]) for c in _calls(q, "ship") if c["ship"] == "alpha"]
+    beta_fetched = next(c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "beta")
+    assert [rc for rc, _ in alpha] == [6, 6, 0], alpha
+    assert alpha[-1][1] < beta_fetched, (alpha, beta_fetched)
+
+
 def test_a_viewer_swap_takes_its_parents_prefetch_mark(q: SimpleNamespace) -> None:
     """alpha swapped (osm-alpha-2026-10-24.zim, its .parent.json naming the
     prefetched osm-alpha-2026-10-23.zim): no prefetch ahead for it, its run
