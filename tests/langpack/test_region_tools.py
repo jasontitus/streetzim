@@ -20,16 +20,16 @@ OUTLINE = {"type": "Polygon", "coordinates": [[[19.0, 34.0], [28.0, 34.0], [28.0
 
 def _base(path: Path, places: list[dict], geo: dict, cfg: dict, admin: list[dict] | None = None,
           title: str = "OSM - Testland", search: dict[str, list[dict]] | None = None,
-          raw: tuple[str, ...] = ()) -> Path:
+          raw: tuple[str, ...] = (), index: str = "<html></html>") -> Path:
     """`search`: search-data/<name>.json files, written as the builder does;
-    the names in `raw` stored uncompressed."""
+    the names in `raw` stored uncompressed; `index`: the viewer page."""
     from libzim.writer import Creator
     with Creator(str(path)).config_indexing(False, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", "osm_en_testland"), ("Title", title), ("Language", "eng"),
                      ("Description", "d"), ("Creator", "c"), ("Publisher", "p"), ("Date", "2026-10-13")):
             c.add_metadata(k, v)
-        c.add_item(lpzims._Item("index.html", "Testland", "text/html", "<html></html>", front=True))
+        c.add_item(lpzims._Item("index.html", "Testland", "text/html", index, front=True))
         c.add_item(lpzims._Item("map-config.json", "", "application/json", json.dumps(cfg)))
         c.add_item(lpzims._Item("category-index/place.json", "", "application/json", json.dumps(places)))
         c.add_item(lpzims._Item("category-index/admin.json", "", "application/json", json.dumps(admin or [])))
@@ -233,6 +233,7 @@ def test_region_meta_keeps_a_continents_most_spoken_languages(tmp_path: Path) ->
     assert set(why) == {"xx", "tr", "it"} and why["xx"].startswith("region language with no Wikipedia ZIM")
     assert why["tr"].startswith("region language beyond the 3 most spoken") and why["it"] == why["tr"]
     assert "it" in m["langs"]                                    # still on the menu: a core language
+    assert m["own_entry"] == []                                  # the viewer shows no interface in tr
     r = tool("region_meta.py", b, "--wiki-src", w, "--core", "de", "--region-packs-max", "1", "--region", "europe")
     assert json.loads(r.stdout)["region_langs"] == ["en", "de"] and json.loads(r.stdout)["tier"] == "continent"
 
@@ -259,10 +260,34 @@ def test_the_cap_fails_closed(tmp_path: Path) -> None:
     for extra in (("--region", "not-in-the-registry"), ()):
         m = _meta(b, w, "ja,en", None, *extra)
         assert m["region_langs"] == ["de", "fr", "it"] and m["tier"] is None, (extra, m)
-        assert [d["lang"] for d in m["dropped"]] == ["rm"], m
+        assert [d["lang"] for d in m["dropped"]] == ["rm"] and "rm" not in m["langs"], m
     from tools.langpack.region_meta import registry_tier
     assert (registry_tier("switzerland"), registry_tier("europe"), registry_tier("balkans"),
             registry_tier("switzerland-de"), registry_tier(None)) == ("country", "continent", "multi-country", "country", None)
+
+
+VIEWER_UI = ('<html><script>var SZ_UI_FALLBACK = { rm: \'de\', gsw: \'de\' };</script>'
+             '<script type="application/json" id="sz-i18n">{"k": "", "t": {"de": "", "eu": "", "gl": ""}}</script></html>')
+
+
+def test_a_language_beyond_the_cap_gets_an_entry_of_its_own(tmp_path: Path) -> None:
+    """Iberia: es, pt, ca in every entry; Basque and Galician were dropped,
+    now each has an entry of its own (its pack and the region's, carried by
+    no other entry), where the map's viewer shows its interface in it (a
+    table, or Romansh's fallback to German); Asturian, without one, is
+    dropped still (the UI gate would refuse its entry)."""
+    cfg = {"name": "Iberia", "hasWikiArticles": True, "regionLanguages": ["es", "pt", "ca", "gl", "eu", "ast", "rm"]}
+    b = _base(tmp_path / "b.zim", PLACES, GEO, cfg, index=VIEWER_UI)
+    w = _wiki(tmp_path, ["es", "pt", "ca", "gl", "eu", "ast", "rm", "en", "ja"])
+    m = _meta(b, w, "ja,en", None, "--tier", "multi-country")
+    assert m["region_langs"] == ["es", "pt", "ca"] and m["own_entry"] == ["gl", "eu", "rm"], m
+    assert {"gl", "eu", "rm"} <= set(m["langs"]) and "ast" not in m["langs"], m
+    assert m["pack_langs"] == ["ca", "es", "eu", "gl", "ja", "pt", "rm"], m           # the base has English
+    assert [d["lang"] for d in m["dropped"]] == ["ast"] and "no interface in it" in m["dropped"][0]["why"], m
+    from tools.langpack.recipe2 import menu_packs
+    avail = dict.fromkeys(m["pack_langs"], "")
+    assert sorted(menu_packs(m["region_langs"], None, "eu", avail)) == ["ca", "es", "eu", "pt"]
+    assert "eu" not in menu_packs(m["region_langs"], None, "ja", avail)               # carried by no other
 
 
 def test_a_variant_takes_its_parents_tier(tmp_path: Path) -> None:

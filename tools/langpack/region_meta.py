@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -52,8 +53,12 @@ TITLE_MAX_UTF16 = 30
 # Every menu entry carries a pack for each of the region's languages, so a
 # continent or a multi-country map (Europe lists 38, by speakers) keeps its
 # most spoken few: the first REGION_PACKS_MAX with a Wikipedia ZIM, the
-# base's own not counted. A country map keeps all its languages
-# (Switzerland: de, fr, it, rm in every entry).
+# base's own not counted. The rest with a Wikipedia ZIM get an entry of
+# their own, carried by no other (Iberia: es, pt, ca in every entry; eu and
+# gl entries too), where the base's viewer shows its interface in them (a
+# UI table it carries, or one it falls back to): the UI gate refuses the
+# others. A country map keeps all its languages (Switzerland: de, fr, it,
+# rm in every entry).
 REGION_PACKS_MAX = 3
 # The cap applies to every tier but these (continent, multi-country, and a
 # region cloud/regions.tsv does not know: review S-4, it fails closed).
@@ -149,6 +154,21 @@ def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
     return found
 
 
+def viewer_ui(z: ZimReader) -> set[str]:
+    """The languages the base's viewer shows its interface in: the UI tables
+    its index.html carries (cloud/viewer_slots.py ui_languages) and those
+    falling back to one of them (runtime.js SZ_UI_FALLBACK: rm -> de)."""
+    try:
+        html = (blob_of(z, (ord("C"), b"index.html")) or b"").decode("utf-8", "replace")
+        block = re.search(r'id="sz-i18n">(.*?)</script>', html, re.S)
+        tables = set(json.loads(block.group(1)).get("t") or {}) if block else set()
+        fb = re.search(r"SZ_UI_FALLBACK = \{([^}]*)\}", html)
+        pairs = re.findall(r"(\w+): '(\w+)'", fb.group(1)) if fb else []
+    except (ValueError, AttributeError, TypeError):
+        return set()
+    return tables | {a for a, b in pairs if b in tables}
+
+
 def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_max: int | None = REGION_PACKS_MAX,
          tier: str | None = None, region: str | None = None,
          has: Callable[[str], bool] | None = None) -> dict:
@@ -165,7 +185,9 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
     base_lang = str(cfg.get("language") or "en")
     base_wiki = base_lang if cfg.get("hasWikiArticles") else None
     dropped: list[dict] = []
-    region_langs = []
+    region_langs: list[str] = []
+    own: list[str] = []                 # beyond the cap: an entry of their own
+    ui: set[str] | None = None
     for lg in cfg.get("regionLanguages") or []:
         if not isinstance(lg, str):
             continue
@@ -173,12 +195,17 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
             dropped.append({"lang": lg, "why": "region language with no Wikipedia ZIM in WIKI_SRC"})
         elif region_max is not None and len([x for x in region_langs if x != base_wiki]) >= region_max \
                 and lg != base_wiki:
-            dropped.append({"lang": lg, "why": f"region language beyond the {region_max} most spoken "
-                                               "(every menu entry carries the region's packs)"})
+            ui = viewer_ui(z) if ui is None else ui
+            if lg in ui:
+                own.append(lg)
+            else:
+                dropped.append({"lang": lg, "why": f"region language beyond the {region_max} most spoken "
+                                                   "(every menu entry carries the region's packs), and the "
+                                                   "map's viewer has no interface in it for an entry of its own"})
         else:
             region_langs.append(lg)
     langs = []
-    for lg in list(dict.fromkeys([*core, *region_langs, base_lang])):
+    for lg in list(dict.fromkeys([*core, *region_langs, *own, base_lang])):
         if lg == base_wiki or present(lg):
             langs.append(lg)
         else:
@@ -200,7 +227,7 @@ def meta(base: str, wiki_src: str, core: list[str], cache: Path | None, region_m
         t = label_in(cache, L, qid) or fallback
         titles[L] = t if utf16(t) <= TITLE_MAX_UTF16 else cut16(fallback, TITLE_MAX_UTF16)
     return {"region_title": name, "base_lang": base_lang, "base_wiki": base_wiki,
-            "region_langs": region_langs, "langs": langs, "pack_langs": sorted(need),
+            "region_langs": region_langs, "own_entry": own, "langs": langs, "pack_langs": sorted(need),
             "region_qid": qid, "titles": titles, "dropped": dropped}
 
 
