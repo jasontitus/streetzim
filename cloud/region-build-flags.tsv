@@ -1,0 +1,4 @@
+# Extra create_osm_zim.py flags for one region, read by ops/build-region-fast.sh
+# (a data file: a flag reaches one region without editing the build script).
+# Columns (tab-separated): id, then the flags (space-separated).
+bahrain	--ocr

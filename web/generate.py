@@ -367,6 +367,13 @@ REGIONS = [
         "description": "Iran &mdash; from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad.",
     },
     {
+        "id": "bahrain",
+        "tier": "country",
+        "title": "Bahrain",
+        "zim_file": "osm-bahrain.zim",
+        "description": "Bahrain &mdash; Manama, Muharraq, Riffa, Isa Town, the King Fahd Causeway and the Hawar Islands; search a street or shop sign with a photo.",
+    },
+    {
         "id": "egypt",
         "tier": "country",
         "title": "Egypt",
