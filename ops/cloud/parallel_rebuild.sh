@@ -456,12 +456,15 @@ current_group() {  # the regions of the first group with an eligible region, in 
     eligible "$id" && { echo "$g"; break; }
   done | head -1
 }
-# The next region for slot $1: worker 0 takes the largest (last) eligible
-# region of the current group, the others the smallest (first); a region
-# sharing tiles with a running build is passed over (WAITING_ON).
+# The next region for slot $1, in PICKED: worker 0 takes the largest (last)
+# eligible region of the current group, the others the smallest (first); a
+# region sharing tiles with a running build is passed over (WAITING_ON). One
+# call sets both, in this shell: the region and the waiting list from two
+# calls could disagree (a parent's build ending between them), and the
+# queue then read as done with its variant never built.
 pick_region() {
   local slot=$1 g ids id c skip
-  WAITING_ON=""
+  WAITING_ON=""; PICKED=""
   g=$(current_group); [ -n "$g" ] || return 1
   ids=$(awk -v want="$g" '/^## / {g++; next} /^[[:space:]]*(#|$)/ {next} (g+0) == want {print $1}' "$QUEUE")
   [ "$slot" = 0 ] && [ "$WORKERS" -gt 1 ] && ids=$(echo "$ids" | tac)
@@ -470,7 +473,7 @@ pick_region() {
     skip=""
     for c in $(conflicts_of "$id"); do build_running "$c" && skip=$c; done
     if [ -n "$skip" ]; then WAITING_ON="$WAITING_ON $id(shares tiles with $skip)"; continue; fi
-    echo "$id"; return 0
+    PICKED=$id; return 0
   done
   return 1
 }
@@ -804,8 +807,9 @@ while :; do
   for ((k = 0; k < WORKERS; k++)); do
     [ -z "${S_PID[k]}" ] || continue
     any_free=1
-    nxt=$(pick_region "$k") || nxt=""
-    if [ -z "$nxt" ]; then pick_region "$k" > /dev/null || true; WAITING_ALL="$WAITING_ALL$WAITING_ON"; continue; fi
+    pick_region "$k" || true
+    nxt=$PICKED
+    if [ -z "$nxt" ]; then WAITING_ALL="$WAITING_ALL$WAITING_ON"; continue; fi
     any_cand=1
     if alone_running; then why="a region that runs alone is running"
     elif [[ "$ALONE" == *" $nxt "* ]] && [ "$(running)" -gt 0 ]; then why="$nxt runs alone: draining $(running) build(s)"

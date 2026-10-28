@@ -1180,3 +1180,38 @@ def test_runner_skips_a_region_being_regated_until_the_regate_is_gone(tmp_path):
         _release(holder)
     _run(tmp_path, env, timeout=60)                # that --regate died: built as usual
     assert _starts(tmp_path)[0][0] == "x" and _status(tmp_path, "x") == "uploaded"
+
+
+def test_one_pick_gives_both_the_region_and_what_waits(tmp_path):
+    """The main loop takes the region for a slot and the list of what waits
+    from one pick_region call. From two (one in a subshell for the region,
+    one for WAITING_ON), a parent whose build ended between them gave no
+    region and nothing waiting, and the queue read as done with its variant
+    never built (CI, 2026-10-28)."""
+    text = RUNNER.read_text()
+    i = text.index("pick_region() {")
+    pick = text[i:text.index("\n}\n", i) + 3]
+    i = text.index('    pick_region "$k" || true\n')
+    slot = text[i:text.index("continue; fi\n", i) + len("continue; fi\n")]
+    cnt = tmp_path / "looks"
+    cnt.write_text("0")
+    body = f"""
+QUEUE={tmp_path}/queue; WORKERS=1
+printf '## g\\nv\\n' > "$QUEUE"
+eligible() {{ return 0; }}
+current_group() {{ echo 1; }}
+conflicts_of() {{ echo p; }}
+# The parent is building at the first look and done at every later one.
+build_running() {{ local c; c=$(cat {cnt}); echo $((c + 1)) > {cnt}; [ "$c" -eq 0 ]; }}
+{pick}
+WAITING_ALL=""; nxt=""; k=0
+for _once in 1; do
+{slot}
+done
+echo "nxt=$nxt waiting=$WAITING_ALL"
+"""
+    r = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    out = r.stdout.strip()
+    # Either answer is consistent; nothing picked and nothing waiting is not.
+    assert out in ("nxt=v waiting=", "nxt= waiting= v(shares tiles with p)"), out
