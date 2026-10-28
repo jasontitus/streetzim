@@ -27,6 +27,7 @@
  "about.non_commercial_only": "ngan pikeun pamakéan nonkomérsial",
  "about.non_commercial_short": "nonkomérsial",
  "about.noto_sans": "Noto Sans (labél Arab, Arménia, Géorgia, Ibrani, Laos, jeung Thai, upami aya dina peta)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (maca téks dina poto)",
  "about.open_sans": "Open Sans (glif labél, ngaliwatan openmaptiles/fonts)",
  "about.osm_contributors": "Kontributor OpenStreetMap",
  "about.overture": "Overture Maps Foundation — téma Alamat",
@@ -289,6 +290,11 @@
  "routing.use_gps": "Paké lokasi ayeuna",
  "search.nearby": "di deukeut dieu",
  "search.no_results": "Teu aya hasil",
+ "search.photo": "Paluruh ku poto",
+ "search.photo_failed": "Poto teu tiasa dibaca",
+ "search.photo_lines": "Téks dina poto: toél baris pikeun maluruhna",
+ "search.photo_none": "Teu aya téks dina poto",
+ "search.photo_reading": "Maca poto…",
  "search.placeholder": "Paluruh tempat, jalan, lokasi narik...",
  "search.placeholder_count": {
   "other": "Paluruh {n} tempat..."

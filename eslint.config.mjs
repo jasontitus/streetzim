@@ -1,6 +1,6 @@
 // ESLint flat config for the viewer JavaScript. Run it with
 //   npm run lint:viewer        (tools/lint_viewer.mjs)
-// which lints routing-worker.js and the inline <script> blocks of
+// which lints routing-worker.js, ocr-worker.js and the inline <script> blocks of
 // resources/viewer/index.html and places.html, reporting index.html
 // findings against the part in resources/viewer/src/index/ they come from.
 // Plain `npx eslint resources/viewer/routing-worker.js` works too.
@@ -51,7 +51,8 @@ export default [
     rules: relaxed,
   },
   {
-    files: ["resources/viewer/routing-worker.js"],
+    // The workers. ocr-worker.js also sees the engine it imports (SZOCR).
+    files: ["resources/viewer/routing-worker.js", "resources/viewer/ocr-worker.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",

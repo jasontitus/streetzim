@@ -10,12 +10,17 @@ noticed them.
 
 | Period | What arrived |
 |---|---|
-| October 2026 | Walking and cycling routing with turn restrictions; maps in other languages, German first; border clip; search in Indic, Thai and native scripts; builds that fit a 16 GB container |
+| October 2026 | Search with a photo (offline sign reading, `--ocr`); walking and cycling routing with turn restrictions; maps in other languages, German first; border clip; search in Indic, Thai and native scripts; builds that fit a 16 GB container |
 | Late September 2026 | The `streetzim` command and Docker image for Zimfarm; dark theme, POI icons, right-to-left and more scripts; search for administrative areas; maps open on the region's main city; areas across the antimeridian |
 | Early September 2026 | The 2026-09 data refresh; blank terrain fixed at its root; search and Find sharded for locality; Wikipedia articles with pictures; Preview streams any map into the browser; viewer slots; 11 European regional ZIMs and Light variants |
 | May to August 2026 | Single-pass build; Find as a maps app (chip rail, carousel, place sheet); routing in a Web Worker; bundled Wikipedia articles; about 22 new regions; per-region torrents |
 | April 2026 | Offline routing and Drive mode; Overture addresses and places; the Find page; archive.org, the streetzim.web.app catalog and the /drive PWA; the first published regions; a validator and a browser smoke test |
 | March 2026 | Vector maps in a ZIM; offline search; 3D terrain; satellite imagery; Wikidata popups |
+
+## Late October 2026
+
+### Search
+- **Search with a photo** (`--ocr`, off by default): a camera button in the search box reads the text of a photo (a street sign, a shop front, an advert, a landmark's plate) offline with PaddleOCR models on ONNX Runtime's WebAssembly, in a worker, and searches the map for it with a fuzzy match that survives OCR slips; the lines read are listed under the photo to search for by hand. The builder adds a PP-OCRv6 tiny detector and a recognizer per script the map's names use (PP-OCRv6 small for Latin and CJK; PP-OCRv5 for Korean, Thai, Arabic, Cyrillic, Greek, Devanagari, Tamil, Telugu), pinned in the lock file; Monaco grows from 2.9 to 25.6 MB. Chosen by measurement across 42 languages against Tesseract.js and the other PP-OCR models (docs/ocr.md) (2026-10-28)
 
 ## October 2026 (to 10-14)
 

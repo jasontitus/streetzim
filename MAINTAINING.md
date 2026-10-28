@@ -99,7 +99,7 @@ python -m pytest tests -q          # ~2 min; tests needing big local ZIMs or too
 for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
          tests/search_shards_js.test.mjs tests/zim_reader_js.test.mjs \
          tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
-         tests/viewer_ui_js.test.mjs; do node "$t"; done
+         tests/viewer_ui_js.test.mjs tests/viewer_ocr_js.test.mjs; do node "$t"; done
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds

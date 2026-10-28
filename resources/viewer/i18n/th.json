@@ -27,6 +27,7 @@
  "about.non_commercial_only": "สำหรับการใช้งานที่ไม่ใช่เชิงพาณิชย์เท่านั้น",
  "about.non_commercial_short": "ไม่ใช่เชิงพาณิชย์",
  "about.noto_sans": "Noto Sans (ป้ายชื่อภาษาอาหรับ อาร์เมเนีย จอร์เจีย ฮีบรู ลาว และไทย เมื่อแผนที่มีป้ายชื่อเหล่านี้)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (การอ่านข้อความในรูปภาพ)",
  "about.open_sans": "Open Sans (รูปอักขระของป้ายชื่อ จาก openmaptiles/fonts)",
  "about.osm_contributors": "ผู้มีส่วนร่วม OpenStreetMap",
  "about.overture": "Overture Maps Foundation — ชุดข้อมูลที่อยู่",
@@ -289,6 +290,11 @@
  "routing.use_gps": "ใช้ตำแหน่งปัจจุบัน",
  "search.nearby": "ใกล้เคียง",
  "search.no_results": "ไม่พบผลลัพธ์",
+ "search.photo": "ค้นหาด้วยรูปภาพ",
+ "search.photo_failed": "อ่านรูปภาพไม่ได้",
+ "search.photo_lines": "ข้อความในรูปภาพ: แตะบรรทัดเพื่อค้นหา",
+ "search.photo_none": "ไม่พบข้อความในรูปภาพ",
+ "search.photo_reading": "กำลังอ่านรูปภาพ…",
  "search.placeholder": "ค้นหาสถานที่ ถนน จุดที่น่าสนใจ…",
  "search.placeholder_count": {
   "other": "ค้นหา {n} สถานที่…"

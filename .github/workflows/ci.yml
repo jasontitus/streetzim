@@ -162,7 +162,8 @@ jobs:
                    tests/viewer_ui_js.test.mjs tests/viewer_search_js.test.mjs \
                    tests/viewer_routing_pickers_js.test.mjs \
                    tests/viewer_i18n_js.test.mjs tests/viewer_wikipacks_js.test.mjs \
-                   tests/sw_back_bar_js.test.mjs tests/build_proxy_merged_js.test.mjs; do
+                   tests/sw_back_bar_js.test.mjs tests/build_proxy_merged_js.test.mjs \
+                   tests/viewer_ocr_js.test.mjs; do
             echo "::group::$t"
             node "$t"
             echo "::endgroup::"
@@ -357,7 +358,7 @@ jobs:
           STREETZIM_REQUIRE_SHAPEFILES: "1"
         run: |
           python create_osm_zim.py --area monaco --pbf monaco-latest.osm.pbf --routing \
-            --spatial-chunk-scale 10 --split-find-chips -o osm-monaco-ci.zim
+            --spatial-chunk-scale 10 --split-find-chips --ocr -o osm-monaco-ci.zim
 
       - name: Validate (cloud/validate_zim.py + zimcheck)
         env:
@@ -472,6 +473,16 @@ jobs:
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node tools/tap_label_check.mjs | tee tap-label.txt
           grep -q '^TAP LABEL OK' tap-label.txt
+
+      # Search with a photo (--ocr, docs/ocr.md): photos of street signs
+      # drawn in the page are read by the PaddleOCR models in the ZIM and
+      # the place comes out first. Uses the kiwix-serve of the overlap check.
+      - name: Search with a photo (OCR check)
+        run: |
+          ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/ocr_check.mjs | tee ocr.txt
+          grep -q '^OCR OK' ocr.txt
 
       # The viewer in another UI language (docs/i18n.md). The pseudo-locale
       # (?uilang=qps) brackets every translated string, so chrome text

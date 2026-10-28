@@ -207,6 +207,19 @@
       "title": "No routing",
       "description": "Leave out offline routing (on by default)"
     },
+    "ocr": {
+      "type": "boolean",
+      "required": false,
+      "title": "Search with a photo",
+      "description": "A camera button in the search box that reads a sign's text offline and searches the map for it; adds 20-60 MB of text recognition models (off by default)"
+    },
+    "ocr_scripts": {
+      "type": "string",
+      "required": false,
+      "title": "Photo search scripts",
+      "description": "With --ocr: the scripts to read (ISO 15924 codes, e.g. Latn,Cyrl) instead of those the map's names use",
+      "pattern": "^[A-Za-z]{4}(,[A-Za-z]{4})*$"
+    },
     "max_zoom": {
       "type": "integer",
       "required": false,

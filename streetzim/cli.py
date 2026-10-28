@@ -95,6 +95,12 @@ ZIMFARM: dict[str, dict[str, Any]] = {
     "wikidata": {"title": "Wikidata"},
     "terrain": {"title": "Terrain"},
     "kiwix_poi_pages": {"title": "POIs in Kiwix search"},
+    "ocr": {"title": "Search with a photo",
+            "description": "A camera button in the search box that reads a sign's text "
+                           "offline and searches the map for it; adds 20-60 MB of text "
+                           "recognition models (off by default)"},
+    "ocr_scripts": {"title": "Photo search scripts",
+                    "pattern": r"^[A-Za-z]{4}(,[A-Za-z]{4})*$"},
     "default_view": {"title": "Default view"},
     "output": {"pattern": r"^/output$"},
     "stats_filename": {"pattern": r"^/output/task_progress\.json$"},
@@ -298,6 +304,15 @@ def build_parser() -> argparse.ArgumentParser:
                            "not only "
                            "places, parks, peaks, water and airports. Adds "
                            "about 440 B per POI (+16%% on Luxembourg). Default: off")
+    feat.add_argument("--ocr", action="store_true",
+                      help="Search with a photo: a camera button in the search box "
+                           "reads a street sign or shop front offline (PaddleOCR) "
+                           "and searches the map for it. Adds 20-60 MB of models "
+                           "for the scripts the map's names use (docs/ocr.md). "
+                           "Default: off")
+    feat.add_argument("--ocr-scripts", metavar="LIST",
+                      help="With --ocr: the scripts to read (ISO 15924 codes, e.g. "
+                           "Latn,Cyrl) instead of those the map's names use")
     feat.add_argument("--max-zoom", type=int, choices=range(0, 15), metavar="{0..14}",
                       help="Maximum zoom of the vector tiles. At 13, footways, cycleways "
                            "and other paths, which the tiles carry only from 14, are copied "
@@ -598,6 +613,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             raise ValueError("--zim-builder=manifest requires --xapian=builder or --xapian=none")
         if args.xapian == "builder" and args.zim_builder != "manifest":
             raise ValueError("--xapian=builder requires --zim-builder=manifest")
+        if args.ocr_scripts and not args.ocr:
+            raise ValueError("--ocr-scripts goes with --ocr")
         resolve_languages(args)
         return apply_profile(args, parser)
     except ValueError as e:
@@ -1239,6 +1256,10 @@ def _builder_argv(args: argparse.Namespace, bbox: str, pbf_url: str | None, dl: 
         argv += ["--terrain"]
     if args.kiwix_poi_pages:
         argv += ["--kiwix-poi-pages"]
+    if args.ocr:
+        argv += ["--ocr"]
+        if args.ocr_scripts:
+            argv += ["--ocr-scripts", args.ocr_scripts]
     if args.max_zoom is not None:
         argv += ["--max-zoom", str(args.max_zoom)]
     if not args.fold_paths:

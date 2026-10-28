@@ -29,6 +29,7 @@
  "about.non_commercial_only": "仅限非商业用途",
  "about.non_commercial_short": "非商业",
  "about.noto_sans": "Noto Sans（地图含阿拉伯文、亚美尼亚文、格鲁吉亚文、希伯来文、老挝文和泰文标注时使用）",
+ "about.ocr": "PaddleOCR and ONNX Runtime（识别照片中的文字）",
  "about.open_sans": "Open Sans（标注字形，来自 openmaptiles/fonts）",
  "about.osm_contributors": "OpenStreetMap 贡献者",
  "about.overture": "Overture Maps Foundation — 地址主题",
@@ -291,6 +292,11 @@
  "routing.use_gps": "使用当前位置",
  "search.nearby": "附近",
  "search.no_results": "未找到结果",
+ "search.photo": "用照片搜索",
+ "search.photo_failed": "无法识别照片",
+ "search.photo_lines": "照片中的文字：点按一行即可搜索",
+ "search.photo_none": "照片中未找到文字",
+ "search.photo_reading": "正在识别照片…",
  "search.placeholder": "搜索地点、街道、兴趣点…",
  "search.placeholder_count": {
   "other": "搜索 {n} 个地点…"

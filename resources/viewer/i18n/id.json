@@ -27,6 +27,7 @@
  "about.non_commercial_only": "hanya untuk penggunaan nonkomersial",
  "about.non_commercial_short": "nonkomersial",
  "about.noto_sans": "Noto Sans (label Arab, Armenia, Georgia, Ibrani, Laos, dan Thai, bila ada di peta)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (membaca teks di foto)",
  "about.open_sans": "Open Sans (glif label, melalui openmaptiles/fonts)",
  "about.osm_contributors": "Kontributor OpenStreetMap",
  "about.overture": "Overture Maps Foundation — tema Alamat",
@@ -289,6 +290,11 @@
  "routing.use_gps": "Gunakan lokasi saat ini",
  "search.nearby": "di dekat sini",
  "search.no_results": "Tidak ada hasil",
+ "search.photo": "Telusuri dengan foto",
+ "search.photo_failed": "Foto tidak dapat dibaca",
+ "search.photo_lines": "Teks di foto: ketuk baris untuk menelusurinya",
+ "search.photo_none": "Tidak ada teks di foto",
+ "search.photo_reading": "Membaca foto…",
  "search.placeholder": "Cari tempat, jalan, lokasi menarik...",
  "search.placeholder_count": {
   "other": "Cari di {n} tempat..."

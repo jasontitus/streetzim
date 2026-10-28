@@ -28,6 +28,7 @@
  "about.non_commercial_only": "비상업적 용도로만 사용 가능",
  "about.non_commercial_short": "비상업용",
  "about.noto_sans": "Noto Sans (지도에 아랍·아르메니아·조지아·히브리·라오·태국 문자 표기가 있을 때)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (사진 속 글자 읽기)",
  "about.open_sans": "Open Sans (라벨 글리프, openmaptiles/fonts 제공)",
  "about.osm_contributors": "OpenStreetMap 기여자",
  "about.overture": "Overture Maps Foundation — 주소 테마",
@@ -290,6 +291,11 @@
  "routing.use_gps": "현재 위치 사용",
  "search.nearby": "근처",
  "search.no_results": "검색 결과가 없습니다",
+ "search.photo": "사진으로 검색",
+ "search.photo_failed": "사진을 읽을 수 없습니다",
+ "search.photo_lines": "사진 속 글자: 줄을 탭하면 검색합니다",
+ "search.photo_none": "사진에서 글자를 찾지 못했습니다",
+ "search.photo_reading": "사진을 읽는 중…",
  "search.placeholder": "장소, 도로, 관심 지점 검색...",
  "search.placeholder_count": {
   "other": "장소 {n}곳 검색..."

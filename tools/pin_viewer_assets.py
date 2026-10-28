@@ -7,6 +7,8 @@
     python tools/pin_viewer_assets.py --rtl-text 0.3.0     # vendor the RTL text plugin
     python tools/pin_viewer_assets.py --fonts              # re-pin the glyph ranges
     python tools/pin_viewer_assets.py --prefetch DIR       # fill a cache (Docker image)
+    python tools/pin_viewer_assets.py --ocr                # re-pin the sign reader (--ocr)
+    python tools/pin_viewer_assets.py --prefetch-ocr DIR   # its runtime and models, cached
 
 --maplibre downloads the npm tarball, checks it against the sha512 the npm
 registry publishes for that version, and writes dist/maplibre-gl.js,
@@ -26,6 +28,18 @@ and --fonts prints each setting it resets). A download that is not
 a glyph range (an HTML error page) stops it. Review the diff and commit both. --prefetch downloads every pinned range, checks it, and stores it in
 DIR as the builder's cache (streetzim/viewer_assets.py) expects, so builds
 that use DIR need no network for fonts.
+
+--ocr pins what the builder's --ocr writes into a ZIM (docs/ocr.md):
+the engine (resources/vendor/ocr-engine/ocr-engine.js: ONNX Runtime Web's
+WebAssembly build and the paddleocr inference runtime, from their npm
+tarballs checked against the registry's sha512, bundled by a pinned
+esbuild into one classic script; it needs node and npx), the WebAssembly
+file it runs (pinned by URL and SHA-256, fetched at build time, too big to
+vendor), and the PaddleOCR models named in OCR_MODELS: each model's ONNX
+file pinned by URL at a Hugging Face commit and SHA-256 (fetched at build
+time) and its character dictionary vendored in resources/vendor/ocr-models/
+(it needs PyYAML to read the model's inference.yml). --prefetch-ocr fills a
+cache with the runtime and every model, like --prefetch.
 """
 from __future__ import annotations
 
@@ -34,12 +48,14 @@ import base64
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -112,6 +128,247 @@ DEFAULT_FALLBACK: dict[str, Any] = {
         "Thai": ["0E00-0E7F"],
     },
 }
+
+
+# The sign reader (--ocr, docs/ocr.md). npm packages bundled into
+# ocr-engine.js, and the esbuild that bundles them.
+OCR_NPM = {"onnxruntime-web": "1.31.1", "paddleocr": "1.2.0"}
+OCR_ESBUILD = "0.28.2"
+# The entry esbuild bundles: the names the worker (resources/viewer/ocr-worker.js) uses.
+OCR_ENGINE_ENTRY = """\
+import * as ort from 'onnxruntime-web/wasm';
+import { DetectionService, RecognitionService, getModelPresetOptions,
+  normalizeInputToRgb } from 'paddleocr';
+self.SZOCR = { ort, DetectionService, RecognitionService, getModelPresetOptions,
+  normalizeInputToRgb };
+"""
+OCR_WASM = "ort-wasm-simd-threaded.wasm"
+OCR_LICENCES = {
+    "LICENSE-onnxruntime.txt":
+        "https://raw.githubusercontent.com/microsoft/onnxruntime/v{onnxruntime-web}/LICENSE",
+}
+# paddleocr ships no licence file; its package.json and README say MIT.
+PADDLEOCR_JS_LICENCE = """\
+paddleocr (npm) {version}, https://github.com/x3zvawq/paddleocr.js
+Licensed under the MIT License (package.json "license": "MIT"; the package
+ships no licence file).
+
+MIT License
+
+Copyright (c) x3zvawq
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+OCR_MODELS_LICENCE = "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE"
+HF = "https://huggingface.co"
+# model key -> Hugging Face repository (its inference.onnx and inference.yml),
+# what it is, and, for a recognizer, the scripts (ISO 15924) it reads. One
+# detector; a map gets the recognizers of the scripts its names use
+# (streetzim/ocr.py). Chosen by measurement: docs/ocr.md.
+OCR_MODELS: dict[str, dict[str, Any]] = {
+    # PP-OCRv6 tiny with v5's input size (the longest side at most 960 px,
+    # never enlarged): as accurate as v5's detector or more, in a third of
+    # the bytes, faster and lighter than v6's own 736 px-minimum input.
+    "det": {"repo": "PaddlePaddle/PP-OCRv6_tiny_det_onnx", "kind": "det",
+            "preset": "PP-OCRv6_tiny", "options": {"maxSideLength": 960, "limitType": "max"}},
+    "latin-cjk": {"repo": "PaddlePaddle/PP-OCRv6_small_rec_onnx", "kind": "rec",
+                  "scripts": ["Latn", "Hani", "Hira", "Kana"]},
+    "korean": {"repo": "PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+               "scripts": ["Hang"]},
+    "thai": {"repo": "PaddlePaddle/th_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+             "scripts": ["Thai"]},
+    "arabic": {"repo": "PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+               "scripts": ["Arab"], "reverse": True},
+    "cyrillic": {"repo": "PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+                 "scripts": ["Cyrl"]},
+    "greek": {"repo": "PaddlePaddle/el_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+              "scripts": ["Grek"]},
+    "devanagari": {"repo": "PaddlePaddle/devanagari_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+                   "scripts": ["Deva"]},
+    "tamil": {"repo": "PaddlePaddle/ta_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+              "scripts": ["Taml"]},
+    "telugu": {"repo": "PaddlePaddle/te_PP-OCRv5_mobile_rec_onnx", "kind": "rec",
+               "scripts": ["Telu"]},
+}
+
+
+def _npm_tarball(package: str, version: str) -> tuple[bytes, dict[str, str]]:
+    meta = json.loads(va.fetch(f"{NPM_REGISTRY}/{package}/{version}"))
+    tgz = va.fetch(meta["dist"]["tarball"])
+    check_npm_integrity(tgz, meta["dist"]["integrity"])
+    return tgz, {"version": version, "tarball": meta["dist"]["tarball"],
+                 "integrity": meta["dist"]["integrity"]}
+
+
+def pin_ocr_engine() -> None:
+    """Bundle ocr-engine.js from the pinned npm tarballs and pin the
+    WebAssembly file it loads."""
+    out_dir = va.VENDOR / va.OCR_ENGINE
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sources: dict[str, dict[str, str]] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        wasm = b""
+        for package, version in OCR_NPM.items():
+            tgz, sources[package] = _npm_tarball(package, version)
+            dest = root / "node_modules" / package
+            with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tar:
+                for m in tar.getmembers():
+                    if not m.isfile() or not m.name.startswith("package/"):
+                        continue
+                    f = tar.extractfile(m)
+                    if f is None:
+                        continue
+                    target = dest / m.name[len("package/"):]
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    data = f.read()
+                    target.write_bytes(data)
+                    if package == "onnxruntime-web" and m.name == f"package/dist/{OCR_WASM}":
+                        wasm = data
+        if not wasm:
+            raise SystemExit(f"{OCR_WASM} not in onnxruntime-web {OCR_NPM['onnxruntime-web']}")
+        (root / "entry.js").write_text(OCR_ENGINE_ENTRY, encoding="utf-8")
+        subprocess.run(["npx", "--yes", f"esbuild@{OCR_ESBUILD}", "entry.js", "--bundle",
+                        "--format=iife", "--minify", "--legal-comments=inline",
+                        "--log-level=warning", "--outfile=ocr-engine.js"],
+                       cwd=root, check=True)
+        bundle = (root / "ocr-engine.js").read_bytes()
+    files: dict[str, str] = {}
+
+    def write(fname: str, data: bytes) -> None:
+        (out_dir / fname).write_bytes(data)
+        files[fname] = va.sha256_hex(data)
+        print(f"  {fname}: {len(data):,} bytes, sha256 {files[fname]}")
+
+    write(va.OCR_ENGINE_FILE, bundle)
+    for fname, url in OCR_LICENCES.items():
+        write(fname, va.fetch(url.replace("{onnxruntime-web}", OCR_NPM["onnxruntime-web"])))
+    write("LICENSE-paddleocr.txt",
+          PADDLEOCR_JS_LICENCE.format(version=OCR_NPM["paddleocr"]).encode())
+    # The builder fetches the WebAssembly from the CDN's copy of the same
+    # npm file; pinned here to the tarball's bytes.
+    wasm_url = (f"https://cdn.jsdelivr.net/npm/onnxruntime-web@{OCR_NPM['onnxruntime-web']}"
+                f"/dist/{OCR_WASM}")
+    digest = va.sha256_hex(wasm)
+    if va.sha256_hex(va.fetch(wasm_url)) != digest:
+        raise SystemExit(f"{wasm_url} differs from the npm tarball's {OCR_WASM}")
+    lock = read_lock_or_empty()
+    lock[va.OCR_ENGINE] = {
+        "version": " + ".join(f"{p} {v}" for p, v in OCR_NPM.items()),
+        "licence": "MIT (ONNX Runtime: LICENSE-onnxruntime.txt; paddleocr: "
+                   "LICENSE-paddleocr.txt)",
+        "sources": sources,
+        "esbuild": OCR_ESBUILD,
+        "files": files,
+        "wasm": {"file": OCR_WASM, "url": wasm_url, "sha256": digest, "bytes": len(wasm)},
+    }
+    write_lock(lock)
+    print(f"bundled {va.OCR_ENGINE_FILE} ({lock[va.OCR_ENGINE]['version']}) "
+          f"in {out_dir.relative_to(ROOT)}")
+
+
+def _model_dictionary(yml: bytes) -> list[str]:
+    try:
+        import yaml  # pyright: ignore[reportMissingModuleSource]
+    except ImportError:
+        raise SystemExit("--ocr needs PyYAML to read the models' inference.yml "
+                         "(pip install pyyaml)") from None
+    # BaseLoader: every scalar a string ("1" stays "1", "no" stays "no").
+    cfg = yaml.load(yml.decode("utf-8"), Loader=yaml.BaseLoader)
+    chars: Any = cfg.get("PostProcess", {}).get("character_dict")
+    if not isinstance(chars, list) or not chars:
+        raise SystemExit("inference.yml has no usable PostProcess.character_dict")
+    out = [str(c) for c in cast(list[Any], chars)]
+    if any("\n" in c for c in out):
+        raise SystemExit("inference.yml has a dictionary entry with a newline")
+    return out
+
+
+def pin_ocr_models() -> None:
+    """Pin each model of OCR_MODELS at its repository's current commit."""
+    out_dir = va.VENDOR / va.OCR_MODELS
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, str] = {}
+    models: dict[str, dict[str, Any]] = {}
+    for key, spec in OCR_MODELS.items():
+        info = json.loads(va.fetch(f"{HF}/api/models/{spec['repo']}"))
+        revision = info["sha"]
+        url = f"{HF}/{spec['repo']}/resolve/{revision}/inference.onnx"
+        data = va.fetch(url, timeout=300)
+        entry: dict[str, Any] = dict(spec, revision=revision, url=url,
+                                     sha256=va.sha256_hex(data), bytes=len(data))
+        if spec["kind"] == "rec":
+            yml = va.fetch(f"{HF}/{spec['repo']}/resolve/{revision}/inference.yml")
+            text = "\n".join(_model_dictionary(yml)) + "\n"
+            fname = f"{key}.txt"
+            (out_dir / fname).write_text(text, encoding="utf-8")
+            files[fname] = va.sha256_hex(text.encode("utf-8"))
+            entry["dict"] = fname
+        models[key] = entry
+        print(f"  {key}: {spec['repo']}@{revision[:12]}, {len(data):,} bytes")
+    licence = va.fetch(OCR_MODELS_LICENCE)
+    (out_dir / "LICENSE.txt").write_bytes(licence)
+    files["LICENSE.txt"] = va.sha256_hex(licence)
+    lock = read_lock_or_empty()
+    lock[va.OCR_MODELS] = {
+        "licence": "Apache-2.0 (LICENSE.txt): PaddleOCR models by PaddlePaddle",
+        "models": models,
+        "files": files,
+    }
+    write_lock(lock)
+    print(f"pinned {len(models)} OCR models; dictionaries in {out_dir.relative_to(ROOT)}")
+
+
+def check_ocr(lock: dict[str, Any]) -> str:
+    """The sign reader's vendored files against the lock; '' when not pinned."""
+    if va.OCR_ENGINE not in lock and va.OCR_MODELS not in lock:
+        return ""
+    va.vendored(va.OCR_ENGINE, lock)
+    va.vendored(va.OCR_MODELS, lock)
+    models = lock[va.OCR_MODELS]["models"]
+    if sorted(models) != sorted(OCR_MODELS):
+        raise SystemExit("lock file: the OCR models differ from OCR_MODELS "
+                         "(run tools/pin_viewer_assets.py --ocr)")
+    for key, m in models.items():
+        for k, v in OCR_MODELS[key].items():
+            if m.get(k) != v:
+                raise SystemExit(f"lock file: OCR model {key}: {k} is {m.get(k)!r}, "
+                                 f"OCR_MODELS says {v!r} (run --ocr)")
+        if m["kind"] == "rec" and m.get("dict") not in lock[va.OCR_MODELS]["files"]:
+            raise SystemExit(f"lock file: OCR model {key} has no vendored dictionary")
+    return f"; the sign reader's engine and {len(models)} models"
+
+
+def prefetch_ocr(dest: Path) -> None:
+    lock = va.load_lock()
+    wanted = [(f["url"], f["sha256"]) for f in [lock[va.OCR_ENGINE]["wasm"]]
+              + list(lock[va.OCR_MODELS]["models"].values())]
+    for url, digest in wanted:
+        path = va.cache_path(dest, digest)
+        if path.is_file() and va.sha256_hex(path.read_bytes()) == digest:
+            continue
+        data = va.fetch(url, timeout=300)
+        if va.sha256_hex(data) != digest:
+            raise SystemExit(f"prefetch failed: {url}: sha256 {va.sha256_hex(data)}, "
+                             f"lock file says {digest}")
+        va.store(digest, data, root=dest)
+    print(f"ok: the OCR runtime and {len(wanted) - 1} models in {dest}")
 
 
 def fallback_ranges(fb: dict[str, Any]) -> list[str]:
@@ -322,9 +579,10 @@ def check() -> None:
            (len(fr.sha256) != 64 or any(c not in "0123456789abcdef" for c in fr.sha256))]
     if bad:
         raise SystemExit(f"lock file: malformed sha256 for {bad[0].stack}/{bad[0].range_key}")
+    ocr = check_ocr(lock)
     print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} and "
           f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock file; "
-          f"{len(ranges) - fb_count} glyph ranges and {fb_count} fallback ranges pinned")
+          f"{len(ranges) - fb_count} glyph ranges and {fb_count} fallback ranges pinned{ocr}")
 
 
 def main() -> int:
@@ -337,6 +595,10 @@ def main() -> int:
     g.add_argument("--fonts", action="store_true", help="re-pin every glyph range from the CDN")
     g.add_argument("--prefetch", metavar="DIR", type=Path,
                    help="download the pinned glyph ranges into this cache directory")
+    g.add_argument("--ocr", action="store_true",
+                   help="re-pin the sign reader: bundle its engine, pin its models")
+    g.add_argument("--prefetch-ocr", metavar="DIR", type=Path,
+                   help="download the sign reader's runtime and models into this cache directory")
     ap.add_argument("--keep-lock", action="store_true",
                     help="with --fonts: keep the lock file's font settings (URLs, "
                          "fontstacks, scripts) instead of this tool's defaults")
@@ -352,6 +614,11 @@ def main() -> int:
             pin_npm(va.RTL_TEXT_PLUGIN, args.rtl_text)
         elif args.fonts:
             pin_fonts(keep_lock=args.keep_lock)
+        elif args.ocr:
+            pin_ocr_engine()
+            pin_ocr_models()
+        elif args.prefetch_ocr:
+            prefetch_ocr(args.prefetch_ocr)
         else:
             prefetch(args.prefetch)
     except va.IntegrityError as e:

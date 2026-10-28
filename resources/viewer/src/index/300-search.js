@@ -235,6 +235,118 @@ function _szTextScore(item, q, words, norm, visitor) {
   return best;
 }
 
+// BEGIN sign-match
+// The sign reader (305-ocr-search.js) searches for what a photo's text
+// lines say. OCR drops or confuses letters (a Vietnamese tone-stacked
+// vowel, an underdot, "Ƙ" read as "K"), so a record matches when one of
+// its names is within a few edits of part of a line, not when a line
+// contains it exactly. Letters that only differ by code point (Arabic and
+// Persian yeh and kaf) or by a hook are folded alike first.
+var SZ_SIGN_VARIANTS = { 'ي': 'ی', 'ى': 'ی', 'ك': 'ک', 'ڪ': 'ک', 'ہ': 'ه', 'ە': 'ه',
+                         'ۀ': 'ه', 'ɓ': 'b', 'ɗ': 'd', 'ƙ': 'k', 'ƴ': 'y', 'ı': 'i',
+                         'ə': 'e', 'ŋ': 'n', 'ɛ': 'e', 'ɔ': 'o' };
+var SZ_SIGN_MIN = 0.75;   // similarity a name needs (one wrong letter in four)
+
+// A name or line as the matcher compares it: folded as the search folds,
+// variants alike, letters, marks and digits only (no spaces: OCR splits
+// and joins words freely).
+function _szSignText(s, norm) {
+  var t = norm(String(s == null ? '' : s));
+  var out = '';
+  for (var i = 0; i < t.length; i++) {
+    var c = t[i];
+    out += Object.prototype.hasOwnProperty.call(SZ_SIGN_VARIANTS, c) ? SZ_SIGN_VARIANTS[c] : c;
+  }
+  return out.replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
+}
+
+// Fewest edits turning `p` into some part of `t` (free start and end in t).
+function _szEditsWithin(p, t) {
+  var prev = new Array(t.length + 1).fill(0), cur = new Array(t.length + 1);
+  for (var i = 1; i <= p.length; i++) {
+    cur[0] = i;
+    for (var j = 1; j <= t.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (p[i - 1] === t[j - 1] ? 0 : 1));
+    }
+    var tmp = prev; prev = cur; cur = tmp;
+  }
+  var best = Infinity;
+  for (var k = 0; k <= t.length; k++) if (prev[k] < best) best = prev[k];
+  return best;
+}
+
+function _szBigrams(s) {
+  var out = {};
+  for (var i = 0; i + 1 < s.length; i++) out[s.substr(i, 2)] = 1;
+  return out;
+}
+
+// Similarity (0..1) of one name to one line, both _szSignText'ed, with the
+// line's bigrams: 1 less the edits that find the name in the line, per
+// letter of the name -- 1 when the line holds it exactly.
+function _szSignSimilarity(name, line, lineBigrams) {
+  if (name.length < 2 || line.length < 2) return 0;
+  // Cheap filter first: most records share no letter pair with the line.
+  var shared = 0, pairs = name.length - 1;
+  for (var i = 0; i + 1 < name.length; i++) if (lineBigrams[name.substr(i, 2)]) shared++;
+  if (shared === 0 || (pairs >= 3 && shared / pairs < 0.3)) return 0;
+  // Numbers are read exactly, whole, or not at all: "Road 717" and
+  // "Road 7" are not "Road 719".
+  var nums = name.match(/\p{Nd}+/gu);
+  if (nums) {
+    var lineNums = line.match(/\p{Nd}+/gu) || [];
+    for (var n = 0; n < nums.length; n++) if (lineNums.indexOf(nums[n]) < 0) return 0;
+  }
+  var d = _szEditsWithin(name, line);
+  // Short names must be read exactly: "Rue" is in every sign.
+  if (name.length <= 3 && d > 0) return 0;
+  return Math.max(0, 1 - d / name.length);
+}
+
+// A record's best match among the lines ([{text, bigrams, weight}]), over
+// every name it has (_szSearchForms): {sim, weight} of the line where
+// similarity times the line's weight (its prominence on the sign) is
+// highest among those at least SZ_SIGN_MIN similar, or null.
+function _szSignScore(rec, lines, norm) {
+  var forms = _szSearchForms(rec, norm);
+  var best = null;
+  for (var f = 0; f < forms.length; f++) {
+    var name = _szSignText(forms[f], function (x) { return x; });
+    for (var l = 0; l < lines.length; l++) {
+      var s = _szSignSimilarity(name, lines[l].text, lines[l].bigrams);
+      var w = lines[l].weight || 1;
+      if (s >= SZ_SIGN_MIN && (!best || s * w > best.sim * best.weight)) best = { sim: s, weight: w };
+    }
+  }
+  return best;
+}
+
+// The lines worth searching for (strings, or {text, weight}: weight 0..1,
+// how prominent the line is on the sign), best first: _szSignText'ed, at
+// least two letters, no repeats, at most `max`.
+// A right-to-left line is also tried with its words the other way round:
+// a recognizer may give them in visual order.
+var SZ_SIGN_RTL_TEXT = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+function _szSignLines(texts, norm, max) {
+  var out = [], seen = {};
+  function add(raw, weight) {
+    var t = _szSignText(raw, norm);
+    if (t.length < 2 || seen[t]) return;
+    seen[t] = 1;
+    out.push({ raw: String(raw), text: t, bigrams: _szBigrams(t), weight: weight });
+  }
+  for (var i = 0; i < texts.length; i++) {
+    var raw = texts[i] && typeof texts[i] === 'object' ? texts[i].text : texts[i];
+    var w = texts[i] && typeof texts[i] === 'object' && texts[i].weight > 0 ? Math.min(1, texts[i].weight) : 1;
+    add(raw, w);
+    var words = String(raw).trim().split(/\s+/);
+    if (words.length > 1 && SZ_SIGN_RTL_TEXT.test(raw)) add(words.reverse().join(' '), w);
+  }
+  out.sort(function (a, b) { return b.weight - a.weight || b.text.length - a.text.length; });
+  return out.slice(0, max || 8);
+}
+// END sign-match
+
 // Where a pick of an admin area goes: its box when it has a sane one, else
 // its point at a zoom for its level.
 function _szAdminCamera(item) {
@@ -811,7 +923,8 @@ var SEARCH_SHARDS = (function () {
   // Build-side fix is queued: prefix-based recursive split (use the
   // next character of the most common word, not FNV hash) would let
   // "san" target a single sub-chunk instead of all 256.
-  function streamFilterChunks(prefixes, query) {
+  // `accept` (optional) replaces the name test: the sign reader's fuzzy one.
+  function streamFilterChunks(prefixes, query, accept) {
     if (!prefixes || !prefixes.length) return Promise.resolve([]);
     var qNorm = normalizeText(query || '');
     // Skip address records unless the query contains a digit. Each
@@ -850,7 +963,7 @@ var SEARCH_SHARDS = (function () {
                   var name = rec && rec.n;
                   if (!name) continue;
                   if (!includeAddrs && rec.t === 'addr') continue;
-                  if (qNorm && !_szFormsContain(rec, qNorm, normalizeText)) continue;
+                  if (accept ? !accept(rec) : (qNorm && !_szFormsContain(rec, qNorm, normalizeText))) continue;
                   matches.push(rec);
                   if (matches.length >= MAX_RESULTS) break;
                 }
@@ -1036,7 +1149,8 @@ var SEARCH_SHARDS = (function () {
     return prefixes;
   }
 
-  function scoreResults(entries, query) {
+  // `textScoreOf` (optional) replaces _szTextScore: the sign reader's.
+  function scoreResults(entries, query, textScoreOf) {
     var q = normalizeText(query);
     var words = q.split(/\s+/).filter(function(w) { return w; });
     var matches = [];
@@ -1057,7 +1171,7 @@ var SEARCH_SHARDS = (function () {
       if (item.t !== 'admin' && adminKeys[dedupKey]) continue;
       seenKeys[dedupKey] = true;
 
-      var textScore = _szTextScore(item, q, words, normalizeText);
+      var textScore = textScoreOf ? textScoreOf(item) : _szTextScore(item, q, words, normalizeText);
       if (textScore < 0) continue;
 
       // Proximity is the PRIMARY signal — multiply text score by proximity factor
@@ -1408,6 +1522,59 @@ var SEARCH_SHARDS = (function () {
   // Also stash once at load — covers the case where the user opens
   // the find page without ever moving the map.
   map.once('idle', __stashViewport);
+
+  // The sign reader's search (305-ocr-search.js): the places one of whose
+  // names is (nearly) on one of a photo's text lines. Reads the leaves for
+  // each line word's first two letters -- a later OCR slip must not pick
+  // another leaf -- and keeps the records _szSignScore finds similar
+  // enough, ranked by similarity, type and proximity like a typed search.
+  // Shows them in the results list; resolves to the matches.
+  map._searchSign = function(texts) {
+    if (!manifest) return Promise.resolve([]);
+    var lines = _szSignLines(texts || [], normalizeText, 12);
+    if (!lines.length) { renderResults([]); return Promise.resolve([]); }
+    var keys = [], seenKey = {};
+    for (var i = 0; i < lines.length; i++) {
+      var ws = SEARCH_SHARDS.words(normalizeText(lines[i].raw), manifest);
+      ws.push(lines[i].text);
+      for (var j = 0; j < ws.length; j++) {
+        var k = Array.from(ws[j]).slice(0, 2).join('');
+        if (Array.from(k).length < 2 || seenKey[k]) continue;
+        seenKey[k] = 1;
+        keys.push(k);
+      }
+    }
+    var prefixes = [], seenLeaf = {};
+    keys.slice(0, 16).forEach(function(k) {
+      getPrefixes(k).forEach(function(p) {
+        if (!seenLeaf[p]) { seenLeaf[p] = 1; prefixes.push(p); }
+      });
+    });
+    var hasDigits = lines.some(function(l) { return /\d/.test(l.text); });
+    var seq = ++searchSeq;
+    var scores = new Map();
+    function accept(rec) {
+      if (rec.t === 'addr' && !hasDigits) return false;
+      var sc = _szSignScore(rec, lines, normalizeText);
+      if (!sc) return false;
+      scores.set(rec, sc);
+      return true;
+    }
+    return streamFilterChunks(prefixes, '', accept).then(function(found) {
+      var scored = scoreResults(found, '', function(item) {
+        var sc = scores.get(item) || { sim: 0, weight: 0 };
+        // Similarity first, steeply: proximity multiplies by up to 10, and
+        // an on-screen near miss (0.76) must not beat an exact name farther
+        // away, while a close one (0.85) may. The sign's big text before
+        // its small print (the town under a street name); the type breaks
+        // ties. No admin-level bonus: a country named in small print is
+        // not what the photo is of.
+        return 400 * Math.pow(sc.sim, 10) * sc.weight + (SZ_TYPE_BONUS[item.t] || 0);
+      });
+      if (seq === searchSeq) renderResults(scored);
+      return scored;
+    });
+  };
 
   // Shared search API — used by routing panel's typeahead inputs so we
   // don't duplicate the manifest/chunk/scoring infrastructure. Returns

@@ -35,6 +35,7 @@ turns off everything below that says "full".
 | Wikidata place details | on with full | `--wikidata` / `--no-wikidata` (queries Wikidata) |
 | Terrain (hillshade and 3D) | on with full, from just below the lowest zoom the viewer can show to z12 | `--terrain` / `--no-terrain` (downloads Copernicus DEM tiles; [cost](#terrain-cost)) |
 | POIs in Kiwix's own search | on with full (without it, Kiwix's full-text search covers places, parks, peaks, water, airports and administrative areas) | `--kiwix-poi-pages` / `--kiwix-poi-pages=off` ([below](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
+| Search with a photo (offline sign reading) | **off**; opt-in | `--ocr` (adds 20-60 MB of PaddleOCR models, pinned and fetched from Hugging Face; [ocr.md](ocr.md)); `--ocr-scripts` chooses the scripts |
 | Satellite imagery | **off**; opt-in | `--satellite`: EOX Sentinel-2 cloudless 2016, **CC BY 4.0**. The 2021 mosaic, **CC BY-NC-SA 4.0 (non-commercial)**, only with `--satellite-source s2cloudless-2021 --satellite-accept-noncommercial`, as a variant labelled restricted ([below](#satellite-imagery)) |
 
 The area is exactly one of `--area` (a preset), `--include-poly` (a `.poly`
@@ -747,6 +748,7 @@ directly. "streetzim" below is `streetzim/cli.py` and
 | Satellite imagery (`--satellite`) | yes (the 2021 mosaic), except `satellite=no` variants | opt-in, labelled ([Satellite imagery](#satellite-imagery)) | off, in no profile | 2016 mosaic (the default source): CC BY 4.0; 2021 mosaic: CC BY-NC-SA 4.0, non-commercial | EOX Sentinel-2 cloudless | yes, about 15 s for Monaco |
 | Multilingual labels and search: `name:XX` for 21 languages plus the region's own, `ln` search names, `tileLanguages`/`regionLanguages` (`--tile-languages`, `--region-languages`) | yes (tiles from `ops/region-ml-tiles.py`, `STREETZIM_ML_TILES=1`) | **was missing; now `--multilingual`, `--region-languages`** ([above](#multilingual-maps---multilingual)) | off | ODbL | the extract | yes |
 | Every named POI in Kiwix's own search (`--kiwix-poi-pages`) | no | yes | full: on | ODbL | the extract | yes (+12 to 28% ZIM size, [above](#pois-in-kiwixs-own-search---kiwix-poi-pages)) |
+| Search with a photo (`--ocr`) | no (new) | yes | off, in no profile | Apache-2.0 (PaddleOCR models), MIT (ONNX Runtime Web, paddleocr) | huggingface.co, cdn.jsdelivr.net (pinned by sha256) | yes (Monaco 2.9 → 25.6 MB) |
 | 3D buildings | no (the viewer has no building extrusion; "3D" is terrain) | no | - | - | - | - |
 | Fonts: Open Sans, Noto Sans for Arabic, Hebrew, Armenian, Georgian, Lao, Thai; RTL shaping | yes | yes | on | Apache 2.0, OFL 1.1, BSD-2-Clause (RTL plugin) | glyphs pinned by sha256; in the Docker image, fetched otherwise | yes |
 | Dark map style (Auto follows the system; in-map Auto/Light/Dark switch under Home, kept per browser; `?theme=` overrides), POI icons (Maki) | yes | yes | on | CC0 (Maki) | inlined in the viewer | yes |

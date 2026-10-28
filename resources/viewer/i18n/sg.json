@@ -27,6 +27,7 @@
  "about.non_commercial_only": "gï tî kua sô ayeke tî büze pëpe",
  "about.non_commercial_short": "tî büze pëpe",
  "about.noto_sans": "Noto Sans (âsüngö tî Arabe, tî Arménie, tî Géorgie, tî Hébreu, tî Lao na tî Thaï, töngana kârâte ayeke na ni)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (diko süngö na yâ ti afoto)",
  "about.open_sans": "Open Sans (âfä tî süngö, na lêgë tî openmaptiles/fonts)",
  "about.osm_contributors": "Âzo sô amû mabôko na OpenStreetMap",
  "about.overture": "Overture Maps Foundation — tënë tî âadrêse",
@@ -289,6 +290,11 @@
  "routing.use_gps": "Sâra kua na ndo sô mo yeke dä",
  "search.nearby": "ndurü",
  "search.no_results": "A wara yê pëpe",
+ "search.photo": "Gi na foto",
+ "search.photo_failed": "A lingbi ti diko foto ni pëpe",
+ "search.photo_lines": "Süngö na yâ ti foto: ndû mbeni linye ti gi ni",
+ "search.photo_none": "A wara mbeni süngö na yâ ti foto ni pëpe",
+ "search.photo_reading": "A yeke diko foto ni…",
  "search.placeholder": "Gi ândo, âlêgë, ândo tî bängö...",
  "search.placeholder_count": {
   "other": "Gi na yâ tî ndo {n}..."

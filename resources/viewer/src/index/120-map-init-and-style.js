@@ -669,14 +669,16 @@ if (!window.__szUnsupported) fetchConfig(1)
      ['attr-terrain-section', config.hasTerrain],
      ['attr-wiki-section', config.hasWikidata || config.hasWikiArticles
                            || _wikiPacksFromConfig(config).length],
-     ['attr-rtl-section', config.rtlTextPlugin]
+     ['attr-rtl-section', config.rtlTextPlugin],
+     ['attr-ocr-section', config.ocr]
     ].forEach(function (s) {
       var el = document.getElementById(s[0]);
       if (el && s[1]) el.style.display = '';
     });
 
-    // Initialize search
+    // Initialize search, and search with a photo when the ZIM can read one
     initSearch(map);
+    initSignSearch(map, config);
 
     // Initialize Wikidata info popups
     initWikidataPopups(map, config);

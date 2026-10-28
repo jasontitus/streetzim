@@ -1076,8 +1076,11 @@ def _create_zim(
     metadata=None,
     illustration=None,
     kiwix_poi_pages=False,
+    ocr=None,
 ):
     """Create a ZIM file containing the map viewer and all tiles.
+
+    ``ocr``: a streetzim.ocr.Plan, the sign reader's models (--ocr), or None.
 
     ``xapian_mode``:
       ``"libzim"`` — emit search/<slug>.html stubs and let libzim's
@@ -1254,6 +1257,8 @@ def _create_zim(
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
                     name=name)
+        if ocr is not None:
+            _add_ocr(creator, MapItem, plan=ocr)
         _add_vector_tiles(creator, MapItem, output_path=output_path, tiles=tiles,
                           mbtiles_path=mbtiles_path, tile_count=tile_count,
                           bbox=bbox, zim_builder=zim_builder, max_zoom=max_zoom,
@@ -1286,7 +1291,7 @@ def _create_zim(
         # OSM's wikipedia=/wikidata= tags (ODbL), not Wikipedia content.
         has_articles = bool(_bundled_set)
         _add_map_config(creator, MapItem, map_config=map_config,
-                        has_wiki_articles=has_articles,
+                        has_wiki_articles=has_articles, has_ocr=ocr is not None,
                         about=_about_fields(name=name, description=description,
                                             metadata=metadata))
         _add_metadata(creator, name=name, description=description,
@@ -1661,11 +1666,25 @@ def _about_fields(*, name, description, metadata=None):
     }
 
 
-def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=None):
+def _add_ocr(creator, MapItem, *, plan):
+    """The sign reader: its worker, engine, runtime, the plan's models and
+    their manifest (streetzim/ocr.py; docs/ocr.md)."""
+    from streetzim import ocr as _ocr
+    total = 0
+    for path, title, mimetype, content in _ocr.entries(plan):
+        creator.add_item(MapItem(path, title, mimetype, content))
+        total += len(content)
+    print(f"  Added the sign reader: {', '.join((plan.detector, *plan.recognizers))} "
+          f"({total / 1e6:.1f} MB)")
+
+
+def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=None,
+                    has_ocr=False):
     """map-config.json, with hasWikiArticles (true when articles were stored;
     false when none were, so the viewer does not ask for a
     wiki-geo-index.json the ZIM lacks — a ZIM from before the flag has
-    neither and is asked as before) and the About fields."""
+    neither and is asked as before), the About fields, and ``ocr``, the
+    sign reader's manifest, when _add_ocr wrote one."""
     map_config = dict(map_config)
     for k, v in (about or {}).items():
         if v:
@@ -1673,6 +1692,9 @@ def _add_map_config(creator, MapItem, *, map_config, has_wiki_articles, about=No
     # _add_viewer wrote the file (or stopped the build).
     map_config["rtlTextPlugin"] = RTL_TEXT_PLUGIN_ENTRY
     map_config["hasWikiArticles"] = bool(has_wiki_articles)
+    if has_ocr:
+        from streetzim.ocr import MANIFEST_ENTRY
+        map_config["ocr"] = MANIFEST_ENTRY
     config_json = json.dumps(map_config, indent=2)
     creator.add_item(MapItem(
         "map-config.json", "Map Config", "application/json",

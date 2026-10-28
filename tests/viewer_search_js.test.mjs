@@ -127,7 +127,8 @@ ok('selectResult and applyHash use the box', () => {
   assert.match(search, /adminCam = \(item && item\.t === 'admin'\) \? _szAdminCamera\(item\)/);
   assert.match(search, /_szFitAdminBox\(map, adminCam\.bounds, _topChrome, SZ_ADMIN_ZOOM\[item\.al\] \|\| 12\)/);
   assert.match(search, /_szFormsContain\(rec, qNorm, normalizeText\)/);
-  assert.match(search, /var textScore = _szTextScore\(item, q, words, normalizeText\);/);
+  // a typed search is scored by _szTextScore (the sign reader passes its own)
+  assert.match(search, /var textScore = textScoreOf \? textScoreOf\(item\) : _szTextScore\(item, q, words, normalizeText\);/);
   const init = fs.readFileSync(`${REPO}/resources/viewer/src/index/120-map-init-and-style.js`, 'utf8');
   assert.match(init, /hash\.match\(\/bounds=/);
   assert.match(init, /if \(!fitted\) map\.flyTo/);

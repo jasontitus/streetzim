@@ -662,6 +662,18 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                              "only places, parks, peaks, water and airports. "
                              "About 440 B per POI: +16%% on Luxembourg. Off by "
                              "default (docs/zimfarm.md).")
+    parser.add_argument("--ocr", action="store_true",
+                        help="Add the sign reader: a camera button in the "
+                             "search box that reads the text of a photo (a "
+                             "street sign, a shop front) offline and searches "
+                             "the map for it. Adds 20-60 MB of PaddleOCR models "
+                             "for the scripts the map's names use, fetched and "
+                             "checked against the lock file (docs/ocr.md).")
+    parser.add_argument("--ocr-scripts", metavar="LIST", default=None,
+                        help="With --ocr: the scripts to read, as ISO 15924 codes "
+                             "(e.g. Latn,Cyrl) instead of those the map's names "
+                             "use. Known: Latn, Hani, Hira, Kana, Hang, Thai, "
+                             "Arab, Cyrl, Grek, Deva, Taml, Telu.")
     parser.add_argument("--xapianbuilder-bin", metavar="PATH", default=None,
                         help="Path to the xapianbuilder binary. Defaults to "
                              "$XAPIANBUILDER_BIN, then "
@@ -1894,6 +1906,14 @@ def _wikidata_default_cache():
     return DEFAULT_CACHE_DIR
 
 
+def _ocr_scripts(args) -> list[str] | None:
+    """--ocr-scripts as a list of ISO 15924 codes, or None."""
+    raw = getattr(args, "ocr_scripts", None)
+    if not raw:
+        return None
+    return [s.strip().capitalize() for s in raw.split(",") if s.strip()]
+
+
 def _write_zim(
         *, address_count, args, bbox_str, fonts, map_config, maplibre_css, maplibre_js,
         mbtiles_path, name, output_path, overture_sources, overture_themes,
@@ -1915,6 +1935,10 @@ def _write_zim(
         from streetzim.search_extract import localize_feature
         for _f in search_features:
             localize_feature(_f, args.language)
+    ocr_plan = None
+    if getattr(args, "ocr", False):
+        from streetzim import ocr as _ocr
+        ocr_plan = _ocr.plan_for(search_features, scripts=_ocr_scripts(args))
     create_zim(
         output_path=output_path,
         tiles=tiles,
@@ -1957,6 +1981,7 @@ def _write_zim(
         fold_paths=fold_paths_on(args),
         xapian_mode=getattr(args, "xapian", "libzim"),
         kiwix_poi_pages=bool(getattr(args, "kiwix_poi_pages", False)),
+        ocr=ocr_plan,
         xapianbuilder_bin=getattr(args, "xapianbuilder_bin", None),
         xapian_workdir=tmpdir,
         no_llm_bundle=bool(getattr(args, "no_llm_bundle", False)),
@@ -2058,6 +2083,22 @@ def main(argv=None):
     # A viewer that has outgrown its slot fails now, not after the data
     # phases (cloud/viewer_slots.py).
     check_viewer_fits(VIEWER_DIR)
+    if getattr(args, "ocr_scripts", None) and not args.ocr:
+        parser.error("--ocr-scripts goes with --ocr")
+    if args.ocr:
+        # Seconds now rather than at the end of a long build: the pins are
+        # there and the runtime and detector download (or are cached).
+        from streetzim import ocr as _ocr
+        from streetzim import viewer_assets as _va
+        try:
+            _scripts = _ocr_scripts(args)
+            if _scripts is not None:
+                _ocr.check_scripts(_scripts)
+            _ocr.prefetch()
+        except ValueError as e:
+            parser.error(str(e))
+        except (_va.IntegrityError, _va.DownloadError) as e:
+            parser.error(f"--ocr: {e}")
     from streetzim import languages as _languages
     try:
         _apply_languages(args)

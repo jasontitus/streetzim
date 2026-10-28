@@ -361,6 +361,42 @@
     line-height: 1;
   }
   #search-clear:hover { color: var(--text-secondary); }
+  /* Search with a photo (305-ocr-search.js): a camera at the field's end,
+     the clear button beside it. */
+  #search-photo {
+    position: absolute; right: 8px; top: 6px; width: 28px; height: 28px;
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: var(--text-tertiary); display: inline-flex; align-items: center; justify-content: center;
+  }
+  #search-photo[hidden] { display: none; }
+  #search-photo:hover { color: var(--text-secondary); }
+  #search-container.has-photo #search-input { padding-right: 66px; }
+  #search-container.has-photo #search-clear { right: 40px; }
+  #ocr-sheet {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 3;
+    width: 340px; max-width: calc(100% - 24px); max-height: 50vh; overflow-y: auto;
+    box-sizing: border-box; padding: 10px 12px 12px;
+    background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--panel-shadow);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-family: var(--ui-font); color: var(--text-primary);
+  }
+  #ocr-sheet[hidden] { display: none; }
+  #ocr-sheet .ocr-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  #ocr-status { flex: 1; font-size: 13px; color: var(--text-secondary); }
+  #ocr-close {
+    background: none; border: none; font-size: 18px; line-height: 1; padding: 0 4px;
+    color: var(--text-tertiary); cursor: pointer;
+  }
+  #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
+  #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #ocr-lines .ocr-line {
+    padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.10);
+    background: rgba(255,255,255,0.96); color: var(--text-primary, #222);
+    font: inherit; font-size: 13px; cursor: pointer; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #ocr-lines .ocr-line:active { transform: scale(0.97); }
   /* MapLibre popups carry NO z-index of their own, so they painted below
      #search-container (z-index 2): on a phone the place card's title,
      "Directions to here" button and its close X rendered underneath the
@@ -1009,6 +1045,10 @@
       line-height: 44px; text-align: center;
     }
     #search-input { font-size: 16px; }
+    #search-photo { top: 0; right: 0; width: 44px; height: 44px; }
+    #search-container.has-photo #search-clear { right: 40px; }
+    #ocr-close { min-width: 44px; min-height: 44px; margin: -12px -12px -8px 0; }
+    #ocr-lines .ocr-line { min-height: 44px; padding: 0 14px; }
     .routing-input { font-size: 16px; min-height: 44px; padding: 8px 10px; }
     .routing-icon-btn { min-width: 44px; min-height: 44px; padding: 0 8px; }
     #controls button { min-height: 44px; padding: 12px 16px; font-size: 13px; }
@@ -1092,6 +1132,7 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.45);
   }
   html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  html.sz-dark #ocr-lines .ocr-line { background: rgba(35,38,45,0.96); color: #e8eaed; border-color: rgba(255,255,255,0.14); }
   /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
      text on a dark panel it is too dark, so text uses a lighter blue. */
   html.sz-dark .pin-popup .pin-link,
@@ -1165,6 +1206,9 @@
      Numbers, distances and coordinates are isolated LTR runs (szLtr). */
   html[dir="rtl"] #search-input { padding: 10px 14px 10px 36px; }
   html[dir="rtl"] #search-clear { right: auto; left: 10px; }
+  html[dir="rtl"] #search-photo { right: auto; left: 8px; }
+  html[dir="rtl"] #search-container.has-photo #search-input { padding: 10px 14px 10px 66px; }
+  html[dir="rtl"] #search-container.has-photo #search-clear { left: 40px; }
   html[dir="rtl"] .search-result-native { margin-left: 0; margin-right: 4px; }
   html[dir="rtl"] .search-result-type { margin-left: 0; margin-right: 6px; }
   /* Each part of a result row its own run: an untranslated Latin type
@@ -1196,6 +1240,8 @@
     html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }
     html[dir="rtl"] #wiki-panel-close { margin: -14px 0 -12px -12px; }
     html[dir="rtl"] #search-clear { right: auto; left: 0; }
+    html[dir="rtl"] #search-photo { right: auto; left: 0; }
+    html[dir="rtl"] #search-container.has-photo #search-clear { left: 40px; }
   }
 </style>
 </head>
