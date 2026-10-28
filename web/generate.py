@@ -137,8 +137,10 @@ PAGE_TEXT = {
          "<p>Nur eine .zim-Datei. Kein Konto, kein Tracking, kein Netz. Öffnen und loslegen.</p>"),
         ("<h2>How to Use</h2>", "<h2>So geht&rsquo;s</h2>"),
         ("<h4>Install Kiwix</h4>", "<h4>Kiwix installieren</h4>"),
-        ('<p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>',
-         '<p>Kostenloser Reader für iOS, Android, Mac, Windows und Linux, erhältlich auf <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>.</p>'),
+        ('<p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>. '
+         'On Windows and Linux, open maps in the <a href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Kiwix PWA</a> for now: Kiwix Desktop 2.5 shows them blank, and its fix is only in the <a href="https://download.kiwix.org/nightly/" target="_blank" rel="noopener">nightly builds</a> so far.</p>',
+         '<p>Kostenloser Reader für iOS, Android, Mac, Windows und Linux, erhältlich auf <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>. '
+         'Unter Windows und Linux öffnen Sie die Karten vorerst in der <a href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Kiwix-PWA</a>: Kiwix Desktop 2.5 zeigt sie leer an, und die Korrektur steckt bisher nur in den <a href="https://download.kiwix.org/nightly/" target="_blank" rel="noopener">Nightly-Builds</a>.</p>'),
         ("<h4>Download a map</h4>", "<h4>Karte herunterladen</h4>"),
         ("<p>Pick a region above and download the .zim file (or grab the torrent for faster speeds).</p>",
          "<p>Wählen Sie oben eine Region und laden Sie die .zim-Datei herunter.</p>"),
