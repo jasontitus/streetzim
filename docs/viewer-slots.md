@@ -53,7 +53,7 @@ Slots are right-sized per file rather than a flat 1 MB each:
 
 | file | slot | typical content | headroom |
 |---|---|---|---|
-| index.html | 1 MB | ~664 KB (2026-10-22: built without comments, below; the base 22 UI tables, stored compressed, are ~160 KB of it; a ZIM carries those and its own, [i18n.md](i18n.md#adding-a-language)) | 1.5x |
+| index.html | 1 MB | ~705 KB (2026-10-28, with the photo search's ~31 KB; built without comments, below; the base 22 UI tables, stored compressed, are ~160 KB of it; a ZIM carries those and its own, [i18n.md](i18n.md#adding-a-language)) | 1.45x (at least 30% of the slot kept free: `tests/test_rtl_text_plugin.py`) |
 | places.html | 256 KB | ~216 KB (2026-10-22: + UI strings and the 22 compressed tables, ~85 KB) | 1.2x |
 | routing-worker.js | 128 KB | ~93 KB (93,383 B) | 1.4x |
 
