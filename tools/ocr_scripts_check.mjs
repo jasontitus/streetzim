@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 
-const DIR = process.env.OCR_DIR;
+const DIR = process.env.OCR_DIR && path.resolve(process.env.OCR_DIR);
 if (!DIR || !fs.existsSync(path.join(DIR, 'ocr/manifest.json'))) {
   console.error('OCR_DIR must hold ocr/manifest.json (python -m streetzim.ocr export DIR)');
   process.exit(2);
@@ -76,7 +76,7 @@ try {
     if (u.origin !== ORIGIN) return req.abort();
     if (u.pathname === '/') return req.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><body>' });
     const f = path.join(DIR, decodeURIComponent(u.pathname));
-    if (!f.startsWith(path.resolve(DIR)) || !fs.existsSync(f)) return req.respond({ status: 404, body: '' });
+    if (!f.startsWith(DIR + path.sep) || !fs.existsSync(f)) return req.respond({ status: 404, body: '' });
     return req.respond({ status: 200, contentType: 'application/octet-stream', body: fs.readFileSync(f) });
   });
   await p.goto(ORIGIN + '/', { waitUntil: 'load' });
