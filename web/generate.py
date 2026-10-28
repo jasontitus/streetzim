@@ -239,6 +239,13 @@ REGIONS = [
         "description": "Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste &mdash; Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea.",
     },
     {
+        "id": "thailand",
+        "tier": "country",
+        "title": "Thailand",
+        "zim_file": "osm-thailand.zim",
+        "description": "Thailand &mdash; Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen and Hat Yai, with the islands of the Andaman Sea and the Gulf of Thailand.",
+    },
+    {
         "id": "canada",
         "tier": "continent",
         "title": "Canada",
