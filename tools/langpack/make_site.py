@@ -38,12 +38,29 @@ from tools.langpack import gatelib  # noqa: E402
 from tools.langpack.gatelib import entry_verdict_ok, pack_gate_ok  # noqa: E402
 
 
-# Each language's own name (the builder page adds the visitor's name for it).
+# Each language's own name (the builder page adds the visitor's name for it):
+# every language with a viewer UI table, and the core ones.
 NATIVE = {"ar": "العربية", "de": "Deutsch", "el": "Ελληνικά", "en": "English", "es": "Español",
           "fa": "فارسی", "fr": "Français", "he": "עברית", "hi": "हिन्दी", "hy": "Հայերեն",
           "id": "Bahasa Indonesia", "it": "Italiano", "ja": "日本語", "ko": "한국어",
           "nl": "Nederlands", "pl": "Polski", "pt": "Português", "rm": "Rumantsch", "ru": "Русский", "sv": "Svenska",
-          "th": "ไทย", "tr": "Türkçe", "uk": "Українська", "vi": "Tiếng Việt", "zh": "中文"}
+          "th": "ไทย", "tr": "Türkçe", "uk": "Українська", "vi": "Tiếng Việt", "zh": "中文",
+          # Europe's own languages
+          "az": "Azərbaycanca", "bg": "Български", "bs": "Bosanski", "ca": "Català", "cs": "Čeština",
+          "cy": "Cymraeg", "da": "Dansk", "et": "Eesti", "eu": "Euskara", "fi": "Suomi", "fy": "Frysk",
+          "ga": "Gaeilge", "gl": "Galego", "hr": "Hrvatski", "hu": "Magyar", "is": "Íslenska", "ka": "ქართული",
+          "ku": "Kurdî", "lb": "Lëtzebuergesch", "lt": "Lietuvių", "lv": "Latviešu", "mk": "Македонски",
+          "mt": "Malti", "no": "Norsk", "nb": "Norsk bokmål", "ro": "Română", "sc": "Sardu", "sk": "Slovenčina",
+          "sl": "Slovenščina", "sq": "Shqip", "sr": "Српски",
+          # Africa, Asia, the Caribbean, the Pacific, Iran, the Caucasus
+          "af": "Afrikaans", "am": "አማርኛ", "av": "Авар", "bi": "Bislama", "ce": "Нохчийн", "din": "Thuɔŋjäŋ",
+          "ff": "Fulfulde", "fj": "Na Vosa Vakaviti", "glk": "گیلکی", "ha": "Hausa", "haw": "ʻŌlelo Hawaiʻi",
+          "hif": "Fiji Baat", "ht": "Kreyòl ayisyen", "ig": "Igbo", "jam": "Patwa", "jv": "Basa Jawa",
+          "kab": "Taqbaylit", "kg": "Kikongo", "ln": "Lingála", "ms": "Bahasa Melayu", "my": "မြန်မာဘာသာ",
+          "mzn": "مازِرونی", "ny": "Chichewa", "om": "Afaan Oromoo", "pap": "Papiamentu", "pcm": "Naijá",
+          "sg": "Sängö", "sn": "chiShona", "so": "Soomaali", "su": "Basa Sunda", "sw": "Kiswahili", "ti": "ትግርኛ",
+          "tl": "Tagalog", "tpi": "Tok Pisin", "ty": "Reo Tahiti", "xh": "isiXhosa", "yo": "Yorùbá",
+          "zgh": "ⵜⴰⵎⴰⵣⵉⵖⵜ", "zu": "isiZulu"}
 
 
 # Per entry (plan review M-3): what a visitor downloads besides the base

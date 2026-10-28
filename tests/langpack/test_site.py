@@ -188,6 +188,17 @@ def test_make_site_takes_the_pack_the_gates_take(site: SimpleNamespace, lp: Simp
     assert lp.packs["de"].name in text and late.name not in text
 
 
+def test_every_language_with_a_ui_has_its_own_name() -> None:
+    """The builder page's menu and pack labels name a language in itself
+    ("Lietuvių", "Euskara"), not by its code ("lt Wikipedia"): every
+    language with a viewer UI table has its name."""
+    from tests.langpack.conftest import ROOT
+    from tools.langpack.make_site import NATIVE
+    tables = {p.stem for p in (ROOT / "resources" / "viewer" / "i18n").glob("*.json")}
+    assert not tables - set(NATIVE), sorted(tables - set(NATIVE))
+    assert all(v and v != k for k, v in NATIVE.items())
+
+
 def _jedit(path: Path, fn) -> None:  # noqa: ANN001
     d = json.loads(path.read_text())
     fn(d)
