@@ -38,6 +38,20 @@ try {
   const pageErrors = [];
   p.on('pageerror', e => pageErrors.push(e.message));
   if (process.env.DEBUG) p.on('console', m => console.log('console:', m.text().slice(0, 200)));
+  // Where the time goes when a photo is slow: requests over 5 s are
+  // printed as they end, and the ones still open when a photo times out.
+  const T0 = Date.now(), open = new Map();
+  const since = (t) => `${((t - T0) / 1000).toFixed(1)} s`;
+  p.on('request', r => open.set(r, Date.now()));
+  const ended = (how) => (r) => {
+    const t = open.get(r); open.delete(r);
+    if (t !== undefined && Date.now() - t > 5000) {
+      console.log(`slow request (${how}): ${r.url().replace(origin, '')} took ${Date.now() - t} ms, from ${since(t)}`);
+    }
+  };
+  p.on('requestfinished', ended('finished'));
+  p.on('requestfailed', ended('failed'));
+  p.on('workercreated', w => console.log(`worker started at ${since(Date.now())}: ${w.url().slice(0, 40)}`));
   await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   await p.goto(origin + '/index.html', { waitUntil: 'load', timeout: 120000 });
   await p.waitForFunction(() => window.__szMap && window.__szMap.loaded() &&
@@ -179,7 +193,12 @@ try {
     }));
     const ms = Date.now() - t0;
     console.log(`"${name}": ${got.status}: read ${JSON.stringify(got.lines)} in ${ms} ms; results ${JSON.stringify(got.results.slice(0, 3))}`);
-    if (!done) { errs.push(`"${name}": nothing read or found in 180 s (${got.status})`); continue; }
+    if (!done) {
+      for (const [r, t] of open) console.log(`still open: ${r.url().replace(origin, '')}, since ${since(t)}`);
+      // Its answer would land on the next photo: stop here.
+      errs.push(`"${name}": nothing read or found in 180 s (${got.status}), at ${since(Date.now())}`);
+      break;
+    }
     // The line the place matched, as read ("Bab AI Bahrain" for "Bab Al
     // Bahrain" is still that line), not every line of the photo.
     if (got.lines.indexOf(got.field) < 0 || got.field.indexOf('OPEN') >= 0) {
