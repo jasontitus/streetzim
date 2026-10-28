@@ -302,6 +302,7 @@
  "search.photo": "Iskanje s fotografijo",
  "search.photo_back": "Nazaj na fotografijo",
  "search.photo_choose": "Izberite fotografijo",
+ "search.photo_take": "Posnemite fotografijo",
  "search.photo_drop": "Povlecite fotografijo na zemljevid ali jo prilepite s ⌘V.",
  "search.photo_failed": "Fotografije ni bilo mogoče prebrati",
  "search.photo_kiwix_ios": "V aplikaciji Kiwix izberite fotografijo iz knjižnice: fotografiranje tukaj zapre aplikacijo, ki še ne more uporabljati kamere.",

@@ -273,9 +273,14 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
             aria-label="Search with a photo" data-i18n-aria-label="search.photo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
     <button id="ocr-close" type="button" title="Close" data-i18n-title="common.close">&times;</button>
   </div>
-  <!-- In the Kiwix iOS app (no camera permission: Take Photo closes it), the
-       note and this button come before the file picker (305-ocr-search.js). -->
-  <button id="ocr-choose" type="button" hidden data-i18n="search.photo_choose">Choose a photo</button>
+  <!-- How a photo comes in (305-ocr-search.js, _szSignPickMode): on a phone
+       or tablet, the camera at once or a photo from the library; in the
+       Kiwix iOS app the camera tile is off (no camera permission: Take
+       Photo closes the app) and the library comes first. -->
+  <div id="ocr-pick" hidden>
+    <button id="ocr-take" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg><span data-i18n="search.photo_take">Take a photo</span></button>
+    <button id="ocr-choose" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-5.5-7.5-3 3.9-2-2.4L5.5 17h13l-5-6.5zM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3z"/></svg><span data-i18n="search.photo_choose">Choose a photo</span></button>
+  </div>
   <canvas id="ocr-canvas" width="1" height="1"></canvas>
   <div id="ocr-lines"></div>
 </div>
@@ -288,6 +293,8 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
   <button id="search-photo" type="button" hidden title="Search with a photo" data-i18n-title="search.photo"
           aria-label="Search with a photo" data-i18n-aria-label="search.photo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
   <input id="search-photo-file" type="file" accept="image/*" hidden tabindex="-1">
+  <!-- Take a photo: `capture` opens the camera straight away. -->
+  <input id="search-photo-take" type="file" accept="image/*" capture="environment" hidden tabindex="-1">
   <div id="search-results"></div>
   <!-- On-map Find UI: tapping a chip fetches its category-index
        file, filters to the current viewport, and drops pins +

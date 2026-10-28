@@ -62,25 +62,33 @@ try {
   });
   if (!shown) errs.push('no camera button: map-config.json has no `ocr`, or the viewer hid it');
 
-  // In Kiwix's Apple apps (forced: no zim: scheme here) the camera opens a
-  // note, not the file picker: on iOS with a "choose a photo" button (its
-  // Take Photo closes the app), on macOS without (it opens no picker; drop
-  // or paste instead). The x lets it go.
-  for (const app of ['ios', 'mac']) {
-    const note = await p.evaluate((a) => {
+  // The camera opens a choice (305-ocr-search.js, _szSignPickMode). On a
+  // phone (this page: a touch screen) Take a photo and Choose a photo, the
+  // camera first. In Kiwix's Apple apps (forced: no zim: scheme here): on
+  // iOS the camera tile is off (Take Photo closes the app) and the library
+  // first; on macOS a note to drop or paste, no tiles (no picker opens).
+  // The x lets it go.
+  for (const app of ['', 'ios', 'mac']) {
+    const got = await p.evaluate((a) => {
       window.__szSignKiwixApp = a;
       document.getElementById('search-photo').click();
       const sheet = document.getElementById('ocr-sheet');
-      const got = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
-                    choose: !document.getElementById('ocr-choose').hidden,
-                    photo: !document.getElementById('ocr-canvas').hidden };
+      const take = document.getElementById('ocr-take'), choose = document.getElementById('ocr-choose');
+      const shown = (el) => !el.closest('[hidden]') && el.getBoundingClientRect().width > 0;
+      const r = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
+                  take: shown(take) ? (take.disabled ? 'off' : take.classList.contains('primary') ? 'first' : 'on') : 'none',
+                  choose: shown(choose) ? (choose.classList.contains('primary') ? 'first' : 'on') : 'none',
+                  photo: !document.getElementById('ocr-canvas').hidden };
       document.getElementById('ocr-close').click();
       window.__szSignKiwixApp = '';
-      return got;
+      return r;
     }, app);
-    const want = app === 'ios' ? { state: 'pick', choose: true } : { state: 'drop', choose: false };
-    if (!(note.open && note.state === want.state && note.choose === want.choose && !note.photo)) {
-      errs.push(`Kiwix ${app}: the camera did not open its note first: ` + JSON.stringify(note));
+    const want = { '': { state: 'choose', take: 'first', choose: 'on' },
+                   ios: { state: 'pick', take: 'off', choose: 'first' },
+                   mac: { state: 'drop', take: 'none', choose: 'none' } }[app];
+    if (!(got.open && !got.photo && got.state === want.state && got.take === want.take && got.choose === want.choose)) {
+      errs.push(`${app ? 'Kiwix ' + app : 'a phone browser'}: the camera's choice is not what it should be: ` +
+                JSON.stringify(got) + ', want ' + JSON.stringify(want));
     }
   }
 
@@ -158,13 +166,14 @@ try {
       }
       x.putImageData(img, 0, 0);
       const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.75));
-      // As a phone's picker gives it, then dropped on the map, then pasted:
-      // the ways in where no picker opens (Kiwix for macOS).
+      // As a phone's picker gives it (Choose a photo, then Take a photo's
+      // camera input), dropped on the map, or pasted: the ways in where no
+      // picker opens (Kiwix for macOS).
       const dt = new DataTransfer();
       dt.items.add(new File([blob], 'sign.jpg', { type: 'image/jpeg' }));
-      const how = seed % 3;
-      if (how === 1) {
-        const input = document.getElementById('search-photo-file');
+      const how = seed % 4;
+      if (how === 1 || how === 3) {
+        const input = document.getElementById(how === 1 ? 'search-photo-file' : 'search-photo-take');
         input.files = dt.files;
         input.dispatchEvent(new Event('change', { bubbles: true }));
       } else if (how === 2) {

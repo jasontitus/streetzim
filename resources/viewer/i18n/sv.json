@@ -296,6 +296,7 @@
  "search.photo": "Sök med ett foto",
  "search.photo_back": "Tillbaka till fotot",
  "search.photo_choose": "Välj ett foto",
+ "search.photo_take": "Ta ett foto",
  "search.photo_drop": "Dra ett foto till kartan, eller klistra in det med ⌘V.",
  "search.photo_failed": "Det gick inte att läsa fotot",
  "search.photo_kiwix_ios": "I Kiwix-appen väljer du ett foto från biblioteket: att ta ett nytt foto här stänger appen, som ännu inte kan använda kameran.",

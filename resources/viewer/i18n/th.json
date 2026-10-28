@@ -293,6 +293,7 @@
  "search.photo": "ค้นหาด้วยรูปภาพ",
  "search.photo_back": "กลับไปที่รูปภาพ",
  "search.photo_choose": "เลือกรูปภาพ",
+ "search.photo_take": "ถ่ายรูป",
  "search.photo_drop": "ลากรูปภาพมาวางบนแผนที่ หรือวางด้วย ⌘V",
  "search.photo_failed": "อ่านรูปภาพไม่ได้",
  "search.photo_kiwix_ios": "ในแอป Kiwix ให้เลือกรูปภาพจากคลังภาพ: การถ่ายรูปใหม่ที่นี่จะปิดแอป ซึ่งยังใช้กล้องไม่ได้",

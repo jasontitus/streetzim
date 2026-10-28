@@ -309,6 +309,7 @@
  "search.photo": "البحث باستخدام صورة",
  "search.photo_back": "العودة إلى الصورة",
  "search.photo_choose": "اختر صورة",
+ "search.photo_take": "التقط صورة",
  "search.photo_drop": "اسحب صورة إلى الخريطة، أو الصقها باستخدام ⌘V.",
  "search.photo_failed": "تعذّرت قراءة الصورة",
  "search.photo_kiwix_ios": "في تطبيق Kiwix، اختر صورة من مكتبتك: التقاط صورة جديدة هنا يغلق التطبيق، فهو لا يستطيع استخدام الكاميرا بعد.",

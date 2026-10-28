@@ -10,8 +10,11 @@
 // shows it, and a tap goes back to it, its lines and its places (the sheet's
 // own camera takes another; its x lets it go). The search field holds the
 // line the first place matched. A photo can also be dropped on the page or
-// pasted. In Kiwix's Apple apps a note comes first (sign-env): pick from
-// the library on iOS, drop or paste on macOS. Nothing is fetched before the first photo;
+// pasted. The camera button opens the choice _szSignPickMode gives: on a
+// phone or tablet, Take a photo (the camera at once) or Choose a photo; in
+// Kiwix on iOS Take a photo is off and the library comes first; in Kiwix
+// on macOS a note to drop or paste; on a desktop, the file picker at once.
+// Nothing is fetched before the first photo;
 // the worker, a few hundred MB while it reads, is let go a minute after
 // the last one.
 
@@ -81,6 +84,19 @@ function _szSignKiwixApp(protocol, nav) {
 }
 // END sign-env
 
+// BEGIN sign-pick
+// What the camera button offers, from sign-env's app and whether the
+// pointer is coarse (a finger): 'drop' in Kiwix for macOS, where no picker
+// opens; 'library' in Kiwix on iOS, where Take Photo closes the app (the
+// camera tile shows, off); 'both' on a phone or tablet, the camera at once
+// or a photo; 'picker' on a desktop, the file picker straight away.
+function _szSignPickMode(app, coarse) {
+  if (app === 'mac') return 'drop';
+  if (app === 'ios') return 'library';
+  return coarse ? 'both' : 'picker';
+}
+// END sign-pick
+
 // BEGIN sign-load
 // The reader's files, one at a time: each job (a function returning a
 // promise) starts when the one before has ended; the results in order.
@@ -114,6 +130,11 @@ function initSignSearch(map, config) {
   var canvas = document.getElementById('ocr-canvas');
   var linesEl = document.getElementById('ocr-lines');
   var chooseBtn = document.getElementById('ocr-choose');
+  var takeBtn = document.getElementById('ocr-take');
+  var takeFile = document.getElementById('search-photo-take');
+  var pickRow = document.getElementById('ocr-pick');
+  // The sheet's own camera, for another photo: not beside the tiles.
+  var againBtn = document.getElementById('ocr-again');
   var MAX_SIDE = 1600;     // the detector works at 960; crops are read sharper
   var IDLE_MS = 60000;
   var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
@@ -261,30 +282,39 @@ function initSignSearch(map, config) {
   function reopen() {
     sheet.hidden = false;
     canvas.hidden = false;
-    chooseBtn.hidden = true;
+    pickRow.hidden = true;
+    againBtn.hidden = false;
     setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
     input.value = last.query;
     document.getElementById('search-clear').style.display = 'block';
     map._searchSign(last.lines).then(function () { sheet.setAttribute('data-sz-ocr', 'searched'); });
   }
-  // A new photo: the file picker, after the note in the Kiwix iOS app; in
-  // the Kiwix macOS app, which opens no picker, a note to drop or paste one.
+  // A new photo, as _szSignPickMode says: the two tiles (the camera off in
+  // Kiwix on iOS), the note to drop or paste in Kiwix on macOS, or the
+  // file picker at once on a desktop.
   function pick() {
-    var app = kiwixApp();
-    if ((app === 'ios' && chooseBtn.hidden) || app === 'mac') {
-      sheet.hidden = false;
-      canvas.hidden = true;
-      linesEl.innerHTML = '';
-      chooseBtn.hidden = app !== 'ios';
-      if (app === 'ios') {
-        setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
-      } else {
-        setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
-      }
+    var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    var mode = _szSignPickMode(kiwixApp(), coarse);
+    if (mode === 'picker') {
+      file.value = '';
+      file.click();
       return;
     }
-    file.value = '';
-    file.click();
+    sheet.hidden = false;
+    canvas.hidden = true;
+    linesEl.innerHTML = '';
+    pickRow.hidden = mode === 'drop';
+    againBtn.hidden = true;
+    takeBtn.disabled = mode !== 'both';
+    takeBtn.classList.toggle('primary', mode === 'both');
+    chooseBtn.classList.toggle('primary', mode === 'library');
+    if (mode === 'library') {
+      setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
+    } else if (mode === 'drop') {
+      setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
+    } else {
+      setStatus(szT('search.photo', 'Search with a photo'), 'choose');
+    }
   }
   // The first image of a drop or a paste (DataTransfer), or null.
   function imageOf(dt) {
@@ -350,7 +380,8 @@ function initSignSearch(map, config) {
     if (!f) return;
     sheet.hidden = false;
     canvas.hidden = false;
-    chooseBtn.hidden = true;
+    pickRow.hidden = true;
+    againBtn.hidden = false;
     linesEl.innerHTML = '';
     forget();
     // The last photo's places are not this one's.
@@ -395,12 +426,18 @@ function initSignSearch(map, config) {
   btn.addEventListener('click', function () {
     if (last && sheet.hidden) reopen(); else pick();
   });
-  document.getElementById('ocr-again').addEventListener('click', pick);
+  againBtn.addEventListener('click', pick);
   chooseBtn.addEventListener('click', function () {
     file.value = '';
     file.click();
   });
+  takeBtn.addEventListener('click', function () {
+    if (takeBtn.disabled) return;
+    takeFile.value = '';
+    takeFile.click();
+  });
   file.addEventListener('change', function () { handle(file.files && file.files[0]); });
+  takeFile.addEventListener('change', function () { handle(takeFile.files && takeFile.files[0]); });
   // A photo dropped anywhere on the page, or pasted (not into a text field
   // pasting text): the way in where no picker opens (Kiwix for macOS), and
   // a shortcut on any desktop. Without preventDefault on dragover a web

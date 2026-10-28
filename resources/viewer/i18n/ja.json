@@ -294,6 +294,7 @@
  "search.photo": "写真で検索",
  "search.photo_back": "写真に戻る",
  "search.photo_choose": "写真を選択",
+ "search.photo_take": "写真を撮影",
  "search.photo_drop": "写真を地図にドラッグするか、⌘V で貼り付けてください。",
  "search.photo_failed": "写真を読み取れませんでした",
  "search.photo_kiwix_ios": "Kiwix アプリでは、ライブラリから写真を選んでください：ここで新しく撮影するとアプリが終了します（アプリはまだカメラを使えません）。",

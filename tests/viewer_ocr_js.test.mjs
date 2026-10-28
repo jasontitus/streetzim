@@ -183,4 +183,14 @@ await (async () => {
     console.log('ok   ', name); pass++;
   } catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
 })();
+
+const P = new Function(slice(HTML, '// BEGIN sign-pick', '// END sign-pick') + '\nreturn { _szSignPickMode };')();
+ok('the camera button offers the camera and the library on a phone, the library first in Kiwix on iOS', () => {
+  assert.strictEqual(P._szSignPickMode('', true), 'both');        // a phone or tablet browser
+  assert.strictEqual(P._szSignPickMode('', false), 'picker');     // a desktop: the file picker at once
+  assert.strictEqual(P._szSignPickMode('ios', true), 'library');  // Take Photo closes the Kiwix app
+  assert.strictEqual(P._szSignPickMode('ios', false), 'library');
+  assert.strictEqual(P._szSignPickMode('mac', false), 'drop');    // no picker opens in Kiwix for macOS
+  assert.strictEqual(P._szSignPickMode('mac', true), 'drop');
+});
 console.log(`${pass} passed`);

@@ -296,6 +296,7 @@
  "search.photo": "Buscar con una foto",
  "search.photo_back": "Volver a la foto",
  "search.photo_choose": "Elegir una foto",
+ "search.photo_take": "Hacer una foto",
  "search.photo_drop": "Arrastra una foto al mapa o pégala con ⌘V.",
  "search.photo_failed": "No se pudo leer la foto",
  "search.photo_kiwix_ios": "En la app Kiwix, elige una foto de tu biblioteca: hacer una foto nueva aquí cierra la app, que aún no puede usar la cámara.",

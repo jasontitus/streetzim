@@ -296,6 +296,7 @@
  "search.photo": "Keresés fotóval",
  "search.photo_back": "Vissza a fotóhoz",
  "search.photo_choose": "Fotó kiválasztása",
+ "search.photo_take": "Fotó készítése",
  "search.photo_drop": "Húzzon egy fotót a térképre, vagy illessze be ⌘V-vel.",
  "search.photo_failed": "A fotót nem sikerült elolvasni",
  "search.photo_kiwix_ios": "A Kiwix alkalmazásban válasszon fotót a könyvtárából: itt új fotó készítése bezárja az alkalmazást, amely még nem tudja használni a kamerát.",

@@ -296,6 +296,7 @@
  "search.photo": "Søk med et bilde",
  "search.photo_back": "Tilbake til bildet",
  "search.photo_choose": "Velg et bilde",
+ "search.photo_take": "Ta et bilde",
  "search.photo_drop": "Dra et bilde inn på kartet, eller lim inn et med ⌘V.",
  "search.photo_failed": "Kunne ikke lese bildet",
  "search.photo_kiwix_ios": "I Kiwix-appen velger du et bilde fra biblioteket: å ta et nytt bilde her lukker appen, som ennå ikke kan bruke kameraet.",

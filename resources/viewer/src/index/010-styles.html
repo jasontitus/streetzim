@@ -397,11 +397,17 @@
     background-origin: content-box; background-clip: content-box; border-radius: 6px;
   }
   #search-photo.has-last svg { visibility: hidden; }
-  #ocr-choose {
-    display: block; margin: 4px 0 2px; padding: 8px 16px; border: none; border-radius: 999px;
-    background: var(--accent, #2563eb); color: #fff; font: inherit; font-size: 14px; cursor: pointer;
+  /* Take a photo / Choose a photo, side by side; the one to use is blue. */
+  #ocr-pick { display: flex; gap: 10px; margin: 2px 0; }
+  #ocr-pick[hidden], #ocr-canvas[hidden] { display: none; }
+  .ocr-tile {
+    flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 14px 8px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--hover-bg); color: var(--text-primary);
+    font: inherit; font-size: 14px; font-weight: 600; line-height: 1.25; text-align: center; cursor: pointer;
   }
-  #ocr-choose[hidden], #ocr-canvas[hidden] { display: none; }
+  .ocr-tile.primary { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
+  .ocr-tile:disabled { opacity: 0.45; border-style: dashed; cursor: default; }
   #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
   #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   #ocr-lines .ocr-line {
@@ -1064,7 +1070,7 @@
     #ocr-close { min-width: 44px; min-height: 44px; margin: -12px -12px -8px 0; }
     #ocr-again { min-width: 44px; min-height: 44px; margin: -12px 0 -8px 0; }
     #search-photo.has-last { padding: 8px; }
-    #ocr-choose { min-height: 44px; }
+    .ocr-tile { min-height: 72px; }
     #ocr-lines .ocr-line { min-height: 44px; padding: 0 14px; }
     .routing-input { font-size: 16px; min-height: 44px; padding: 8px 10px; }
     .routing-icon-btn { min-width: 44px; min-height: 44px; padding: 0 8px; }
