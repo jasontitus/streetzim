@@ -385,8 +385,15 @@ those reviews found are in the commit after each change.
   west-coast-us, central-us, midwest-us, australia-nz, southeast-asia,
   indian-subcontinent, china, central-asia) build on 2026-10-21.0
   (decision 2026-10-24), set by `OVERTURE_RELEASE=2026-10-21.0` in their
-  `$PAR_STATE/env/<id>` (rebuild_old_regions.sh takes it; the default stays
-  2026-08-19.0). Their older cuts are kept in `overture_cache/keep-2026-08-19.0/`.
+  `$PAR_STATE/env/<id>` (rebuild_old_regions.sh takes it). Their older cuts
+  are kept in `overture_cache/keep-2026-08-19.0/`.
+- Since 2026-10-28 the driver does the same by itself: with no
+  `OVERTURE_RELEASE`, a region keeps 2026-08-19.0 while both of its parquets
+  for that release are cut for its box, and otherwise takes 2026-10-21.0
+  (`CUR_REL`). Bahrain, new that day, failed `no-places` on the old default.
+  The regions still to build (europe, united-states, south-america, russia,
+  africa, argentina) all have their 2026-08-19.0 cuts, about 20 GB, and keep
+  them.
 
 ### Region extracts kept lakes whole only inside the box
 - Region extracts were cut with osmium's default `complete_ways`; a lake or

@@ -41,6 +41,8 @@ unset _ops_real _ops_old
 #    another (parallel_rebuild.sh sets it per region from $PAR_STATE/env/<id>):
 #    Overture serves only its last few releases, so a region whose parquets for
 #    the pin were never cut, or were cut for an older bbox, needs a current one.
+#    With none named, such a region takes CUR_REL by itself; one whose pin
+#    parquets are cut for its box keeps them.
 #  * osmium extracts serialise on tmp/.regions-pbf.lock -- two writers on one
 #    path yield a truncated-but-valid PBF that nothing downstream notices.
 set -uo pipefail
@@ -65,6 +67,8 @@ WORLD_MB=/storage/streetzim/world-data/world-tiles-v3.mbtiles
 # warns about that.
 WORLD_SEARCH=/storage/streetzim/search_cache/world-2026-08-31.s2.jsonl
 REL=${OVERTURE_RELEASE:-2026-08-19.0}
+# The pin has left Overture's bucket; regions without its parquets take this.
+CUR_REL=2026-10-21.0
 REGISTRY=/storage/streetzim/cloud/regions.tsv
 VARIANTS=/storage/streetzim/cloud/region-variants.tsv
 LOG=${REBUILD_LOG:-/storage/streetzim/rebuild-old.log}
@@ -365,18 +369,28 @@ for ID in $ORDER; do
     fi
   done
 
+  # No release named: the pin while both of its parquets are cut for this
+  # box, else CUR_REL (the pin can no longer be downloaded).
+  RREL=$REL
+  if [ -z "${OVERTURE_RELEASE:-}" ]; then
+    for _t in addresses places; do
+      _p=overture_cache/${_t}-${DATA_ID}-${REL}.parquet
+      { [ -s "$_p" ] && ! bbox_stale "$_p" "$BBOX"; } || RREL=$CUR_REL
+    done
+    [ "$RREL" = "$REL" ] || log "  overture: no $REL parquets for this box; using $RREL"
+  fi
   for THEME in addresses places; do
-    OUT=overture_cache/${THEME}-${DATA_ID}-${REL}.parquet
+    OUT=overture_cache/${THEME}-${DATA_ID}-${RREL}.parquet
     [ -s "$OUT" ] && ! bbox_stale "$OUT" "$BBOX" && continue
     rm -f "$OUT" "$OUT.bbox"               # cut for another bbox (or absent)
     log "  overture $THEME"
-    if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$REL" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$OUT" >> "$LOG" 2>&1; then
+    if "$PY" download_overture_data.py "$THEME" --bbox="$BBOX" --release "$RREL" --transport "${OVERTURE_TRANSPORT:-s3}" --out "$OUT" >> "$LOG" 2>&1; then
       bbox_mark "$OUT" "$BBOX"
     else
       log "  overture $THEME failed (continuing; build guards on file presence)"
     fi
   done
-  PLACES=overture_cache/places-${DATA_ID}-${REL}.parquet
+  PLACES=overture_cache/places-${DATA_ID}-${RREL}.parquet
   if [ ! -s "$PLACES" ]; then
     log "  NO PLACES PARQUET — refusing to build (would silently drop --overture-places)"
     row "$ID" no-places "-"; continue
@@ -398,8 +412,8 @@ for ID in $ORDER; do
   #     <id>.ml.mbtiles, a few GB) stages them.
   TIER=$(echo "$R" | cut -f4)
   case "$TIER" in continent) WI=lead ;; *) WI=all ;; esac
-  log "  build-region-fast.sh $ID (tier=$TIER wiki_images=$WI overture=$REL)"
-  if ! env OVERTURE_RELEASE="$REL" WIKI_IMAGES="$WI" STAGE_MBTILES_NVME="${REBUILD_STAGE_MBTILES:-0}" \
+  log "  build-region-fast.sh $ID (tier=$TIER wiki_images=$WI overture=$RREL)"
+  if ! env OVERTURE_RELEASE="$RREL" WIKI_IMAGES="$WI" STAGE_MBTILES_NVME="${REBUILD_STAGE_MBTILES:-0}" \
        bash build-region-fast.sh "$ID" "$BBOX" "$NAME" >> "$LOG" 2>&1; then
     log "  BUILD FAILED"; row "$ID" build-failed "-"; continue
   fi

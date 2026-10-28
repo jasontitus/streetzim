@@ -66,14 +66,18 @@ def _setup(tmp: Path, *, variant_box: str = BOX, parent_places: bool = True) -> 
     return {"PATH": f"{bin_}:{os.environ['PATH']}", "PY": str(py), "STUB_LOG": str(tmp / "calls.log")}
 
 
-def _run(tmp: Path, env: dict[str, str], rid: str, pre: str = "") -> list[str]:
+def _run(tmp: Path, env: dict[str, str], rid: str, pre: str = "", named: bool = True) -> list[str]:
+    """named: OVERTURE_RELEASE names the release (rel), as an env-file pin
+    does; else the driver picks: rel while its parquets are cut, else cur."""
+    release = "OVERTURE_RELEASE=rel" if named else "unset OVERTURE_RELEASE"
     body = f"""
 . {ROOT}/ops/region-bbox.sh
 log() {{ echo "LOG $*" >> "$STUB_LOG"; }}
 row() {{ echo "ROW $*" >> "$STUB_LOG"; }}
 flock() {{ case "$1" in -*) return 0 ;; esac; shift; "$@"; }}
 REGISTRY={tmp}/regions.tsv; VARIANTS={tmp}/variants.tsv
-PLANET={tmp}/planet.osm.pbf; PBFLOCK={tmp}/lock; LOG=/dev/null; REL=rel
+PLANET={tmp}/planet.osm.pbf; PBFLOCK={tmp}/lock; LOG=/dev/null; REL=rel; CUR_REL=cur
+{release}
 WORLD_MB={tmp}/world.mbtiles; WORLD_SEARCH={tmp}/world.s2.jsonl
 ID={rid}
 {pre}
@@ -134,6 +138,33 @@ def test_a_variant_whose_parent_lacks_places_is_refused_for_the_parent(tmp_path)
     assert f"--bbox={BOX}" in py[0] and "--release rel " in py[0]
     assert "ROW v no-places -" in calls and "BUILD p" not in calls, calls
     assert _files(tmp_path, "v") == []
+
+
+@pytest.mark.parametrize("py_ok", [False, True])
+def test_with_no_release_named_a_parent_without_places_takes_the_current_one(tmp_path, py_ok):
+    """The round's pin left Overture's bucket: a region missing one of its
+    pin parquets downloads both themes for CUR_REL, and the places check and
+    the build then name that release."""
+    env = {**_setup(tmp_path, parent_places=False), **({"PY_OK": "1"} if py_ok else {})}
+    calls = _run(tmp_path, env, "v", named=False)
+    py = [c for c in calls if c.startswith("python")]
+    assert [p.split("--out ")[1].split()[0] for p in py] == [
+        "overture_cache/addresses-p-cur.parquet", "overture_cache/places-p-cur.parquet"], calls
+    assert all("--release cur " in p for p in py), py
+    assert "LOG   overture: no rel parquets for this box; using cur" in calls, calls
+    if py_ok:
+        assert "BUILD p" in calls and not [c for c in calls if c.startswith("ROW")], calls
+    else:
+        assert "ROW v no-places -" in calls and "BUILD p" not in calls, calls
+    # The pin's addresses cut stays where it was.
+    assert (tmp_path / "overture_cache" / "addresses-p-rel.parquet").read_text() == "x"
+
+
+def test_with_no_release_named_the_pins_cuts_are_kept(tmp_path):
+    env = _setup(tmp_path)
+    calls = _run(tmp_path, env, "v", named=False)
+    assert "BUILD p" in calls and not [c for c in calls if c.startswith(("python", "ROW"))], calls
+    assert not any("using cur" in c for c in calls), calls
 
 
 def test_a_variant_under_another_box_is_skipped_before_any_data_step(tmp_path):

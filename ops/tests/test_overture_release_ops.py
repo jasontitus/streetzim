@@ -239,8 +239,8 @@ def test_the_rebuild_driver_takes_a_named_release(tmp_path, value, want):
 
 
 def test_the_rebuild_driver_builds_on_the_regions_release(tmp_path):
-    """The release the driver downloaded for is the one build-region-fast.sh
-    is given (it names the parquets it reads)."""
+    """The release the driver downloaded for (the region's, RREL) is the one
+    build-region-fast.sh is given (it names the parquets it reads)."""
     text = (ROOT / "ops/cloud/rebuild_old_regions.sh").read_text()
     i = text.index('  TIER=$(echo "$R" | cut -f4)')
     end = 'row "$ID" build-failed "-"; continue\n  fi\n'
@@ -248,8 +248,50 @@ def test_the_rebuild_driver_builds_on_the_regions_release(tmp_path):
     log = tmp_path / "calls.log"
     (tmp_path / "build-region-fast.sh").write_text(f'echo "build $OVERTURE_RELEASE $*" >> "{log}"\n')
     body = ('log() { :; }; row() { :; }\nR=$(printf "r\\tPlain\\t1,2,3,4\\tcountry")\n'
-            'ID=r; BBOX=1,2,3,4; NAME=Plain; LOG=/dev/null; REL=2026-10-21.0\n'
+            'ID=r; BBOX=1,2,3,4; NAME=Plain; LOG=/dev/null; REL=2026-08-19.0; RREL=2026-10-21.0\n'
             f'for _once in 1; do\n{block}done\n')
     env = {k: v for k, v in os.environ.items() if k != "OVERTURE_RELEASE"}
     subprocess.run(["bash", "-c", body], cwd=tmp_path, env=env, check=True, capture_output=True, text=True)
     assert log.read_text().splitlines() == ["build 2026-10-21.0 r 1,2,3,4 Plain"]
+
+
+@pytest.mark.parametrize("named,files,want", [
+    (None, {"addresses": "B", "places": "B"}, PIN),           # the pin's cuts for this box: kept
+    (None, {"places": "B"}, "CUR"),                            # no addresses cut
+    (None, {"addresses": "B", "places": "other"}, "CUR"),      # cut for another box
+    (None, {"addresses": "B", "places": ""}, "CUR"),           # empty file
+    (None, {}, "CUR"),
+    ("2026-09-23.1", {}, "2026-09-23.1"),                      # a named release is never replaced
+    (PIN, {}, PIN),
+    ("", {}, "CUR"),                                           # an env file's empty OVERTURE_RELEASE=
+    ("", {"addresses": "B", "places": "B"}, PIN),
+])
+def test_the_rebuild_driver_falls_back_off_a_gone_pin(tmp_path, named, files, want):
+    """With no OVERTURE_RELEASE, a region keeps the pin only while both of its
+    pin parquets are cut for the region's box; otherwise it takes CUR_REL,
+    which every later use (download, places check, build) then names."""
+    text = (ROOT / "ops/cloud/rebuild_old_regions.sh").read_text()
+    lines = text.splitlines()
+    rel = next(ln for ln in lines if ln.startswith("REL=${OVERTURE_RELEASE:-"))
+    cur = next(ln for ln in lines if ln.startswith("CUR_REL="))
+    assert cur == "CUR_REL=2026-10-21.0"
+    i = text.index("  RREL=$REL\n")
+    block = text[i:text.index("\n  fi\n", i) + 6]
+    (tmp_path / "overture_cache").mkdir()
+    for theme, box in files.items():
+        f = tmp_path / "overture_cache" / f"{theme}-r-{PIN}.parquet"
+        f.write_text("x" if box else "")
+        (f.parent / (f.name + ".bbox")).write_text(("1,2,3,4" if box in ("B", "") else "5,6,7,8") + "\n")
+    env = {k: v for k, v in os.environ.items() if k != "OVERTURE_RELEASE"}
+    if named is not None:
+        env["OVERTURE_RELEASE"] = named
+    r = subprocess.run(["bash", "-c", f'log() {{ :; }}\n. "{ROOT}/ops/region-bbox.sh"\n{rel}\n{cur}\n'
+                        f'DATA_ID=r; BBOX=1,2,3,4\n{block}printf %s "$RREL"'],
+                       cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ("2026-10-21.0" if want == "CUR" else want)
+    after = text[i:]
+    for use in ('OUT=overture_cache/${THEME}-${DATA_ID}-${RREL}.parquet', '--release "$RREL"',
+                'PLACES=overture_cache/places-${DATA_ID}-${RREL}.parquet', 'env OVERTURE_RELEASE="$RREL"'):
+        assert use in after
+    assert "${REL}" not in after[len(block):] and '"$REL"' not in after[len(block):]

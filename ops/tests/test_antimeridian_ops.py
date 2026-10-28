@@ -339,7 +339,7 @@ def test_overture_parquet_cut_for_another_bbox_is_refetched(tmp_path, which):
                   'echo fetched >> "$STUB_LOG"; echo NEW > "$out"\n')
     py.chmod(0o755)
     env = {"PY": str(py), "STUB_LOG": str(tmp_path / "calls.log")}
-    pre = "OVERTURE_RELEASE=rel; REL=rel; LOG=/dev/null"
+    pre = "OVERTURE_RELEASE=rel; REL=rel; RREL=rel; LOG=/dev/null"
 
     def pq(theme):
         return tmp_path / "overture_cache" / f"{theme}-r-rel.parquet"

@@ -148,9 +148,10 @@ per-region slices in one sequential scan each; see
 
 Use `download_overture_data.py` for both themes. Cache lives in
 `overture_cache/`. Filename pattern is what `build-region-fast.sh` looks for
-(with `OVERTURE_RELEASE` set to match). Use one release for both files. To
-stay on the current round's release (what the ops wrappers default to), set
-`REL=2026-08-19.0`. For the newest complete release instead (the
+(with `OVERTURE_RELEASE` set to match). Use one release for both files. The
+round's pin, 2026-08-19.0, has left Overture's bucket, so a new region
+downloads `REL=2026-10-21.0` (what the round driver takes for a region
+without pin parquets cut for its box). For the newest complete release instead (the
 downloader's own default, `--release latest`: STAC's "latest", walking back
 past a release still being uploaded; it moves when Overture publishes),
 resolve it once:
@@ -210,8 +211,11 @@ setsid nohup env OVERTURE_RELEASE="$REL" WIKI_IMAGES=all \
   without Overture — the same failure that cost switzerland-light 748,654
   place records.
 - The wrappers (`build-refresh-queue.sh`, `ship-region.sh`,
-  `cloud/build_region.sh`) default to the pinned round release, 2026-08-19.0;
-  `OVERTURE_RELEASE=latest` opts in to the newest complete release, resolved
+  `cloud/build_region.sh`) default to the pinned round release, 2026-08-19.0,
+  which only cached parquets still have: a region without them needs
+  `OVERTURE_RELEASE=2026-10-21.0`. The round driver
+  (`cloud/rebuild_old_regions.sh`) switches such a region to 2026-10-21.0 by
+  itself. `OVERTURE_RELEASE=latest` opts in to the newest complete release, resolved
   once at start. The queue records its release in `queue-refresh.release`,
   and `--continue` refuses a different one unless `OVERTURE_RELEASE` names a
   release explicitly.

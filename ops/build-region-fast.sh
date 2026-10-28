@@ -353,9 +353,11 @@ ARGS=(
 ARGS+=( $WRITER_FLAGS )
 ARGS+=( "${ML_ARGS[@]}" )
 # A region's extra builder flags (cloud/region-build-flags.tsv: id, then the flags), a data file so
-# one region gets a flag without an edit here: Bahrain's --ocr, a test map for the sign reader.
+# one region gets a flag without an edit here. No file: none (awk on a missing file exits 2,
+# which set -e made the end of every build).
 BUILD_FLAGS_TSV=${STREETZIM_BUILD_FLAGS_TSV:-/storage/streetzim/cloud/region-build-flags.tsv}
-EXTRA_FLAGS=$(awk -F'\t' -v id="$ID" '$1==id && $1 !~ /^#/ {print $2; exit}' "$BUILD_FLAGS_TSV" 2>/dev/null)
+EXTRA_FLAGS=""
+[ ! -f "$BUILD_FLAGS_TSV" ] || EXTRA_FLAGS=$(awk -F'\t' -v id="$ID" '$1==id && $1 !~ /^#/ {print $2; exit}' "$BUILD_FLAGS_TSV")
 # shellcheck disable=SC2206
 [ -z "$EXTRA_FLAGS" ] || { ARGS+=( $EXTRA_FLAGS ); echo "  extra builder flags for $ID: $EXTRA_FLAGS"; }
 # Terrain is always on here: without the world DEM the builder would

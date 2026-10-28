@@ -20,22 +20,27 @@ def test_the_wrapper_takes_another_search_cache():
 
 
 def test_a_region_gets_its_extra_builder_flags(tmp_path):
-    """cloud/region-build-flags.tsv gives one region builder flags (Bahrain's
-    --ocr) without an edit to build-region-fast.sh; any other region gets none."""
+    """cloud/region-build-flags.tsv gives one region builder flags without an
+    edit to build-region-fast.sh; any other region gets none, and so does
+    every region when the file is missing (under the wrapper's set -e)."""
     text = (ROOT / "ops" / "build-region-fast.sh").read_text(encoding="utf-8")
     lines = text.splitlines()
     i = next(k for k, ln in enumerate(lines) if ln.startswith("BUILD_FLAGS_TSV="))
-    block = "\n".join(lines[i:i + 4])
+    j = next(k for k, ln in enumerate(lines) if ln.startswith('[ -z "$EXTRA_FLAGS" ]'))
+    block = "\n".join(lines[i:j + 1])
     flags = tmp_path / "flags.tsv"
     flags.write_text("# id\tflags\nbahrain\t--ocr --ocr-scripts arabic,latin\n")
 
-    def run(rid: str) -> list[str]:
-        out = subprocess.run(["bash", "-c", f'ID={rid}; ARGS=(--name x); {block}\nprintf "%s\\n" "${{ARGS[@]}}"'],
-                             env={"PATH": "/usr/bin:/bin", "STREETZIM_BUILD_FLAGS_TSV": str(flags)},
-                             capture_output=True, text=True).stdout
-        return [ln for ln in out.splitlines() if not ln.startswith("  extra")]
+    def run(rid: str, path: Path = flags) -> list[str]:
+        r = subprocess.run(["bash", "-c", f'set -euo pipefail\nID={rid}; ARGS=(--name x); {block}\n'
+                            'printf "%s\\n" "${ARGS[@]}"'],
+                           env={"PATH": "/usr/bin:/bin", "STREETZIM_BUILD_FLAGS_TSV": str(path)},
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return [ln for ln in r.stdout.splitlines() if not ln.startswith("  extra")]
     assert run("bahrain") == ["--name", "x", "--ocr", "--ocr-scripts", "arabic,latin"]
     assert run("iran") == ["--name", "x"]
+    assert run("bahrain", tmp_path / "missing.tsv") == ["--name", "x"]
 
 
 def test_every_region_is_built_with_the_sign_reader():
