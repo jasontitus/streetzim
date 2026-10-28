@@ -19,6 +19,14 @@ noticed them.
 
 ## Late October 2026
 
+### Viewer
+- **The view is in the URL:** each move the reader makes writes `#map=zoom/lat/lon` into the address (no history entry), and a map opened with one starts there instead of flying in from its opening view. A bookmark, a reload or a reader around the viewer gets the same view back; the fragment is the supported way to drive the map from outside (docs/in-zim-apps.md) (2026-10-28)
+- The Satellite button keeps its name and is lit while satellite shows, like 3D and Wiki. It used to read "Map", lit up over the satellite picture. The layer buttons report their state to screen readers (2026-10-28)
+- While the search dropdown covers the Satellite / 3D / Wiki row (all of it on a 568x320 landscape phone, a strip in portrait), the row steps aside instead of showing through under the results (2026-10-28)
+
+### Building
+- `streetzim` downloads on Python 3.12 (no zimscraperlib) try a timeout, a dropped connection, a 429 or a 5xx again, and on any Python a body that ends early, three tries in all, 5 and then 10 s apart, resuming where the server allows; CI's Monaco build failed on a Geofabrik read timeout now and then. A server that cannot be reached at all is not waited on (2026-10-28)
+
 ### Search
 - **Search with a photo** (`--ocr`, off by default): a camera button in the search box reads the text of a photo (a street sign, a shop front, an advert, a landmark's plate) offline with PaddleOCR models on ONNX Runtime's WebAssembly, in a worker, and searches the map for it with a fuzzy match that survives OCR slips; the lines read are listed under the photo to search for by hand. The builder adds a PP-OCRv6 tiny detector and a recognizer per script the map's names use (PP-OCRv6 small for Latin and CJK; PP-OCRv5 for Korean, Thai, Arabic, Cyrillic, Greek, Devanagari, Tamil, Telugu), pinned in the lock file; Monaco grows from 2.9 to 25.6 MB. Chosen by measurement across 42 languages against Tesseract.js and the other PP-OCR models (docs/ocr.md) (2026-10-28)
 

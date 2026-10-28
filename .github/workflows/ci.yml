@@ -429,6 +429,26 @@ jobs:
               grep -q '^NO OVERLAPS' "overlap-$s-$b.txt" || { echo "::error::controls overlap at $s (banner=$b)"; fail=1; }
             done
           done
+          # In Kiwix the app's toolbar sits below the page (--bottom-inset),
+          # which lifts the locate button: on a 568x320 phone it used to land
+          # on Home (#25).
+          for s in 568x320 667x375 844x390; do
+            ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+              BOTTOM_INSET=64 CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+              node tmp/overlap-check.mjs | tee "overlap-$s-inset.txt"
+            grep -q '^NO OVERLAPS' "overlap-$s-inset.txt" || { echo "::error::controls overlap at $s (bottom inset)"; fail=1; }
+          done
+          # While typing, the dropdown may cover a bottom corner for a moment,
+          # but the layer row steps aside instead of sitting under it.
+          for s in 568x320 390x844; do
+            ZIM_ORIGIN=http://127.0.0.1:8902/content/osm-monaco-ci VW=${s%x*} VH=${s#*x} SHOW_ALL_CONTROLS=1 \
+              SEARCH=Mona CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+              node tmp/overlap-check.mjs | tee "overlap-$s-search.txt"
+            grep -q '^OVERLAP-CHECK-DONE' "overlap-$s-search.txt" || { echo "::error::search overlap check did not finish at $s"; fail=1; }
+            if sed -n '/^OVERLAPS:/,$p' "overlap-$s-search.txt" | grep -q '#controls'; then
+              echo "::error::the search results cover the layer row at $s"; fail=1
+            fi
+          done
           exit $fail
 
       # The /drive/ online preview (docs/online-preview.md): the picker

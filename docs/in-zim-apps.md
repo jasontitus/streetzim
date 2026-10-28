@@ -21,7 +21,7 @@ built into `index.html`) recognises these fragments. They can mix freely:
 
 | Fragment | Behaviour |
 | --- | --- |
-| `map=<zoom>/<lat>/<lon>` | Fly the map to that view. Legacy "show this on the map" link — also produced by the auto-redirect search detail pages used to do. |
+| `map=<zoom>/<lat>/<lon>` | That view, openstreetmap.org's form: the map opens there, and flies there on a `hashchange`. The viewer also writes it (see below). |
 | `bounds=<w>,<s>,<e>,<n>` | Fit the map to that box (an administrative area's page and Find result); takes the place of `map=`, which the same links carry for viewers without `bounds=`. |
 | `dest=<lat>,<lon>` | Open the routing panel with `window.streetzimRouting.open()`, then call `streetzimRouting.setDest` with the supplied coords. The panel queues the pick if the routing graph hasn't loaded yet, so timing isn't an issue. |
 | `origin=<lat>,<lon>` | Sets the origin slot. Only read together with `dest=`. |
@@ -35,6 +35,26 @@ shape from each result row's primary CTA. Anything else that wants
 to deep-link into routing (a kiwix bookmark, a custom search
 engine, a third-party sidebar) only has to construct that one
 fragment.
+
+### The view in the URL, and driving the map from outside
+
+After each move the reader makes (drag, pinch, wheel, keys, the zoom
+buttons; not a search, deep link, Home or route framing, the same moves the
+last-view memory keeps), the viewer writes the view into the URL as
+`map=<zoom>/<lat>/<lon>`, zoom to 2 decimals and the coordinates to 5. It
+uses `history.replaceState`, so this adds no history entry and fires no
+`hashchange`. The other fragments stay, except `bounds=`, which would win
+over `map=`. So the address is a link to what is on screen: copied,
+bookmarked or reloaded, it opens there, in any reader.
+
+That fragment is the supported way for a reader or app around the viewer
+to drive the map: read `location.hash` for the view, and set it to move the
+map (`#map=…`), drop a pin (`#pin=…&label=…`) or open directions
+(`#dest=…`). A `#map=` view off the map's box, or below its minimum zoom, is
+not opened at (the /drive/ app shows every map at one address, so the URL
+can still name the last one). `window.__szMap`, the MapLibre map,
+is there for the viewer's own tests and probes. It is not an interface, and
+it changes with MapLibre.
 
 The `places.html` page ALSO understands `q=<text>` and `cat=<id>`
 fragments, so the Firebase `/drive` PWA shell can open it with a

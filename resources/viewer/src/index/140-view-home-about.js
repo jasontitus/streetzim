@@ -4,7 +4,12 @@
 // Last view: the camera (centre, zoom, and bearing/pitch when not 0) is kept
 // in localStorage per map and reopened on the next visit -- unless the URL
 // names a view or a place itself (#map=, #dest=, #origin=, #pin=,
-// #find=results): a deep link always wins. Only a move the reader made
+// #find=results): a deep link always wins, and a `#map=zoom/lat/lon` view
+// is where the map opens (not map-config's, flown from). The same move also
+// writes its view into the URL as `#map=` (history.replaceState: no history
+// entry, no hashchange), so the address is a link to what is on screen: a
+// bookmark, a reload or a reader around the viewer gets it back, as with
+// openstreetmap.org (docs/in-zim-apps.md). Only a move the reader made
 // (drag, pinch, wheel, keys, the zoom buttons; see initViewMemory) is
 // saved; opening, deep links, Home, search and route framing are not, so merely opening the map never pins a view. The saved
 // view also records map-config's centre and zoom and is dropped when they
@@ -111,6 +116,46 @@ function _szHashSetsView(hash) {
   return /(?:^#|[#&?])(?:map|bounds|dest|origin|pin)=|find=results/.test(hash || '');
 }
 
+// The view `#map=zoom/lat/lon` names (applyHash, 120, reads the same), or
+// null: none, out of range, or beside `bounds=`, which wins there. With
+// `config`, also null for a view outside this map's box or below its
+// minZoom, as for a saved view: /drive/ serves every map at one path, so the
+// URL can still name the map open before.
+function _szHashView(hash, config) {
+  hash = hash || '';
+  if (/(?:^#|[#&?])bounds=/.test(hash)) return null;
+  var m = hash.match(/(?:^#|[#&?])map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
+  if (!m) return null;
+  var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
+  if (!_szNum(z, 0, 24) || !_szNum(lat, -90, 90) || !_szNum(lon, -180, 180)) return null;
+  if (config) {
+    var b = config.bounds;
+    if (z < (config.minZoom || 0)) return null;
+    if (b && b.length === 4 &&
+        (lon < b[0] - 0.01 || lon > b[2] + 0.01 || lat < b[1] - 0.01 || lat > b[3] + 0.01)) return null;
+  }
+  return { center: [lon, lat], zoom: z, bearing: 0, pitch: 0 };
+}
+
+// The fragment with `map=` set to the camera, first; bounds= goes (it would
+// win over map=), the rest (pin=, dest=, label=, ...) stays.
+function _szViewHash(hash, cam) {
+  var r = function(x, d) { var k = Math.pow(10, d); return Math.round(x * k) / k; };
+  var rest = String(hash || '').replace(/^#/, '').split('&').filter(function(part) {
+    return part && !/^(?:map|bounds)=/.test(part);
+  });
+  return '#' + ['map=' + r(cam.zoom, 2) + '/' + r(cam.lat, 5) + '/' + r(cam.lng, 5)].concat(rest).join('&');
+}
+
+function _szStampView(cam) {
+  try {
+    var h = window.history;
+    if (!h || typeof h.replaceState !== 'function') return;
+    var frag = _szViewHash(location.hash, cam);
+    if (frag !== location.hash) h.replaceState(h.state, '', location.pathname + (location.search || '') + frag);
+  } catch (e) {}
+}
+
 function _szNum(v, lo, hi) {
   return typeof v === 'number' && isFinite(v) && v >= lo && v <= hi;
 }
@@ -154,12 +199,22 @@ function _szWriteView(config, storage, cam) {
   catch (e) { return false; }
 }
 
-// The camera the map opens with: the saved view when the URL leaves the
-// choice to us, else map-config.json's.
+// The camera the map opens with: the view the URL names (with the saved
+// view's bearing and pitch when it is that view: the URL carries neither);
+// map-config.json's when the URL names a place or a box instead (applyHash
+// frames it), or a view off this map; else the saved view.
 function _szOpeningCamera(config, hash, storage) {
   var home = { center: config.center, zoom: config.zoom, bearing: 0, pitch: 0 };
-  if (_szHashSetsView(hash)) return home;
-  return _szReadView(config, storage) || home;
+  var saved = _szReadView(config, storage);
+  if (!_szHashSetsView(hash)) return saved || home;
+  var view = _szHashView(hash, config);
+  if (!view) return home;
+  if (saved && Math.abs(saved.center[0] - view.center[0]) < 6e-6 &&
+      Math.abs(saved.center[1] - view.center[1]) < 6e-6 && Math.abs(saved.zoom - view.zoom) < 0.006) {
+    view.bearing = saved.bearing;
+    view.pitch = saved.pitch;
+  }
+  return view;
 }
 
 // How far the reader can pan: exactly the built box (map-config.json's
@@ -257,8 +312,7 @@ function _szDriving() {
 }
 
 function initViewMemory(map, config) {
-  var storage = _szStorage();
-  if (!storage) return;
+  var storage = _szStorage();   // none: the URL still gets the view
   var timer = null;
   // Whose move is it? MapLibre marks most gesture moves with originalEvent,
   // but not all: a plain mouse-wheel notch and the snap back to north after
@@ -278,10 +332,10 @@ function initViewMemory(map, config) {
     timer = null;
     if (_szDriving()) return;
     var c = map.getCenter();
-    _szWriteView(config, storage, {
-      lng: c.lng, lat: c.lat, zoom: map.getZoom(),
-      bearing: map.getBearing(), pitch: map.getPitch()
-    });
+    var cam = { lng: c.lng, lat: c.lat, zoom: map.getZoom(),
+                bearing: map.getBearing(), pitch: map.getPitch() };
+    _szWriteView(config, storage, cam);
+    _szStampView(cam);
   }
   var el = map.getCanvasContainer && map.getCanvasContainer();
   if (el && el.addEventListener) {

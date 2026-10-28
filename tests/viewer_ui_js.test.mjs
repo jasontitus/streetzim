@@ -73,20 +73,22 @@ function loadView(env = {}) {
   const document = env.document || fakeDocument();
   const winOn = {};
   const window = { addEventListener(t, f) { (winOn[t] = winOn[t] || []).push(f); }, _on: winOn };
+  if (env.history) window.history = env.history;
   if ('storage' in env) {
     Object.defineProperty(window, 'localStorage', {
       get() { if (env.storage === 'throws') throw new Error('SecurityError'); return env.storage; },
     });
   }
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
-    VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView,' +
+    VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView, _szHashView, _szViewHash,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
     ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance, initCompassVisibility };');
   // Fake timers: `timers` holds the pending ones; runTimers() fires them.
   const timers = new Map();
   let next = 1;
-  const api = fn(window, document, { pathname: env.pathname || '/C/index.html' },
+  const location = env.location || { pathname: env.pathname || '/C/index.html' };
+  const api = fn(window, document, location,
     (f, ms) => { timers.set(next, { f, ms }); return next++; }, (id) => { timers.delete(id); });
   const pending = (ms) => [...timers.values()].filter((t) => ms === undefined || t.ms === ms).length;
   const runTimers = (ms) => {
@@ -121,18 +123,46 @@ await ok('a saved view reopens; bearing and pitch only when used', () => {
     { center: [7.43, 43.73], zoom: 16, bearing: -30.3, pitch: 45 });
 });
 
-await ok('deep links win over the saved view', () => {
+await ok('deep links win over the saved view; a #map= view is where the map opens', () => {
   const v = loadView({ storage: memStorage() });
   const s = v._szStorage();
   v._szWriteView(CONFIG, s, { lng: 7.43, lat: 43.73, zoom: 16 });
   const home = { center: CONFIG.center, zoom: CONFIG.zoom, bearing: 0, pitch: 0 };
-  for (const h of ['#map=16/43.7/7.4', '#dest=43.7,7.4&label=x', '#origin=43.7,7.4',
-                   '#pin=43.7,7.4', '#find=results', '#label=a&map=3/1/2']) {
+  for (const h of ['#dest=43.7,7.4&label=x', '#origin=43.7,7.4', '#pin=43.7,7.4', '#find=results',
+                   '#bounds=7.40,43.72,7.44,43.76&map=12/43.74/7.42',   // bounds= frames instead
+                   '#map=99/43.7/7.4', '#map=16/91/7.4', '#map=16/43.7/181']) {
     assert.deepStrictEqual(v._szOpeningCamera(CONFIG, h, s), home, h);
   }
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '#map=16.5/43.7312/7.4251', s),
+    { center: [7.4251, 43.7312], zoom: 16.5, bearing: 0, pitch: 0 });
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '#label=a&map=14/43.75/7.43&pin=1,2', s),
+    { center: [7.43, 43.75], zoom: 14, bearing: 0, pitch: 0 });
+  // A view off this map (the /drive/ app shows every map at one address, so
+  // the URL can still name the last one) or below its minZoom: map-config's.
+  for (const h of ['#map=3/1/-2', '#map=14/43.70/7.42', '#map=14/43.74/7.46']) {
+    assert.deepStrictEqual(v._szOpeningCamera(CONFIG, h, s), home, h);
+  }
+  assert.deepStrictEqual(v._szOpeningCamera({ ...CONFIG, minZoom: 10 }, '#map=9/43.74/7.42', s),
+    { ...home }, 'below minZoom');
+  assert.ok(v._szHashView('#map=9/43.74/7.42'));                 // without a map, only the form is checked
+  assert.strictEqual(v._szHashView('#map=9/43.74/7.42', { ...CONFIG, minZoom: 10 }), null);
   // Other fragments and none at all leave the choice to the saved view.
   assert.strictEqual(v._szOpeningCamera(CONFIG, '#label=x', s).zoom, 16);
   assert.strictEqual(v._szOpeningCamera(CONFIG, '', s).zoom, 16);
+});
+
+await ok('a reload keeps the bearing and pitch the URL cannot carry', () => {
+  const v = loadView({ storage: memStorage() });
+  const s = v._szStorage();
+  v._szWriteView(CONFIG, s, { lng: 7.4312345, lat: 43.7398765, zoom: 15.456, bearing: -45, pitch: 30 });
+  // The URL written by the same move: same view, so its bearing and pitch.
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '#map=15.46/43.73988/7.43123', s),
+    { center: [7.43123, 43.73988], zoom: 15.46, bearing: -45, pitch: 30 });
+  // Another view: north up, flat.
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '#map=15.46/43.73988/7.43124', s),
+    { center: [7.43124, 43.73988], zoom: 15.46, bearing: 0, pitch: 0 });
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, '#map=15.47/43.73988/7.43123', s),
+    { center: [7.43123, 43.73988], zoom: 15.47, bearing: 0, pitch: 0 });
 });
 
 await ok('views are kept per map and invalid ones ignored', () => {
@@ -327,12 +357,79 @@ await ok('a changed opening view in map-config drops the saved view', () => {
   assert.strictEqual(v._szReadView(CONFIG, s), null);
 });
 
-await ok('no storage: memory is off and nothing throws', () => {
-  const v = loadView({ storage: 'throws' });
+await ok('no storage: nothing is saved, nothing throws, the URL still gets the view', () => {
+  const hist = fakeHistory('/C/index.html', '');
+  const v = loadView({ storage: 'throws', history: hist, location: hist.location });
   const map = fakeMap();
   v.initViewMemory(map, CONFIG);
   map.fire('moveend', GESTURE);
-  assert.strictEqual(v.pending(), 0);
+  v.runTimers();
+  assert.deepStrictEqual(hist.calls, ['/C/index.html#map=17/43.735/7.425']);
+});
+
+// history.replaceState, keeping location in step as a browser does.
+function fakeHistory(pathname, hash, search = '') {
+  const location = { pathname, search, hash };
+  return {
+    location, calls: [], state: { s: 1 },
+    replaceState(state, title, url) {
+      assert.deepStrictEqual(state, { s: 1 });
+      this.calls.push(url);
+      location.hash = url.slice(url.indexOf('#'));
+    },
+  };
+}
+
+await ok('a reader move writes #map= into the URL, keeping the other fragments', () => {
+  const hist = fakeHistory('/content/osm-monaco/index.html', '#pin=43.73,7.42&label=Casino', '?uilang=fr');
+  const storage = memStorage();
+  const v = loadView({ storage, history: hist, location: hist.location });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.move({ lng: 7.4312345, lat: 43.7398765, zoom: 15.456 }, GESTURE);
+  v.runTimers();
+  assert.deepStrictEqual(hist.calls,
+    ['/content/osm-monaco/index.html?uilang=fr#map=15.46/43.73988/7.43123&pin=43.73,7.42&label=Casino']);
+  assert.strictEqual(saved(v, storage).z, 15.46);
+  // The next move replaces map= in place; an unchanged view writes nothing.
+  map.move({ zoom: 16 }, GESTURE);
+  v.runTimers();
+  assert.strictEqual(hist.location.hash, '#map=16/43.73988/7.43123&pin=43.73,7.42&label=Casino');
+  map.move({}, GESTURE);
+  v.runTimers();
+  assert.strictEqual(hist.calls.length, 2);
+  // What it wrote is what the map opens with.
+  assert.deepStrictEqual(v._szOpeningCamera(CONFIG, hist.location.hash, null),
+    { center: [7.43123, 43.73988], zoom: 16, bearing: 0, pitch: 0 });
+});
+
+await ok('code moves and driving leave the URL alone', () => {
+  const hist = fakeHistory('/C/index.html', '#dest=43.7,7.4');
+  const v = loadView({ storage: memStorage(), history: hist, location: hist.location });
+  const map = fakeMap();
+  v.initViewMemory(map, CONFIG);
+  map.fire('moveend', {});                              // the opening camera
+  map.flyTo({ center: [7.41, 43.74], zoom: 16 });       // a deep link, search, Home
+  v.runTimers();
+  const hud = v.document._el('div'); hud.id = 'drive-hud'; hud.classList.add('visible');
+  v.document.body.appendChild(hud);
+  map.move({ zoom: 12 }, GESTURE);
+  v.runTimers();
+  assert.deepStrictEqual(hist.calls, []);
+});
+
+const v0 = loadView({});
+await ok('the URL view: bounds= goes, other fragments stay, numbers rounded', () => {
+  const cam = { lng: -7.123456, lat: 43.0000049, zoom: 3.14159 };
+  assert.strictEqual(v0._szViewHash('', cam), '#map=3.14/43/-7.12346');
+  assert.strictEqual(v0._szViewHash(undefined, cam), '#map=3.14/43/-7.12346');
+  assert.strictEqual(v0._szViewHash('#bounds=1,2,3,4&map=9/1/2&label=a%26b', cam),
+    '#map=3.14/43/-7.12346&label=a%26b');
+  assert.strictEqual(v0._szViewHash('#find=results', cam), '#map=3.14/43/-7.12346&find=results');
+  assert.deepStrictEqual(v0._szHashView(v0._szViewHash('#find=results', cam)),
+    { center: [-7.12346, 43], zoom: 3.14, bearing: 0, pitch: 0 });
+  assert.strictEqual(v0._szHashView('#xmap=3/1/2'), null);
+  assert.strictEqual(v0._szHashView(''), null);
 });
 
 await ok('Home returns to the config view, and not while driving', () => {

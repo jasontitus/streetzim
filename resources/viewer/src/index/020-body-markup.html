@@ -163,9 +163,9 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 })();
 </script>
 <div id="controls">
-  <button id="layer-toggle" title="Toggle satellite imagery" data-i18n-title="controls.satellite_title" data-i18n="controls.satellite">Satellite</button>
-  <button id="terrain-toggle" title="Toggle 3D terrain" data-i18n-title="controls.terrain_title" data-i18n="controls.terrain_3d">3D</button>
-  <button id="wiki-toggle" title="Show nearby Wikipedia entries" data-i18n-title="controls.wiki_title" data-i18n="controls.wiki">📖 Wiki</button>
+  <button id="layer-toggle" aria-pressed="false" title="Toggle satellite imagery" data-i18n-title="controls.satellite_title" data-i18n="controls.satellite">Satellite</button>
+  <button id="terrain-toggle" aria-pressed="false" title="Toggle 3D terrain" data-i18n-title="controls.terrain_title" data-i18n="controls.terrain_3d">3D</button>
+  <button id="wiki-toggle" aria-pressed="false" title="Show nearby Wikipedia entries" data-i18n-title="controls.wiki_title" data-i18n="controls.wiki">📖 Wiki</button>
   <!-- The "Find" link to places.html was removed 2026-05-10 — the
        on-map chip rail under #search-input now covers chip-based
        browsing without a navigation. places.html stays available

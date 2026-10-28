@@ -939,7 +939,7 @@ await ok('names with several values: a search row shows the first; data-name and
 await ok('names with several values: the Find page\'s #dest=…&label= hand-off fills the route with the first', () => {
   // applyHash as the map's load handler has it (120-map-init-and-style.js).
   const a = HTML.indexOf('    function validLatLon(lat, lon) {');
-  const b = HTML.indexOf("    map.on('load', applyHash);", a);
+  const b = HTML.indexOf("    map.on('load', function() { applyHash(true); });", a);
   assert.ok(a > 0 && b > a);
   const run = (hash) => {
     const calls = [];
@@ -960,6 +960,45 @@ await ok('names with several values: the Find page\'s #dest=…&label= hand-off 
   // A pin's popup cuts the name itself (_szPlacePopupDOM).
   r = run('#pin=37.79,-122.27&label=' + encodeURIComponent('A;B'));
   assert.deepStrictEqual(r.pins, ['A;B']);
+});
+
+// The functions applyHash's first run uses from 140.
+function viewHelpers() {
+  const fn = (name) => {
+    const i = HTML.indexOf(`function ${name}(`);
+    assert.ok(i > 0, name);
+    return HTML.slice(i, HTML.indexOf('\n}\n', i) + 3);
+  };
+  return fn('_szNum') + fn('_szHashView');
+}
+
+await ok('applyHash on load reads the URL the page opened with and flies to no map= view', () => {
+  const a = HTML.indexOf('    function validLatLon(lat, lon) {');
+  const b = HTML.indexOf("    map.on('load', function() { applyHash(true); });", a);
+  assert.ok(a > 0 && b > a);
+  const config = { bounds: [-122.5, 37.6, -122.1, 37.9], minZoom: 0 };
+  const run = (openHash, hash, first) => {
+    const flown = [], pins = [], calls = [];
+    const win = { location: { hash }, streetzimRouting: { open() {}, setDest: (...x) => calls.push(['dest', ...x]) } };
+    const map = { flyTo: (o) => flown.push([o.center, o.zoom]), fitBounds() {} };
+    new Function('window', 'map', 'placeSearchPin', 'SZ_HERE', 'renderFindResultsFromStash', 'openHash', 'config',
+      viewHelpers() + HTML.slice(a, b) + `\napplyHash(${first});`)(win, map, (m, la, lo, name) => pins.push(name),
+      'HERE', () => {}, openHash, config);
+    return { flown, pins, calls };
+  };
+  // A move before `load` wrote its view into the URL: not flown back to.
+  assert.deepStrictEqual(run('', '#map=13/37.8/-122.3', true).flown, []);
+  // A deep link the map opened at: no hidden ease to the same view, and the
+  // pin from the opening URL is dropped straight away.
+  let r = run('#map=16/37.79/-122.27&pin=37.79,-122.27&label=X', '#map=12/37.7/-122.4', true);
+  assert.deepStrictEqual(r.flown, []);
+  assert.deepStrictEqual(r.pins, ['X']);
+  // A map= off this map (/drive/'s last map) is ignored; a dest= beside it is framed.
+  r = run('#map=14/48.85/2.35&dest=37.79,-122.27', '', true);
+  assert.deepStrictEqual(r.flown, [[[-122.27, 37.79], 16]]);
+  assert.deepStrictEqual(r.calls, [['dest', 37.79, -122.27, '']]);
+  // A hashchange (a reader around the viewer, a link inside it) flies.
+  assert.deepStrictEqual(run('', '#map=13/37.8/-122.3', false).flown, [[[-122.3, 37.8], 13]]);
 });
 
 await ok('names with several values: route steps and the navigation HUD show the first street name', () => {

@@ -589,6 +589,31 @@ function initSearch(map) {
   var clearBtn = document.getElementById('search-clear');
   var activeIdx = -1;
 
+  // The layer row (#controls) steps aside while the dropdown covers it: all
+  // of it on a 568x320 landscape phone, a strip of it in portrait, and the
+  // results are what the reader taps then (#25). Watched rather than set
+  // where the dropdown opens: several places open it (typing, the sign
+  // reader, history), and routing and the "Search this area" pill hide the
+  // whole search box with the dropdown still open in it.
+  (function() {
+    var row = document.getElementById('controls');
+    if (!row || !resultsEl || typeof MutationObserver === 'undefined') return;
+    function sync() {
+      var hide = false;
+      if (resultsEl.style.display === 'block' && resultsEl.getClientRects().length) {
+        var a = resultsEl.getBoundingClientRect(), b = row.getBoundingClientRect();
+        hide = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      }
+      row.classList.toggle('sz-under-results', hide);
+    }
+    var watch = new MutationObserver(sync);
+    watch.observe(resultsEl, { attributes: true, attributeFilter: ['style'], childList: true });
+    var box = document.getElementById('search-container');
+    if (box) watch.observe(box, { attributes: true, attributeFilter: ['class', 'style'] });
+    window.addEventListener('resize', sync);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', sync);
+  })();
+
   var manifest = null;       // {total: N, chunks: {prefix: count, ...}}
   var chunkCache = {};       // prefix -> array of entries
   var chunkCacheBytes = {};  // prefix -> approximate bytes held

@@ -8,7 +8,10 @@
 // banner shown, again with the attribution in its other compact state, and
 // after the banner's x. SHOW_PREVIEW_BANNER=1: the in-ZIM viewer with the
 // banner forced on and filled in (CI has no /drive/ preview). SAFE_BOTTOM=34:
-// under a home-indicator inset. INFO_NAME: a longer map name in #info.
+// under a home-indicator inset. BOTTOM_INSET=64: Kiwix's toolbar below the
+// page (--bottom-inset, which lifts the locate button out of its dead touch
+// band). SEARCH=<text>: typed into the search box, measured with the
+// results open. INFO_NAME: a longer map name in #info.
 // SHOTS=<dir>: a screenshot of each state.
 import puppeteer from 'puppeteer';
 const ORIGIN = process.env.ZIM_ORIGIN;
@@ -58,8 +61,9 @@ try {
         .forEach(el => { el.style.display = 'block'; }));
       await sleep(300);
     }
-    await p.evaluate((force, safe, name) => {
+    await p.evaluate((force, safe, inset, name) => {
       if (safe) document.documentElement.style.setProperty('--safe-bottom', safe + 'px');
+      if (inset) document.documentElement.style.setProperty('--bottom-inset', inset + 'px');
       if (name) document.querySelector('#info h3').textContent = name;
       if (!force) return;
       // What /drive/ writes into it for a streamed Switzerland.
@@ -69,8 +73,15 @@ try {
       set('preview-banner-bytes', ' · 12.3 MB streamed so far');
       document.getElementById('preview-banner-download').textContent = 'Download (1.1 GB)';
       document.getElementById('preview-banner').hidden = false;
-    }, BANNER && !SITE, +(process.env.SAFE_BOTTOM || 0), process.env.INFO_NAME || '');
+    }, BANNER && !SITE, +(process.env.SAFE_BOTTOM || 0), +(process.env.BOTTOM_INSET || 0),
+       process.env.INFO_NAME || '');
     await sleep(300);
+    if (process.env.SEARCH) {
+      await p.type('#search-input', process.env.SEARCH);
+      await p.waitForFunction(() => document.querySelectorAll('#search-results .search-result:not([data-sz-pending])').length > 0,
+        { timeout: 60000 });
+      await sleep(500);
+    }
     for (const state of BANNER ? ['banner', 'banner+attribution', 'dismissed'] : ['']) {
       if (state === 'banner+attribution' || state === 'dismissed') {
         // MapLibre's compact attribution opens and closes on a tap; the

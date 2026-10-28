@@ -131,7 +131,7 @@ ok('selectResult and applyHash use the box', () => {
   assert.match(search, /var textScore = textScoreOf \? textScoreOf\(item\) : _szTextScore\(item, q, words, normalizeText\);/);
   const init = fs.readFileSync(`${REPO}/resources/viewer/src/index/120-map-init-and-style.js`, 'utf8');
   assert.match(init, /hash\.match\(\/bounds=/);
-  assert.match(init, /if \(!fitted\) map\.flyTo/);
+  assert.match(init, /if \(!fitted && !first\) map\.flyTo/);
 });
 
 // ---- an area pick's camera on a short canvas -----------------------------

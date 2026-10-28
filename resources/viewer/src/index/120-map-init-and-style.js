@@ -88,7 +88,11 @@ if (!window.__szUnsupported) fetchConfig(1)
     // repeat them. The zoom is already extent-based (create_osm_zim's
     // get_center_and_zoom), so only the centre needs work.
     // The last view of this map, unless the URL names one (140).
-    var openCam = _szOpeningCamera(config, location.hash, _szStorage());
+    // openHash: the URL the page opened with. A move the reader makes before
+    // `load` writes its view into the URL (140), and applyHash's first run,
+    // on `load`, must not read that and fly the map back to it.
+    var openHash = window.location.hash || '';
+    var openCam = _szOpeningCamera(config, openHash, _szStorage());
     var map = new maplibregl.Map({
       container: 'map',
       locale: _szMapLibreLocale(),
@@ -418,10 +422,13 @@ if (!window.__szUnsupported) fetchConfig(1)
         if (satelliteVisible) showSatellite();
       });
 
+      // The button names its layer and is lit while the layer shows, as 3D
+      // and Wiki are. It used to read "Map" while satellite showed: lit up
+      // over the satellite picture, "Map" read as the map being on (#9).
       toggleBtn.addEventListener('click', function() {
         satelliteVisible = !satelliteVisible;
         toggleBtn.classList.toggle('active-control', satelliteVisible);
-        toggleBtn.textContent = satelliteVisible ? szT('controls.map', 'Map') : szT('controls.satellite', 'Satellite');
+        toggleBtn.setAttribute('aria-pressed', satelliteVisible ? 'true' : 'false');
         if (satelliteVisible) { showSatellite(); } else { hideSatellite(); }
       });
     }
@@ -500,6 +507,7 @@ if (!window.__szUnsupported) fetchConfig(1)
         terrainMode = (terrainMode + 1) % 3;
         terrainToggle.textContent = terrainLabels[terrainMode] || '3D';
         terrainToggle.classList.toggle('active-control', terrainMode > 0);
+        terrainToggle.setAttribute('aria-pressed', terrainMode > 0 ? 'true' : 'false');
         setTerrainMode(terrainMode);
       });
     }
@@ -545,9 +553,14 @@ if (!window.__szUnsupported) fetchConfig(1)
     function validLatLon(lat, lon) {
       return isFinite(lat) && isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
     }
-    function applyHash() {
-      var hash = window.location.hash || '';
+    // first: the run on `load`, for the URL the page opened with. Its `map=`
+    // view is not flown to: the map opened there (openCam), or it was off
+    // this map and ignored.
+    function applyHash(first) {
+      first = first === true;
+      var hash = first ? openHash : (window.location.hash || '');
       var m = hash.match(/map=(\d+\.?\d*)\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/);
+      if (m && first && !_szHashView(hash, config)) m = null;   // off this map: ignored
       // `bounds=w,s,e,n` (an administrative area's search page) fits the box
       // this viewport has; `map=` beside it is for viewers without this.
       var bm = hash.match(/bounds=(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*)/);
@@ -562,7 +575,7 @@ if (!window.__szUnsupported) fetchConfig(1)
       if (m) {
         var z = parseFloat(m[1]), lat = parseFloat(m[2]), lon = parseFloat(m[3]);
         if (validLatLon(lat, lon) && isFinite(z) && z >= 0 && z <= 24) {
-          if (!fitted) map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
+          if (!fitted && !first) map.flyTo({ center: [lon, lat], zoom: z, duration: 1500 });
         } else {
           m = null;
         }
@@ -627,9 +640,9 @@ if (!window.__szUnsupported) fetchConfig(1)
     // immediate fallback a fast PWA cold-start can leave `#pin=…` /
     // `#dest=…` deep-links broken because the listener registered
     // after the event already fired.
-    map.on('load', applyHash);
-    if (map.loaded && map.loaded()) applyHash();
-    window.addEventListener('hashchange', applyHash);
+    map.on('load', function() { applyHash(true); });
+    if (map.loaded && map.loaded()) applyHash(true);
+    window.addEventListener('hashchange', function() { applyHash(false); });
 
     // Attribution dialog
     var attrBtn = document.getElementById('attr-btn');

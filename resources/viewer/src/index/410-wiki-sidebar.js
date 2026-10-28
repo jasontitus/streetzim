@@ -540,6 +540,7 @@ function initWikiSidebar(map, config) {
     staleView = false;
     refreshBar.style.display = 'none';
     toggle.classList.add('active-control');
+    toggle.setAttribute('aria-pressed', 'true');
     panel.classList.add('wiki-visible');
     panel.style.display = 'flex';
     updateSidebar();
@@ -548,6 +549,7 @@ function initWikiSidebar(map, config) {
   function closePanel() {
     active = false;
     toggle.classList.remove('active-control');
+    toggle.setAttribute('aria-pressed', 'false');
     panel.classList.remove('wiki-visible');
     panel.style.display = 'none';
     listEl.textContent = '';
