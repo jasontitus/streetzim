@@ -6,8 +6,13 @@
 // text lines are searched for (map._searchSign, 300-search.js), and the
 // lines are listed under the photo to search for one by hand. Older ZIMs
 // lack the key (in-place patching cannot add the files): no button.
-// Nothing is fetched before the first photo; the worker, a few hundred MB
-// while it reads, is let go a minute after the last one.
+// Picking a place hides the sheet but keeps the photo: the camera button
+// shows it, and a tap goes back to it, its lines and its places (the sheet's
+// own camera takes another; its x lets it go). The search field holds the
+// line the first place matched. In the Kiwix iOS app a note comes before
+// the file picker (sign-env). Nothing is fetched before the first photo;
+// the worker, a few hundred MB while it reads, is let go a minute after
+// the last one.
 
 // BEGIN sign-lines
 // The detector's boxes ({text, box: {x, y, width, height}, script}) as text
@@ -54,6 +59,19 @@ function _szSignLineGroups(items) {
 }
 // END sign-lines
 
+// BEGIN sign-env
+// Kiwix for iOS: the in-ZIM viewer on Kiwix's zim: scheme on a touch screen
+// (000-head.html tells it the same way). The app has no camera permission
+// (no NSCameraUsageDescription), and iOS closes an app that opens the camera
+// without one: the file picker's Take Photo crashes Kiwix. So there the
+// reader is told to pick from the photo library before the picker opens.
+function _szSignKiwixIOS(protocol, nav) {
+  if (protocol !== 'zim:' || !nav) return false;
+  var ua = nav.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1);
+}
+// END sign-env
+
 function initSignSearch(map, config) {
   var path = config && config.ocr;
   var btn = document.getElementById('search-photo');
@@ -70,9 +88,15 @@ function initSignSearch(map, config) {
   var statusEl = document.getElementById('ocr-status');
   var canvas = document.getElementById('ocr-canvas');
   var linesEl = document.getElementById('ocr-lines');
+  var chooseBtn = document.getElementById('ocr-choose');
   var MAX_SIDE = 1600;     // the detector works at 960; crops are read sharper
   var IDLE_MS = 60000;
   var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
+  // window.__szSignKiwixIOS forces it, for tools/ocr_check.mjs (no zim: there).
+  function kiwixIOS() { return !!window.__szSignKiwixIOS || _szSignKiwixIOS(location.protocol, navigator); }
+  // The last photo's search, kept when a result is picked so the reader can
+  // go back to it (the camera button shows the photo): {lines, query}, or null.
+  var last = null;
 
   btn.hidden = false;
   document.getElementById('search-container').classList.add('has-photo');
@@ -168,9 +192,62 @@ function initSignSearch(map, config) {
     sheet.setAttribute('data-sz-ocr', state);
   }
 
-  function close() {
+  // The sheet hides; the photo, its lines and its search stay for the way
+  // back (a result was picked).
+  function hide() {
+    sheet.hidden = true;
+  }
+  // The photo is let go: the sheet closes and the camera button is a camera.
+  function discard() {
     sheet.hidden = true;
     linesEl.innerHTML = '';
+    forget();
+    sheet.setAttribute('data-sz-ocr', '');
+  }
+  function forget() {
+    last = null;
+    btn.classList.remove('has-last');
+    btn.style.backgroundImage = '';
+    btn.title = szT('search.photo', 'Search with a photo');
+    btn.setAttribute('aria-label', btn.title);
+  }
+  // The camera button shows the photo, small: the way back to it.
+  function keep(lines, query) {
+    last = { lines: lines, query: query };
+    try {
+      var t = document.createElement('canvas'), side = 96;
+      var s = side / Math.min(canvas.width, canvas.height);
+      t.width = t.height = side;
+      t.getContext('2d').drawImage(canvas, (side - canvas.width * s) / 2, (side - canvas.height * s) / 2,
+                                   canvas.width * s, canvas.height * s);
+      btn.style.backgroundImage = 'url(' + t.toDataURL('image/jpeg', 0.7) + ')';
+    } catch (e) {}
+    btn.classList.add('has-last');
+    btn.title = szT('search.photo_back', 'Back to the photo');
+    btn.setAttribute('aria-label', btn.title);
+  }
+  // Back to the photo: its sheet, its lines and its places again.
+  function reopen() {
+    sheet.hidden = false;
+    canvas.hidden = false;
+    chooseBtn.hidden = true;
+    setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+    input.value = last.query;
+    document.getElementById('search-clear').style.display = 'block';
+    map._searchSign(last.lines).then(function () { sheet.setAttribute('data-sz-ocr', 'searched'); });
+  }
+  // A new photo: the file picker, after the note in the Kiwix iOS app.
+  function pick() {
+    if (kiwixIOS() && chooseBtn.hidden) {
+      sheet.hidden = false;
+      canvas.hidden = true;
+      linesEl.innerHTML = '';
+      chooseBtn.hidden = false;
+      setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
+      return;
+    }
+    file.value = '';
+    file.click();
   }
 
   // The photo, scaled to MAX_SIDE, drawn on the sheet's canvas; its pixels.
@@ -220,7 +297,10 @@ function initSignSearch(map, config) {
   function handle(f) {
     if (!f) return;
     sheet.hidden = false;
+    canvas.hidden = false;
+    chooseBtn.hidden = true;
     linesEl.innerHTML = '';
+    forget();
     // The last photo's places are not this one's.
     resultsEl.innerHTML = '';
     resultsEl.style.display = 'none';
@@ -236,14 +316,21 @@ function initSignSearch(map, config) {
       }
       setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
       showLines(lines);
-      // What was read, in the field, so it can be edited and searched as typed.
-      input.value = lines.map(function (L) { return L.text; }).join(' · ');
-      document.getElementById('search-clear').style.display = 'block';
       // Each line weighs as tall as its letters, against the sign's biggest.
       var tallest = Math.max.apply(null, lines.map(function (L) { return L.box.height; }));
-      return map._searchSign(lines.map(function (L) {
+      var weighted = lines.map(function (L) {
         return { text: L.text, weight: 0.5 + 0.5 * L.box.height / tallest };
-      })).then(function () {
+      });
+      // In the field: the sign's biggest line now, the line the first place
+      // matched once found -- what was searched for, to edit and search as
+      // typed, not everything the photo holds (a status bar, a watermark).
+      var biggest = lines.filter(function (L) { return L.box.height === tallest; })[0].text;
+      input.value = biggest;
+      document.getElementById('search-clear').style.display = 'block';
+      return map._searchSign(weighted).then(function (found) {
+        var query = (found[0] && found[0].signLine) || biggest;
+        input.value = query;
+        keep(weighted, query);
         sheet.setAttribute('data-sz-ocr', 'searched');
       });
     }).catch(function (err) {
@@ -252,15 +339,20 @@ function initSignSearch(map, config) {
     });
   }
 
+  // The camera: back to the last photo while there is one, else a new one.
   btn.addEventListener('click', function () {
+    if (last && sheet.hidden) reopen(); else pick();
+  });
+  document.getElementById('ocr-again').addEventListener('click', pick);
+  chooseBtn.addEventListener('click', function () {
     file.value = '';
     file.click();
   });
   file.addEventListener('change', function () { handle(file.files && file.files[0]); });
-  document.getElementById('ocr-close').addEventListener('click', close);
-  // A picked result flies the map there: the photo has done its job.
+  document.getElementById('ocr-close').addEventListener('click', discard);
+  // A picked result flies the map there; the photo stays for the way back.
   resultsEl.addEventListener('click', function (ev) {
-    if (!sheet.hidden && ev.target && ev.target.closest && ev.target.closest('.search-result')) close();
+    if (!sheet.hidden && ev.target && ev.target.closest && ev.target.closest('.search-result')) hide();
   });
   window.__szSignSearch = { read: handle, release: release };
   return true;

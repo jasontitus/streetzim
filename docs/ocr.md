@@ -92,13 +92,22 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    them (accents and other combining marks off),
    with letters that only differ by code point made alike (Arabic and
    Persian yeh and kaf, ɓ/ɗ/ƙ and b/d/k, ...). Right-to-left lines are also
-   tried with their words reversed. Records are ranked by similarity (to
-   the tenth power, so a near miss on screen does not beat an exact name
-   further away), times the line's prominence (its letters' height against
-   the sign's tallest: the street name before the town in small print),
-   plus a type bonus, then by proximity, as typed searches are. The
-   results show in the search list; picking one closes the photo sheet.
-   Tapping a line in the sheet runs an ordinary search for it.
+   tried with their words reversed. On a line of several words, a name of
+   five letters or fewer must be one of them ("Mace" is not on a sign
+   reading "Manama Central Market", though "mana-mace-ntral" holds it).
+   Records are ranked by similarity (to the tenth power, so a near miss
+   on screen does not beat an exact name further away), times the line's
+   prominence (its letters' height against the sign's tallest: the street
+   name before the town in small print), times how much of the line the
+   name covers ("Manama Central Market" before "Manama"), plus a type
+   bonus, then by proximity, as typed searches are. The results show in
+   the search list, and the search field holds the line the first one
+   matched, as read: not the photo's other text (a status bar, a
+   watermark). Tapping a line in the sheet runs an ordinary search for it.
+4. **Going back.** Picking a result hides the sheet but keeps the photo:
+   the camera button shows it, and tapping it brings back the photo, its
+   lines and its places, for when the first pick was the wrong one. The
+   sheet's own camera button takes another photo; its × lets the photo go.
 
 ## Choosing the models
 
@@ -153,7 +162,7 @@ vowel sign ை (drawn before its consonant) even on a clean sign:
 | reader | camera / photo |
 |---|---|
 | a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone, file picker on a desktop |
-| Kiwix for iOS | the file picker's photo library; the app does not ask for the camera permission (no `NSCameraUsageDescription`), so taking a photo there depends on the app |
+| Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera button first shows a note and a "Choose a photo" button. The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
 | Kiwix for Android | no: its WebView opens no file chooser, so the viewer hides the button there (an Android WebView's user agent says `; wv)`) |
 
 ## Pinning and updating
@@ -197,8 +206,11 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
 - `tools/ocr_check.mjs` (CI, on the Monaco ZIM built with `--ocr`):
   draws photos of signs of the map's own streets and shops (tilted, noisy,
   with other text and the town in small print), gives them to the file
-  input and checks the place comes out first, then that picking it closes
-  the sheet and moves the map. `NAMES` photographs given text instead
+  input and checks the place comes out first and the search field holds
+  its line; then that picking it hides the sheet, moves the map and leaves
+  the photo on the camera button, which brings the photo and its places
+  back; and that in the Kiwix iOS app (forced) the camera opens the note,
+  not the picker. `NAMES` photographs given text instead
   ("text=>record name" for a sign in another script than the record's
   name). With `SCRIPT` and `QUERIES` it photographs the own-script names
   of places the map's search finds: CI runs it on Manama

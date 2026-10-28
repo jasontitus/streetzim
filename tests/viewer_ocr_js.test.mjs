@@ -27,7 +27,8 @@ const M = new Function(
   slice(HTML, '// BEGIN sign-match', '// END sign-match') +
   '\nreturn { _szSignText, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN };')();
 const L = new Function(slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
-  '\nreturn { _szSignLineGroups };')();
+  slice(HTML, '// BEGIN sign-env', '// END sign-env') +
+  '\nreturn { _szSignLineGroups, _szSignKiwixIOS };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -88,8 +89,22 @@ ok('a name in another language counts (ln)', () => {
 ok('the sign\'s big text outweighs its small print', () => {
   const lines = M._szSignLines([{ text: 'Monaco', weight: 0.7 }, { text: 'Rue Paradis', weight: 1 }], norm, 12);
   assert.deepStrictEqual(lines.map((l) => l.text), ['rueparadis', 'monaco']);
-  assert.deepStrictEqual(M._szSignScore({ n: 'Monaco', t: 'admin' }, lines, norm), { sim: 1, weight: 0.7 });
-  assert.deepStrictEqual(M._szSignScore({ n: 'Rue Paradis', t: 'street' }, lines, norm), { sim: 1, weight: 1 });
+  assert.deepStrictEqual(M._szSignScore({ n: 'Monaco', t: 'admin' }, lines, norm),
+                         { sim: 1, weight: 0.7, cover: 1, line: 'Monaco' });
+  assert.deepStrictEqual(M._szSignScore({ n: 'Rue Paradis', t: 'street' }, lines, norm),
+                         { sim: 1, weight: 1, cover: 1, line: 'Rue Paradis' });
+});
+
+ok('a name covering the whole line before one covering part of it; short names are whole words', () => {
+  const lines = M._szSignLines(['Manama Central Market'], norm, 12);
+  const market = M._szSignScore({ n: 'Manama Central Market', t: 'poi' }, lines, norm);
+  const city = M._szSignScore({ n: 'Manama', t: 'place' }, lines, norm);
+  assert.strictEqual(market.cover, 1);
+  assert.ok(city.cover < 0.4, city.cover);
+  // "mana-MACE-ntral" holds it, but it is not a word of the line
+  assert.strictEqual(M._szSignScore({ n: 'Mace', t: 'poi' }, lines, norm), null);
+  // a line without spaces (Chinese) has no words to check: a short name in it counts
+  assert.ok(M._szSignScore({ n: 'Wangfujing', nn: '王府井', t: 'place' }, M._szSignLines(['王府井大街'], norm, 12), norm));
 });
 
 ok('lines: at least two letters, no repeats, longest first, capped', () => {
@@ -129,6 +144,17 @@ ok('Arabic boxes join right to left; Chinese and Thai words without a space', ()
 ok('boxes without text or size are skipped', () => {
   assert.deepStrictEqual(L._szSignLineGroups([{ text: '', box: { x: 0, y: 0, width: 1, height: 1 } },
                                               { text: 'x', box: { x: 0, y: 0, width: 1, height: 0 } }]), []);
+});
+
+ok('the Kiwix iOS app (no camera permission) is told apart from browsers and other Kiwix apps', () => {
+  const iphone = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148' };
+  const ipad = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', platform: 'MacIntel', maxTouchPoints: 5 };
+  const mac = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', platform: 'MacIntel', maxTouchPoints: 0 };
+  assert.strictEqual(L._szSignKiwixIOS('zim:', iphone), true);
+  assert.strictEqual(L._szSignKiwixIOS('zim:', ipad), true);
+  assert.strictEqual(L._szSignKiwixIOS('zim:', mac), false);         // Kiwix for macOS: a file dialog
+  assert.strictEqual(L._szSignKiwixIOS('https:', iphone), false);    // Safari, the /drive/ PWA
+  assert.strictEqual(L._szSignKiwixIOS('http:', iphone), false);     // kiwix-serve
 });
 
 console.log(`${pass} passed`);

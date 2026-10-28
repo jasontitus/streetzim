@@ -6,7 +6,10 @@
 // with other text and the town in small print -- hands it to the button's file input as a phone would,
 // and checks that the sign reader reads it (ocr/ocr-worker.js, the PaddleOCR
 // models in the ZIM) and that the place comes out first in the results.
-// Then picks it and checks the photo sheet closes and the map flies there.
+// That the search field holds the line the place matched, not the whole
+// photo's text. Then picks it and checks the photo sheet hides, the map flies
+// there and the camera button shows the photo; and that tapping it brings
+// back the photo and its places.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/ocr_check.mjs
@@ -43,6 +46,24 @@ try {
     return !!b && !b.hidden && b.getBoundingClientRect().width > 0;
   });
   if (!shown) errs.push('no camera button: map-config.json has no `ocr`, or the viewer hid it');
+
+  // In the Kiwix iOS app (forced: no zim: scheme here) the camera opens a
+  // note and a "choose a photo" button, not the file picker, whose Take
+  // Photo closes the app; the x lets it go.
+  const note = await p.evaluate(() => {
+    window.__szSignKiwixIOS = true;
+    document.getElementById('search-photo').click();
+    const sheet = document.getElementById('ocr-sheet');
+    const got = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
+                  choose: !document.getElementById('ocr-choose').hidden,
+                  photo: !document.getElementById('ocr-canvas').hidden };
+    document.getElementById('ocr-close').click();
+    window.__szSignKiwixIOS = false;
+    return got;
+  });
+  if (!(note.open && note.state === 'pick' && note.choose && !note.photo)) {
+    errs.push('Kiwix iOS: the camera did not open the note first: ' + JSON.stringify(note));
+  }
 
   // Places to photograph: given, or streets and POIs from the map's search.
   let names = (process.env.NAMES || '').split('|').filter(Boolean);
@@ -133,6 +154,7 @@ try {
     const got = await p.evaluate(() => ({
       status: document.getElementById('ocr-sheet').getAttribute('data-sz-ocr'),
       lines: [...document.querySelectorAll('#ocr-lines .ocr-line')].map(b => b.textContent),
+      field: document.getElementById('search-input').value,
       results: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending])')]
         .map(r => r.getAttribute('data-name')),
       // the first row's names as shown: its name and own-script name
@@ -142,25 +164,44 @@ try {
     const ms = Date.now() - t0;
     console.log(`"${name}": ${got.status}: read ${JSON.stringify(got.lines)} in ${ms} ms; results ${JSON.stringify(got.results.slice(0, 3))}`);
     if (!done) { errs.push(`"${name}": nothing read or found in 180 s (${got.status})`); continue; }
+    // The line the place matched, as read ("Bab AI Bahrain" for "Bab Al
+    // Bahrain" is still that line), not every line of the photo.
+    if (got.lines.indexOf(got.field) < 0 || got.field.indexOf('OPEN') >= 0) {
+      errs.push(`"${name}": the search field says ${JSON.stringify(got.field)}, not the sign's line`);
+    }
     // Another place of exactly the sign's name may come first (two records
     // of one street): its row shows that name.
     const sameName = got.shown[0] && got.shown[0].split(' ').join('').indexOf(name.split(' ').join('')) >= 0;
     if (want.split('/').indexOf(got.results[0]) < 0 && !sameName) errs.push(`"${name}": first result is ${JSON.stringify(got.results[0])}, not ${JSON.stringify(want)}`);
   }
 
-  // Picking the result closes the sheet and flies the map there.
+  // Picking the result hides the sheet, flies the map there and keeps the
+  // photo on the camera button; tapping it brings the photo and its places back.
   if (names.length && !errs.length) {
     const before = await p.evaluate(() => window.__szMap.getCenter().toArray());
+    const first = await p.evaluate(() =>
+      document.querySelector('#search-results .search-result:not([data-sz-pending])').getAttribute('data-name'));
     await p.click('#search-results .search-result');
     await new Promise(r => setTimeout(r, 2500));
     const after = await p.evaluate(() => ({
       hidden: document.getElementById('ocr-sheet').hidden,
       center: window.__szMap.getCenter().toArray(),
+      kept: document.getElementById('search-photo').classList.contains('has-last') &&
+            /^url\(/.test(document.getElementById('search-photo').style.backgroundImage),
     }));
     if (!after.hidden) errs.push('the photo sheet stayed open after a result was picked');
     if (Math.abs(after.center[0] - before[0]) + Math.abs(after.center[1] - before[1]) < 1e-6) {
       errs.push('the map did not move to the picked result');
     }
+    if (!after.kept) errs.push('the camera button does not show the photo after a result was picked');
+    await p.click('#search-photo');
+    const back = await p.waitForFunction(() => {
+      const sheet = document.getElementById('ocr-sheet');
+      const row = document.querySelector('#search-results .search-result:not([data-sz-pending])');
+      return !sheet.hidden && sheet.getAttribute('data-sz-ocr') === 'searched' &&
+        document.getElementById('search-results').style.display !== 'none' && row ? row.getAttribute('data-name') : null;
+    }, { timeout: 30000 }).then(h => h.jsonValue(), () => null);
+    if (back !== first) errs.push(`back to the photo: the sheet and its places did not come back (first result ${JSON.stringify(back)})`);
   }
   const sheetErrors = pageErrors.filter(m => !/ResizeObserver/.test(m));
   if (sheetErrors.length) errs.push('page errors: ' + sheetErrors.join(' | '));

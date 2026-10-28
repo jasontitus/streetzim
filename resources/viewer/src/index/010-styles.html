@@ -384,10 +384,22 @@
   #ocr-sheet[hidden] { display: none; }
   #ocr-sheet .ocr-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   #ocr-status { flex: 1; font-size: 13px; color: var(--text-secondary); }
-  #ocr-close {
+  #ocr-close, #ocr-again {
     background: none; border: none; font-size: 18px; line-height: 1; padding: 0 4px;
     color: var(--text-tertiary); cursor: pointer;
   }
+  #ocr-close:hover, #ocr-again:hover { color: var(--text-secondary); }
+  /* After a photo search the camera button shows the photo: a way back. */
+  #search-photo.has-last {
+    background-position: center; background-size: cover; background-repeat: no-repeat;
+    background-origin: content-box; background-clip: content-box; border-radius: 6px;
+  }
+  #search-photo.has-last svg { visibility: hidden; }
+  #ocr-choose {
+    display: block; margin: 4px 0 2px; padding: 8px 16px; border: none; border-radius: 999px;
+    background: var(--accent, #2563eb); color: #fff; font: inherit; font-size: 14px; cursor: pointer;
+  }
+  #ocr-choose[hidden], #ocr-canvas[hidden] { display: none; }
   #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
   #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   #ocr-lines .ocr-line {
@@ -1048,6 +1060,9 @@
     #search-photo { top: 0; right: 0; width: 44px; height: 44px; }
     #search-container.has-photo #search-clear { right: 40px; }
     #ocr-close { min-width: 44px; min-height: 44px; margin: -12px -12px -8px 0; }
+    #ocr-again { min-width: 44px; min-height: 44px; margin: -12px 0 -8px 0; }
+    #search-photo.has-last { padding: 8px; }
+    #ocr-choose { min-height: 44px; }
     #ocr-lines .ocr-line { min-height: 44px; padding: 0 14px; }
     .routing-input { font-size: 16px; min-height: 44px; padding: 8px 10px; }
     .routing-icon-btn { min-width: 44px; min-height: 44px; padding: 0 8px; }

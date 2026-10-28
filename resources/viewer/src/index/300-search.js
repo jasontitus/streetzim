@@ -303,27 +303,33 @@ function _szSignSimilarity(name, line, lineBigrams) {
   return Math.max(0, 1 - d / name.length);
 }
 
-// A record's best match among the lines ([{text, bigrams, weight}]), over
-// every name it has (_szSearchForms): {sim, weight} of the line where
-// similarity times the line's weight (its prominence on the sign) is
-// highest among those at least SZ_SIGN_MIN similar, or null.
+// A record's best match among the lines ([{raw, text, words, bigrams,
+// weight}]), over every name it has (_szSearchForms): {sim, weight, cover,
+// line} of the line where the match is best, or null. A match needs
+// SZ_SIGN_MIN similarity; on a line of several words a name of five letters
+// or fewer must be one of them ("Mace" is not in "Manama Central Market",
+// though "mana-mace-ntral" holds it). Best is similarity times the line's
+// weight (its prominence on the sign) times how much of the line the name
+// covers: "Manama Central Market" before "Manama" for that sign. `line` is
+// the line as read.
 function _szSignScore(rec, lines, norm) {
   var forms = _szSearchForms(rec, norm);
-  var best = null;
+  var best = null, bestValue = 0;
   for (var f = 0; f < forms.length; f++) {
     var name = _szSignText(forms[f], function (x) { return x; });
     for (var l = 0; l < lines.length; l++) {
-      var s = _szSignSimilarity(name, lines[l].text, lines[l].bigrams);
-      var w = lines[l].weight || 1;
-      if (s >= SZ_SIGN_MIN && (!best || s * w > best.sim * best.weight)) best = { sim: s, weight: w };
+      var L = lines[l];
+      if (name.length <= 5 && L.words && L.words.length > 1 && L.words.indexOf(name) < 0) continue;
+      var s = _szSignSimilarity(name, L.text, L.bigrams);
+      if (s < SZ_SIGN_MIN) continue;
+      var w = L.weight || 1, cover = Math.min(1, name.length / L.text.length);
+      var value = s * w * (0.4 + 0.6 * cover);
+      if (value > bestValue) { bestValue = value; best = { sim: s, weight: w, cover: cover, line: L.raw }; }
     }
   }
   return best;
 }
 
-// The lines worth searching for (strings, or {text, weight}: weight 0..1,
-// how prominent the line is on the sign), best first: _szSignText'ed, at
-// least two letters, no repeats, at most `max`.
 // A right-to-left line is also tried with its words the other way round:
 // a recognizer may give them in visual order.
 var SZ_SIGN_RTL_TEXT = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
@@ -333,7 +339,9 @@ function _szSignLines(texts, norm, max) {
     var t = _szSignText(raw, norm);
     if (t.length < 2 || seen[t]) return;
     seen[t] = 1;
-    out.push({ raw: String(raw), text: t, bigrams: _szBigrams(t), weight: weight });
+    var words = String(raw).split(/\s+/).map(function (x) { return _szSignText(x, norm); })
+      .filter(function (x) { return x; });
+    out.push({ raw: String(raw), text: t, words: words, bigrams: _szBigrams(t), weight: weight });
   }
   for (var i = 0; i < texts.length; i++) {
     var raw = texts[i] && typeof texts[i] === 'object' ? texts[i].text : texts[i];
@@ -1528,7 +1536,8 @@ var SEARCH_SHARDS = (function () {
   // each line word's first two letters -- a later OCR slip must not pick
   // another leaf -- and keeps the records _szSignScore finds similar
   // enough, ranked by similarity, type and proximity like a typed search.
-  // Shows them in the results list; resolves to the matches.
+  // Shows them in the results list; resolves to the matches, each with
+  // `signLine`, the line of the photo it matched.
   map._searchSign = function(texts) {
     if (!manifest) return Promise.resolve([]);
     var lines = _szSignLines(texts || [], normalizeText, 12);
@@ -1562,15 +1571,18 @@ var SEARCH_SHARDS = (function () {
     }
     return streamFilterChunks(prefixes, '', accept).then(function(found) {
       var scored = scoreResults(found, '', function(item) {
-        var sc = scores.get(item) || { sim: 0, weight: 0 };
+        var sc = scores.get(item) || { sim: 0, weight: 0, cover: 0 };
         // Similarity first, steeply: proximity multiplies by up to 10, and
         // an on-screen near miss (0.76) must not beat an exact name farther
         // away, while a close one (0.85) may. The sign's big text before
         // its small print (the town under a street name); the type breaks
         // ties. No admin-level bonus: a country named in small print is
-        // not what the photo is of.
-        return 400 * Math.pow(sc.sim, 10) * sc.weight + (SZ_TYPE_BONUS[item.t] || 0);
+        // not what the photo is of. A name covering its whole line before
+        // one covering part of it (the city in "Manama Central Market").
+        return 400 * Math.pow(sc.sim, 10) * sc.weight * (0.4 + 0.6 * sc.cover) +
+          (SZ_TYPE_BONUS[item.t] || 0);
       });
+      scored.forEach(function(m) { m.signLine = (scores.get(m.item) || {}).line || ''; });
       if (seq === searchSeq) renderResults(scored);
       return scored;
     });

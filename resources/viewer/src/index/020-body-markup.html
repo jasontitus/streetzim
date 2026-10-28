@@ -269,8 +269,13 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 <div id="ocr-sheet" hidden role="dialog" aria-labelledby="ocr-status">
   <div class="ocr-head">
     <span id="ocr-status" aria-live="polite"></span>
+    <button id="ocr-again" type="button" title="Search with a photo" data-i18n-title="search.photo"
+            aria-label="Search with a photo" data-i18n-aria-label="search.photo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
     <button id="ocr-close" type="button" title="Close" data-i18n-title="common.close">&times;</button>
   </div>
+  <!-- In the Kiwix iOS app (no camera permission: Take Photo closes it), the
+       note and this button come before the file picker (305-ocr-search.js). -->
+  <button id="ocr-choose" type="button" hidden data-i18n="search.photo_choose">Choose a photo</button>
   <canvas id="ocr-canvas" width="1" height="1"></canvas>
   <div id="ocr-lines"></div>
 </div>
