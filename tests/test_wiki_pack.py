@@ -13,7 +13,9 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -449,6 +451,25 @@ def test_title_map_from_both_dump_formats(world: dict[str, Any]) -> None:
     assert "Q12" not in rows                            # namespace 4
     renamed = wiki_pack.renamed_titles("fr", ["New_Name", "Beta_Peak"], world["cache"])
     assert renamed == {"New_Name": ["Old_Name"], "Beta_Peak": []}
+
+
+def test_shared_cache_files_are_written_through_a_file_of_their_own(world: dict[str, Any], tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Packs of one language built side by side (Central and West Africa's
+    French) write the same cache files: each writes its own temporary file
+    (its process id in the name), so neither renames the other's away."""
+    cache = tmp_path / "cache"
+    shutil.copytree(world["cache"], cache)
+    (cache / "titles" / "frwiki-renamed.json").unlink(missing_ok=True)
+    for p in (cache / "titles").glob("*.tsv"):
+        p.unlink()
+    moved: list[str] = []
+    real = os.replace
+    monkeypatch.setattr(wiki_pack.os, "replace", lambda a, b: (moved.append(os.path.basename(str(a))), real(a, b))[1])
+    wiki_pack.build_title_map("fr", cache)
+    wiki_pack.renamed_titles("fr", ["New_Name"], cache)
+    tmps = [m for m in moved if m.endswith(".tmp")]
+    assert tmps and all(f".{os.getpid()}.tmp" in m for m in tmps), moved
 
 
 def test_the_gate(world: dict[str, Any]) -> None:

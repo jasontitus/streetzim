@@ -317,7 +317,7 @@ def _wikidata_kinds(a: Any, places: dict[str, tuple[float, float, str]]) -> dict
 
 def _save_base(cached: Path, path: str | os.PathLike[str], base: Base) -> None:
     cached.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cached.with_name(cached.name + ".tmp")
+    tmp = cached.with_name(f"{cached.name}.{os.getpid()}.tmp")     # its own: runs share the cache
     with gzip.open(tmp, "wt", encoding="utf-8") as f:
         json.dump({"base": os.path.basename(str(path)), "places": base.places,
                    "kinds": base.kinds, "kinds_version": KINDS_VERSION}, f)
@@ -422,7 +422,7 @@ def build_title_map(lang: str, cache_dir: Path, *, offline: bool = False,
     t1 = time.time()
     rows = articles = 0
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(out.name + ".tmp")
+    tmp = out.with_name(f"{out.name}.{os.getpid()}.tmp")           # its own: runs share the cache
     pending_pid: list[int] = []
     pending_title: list[bytes] = []
 
@@ -537,7 +537,9 @@ def renamed_titles(lang: str, targets: Iterable[str], cache_dir: Path, *, offlin
                             _sql_unescape(m.group(3)).decode("utf-8", "replace"))
         known.update({k: sorted(v) for k, v in found.items()})
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
+        # a file of its own to write: packs of one language built side by side (two regions'
+        # French) wrote one name, and one renamed the other's away (Central Africa, 2026-10-27)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps({"dumps": stamp, "titles": known}, ensure_ascii=False))
         os.replace(tmp, path)
         log(f"  {len(todo)} titles the source lacks: {len(by_pid)} redirects to them "
