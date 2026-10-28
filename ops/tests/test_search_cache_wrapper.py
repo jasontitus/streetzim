@@ -36,4 +36,10 @@ def test_a_region_gets_its_extra_builder_flags(tmp_path):
         return [ln for ln in out.splitlines() if not ln.startswith("  extra")]
     assert run("bahrain") == ["--name", "x", "--ocr", "--ocr-scripts", "arabic,latin"]
     assert run("iran") == ["--name", "x"]
-    assert (ROOT / "cloud" / "region-build-flags.tsv").read_text().count("bahrain\t--ocr") == 1
+
+
+def test_every_region_is_built_with_the_sign_reader():
+    """--ocr (search with a photo) is in every build's arguments."""
+    text = (ROOT / "ops" / "build-region-fast.sh").read_text(encoding="utf-8")
+    args = text[text.index("ARGS=(\n"):text.index("\n)\n", text.index("ARGS=(\n"))]
+    assert "\n    --ocr\n" in args, args

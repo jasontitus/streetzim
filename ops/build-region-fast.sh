@@ -339,6 +339,9 @@ ARGS=(
     --search-cache "$SEARCH"
     --split-hot-search-chunks-mb 10
     --split-find-chips
+    # Search with a photo (docs/ocr.md): a camera button in the search box that reads a sign on
+    # the device, in every script the map's names use; ~20-25 MB of models per map.
+    --ocr
     --keep-temp
     --output "$OUT_BUILD"
     # Fast-path flags (eliminate post-build repackage). The writer and
