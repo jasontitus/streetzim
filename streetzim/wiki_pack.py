@@ -557,14 +557,21 @@ def _text_cache(cache_dir: Path, lang: str) -> Path:
     return cache_dir / "wikidata-text" / f"{lang}.jsonl"
 
 
-def _load_text_cache(path: Path) -> dict[str, tuple[str, str]]:
-    """{Q-ID: (label, description)}; ("", "") is an answer with neither. A
-    torn last line (a run stopped mid-write) is skipped."""
+def _load_text_cache(path: Path, wanted: set[str] | None = None) -> dict[str, tuple[str, str]]:
+    """{Q-ID: (label, description)}, of the Q-IDs in `wanted` when given;
+    ("", "") is an answer with neither. A torn last line (a run stopped
+    mid-write) is skipped. The caches are shared by every map (2.2 M lines
+    in en.jsonl by 2026-10-28), so a pack reads only its own Q-IDs."""
     out: dict[str, tuple[str, str]] = {}
     if not path.exists():
         return out
     with open(path, encoding="utf-8") as f:
         for line in f:
+            if wanted is not None:
+                # ["Q123", ...]: the Q-ID before parsing the line
+                end = line.find('"', 2)
+                if line[2:end] not in wanted:
+                    continue
             try:
                 q, label, desc = json.loads(line)
             except ValueError:
@@ -633,8 +640,12 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
     if bad:     # each names a file in the cache
         raise ValueError(f"wikidata_text: not language codes: {bad!r}")
     qids = sorted(set(qids), key=lambda q: int(q[1:]))
-    caches = {lg: _load_text_cache(_text_cache(cache_dir, lg)) for lg in langs}
-    missing = [q for q in qids if q not in caches[lang]]
+    # Only `lang`'s cache is read, for these Q-IDs; the others are appended
+    # to. Loading every language's whole cache (22 of them for a map's
+    # menu, 1.5 GB of JSON by 2026-10-28) ran each pack build out of its
+    # 8 GiB (tools/langpack/build_packs.sh): MemoryError for every pack.
+    cache = _load_text_cache(_text_cache(cache_dir, lang), set(qids))
+    missing = [q for q in qids if q not in cache]
     stats: dict[str, Any] = {"qids": len(qids), "asked": len(missing), "requests": 0,
                              "complete": True, "seconds": 0.0, "refused": []}
     codes = sorted({c for lg in langs for c in TEXT_VARIANTS.get(lg, (lg,))})
@@ -683,7 +694,8 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
                     for lg in langs:
                         row = (_pick(ent.get("labels") or {}, lg),
                                _pick(ent.get("descriptions") or {}, lg))
-                        caches[lg][q] = row
+                        if lg == lang:
+                            cache[q] = row
                         files[lg].write(json.dumps([q, *row], ensure_ascii=False) + "\n")
                 for f in files.values():
                     f.flush()
@@ -695,12 +707,12 @@ def wikidata_text(qids: Iterable[str], lang: str, cache_dir: Path, *,
     stats["seconds"] = round(time.time() - t0, 1)
     out: dict[str, list[str]] = {}
     for q in qids:
-        label, desc = caches[lang].get(q, ("", ""))
+        label, desc = cache.get(q, ("", ""))
         if label or desc:
             out[q] = [label, desc]
     stats["labels"] = sum(1 for v in out.values() if v[0])
     stats["descriptions"] = sum(1 for v in out.values() if v[1])
-    stats["missing"] = sum(1 for q in qids if q not in caches[lang])
+    stats["missing"] = sum(1 for q in qids if q not in cache)
     return out, stats
 
 

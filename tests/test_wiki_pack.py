@@ -680,3 +680,45 @@ def test_wikidata_text_refuses_a_code_that_is_no_language(tmp_path: Path, lang: 
 def test_wikidata_text_takes_codes_and_variants(tmp_path: Path) -> None:
     out, st = wiki_pack.wikidata_text(["Q1"], "de", tmp_path, fetch=None, langs=("zh-hans", "gsw"))
     assert out == {} and st["complete"] is False
+
+
+def test_text_cache_reads_only_its_language_and_qids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The caches are shared by every map: a pack reads `lang`'s cache for
+    its own Q-IDs only, and writes the other languages without reading
+    them. Reading every language's whole cache ran pack builds out of
+    memory (MemoryError for every pack, 2026-10-28)."""
+    d = tmp_path / "wikidata-text"
+    d.mkdir()
+    (d / "de.jsonl").write_text('["Q1", "Eins", "erste"]\n["Q2", "Zwei", ""]\n["Q99", "Neunundneunzig", ""]\n["Q3", "Dr',
+                                encoding="utf-8")
+    (d / "fr.jsonl").write_text('["Q1", "Un", ""]\n', encoding="utf-8")
+    calls = []
+    real = wiki_pack._load_text_cache
+
+    def spy(path: Path, wanted: set[str] | None = None) -> dict[str, tuple[str, str]]:
+        got = real(path, wanted)
+        calls.append((path.name, None if wanted is None else sorted(wanted), sorted(got)))
+        return got
+
+    monkeypatch.setattr(wiki_pack, "_load_text_cache", spy)
+    asked: list[list[str]] = []
+
+    def fetch(ids: list[str], codes: list[str]) -> dict[str, Any]:
+        asked.append(ids)
+        return {q: {"labels": {"de": {"value": "Vier"}, "fr": {"value": "Quatre"}}} for q in ids}
+
+    out, st = wiki_pack.wikidata_text(["Q1", "Q2", "Q4"], "de", tmp_path, fetch=fetch, langs=("fr",))
+    assert calls == [("de.jsonl", ["Q1", "Q2", "Q4"], ["Q1", "Q2"])]     # not fr's, not Q99, no torn Q3
+    assert asked == [["Q4"]]
+    assert out == {"Q1": ["Eins", "erste"], "Q2": ["Zwei", ""], "Q4": ["Vier", ""]}
+    assert st["missing"] == 0
+    # The other languages were still appended to.
+    assert (d / "fr.jsonl").read_text(encoding="utf-8").splitlines()[-1] == '["Q4", "Quatre", ""]'
+
+
+def test_load_text_cache_filters_by_qid(tmp_path: Path) -> None:
+    p = tmp_path / "x.jsonl"
+    p.write_text('["Q1", "a", ""]\n["Q10", "b", ""]\n["Q100", "c", "d"]\nnot json\n', encoding="utf-8")
+    assert wiki_pack._load_text_cache(p, {"Q10", "Q7"}) == {"Q10": ("b", "")}
+    assert wiki_pack._load_text_cache(p) == {"Q1": ("a", ""), "Q10": ("b", ""), "Q100": ("c", "d")}
+    assert wiki_pack._load_text_cache(tmp_path / "none.jsonl", {"Q1"}) == {}
