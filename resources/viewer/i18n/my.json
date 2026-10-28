@@ -27,6 +27,7 @@
  "about.non_commercial_only": "စီးပွားဖြစ်မဟုတ်သော အသုံးပြုမှုအတွက်သာ",
  "about.non_commercial_short": "စီးပွားဖြစ်မဟုတ်",
  "about.noto_sans": "Noto Sans (မြေပုံတွင် ပါရှိပါက အာရဗီ၊ အာမေးနီးယား၊ ဂျော်ဂျီယာ၊ ဟီဘရူး၊ လာအို နှင့် ထိုင်း အညွှန်းများ)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (ဓာတ်ပုံများထဲက စာဖတ်ခြင်း)",
  "about.open_sans": "Open Sans (အညွှန်း စာလုံးပုံများ၊ openmaptiles/fonts မှတစ်ဆင့်)",
  "about.osm_contributors": "OpenStreetMap ပါဝင်ကူညီသူများ",
  "about.overture": "Overture Maps Foundation — လိပ်စာ ဒေတာအုပ်စု",
@@ -289,6 +290,15 @@
  "routing.use_gps": "လက်ရှိ တည်နေရာကို သုံးရန်",
  "search.nearby": "အနီးအနား",
  "search.no_results": "ရလဒ် မတွေ့ပါ",
+ "search.photo": "ဓာတ်ပုံဖြင့် ရှာရန်",
+ "search.photo_back": "ဓာတ်ပုံသို့ ပြန်သွားရန်",
+ "search.photo_choose": "ဓာတ်ပုံ ရွေးရန်",
+ "search.photo_drop": "ဓာတ်ပုံကို မြေပုံပေါ်သို့ ဆွဲထည့်ပါ၊ သို့မဟုတ် ⌘V ဖြင့် ကူးထည့်ပါ။",
+ "search.photo_failed": "ဓာတ်ပုံကို ဖတ်၍ မရပါ",
+ "search.photo_kiwix_ios": "Kiwix အက်ပ်တွင် သင့်စာကြည့်တိုက်မှ ဓာတ်ပုံကို ရွေးပါ- ဤနေရာတွင် ဓာတ်ပုံအသစ်ရိုက်ပါက အက်ပ်ပိတ်သွားသည်၊ ကင်မရာကို မသုံးနိုင်သေးပါ။",
+ "search.photo_lines": "ဓာတ်ပုံထဲက စာ- ရှာရန် စာကြောင်းကို တို့ပါ",
+ "search.photo_none": "ဓာတ်ပုံတွင် စာ မတွေ့ပါ",
+ "search.photo_reading": "ဓာတ်ပုံကို ဖတ်နေသည်…",
  "search.placeholder": "နေရာ၊ လမ်း၊ စိတ်ဝင်စားဖွယ်နေရာများ ရှာရန်...",
  "search.placeholder_count": {
   "other": "နေရာ {n} ခုတွင် ရှာရန်..."

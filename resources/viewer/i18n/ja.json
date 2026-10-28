@@ -28,6 +28,7 @@
  "about.non_commercial_only": "非営利目的に限る",
  "about.non_commercial_short": "非営利",
  "about.noto_sans": "Noto Sans（地図にアラビア文字、アルメニア文字、ジョージア文字、ヘブライ文字、ラオ文字、タイ文字のラベルがある場合）",
+ "about.ocr": "PaddleOCR and ONNX Runtime（写真の文字の読み取り）",
  "about.open_sans": "Open Sans（ラベルのグリフ、openmaptiles/fonts 経由）",
  "about.osm_contributors": "OpenStreetMap 貢献者",
  "about.overture": "Overture Maps Foundation — 住所テーマ",
@@ -290,6 +291,15 @@
  "routing.use_gps": "現在地を使用",
  "search.nearby": "すぐ近く",
  "search.no_results": "結果が見つかりません",
+ "search.photo": "写真で検索",
+ "search.photo_back": "写真に戻る",
+ "search.photo_choose": "写真を選択",
+ "search.photo_drop": "写真を地図にドラッグするか、⌘V で貼り付けてください。",
+ "search.photo_failed": "写真を読み取れませんでした",
+ "search.photo_kiwix_ios": "Kiwix アプリでは、ライブラリから写真を選んでください：ここで新しく撮影するとアプリが終了します（アプリはまだカメラを使えません）。",
+ "search.photo_lines": "写真の文字：行をタップして検索",
+ "search.photo_none": "写真に文字が見つかりません",
+ "search.photo_reading": "写真を読み取っています…",
  "search.placeholder": "場所、道路、スポットを検索…",
  "search.placeholder_count": {
   "other": "{n} 件の場所を検索…"

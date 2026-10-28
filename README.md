@@ -13,6 +13,7 @@ browser, with no network at all. A ZIM contains:
 - **Terrain**: hillshade and 3D from the Copernicus DEM (on in the `streetzim` command with `--profile full`, the default; `--terrain` for `create_osm_zim.py`).
 - Optional **satellite imagery** (see the licence note below), **Wikidata** facts and bundled **Wikipedia** articles.
 - Optional **Overture Maps** addresses and place details (websites, phones, brands).
+- Optional **search with a photo** (`--ocr`): a camera button in the search box reads a street sign, shop front or landmark plate offline (PaddleOCR) and finds the place; Latin, Chinese, Japanese, Korean, Thai, Arabic, Cyrillic, Greek, Devanagari, Tamil and Telugu ([docs/ocr.md](docs/ocr.md)).
 
 Published ZIMs are listed at <https://streetzim.web.app>. That site also has a
 PWA at `/drive/` that opens a local ZIM, or streams one from archive.org, in

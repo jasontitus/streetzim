@@ -104,6 +104,13 @@ def vendored_maplibre(lock: dict[str, Any] | None = None,
     return vendored("maplibre-gl", lock, vendor)
 
 
+# The sign reader (--ocr, streetzim/ocr.py): lock keys and vendor
+# directories of its engine and of its models' dictionaries.
+OCR_ENGINE = "ocr-engine"
+OCR_ENGINE_FILE = "ocr-engine.js"
+OCR_MODELS = "ocr-models"
+
+
 # The ZIM entry for the RTL plugin, named in map-config.json as
 # `rtlTextPlugin`; the viewer (137-rtl-text.js) loads it only once a tile
 # carries RTL text.

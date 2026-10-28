@@ -207,6 +207,11 @@ def test_the_pages_carry_the_right_to_left_rules() -> None:
                  'html[dir="rtl"] #routing-close { margin-right: 0 !important; margin-left: -8px !important; }',
                  'html[dir="rtl"] #wiki-panel-close { margin: -14px 0 -12px -12px; }',
                  'html[dir="rtl"] #search-clear { right: auto; left: 0; }',
+                 # the camera button (search with a photo) and the clear button beside it
+                 'html[dir="rtl"] #search-photo { right: auto; left: 8px; }',
+                 'html[dir="rtl"] #search-container.has-photo #search-input { padding: 10px 14px 10px 66px; }',
+                 'html[dir="rtl"] #search-container.has-photo #search-clear { left: 40px; }',
+                 'html[dir="rtl"] #search-photo { right: auto; left: 0; }',
                  'html[dir="rtl"] #attr-dialog #about-mt { border-left: none; padding-left: 0; border-right: 3px solid var(--border); padding-right: 8px; }',
                  'html[dir="rtl"] #sz-fatal ul { padding-left: 0; padding-right: 20px; }',
                  # not RTL: About fits a 390 px phone; #info keeps clear of the About
@@ -224,7 +229,7 @@ def test_the_pages_carry_the_right_to_left_rules() -> None:
     # every html[dir="rtl"] selector in the parts is in the list above
     css = "".join(p.read_text(encoding="utf-8") for p in sorted(PARTS.glob("0*.html"))
                   if p.name != build_i18n.PART_OUT.name)
-    assert css.count('html[dir="rtl"]') == 24, css.count('html[dir="rtl"]')
+    assert css.count('html[dir="rtl"]') == 29, css.count('html[dir="rtl"]')
     for rule in ('html[dir="rtl"] #near-clear { right:auto; left:6px; }',
                  'html[dir="rtl"] #near-input { padding:8px 12px 8px 28px; }',
                  'html[dir="rtl"] input[dir="auto"]:placeholder-shown { direction:rtl; unicode-bidi:isolate; }'):

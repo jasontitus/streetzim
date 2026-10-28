@@ -3,7 +3,7 @@
 //
 //   npm run lint:viewer          (CI runs this in the `checks` job)
 //
-// - resources/viewer/routing-worker.js is linted as a file.
+// - resources/viewer/routing-worker.js and ocr-worker.js are linted as files.
 // - index.html is joined from resources/viewer/src/index/* (as
 //   tools/build_viewer.py does) and places.html is read as is; each page's
 //   inline <script> blocks are linted together as one program (classic
@@ -72,6 +72,11 @@ const jobs = [
     text: readFileSync(join(VIEWER, "routing-worker.js"), "utf8"),
     filePath: join(VIEWER, "routing-worker.js"),
     locate: (l) => ["resources/viewer/routing-worker.js", l],
+  },
+  {
+    text: readFileSync(join(VIEWER, "ocr-worker.js"), "utf8"),
+    filePath: join(VIEWER, "ocr-worker.js"),
+    locate: (l) => ["resources/viewer/ocr-worker.js", l],
   },
 ];
 

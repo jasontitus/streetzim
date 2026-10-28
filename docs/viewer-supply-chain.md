@@ -138,6 +138,33 @@ a plain composite by that field only.
 tampered vendored file, a wrong hash, a CDN serving other bytes (fatal even
 with the escape hatch), a corrupt cache entry, and an offline second build.
 
+### The sign reader (`--ocr`)
+
+`--ocr` adds a text detector and recognizers to the ZIM ([ocr.md](ocr.md)).
+They are pinned in the same lock file, in two entries that
+`tools/pin_viewer_assets.py --ocr` writes:
+
+- `ocr-engine`: `resources/vendor/ocr-engine/ocr-engine.js`, ONNX Runtime
+  Web's WebAssembly build and the paddleocr runtime, bundled by esbuild
+  (version in the lock) into one classic script from the npm tarballs
+  (checked against the registry's sha512). It is a build of pinned inputs,
+  not a copy of a published file, and it is reproducible: `--ocr` gives
+  the same bytes again. With it the licences (ONNX Runtime's from its
+  release tag; paddleocr's MIT notice, since its package has no licence
+  file) and, by URL and SHA-256 only, the 14.8 MB WebAssembly runtime
+  (`ort-wasm-simd-threaded.wasm`, the tarball's file).
+- `ocr-models`: each PaddleOCR model (Apache-2.0) by Hugging Face
+  repository, commit, URL and SHA-256, and its character dictionary,
+  vendored in `resources/vendor/ocr-models/`.
+
+The runtime and the models (2–21 MB each) are fetched at build time, never
+vendored, and checked and cached like the glyph ranges. A build with
+`--ocr` fetches the runtime and detector first, so a missing network stops
+it in seconds. `--prefetch-ocr DIR` fills a cache with all of them;
+the Docker image does not, since `--ocr` is in no profile. `--check`
+verifies the vendored files and that the lock names exactly the models of
+the tool's `OCR_MODELS`.
+
 ## 2. ESLint
 
 `npm run lint:viewer` (`tools/lint_viewer.mjs`, config `eslint.config.mjs`,
@@ -162,7 +189,8 @@ pieces of dead code (unused locals and two never-called helpers), removed.
 Published ZIMs are updated by overwriting fixed-size, uncompressed slots in
 place (`docs/viewer-slots.md`, `cloud/viewer_slots.py`), and a ZIM can
 never gain an entry. So the viewer has to stay exactly three self-contained
-files (`index.html` ≤ 1 MB, `places.html` ≤ 256 KB, `routing-worker.js`
+files (the sign reader's `ocr/` entries exist only in ZIMs built with them,
+and the viewer works without them) (`index.html` ≤ 1 MB, `places.html` ≤ 256 KB, `routing-worker.js`
 ≤ 128 KB, padding included) that work with whatever `maplibre-gl.js` the ZIM
 already has. `tools/build_viewer.py` meets that by concatenation with a
 byte-identity check. A bundler today would add risk (rewriting the code

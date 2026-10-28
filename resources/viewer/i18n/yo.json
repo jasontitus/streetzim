@@ -27,6 +27,7 @@
  "about.non_commercial_only": "fún lílò tí kì í ṣe ti òwò nìkan",
  "about.non_commercial_short": "kì í ṣe ti òwò",
  "about.noto_sans": "Noto Sans (àkọlé ní èdè Lárúbáwá, Àméníà, Jọ́jíà, Hébérù, Lao àti Thai, nígbà tí máàpù bá ní wọn)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (kíka ọ̀rọ̀ inú fọ́tò)",
  "about.open_sans": "Open Sans (àwọn àmì lẹ́tà àkọlé, láti openmaptiles/fonts)",
  "about.osm_contributors": "Àwọn olùkópa OpenStreetMap",
  "about.overture": "Overture Maps Foundation — àkòrí Àdírẹ́sì",
@@ -289,6 +290,15 @@
  "routing.use_gps": "Lo ibi tí o wà báyìí",
  "search.nearby": "nítòsí",
  "search.no_results": "A kò rí àbájáde",
+ "search.photo": "Ṣàwárí pẹ̀lú fọ́tò",
+ "search.photo_back": "Padà sí fọ́tò náà",
+ "search.photo_choose": "Yan fọ́tò kan",
+ "search.photo_drop": "Fa fọ́tò kan sórí máàpù, tàbí lẹ̀ ẹ́ mọ́ pẹ̀lú ⌘V.",
+ "search.photo_failed": "A kò lè ka fọ́tò náà",
+ "search.photo_kiwix_ios": "Nínú áàpù Kiwix, yan fọ́tò kan láti inú ibi ìkówèésí rẹ: yíya fọ́tò tuntun níbí máa ti áàpù náà, tí kò tíì lè lo kámẹ́rà.",
+ "search.photo_lines": "Ọ̀rọ̀ inú fọ́tò: tẹ ìlà kan láti ṣàwárí rẹ̀",
+ "search.photo_none": "A kò rí ọ̀rọ̀ kankan nínú fọ́tò náà",
+ "search.photo_reading": "Ń ka fọ́tò náà…",
  "search.placeholder": "Ṣàwárí àwọn ibi, òpópónà, ibi pàtàkì...",
  "search.placeholder_count": {
   "other": "Ṣàwárí ibi {n}..."

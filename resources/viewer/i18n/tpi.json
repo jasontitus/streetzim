@@ -27,6 +27,7 @@
  "about.non_commercial_only": "long wok i no bilong bisnis tasol",
  "about.non_commercial_short": "i no bilong bisnis",
  "about.noto_sans": "Noto Sans (ol nem long Arabik, Armenian, Jojian, Hibru, Lao na Tai, sapos map i gat)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (ritim rait long ol piksa)",
  "about.open_sans": "Open Sans (ol leta bilong ol nem, long openmaptiles/fonts)",
  "about.osm_contributors": "Ol lain i givim data long OpenStreetMap",
  "about.overture": "Overture Maps Foundation — ol adres",
@@ -289,6 +290,15 @@
  "routing.use_gps": "Yusim ples yu stap nau",
  "search.nearby": "klostu",
  "search.no_results": "I no gat risal",
+ "search.photo": "Painim wantaim piksa",
+ "search.photo_back": "Go bek long piksa",
+ "search.photo_choose": "Makim wanpela piksa",
+ "search.photo_drop": "Pulim wanpela piksa i go long map, o pestim long ⌘V.",
+ "search.photo_failed": "I no inap ritim piksa",
+ "search.photo_kiwix_ios": "Long Kiwix app, makim wanpela piksa long laibreri bilong yu: sapos yu kisim nupela piksa long hia, app bai pas, long wanem em i no inap yusim kamera yet.",
+ "search.photo_lines": "Rait long piksa: paitim wanpela lain bilong painim",
+ "search.photo_none": "I no gat rait long piksa",
+ "search.photo_reading": "Ritim piksa…",
  "search.placeholder": "Painim ol ples, rot, POI...",
  "search.placeholder_count": {
   "other": "Painim {n} ples..."

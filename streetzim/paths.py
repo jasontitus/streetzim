@@ -35,12 +35,28 @@ RUNTIME_FILES = (
     "viewer/index.html",
     "viewer/places.html",
     "viewer/routing-worker.js",
+    "viewer/ocr-worker.js",
     "vendor/maplibre-gl/maplibre-gl.js",
     "vendor/maplibre-gl/maplibre-gl.css",
     "vendor/maplibre-gl/LICENSE.txt",
     "vendor/mapbox-gl-rtl-text/mapbox-gl-rtl-text.js",
     "vendor/mapbox-gl-rtl-text/LICENSE.md",
     "vendor/noto-sans/OFL.txt",
+    # The sign reader (--ocr, streetzim/ocr.py): its engine, and its models'
+    # dictionaries (the models themselves are fetched at build time).
+    "vendor/ocr-engine/ocr-engine.js",
+    "vendor/ocr-engine/LICENSE-onnxruntime.txt",
+    "vendor/ocr-engine/LICENSE-paddleocr.txt",
+    "vendor/ocr-models/LICENSE.txt",
+    "vendor/ocr-models/arabic.txt",
+    "vendor/ocr-models/cyrillic.txt",
+    "vendor/ocr-models/devanagari.txt",
+    "vendor/ocr-models/greek.txt",
+    "vendor/ocr-models/korean.txt",
+    "vendor/ocr-models/latin-cjk.txt",
+    "vendor/ocr-models/tamil.txt",
+    "vendor/ocr-models/telugu.txt",
+    "vendor/ocr-models/thai.txt",
 )
 
 

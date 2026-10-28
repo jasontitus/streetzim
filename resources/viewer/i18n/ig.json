@@ -27,6 +27,7 @@
  "about.non_commercial_only": "maka ojiji na-abụghị nke azụmahịa naanị",
  "about.non_commercial_short": "abụghị nke azụmahịa",
  "about.noto_sans": "Noto Sans (akara n'asụsụ Arabik, Armenia, Georgia, Hibru, Lao na Thai, mgbe maapụ nwere ha)",
+ "about.ocr": "PaddleOCR and ONNX Runtime (ịgụ ederede dị na foto)",
  "about.open_sans": "Open Sans (ọdịdị mkpụrụedemede akara, site na openmaptiles/fonts)",
  "about.osm_contributors": "Ndị na-enye aka na OpenStreetMap",
  "about.overture": "Overture Maps Foundation — isiokwu Adreesị",
@@ -289,6 +290,15 @@
  "routing.use_gps": "Jiri ebe ị nọ ugbu a",
  "search.nearby": "nso",
  "search.no_results": "Achọtaghị nsonaazụ",
+ "search.photo": "Jiri foto chọọ",
+ "search.photo_back": "Laghachi na foto",
+ "search.photo_choose": "Họrọ foto",
+ "search.photo_drop": "Dọkpụrụ foto n'elu map ahụ, ma ọ bụ mado ya site na ⌘V.",
+ "search.photo_failed": "Enweghị ike ịgụ foto ahụ",
+ "search.photo_kiwix_ios": "N'ime ngwa Kiwix, họrọ foto site n'ọbá akwụkwọ gị: ịse foto ọhụrụ ebe a na-emechi ngwa ahụ, nke na-enweghị ike iji igwefoto ugbu a.",
+ "search.photo_lines": "Ederede dị na foto: pịa ahịrị iji chọọ ya",
+ "search.photo_none": "Ahụghị ederede ọ bụla na foto ahụ",
+ "search.photo_reading": "Na-agụ foto ahụ…",
  "search.placeholder": "Chọọ ebe, okporo ụzọ, ebe ndị dị mkpa...",
  "search.placeholder_count": {
   "other": "Chọọ ebe {n}..."

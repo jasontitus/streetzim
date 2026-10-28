@@ -108,6 +108,16 @@ def test_kiwix_poi_pages_is_forwarded(tmp_path, no_network):
     assert builder_args(argv).kiwix_poi_pages
 
 
+def test_ocr_is_forwarded(tmp_path, no_network):
+    argv, _ = plan(["--area", "monaco"], tmp_path)
+    assert not builder_args(argv).ocr                   # off unless asked for
+    argv, _ = plan(["--area", "monaco", "--ocr", "--ocr-scripts", "Latn,Cyrl"], tmp_path)
+    ns = builder_args(argv)
+    assert ns.ocr and ns.ocr_scripts == "Latn,Cyrl"
+    with pytest.raises(SystemExit):
+        plan(["--area", "monaco", "--ocr-scripts", "Latn"], tmp_path)
+
+
 def test_cpus_is_forwarded_only_when_given(tmp_path, no_network):
     argv, _ = plan(["--area", "monaco", "--cpus", "3"], tmp_path)
     assert builder_args(argv).cpus == 3
