@@ -293,6 +293,7 @@
  "search.photo": "Telusuri dengan foto",
  "search.photo_back": "Kembali ke foto",
  "search.photo_choose": "Pilih foto",
+ "search.photo_drop": "Seret foto ke peta, atau tempel dengan ⌘V.",
  "search.photo_failed": "Foto tidak dapat dibaca",
  "search.photo_kiwix_ios": "Di aplikasi Kiwix, pilih foto dari galeri Anda: mengambil foto baru di sini menutup aplikasi, yang belum bisa memakai kamera.",
  "search.photo_lines": "Teks di foto: ketuk baris untuk menelusurinya",

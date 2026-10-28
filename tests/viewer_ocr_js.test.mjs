@@ -28,7 +28,7 @@ const M = new Function(
   '\nreturn { _szSignText, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN };')();
 const L = new Function(slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignKiwixIOS };')();
+  '\nreturn { _szSignLineGroups, _szSignKiwixApp };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -146,15 +146,17 @@ ok('boxes without text or size are skipped', () => {
                                               { text: 'x', box: { x: 0, y: 0, width: 1, height: 0 } }]), []);
 });
 
-ok('the Kiwix iOS app (no camera permission) is told apart from browsers and other Kiwix apps', () => {
+ok('Kiwix\'s Apple apps are told apart from browsers and from each other', () => {
   const iphone = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148' };
   const ipad = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', platform: 'MacIntel', maxTouchPoints: 5 };
   const mac = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', platform: 'MacIntel', maxTouchPoints: 0 };
-  assert.strictEqual(L._szSignKiwixIOS('zim:', iphone), true);
-  assert.strictEqual(L._szSignKiwixIOS('zim:', ipad), true);
-  assert.strictEqual(L._szSignKiwixIOS('zim:', mac), false);         // Kiwix for macOS: a file dialog
-  assert.strictEqual(L._szSignKiwixIOS('https:', iphone), false);    // Safari, the /drive/ PWA
-  assert.strictEqual(L._szSignKiwixIOS('http:', iphone), false);     // kiwix-serve
+  const linux = { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 QtWebEngine/6.5.3 Chrome/108.0 Safari/537.36' };
+  assert.strictEqual(L._szSignKiwixApp('zim:', iphone), 'ios');     // camera: no permission
+  assert.strictEqual(L._szSignKiwixApp('zim:', ipad), 'ios');
+  assert.strictEqual(L._szSignKiwixApp('zim:', mac), 'mac');        // no file picker at all
+  assert.strictEqual(L._szSignKiwixApp('zim:', linux), '');         // Kiwix desktop: Qt's picker works
+  assert.strictEqual(L._szSignKiwixApp('https:', iphone), '');      // Safari, the /drive/ PWA
+  assert.strictEqual(L._szSignKiwixApp('http:', mac), '');          // kiwix-serve in Safari
 });
 
 console.log(`${pass} passed`);

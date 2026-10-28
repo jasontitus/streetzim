@@ -299,6 +299,7 @@
  "search.photo": "Pretraga fotografijom",
  "search.photo_back": "Nazad na fotografiju",
  "search.photo_choose": "Odaberite fotografiju",
+ "search.photo_drop": "Prevucite fotografiju na kartu ili je zalijepite pomoću ⌘V.",
  "search.photo_failed": "Fotografiju nije moguće pročitati",
  "search.photo_kiwix_ios": "U aplikaciji Kiwix odaberite fotografiju iz biblioteke: snimanje nove fotografije ovdje zatvara aplikaciju, koja još ne može koristiti kameru.",
  "search.photo_lines": "Tekst na fotografiji: dodirnite red da ga potražite",

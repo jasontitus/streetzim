@@ -296,6 +296,7 @@
  "search.photo": "Bilatu argazki batekin",
  "search.photo_back": "Itzuli argazkira",
  "search.photo_choose": "Aukeratu argazki bat",
+ "search.photo_drop": "Arrastatu argazki bat mapara, edo itsatsi ⌘V-rekin.",
  "search.photo_failed": "Ezin izan da argazkia irakurri",
  "search.photo_kiwix_ios": "Kiwix aplikazioan, aukeratu argazki bat zure liburutegitik: hemen argazki berri bat ateratzeak aplikazioa ixten du, oraindik ezin baitu kamera erabili.",
  "search.photo_lines": "Argazkiko testua: sakatu lerro bat hura bilatzeko",

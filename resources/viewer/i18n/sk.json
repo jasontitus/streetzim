@@ -302,6 +302,7 @@
  "search.photo": "Hľadať podľa fotky",
  "search.photo_back": "Späť na fotku",
  "search.photo_choose": "Vyberte fotku",
+ "search.photo_drop": "Presuňte fotku na mapu alebo ju vložte pomocou ⌘V.",
  "search.photo_failed": "Fotku sa nepodarilo prečítať",
  "search.photo_kiwix_ios": "V aplikácii Kiwix vyberte fotku zo svojej knižnice: nasnímanie novej fotky tu aplikáciu zatvorí, pretože ešte nemôže používať fotoaparát.",
  "search.photo_lines": "Text na fotke: ťuknutím na riadok ho vyhľadáte",

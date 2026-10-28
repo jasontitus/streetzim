@@ -9,8 +9,9 @@
 // Picking a place hides the sheet but keeps the photo: the camera button
 // shows it, and a tap goes back to it, its lines and its places (the sheet's
 // own camera takes another; its x lets it go). The search field holds the
-// line the first place matched. In the Kiwix iOS app a note comes before
-// the file picker (sign-env). Nothing is fetched before the first photo;
+// line the first place matched. A photo can also be dropped on the page or
+// pasted. In Kiwix's Apple apps a note comes first (sign-env): pick from
+// the library on iOS, drop or paste on macOS. Nothing is fetched before the first photo;
 // the worker, a few hundred MB while it reads, is let go a minute after
 // the last one.
 
@@ -60,15 +61,23 @@ function _szSignLineGroups(items) {
 // END sign-lines
 
 // BEGIN sign-env
-// Kiwix for iOS: the in-ZIM viewer on Kiwix's zim: scheme on a touch screen
-// (000-head.html tells it the same way). The app has no camera permission
-// (no NSCameraUsageDescription), and iOS closes an app that opens the camera
-// without one: the file picker's Take Photo crashes Kiwix. So there the
-// reader is told to pick from the photo library before the picker opens.
-function _szSignKiwixIOS(protocol, nav) {
-  if (protocol !== 'zim:' || !nav) return false;
+// Kiwix's Apple apps serve the in-ZIM viewer on their zim: scheme, and
+// neither opens the file picker as a browser does (kiwix-apple, 2026-10):
+// - 'ios' (an iPhone or iPad, as 000-head.html tells it): the system
+//   picker opens, but the app has no camera permission (no
+//   NSCameraUsageDescription) and iOS closes an app that opens the camera
+//   without one, so its Take Photo crashes Kiwix: the reader is pointed at
+//   the photo library first.
+// - 'mac': the app does not answer the web view's open-panel request
+//   (WKUIDelegate runOpenPanelWith), so the picker never opens: the reader
+//   is told to drop or paste a photo instead.
+// '' anywhere else.
+function _szSignKiwixApp(protocol, nav) {
+  if (protocol !== 'zim:' || !nav) return '';
   var ua = nav.userAgent || '';
-  return /iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1);
+  if (/iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)) return 'ios';
+  if (/Macintosh|Mac OS X/.test(ua)) return 'mac';
+  return '';
 }
 // END sign-env
 
@@ -92,8 +101,8 @@ function initSignSearch(map, config) {
   var MAX_SIDE = 1600;     // the detector works at 960; crops are read sharper
   var IDLE_MS = 60000;
   var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
-  // window.__szSignKiwixIOS forces it, for tools/ocr_check.mjs (no zim: there).
-  function kiwixIOS() { return !!window.__szSignKiwixIOS || _szSignKiwixIOS(location.protocol, navigator); }
+  // window.__szSignKiwixApp forces it, for tools/ocr_check.mjs (no zim: there).
+  function kiwixApp() { return window.__szSignKiwixApp || _szSignKiwixApp(location.protocol, navigator); }
   // The last photo's search, kept when a result is picked so the reader can
   // go back to it (the camera button shows the photo): {lines, query}, or null.
   var last = null;
@@ -236,18 +245,39 @@ function initSignSearch(map, config) {
     document.getElementById('search-clear').style.display = 'block';
     map._searchSign(last.lines).then(function () { sheet.setAttribute('data-sz-ocr', 'searched'); });
   }
-  // A new photo: the file picker, after the note in the Kiwix iOS app.
+  // A new photo: the file picker, after the note in the Kiwix iOS app; in
+  // the Kiwix macOS app, which opens no picker, a note to drop or paste one.
   function pick() {
-    if (kiwixIOS() && chooseBtn.hidden) {
+    var app = kiwixApp();
+    if ((app === 'ios' && chooseBtn.hidden) || app === 'mac') {
       sheet.hidden = false;
       canvas.hidden = true;
       linesEl.innerHTML = '';
-      chooseBtn.hidden = false;
-      setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
+      chooseBtn.hidden = app !== 'ios';
+      if (app === 'ios') {
+        setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
+      } else {
+        setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
+      }
       return;
     }
     file.value = '';
     file.click();
+  }
+  // The first image of a drop or a paste (DataTransfer), or null.
+  function imageOf(dt) {
+    var files = (dt && dt.files) || [];
+    for (var i = 0; i < files.length; i++) if (/^image\//.test(files[i].type || '')) return files[i];
+    var items = (dt && dt.items) || [];
+    for (var j = 0; j < items.length; j++) {
+      if (items[j].kind === 'file' && /^image\//.test(items[j].type || '')) return items[j].getAsFile();
+    }
+    return null;
+  }
+  function carriesFiles(dt) {
+    var types = (dt && dt.types) || [];
+    for (var i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+    return false;
   }
 
   // The photo, scaled to MAX_SIDE, drawn on the sheet's canvas; its pixels.
@@ -349,6 +379,28 @@ function initSignSearch(map, config) {
     file.click();
   });
   file.addEventListener('change', function () { handle(file.files && file.files[0]); });
+  // A photo dropped anywhere on the page, or pasted (not into a text field
+  // pasting text): the way in where no picker opens (Kiwix for macOS), and
+  // a shortcut on any desktop. Without preventDefault on dragover a web
+  // view opens the dropped file in place of the map.
+  document.addEventListener('dragover', function (ev) {
+    if (carriesFiles(ev.dataTransfer)) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; }
+  });
+  document.addEventListener('drop', function (ev) {
+    if (!carriesFiles(ev.dataTransfer)) return;
+    ev.preventDefault();
+    var f = imageOf(ev.dataTransfer);
+    if (f) handle(f);
+  });
+  document.addEventListener('paste', function (ev) {
+    var t = ev.target;
+    if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName || '') && ev.clipboardData &&
+        ev.clipboardData.getData('text/plain')) return;   // text into a field stays text
+    var f = imageOf(ev.clipboardData);
+    if (!f) return;
+    ev.preventDefault();
+    handle(f);
+  });
   document.getElementById('ocr-close').addEventListener('click', discard);
   // A picked result flies the map there; the photo stays for the way back.
   resultsEl.addEventListener('click', function (ev) {

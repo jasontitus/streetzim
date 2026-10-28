@@ -296,6 +296,7 @@
  "search.photo": "Hae kuvan avulla",
  "search.photo_back": "Takaisin kuvaan",
  "search.photo_choose": "Valitse kuva",
+ "search.photo_drop": "Vedä kuva kartalle tai liitä se näppäimillä ⌘V.",
  "search.photo_failed": "Kuvaa ei voitu lukea",
  "search.photo_kiwix_ios": "Valitse Kiwix-sovelluksessa kuva kirjastostasi: uuden kuvan ottaminen tässä sulkee sovelluksen, joka ei vielä voi käyttää kameraa.",
  "search.photo_lines": "Kuvan teksti: hae riviä napauttamalla sitä",

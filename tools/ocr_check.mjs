@@ -3,7 +3,8 @@
 // Loads the viewer from a ZIM built with --ocr, checks the camera button is
 // there, then for a few places of the map draws a photo of a street sign
 // with the place's name on it -- tilted, unevenly lit, noisy, on a wall
-// with other text and the town in small print -- hands it to the button's file input as a phone would,
+// with other text and the town in small print -- hands it in as a phone's
+// picker would, or drops it on the map, or pastes it (in turn),
 // and checks that the sign reader reads it (ocr/ocr-worker.js, the PaddleOCR
 // models in the ZIM) and that the place comes out first in the results.
 // That the search field holds the line the place matched, not the whole
@@ -47,22 +48,26 @@ try {
   });
   if (!shown) errs.push('no camera button: map-config.json has no `ocr`, or the viewer hid it');
 
-  // In the Kiwix iOS app (forced: no zim: scheme here) the camera opens a
-  // note and a "choose a photo" button, not the file picker, whose Take
-  // Photo closes the app; the x lets it go.
-  const note = await p.evaluate(() => {
-    window.__szSignKiwixIOS = true;
-    document.getElementById('search-photo').click();
-    const sheet = document.getElementById('ocr-sheet');
-    const got = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
-                  choose: !document.getElementById('ocr-choose').hidden,
-                  photo: !document.getElementById('ocr-canvas').hidden };
-    document.getElementById('ocr-close').click();
-    window.__szSignKiwixIOS = false;
-    return got;
-  });
-  if (!(note.open && note.state === 'pick' && note.choose && !note.photo)) {
-    errs.push('Kiwix iOS: the camera did not open the note first: ' + JSON.stringify(note));
+  // In Kiwix's Apple apps (forced: no zim: scheme here) the camera opens a
+  // note, not the file picker: on iOS with a "choose a photo" button (its
+  // Take Photo closes the app), on macOS without (it opens no picker; drop
+  // or paste instead). The x lets it go.
+  for (const app of ['ios', 'mac']) {
+    const note = await p.evaluate((a) => {
+      window.__szSignKiwixApp = a;
+      document.getElementById('search-photo').click();
+      const sheet = document.getElementById('ocr-sheet');
+      const got = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
+                    choose: !document.getElementById('ocr-choose').hidden,
+                    photo: !document.getElementById('ocr-canvas').hidden };
+      document.getElementById('ocr-close').click();
+      window.__szSignKiwixApp = '';
+      return got;
+    }, app);
+    const want = app === 'ios' ? { state: 'pick', choose: true } : { state: 'drop', choose: false };
+    if (!(note.open && note.state === want.state && note.choose === want.choose && !note.photo)) {
+      errs.push(`Kiwix ${app}: the camera did not open its note first: ` + JSON.stringify(note));
+    }
   }
 
   // Places to photograph: given, or streets and POIs from the map's search.
@@ -139,11 +144,22 @@ try {
       }
       x.putImageData(img, 0, 0);
       const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.75));
-      const input = document.getElementById('search-photo-file');
+      // As a phone's picker gives it, then dropped on the map, then pasted:
+      // the ways in where no picker opens (Kiwix for macOS).
       const dt = new DataTransfer();
       dt.items.add(new File([blob], 'sign.jpg', { type: 'image/jpeg' }));
-      input.files = dt.files;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+      const how = seed % 3;
+      if (how === 1) {
+        const input = document.getElementById('search-photo-file');
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (how === 2) {
+        const target = document.getElementById('map');
+        target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+        target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      } else {
+        document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }
     }, name, i + 1);
     // Read, then searched for: the results list shows real rows.
     // The sheet's state (305-ocr-search.js): reading, lines, then searched,

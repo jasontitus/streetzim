@@ -66,7 +66,9 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
 
 1. **The photo.** The button opens the device's file picker
    (`<input type="file" accept="image/*">`, no `capture`), which on a phone
-   offers the camera and the photo library. The photo is scaled to at most
+   offers the camera and the photo library. A photo can also be dropped
+   anywhere on the page or pasted (an image pasted into a text field with
+   text alongside stays text). The photo is scaled to at most
    1600 px on its longest side and drawn on the sheet that opens over the
    map.
 2. **Reading.** At the first photo the page fetches the worker, the engine,
@@ -163,6 +165,7 @@ vowel sign ை (drawn before its consonant) even on a clean sign:
 |---|---|
 | a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone, file picker on a desktop |
 | Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera button first shows a note and a "Choose a photo" button. The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
+| Kiwix for macOS | drop a photo on the map, or paste one with ⌘V. The app does not answer the web view's open-panel request (`WKUIDelegate` `runOpenPanelWith`, absent from kiwix-apple as of 2026-10-23), so the file picker never opens: the camera button first shows a note saying so (the `zim:` scheme on a Mac, `sign-env`). The fix belongs in the app |
 | Kiwix for Android | no: its WebView opens no file chooser, so the viewer hides the button there (an Android WebView's user agent says `; wv)`) |
 
 ## Pinning and updating
@@ -209,8 +212,9 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
   input and checks the place comes out first and the search field holds
   its line; then that picking it hides the sheet, moves the map and leaves
   the photo on the camera button, which brings the photo and its places
-  back; and that in the Kiwix iOS app (forced) the camera opens the note,
-  not the picker. `NAMES` photographs given text instead
+  back; that photos given by the picker, dropped on the map and pasted are
+  all read; and that in Kiwix's iOS and macOS apps (forced) the camera
+  opens their notes, not the picker. `NAMES` photographs given text instead
   ("text=>record name" for a sign in another script than the record's
   name). With `SCRIPT` and `QUERIES` it photographs the own-script names
   of places the map's search finds: CI runs it on Manama

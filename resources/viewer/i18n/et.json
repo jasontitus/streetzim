@@ -296,6 +296,7 @@
  "search.photo": "Otsi foto abil",
  "search.photo_back": "Tagasi foto juurde",
  "search.photo_choose": "Valige foto",
+ "search.photo_drop": "Lohistage foto kaardile või kleepige see klahvidega ⌘V.",
  "search.photo_failed": "Fotot ei õnnestunud lugeda",
  "search.photo_kiwix_ios": "Valige Kiwixi rakenduses foto oma kogust: siin uue foto tegemine sulgeb rakenduse, mis ei saa veel kaamerat kasutada.",
  "search.photo_lines": "Foto tekst: puudutage rida, et seda otsida",

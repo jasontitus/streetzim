@@ -296,6 +296,7 @@
  "search.photo": "በፎቶ ይፈልጉ",
  "search.photo_back": "ወደ ፎቶው ተመለስ",
  "search.photo_choose": "ፎቶ ይምረጡ",
+ "search.photo_drop": "ፎቶ ወደ ካርታው ይጎትቱ፣ ወይም በ⌘V ይለጥፉ።",
  "search.photo_failed": "ፎቶውን ማንበብ አልተቻለም",
  "search.photo_kiwix_ios": "በKiwix መተግበሪያ ውስጥ ከቤተ-መጽሐፍትዎ ፎቶ ይምረጡ፦ እዚህ አዲስ ፎቶ ማንሳት መተግበሪያውን ይዘጋል፤ ካሜራውን ገና መጠቀም አይችልም።",
  "search.photo_lines": "በፎቶው ውስጥ ያለ ጽሑፍ፦ ለመፈለግ መስመሩን ይንኩ",
