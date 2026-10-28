@@ -3,10 +3,13 @@ checksums, eviction, locking, and what plan() does with the URL."""
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import random
 import sys
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -113,6 +116,7 @@ def srv(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+    monkeypatch.setattr(download, "RETRY_WAIT", 0)
     servers = []
 
     def make(data=A, path="/t.mbtiles"):
@@ -136,8 +140,9 @@ def paths(s, dl):
 
 def interrupted(s, dl, at=2_500_000):
     """A first download cut short after `at` bytes; returns the .part size.
-    (Where the cut reads as a short body, the immediate retry fails too.)"""
-    s.drop_after, s.fail_after_drop = at, 1
+    (Where the cut reads as a short body, the immediate retry and each try
+    after it fail too.)"""
+    s.drop_after, s.fail_after_drop = at, download.ATTEMPTS
     with pytest.raises(Exception):  # noqa: B017 (requests or http.client, by install)
         fetch(s, dl)
     s.fail_after_drop = 0
@@ -450,7 +455,7 @@ def test_main_cleans_owned_cut_on_failure_and_preserves_other_workspace(tmp_path
 def test_generic_fetch_never_promotes_a_short_body(srv, tmp_path):
     s = srv()
     dest = tmp_path / 'extract.pbf'
-    s.drop_after, s.fail_after_drop = 2048, 1
+    s.drop_after, s.fail_after_drop = 2048, download.ATTEMPTS
     with pytest.raises(OSError):
         cli.fetch(s.url, dest)
     s.fail_after_drop = 0
@@ -619,3 +624,254 @@ def test_bad_cached_file_is_replaced_once(srv, tmp_path):
     with pytest.raises(ValueError, match="not an MBTiles"):
         fetch(bad, tmp_path)
     assert not bad_dest.exists() and len(bad.gets) == 1
+
+
+# ------------------------------------------------ transient failures (no zimscraperlib)
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_wait(monkeypatch):
+    monkeypatch.setattr(download, "RETRY_WAIT", 0)
+
+
+def _no_wait(monkeypatch):
+    monkeypatch.setattr(download, "RETRY_WAIT", 0)
+
+
+def _flaky_stream(monkeypatch, failures, data=A, cut_at=5000):
+    """_stream whose first len(failures) GETs fail: an exception raised after
+    the bytes up to `cut_at`, "short" for a body that ends there cleanly, or
+    an HTTP status before any; later GETs answer, honouring a Range.
+    Returns the Range of each GET."""
+    from contextlib import contextmanager
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        rng = request_headers.get("Range")
+        seen.append(rng)
+        start = int(rng.split("=")[1].rstrip("-")) if rng else 0
+        headers = {"Content-Length": str(len(data) - start),
+                   "Content-Range": f"bytes {start}-{len(data) - 1}/{len(data)}"}
+        if len(seen) <= len(failures):
+            f = failures[len(seen) - 1]
+            if isinstance(f, int):
+                raise urllib.error.HTTPError(url, f, "flaky", None, None)  # type: ignore[arg-type]
+
+            def cut():
+                yield data[start:cut_at]
+                if f != "short":
+                    raise f
+            yield (206 if rng else 200), headers, cut()
+            return
+        yield (206 if rng else 200), headers, iter([data[start:]])
+
+    monkeypatch.setattr(download, "_stream", stream)
+    return seen
+
+
+HEADERS = {"ETag": '"a"', "Content-Length": str(len(A)), "Accept-Ranges": "bytes"}
+
+
+def test_a_read_timeout_is_tried_again_from_what_arrived(monkeypatch, tmp_path):
+    # The CI flake: "The read operation timed out" mid-download.
+    _no_wait(monkeypatch)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [TimeoutError("The read operation timed out")])
+    dest = tmp_path / "monaco-latest.osm.pbf"
+    assert cli.fetch_resumable("https://example.org/m", dest).read_bytes() == A
+    assert seen == [None, "bytes=5000-"]
+
+
+def test_without_ranges_a_retry_starts_over(monkeypatch, tmp_path):
+    _no_wait(monkeypatch)
+    monkeypatch.setattr(download, "head", lambda url, agent: {"Content-Length": str(len(A))})
+    seen = _flaky_stream(monkeypatch, [ConnectionResetError("reset by peer")])
+    dest = tmp_path / "x.pbf"
+    assert cli.fetch_resumable("https://example.org/x", dest).read_bytes() == A
+    assert seen == [None, None]
+
+
+@pytest.mark.parametrize("failures", [[503, 503], [429], [502, TimeoutError("t")]])
+def test_server_errors_are_tried_again(monkeypatch, tmp_path, failures):
+    _no_wait(monkeypatch)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, failures)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert len(seen) == len(failures) + 1
+
+
+def test_tries_stop_at_attempts_and_keep_the_part(monkeypatch, tmp_path, capsys):
+    _no_wait(monkeypatch)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [TimeoutError("timed out")] * 10)
+    dest = tmp_path / "x.pbf"
+    with pytest.raises(TimeoutError):
+        cli.fetch_resumable("https://example.org/x", dest)
+    assert len(seen) == download.ATTEMPTS == 3
+    assert dest.with_name(dest.name + ".part").stat().st_size == 5000    # the next run resumes
+    out = capsys.readouterr().out
+    assert "try 2 of 3" in out and "try 3 of 3" in out and "try 4" not in out
+
+
+@pytest.mark.parametrize("status", [404, 403, 410])
+def test_a_client_error_is_not_tried_again(monkeypatch, tmp_path, status):
+    _no_wait(monkeypatch)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [status] * 10)
+    with pytest.raises(urllib.error.HTTPError):
+        cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf")
+    assert len(seen) == 1
+
+
+def test_the_retry_waits_grow(monkeypatch, tmp_path):
+    monkeypatch.setattr(download, "RETRY_WAIT", 5)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    _flaky_stream(monkeypatch, [TimeoutError("t"), TimeoutError("t")])
+    waits = []
+    monkeypatch.setattr(download.time, "sleep", waits.append)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert waits == [download.RETRY_WAIT, 2 * download.RETRY_WAIT] == [5, 10]
+
+
+class _Resp:
+    def __init__(self, status=200, headers=None):
+        self.status, self.headers = status, headers or {"Content-Length": "9", "ETag": '"e"'}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+@pytest.mark.parametrize("errors,want_calls,ok", [
+    ([TimeoutError("timed out")], 2, True),                    # a read timeout
+    ([TimeoutError("t"), ConnectionResetError("r")], 3, True),
+    ([http.client.IncompleteRead(b"")], 2, True),             # not an OSError
+    ([TimeoutError("t")] * 5, 3, False),
+    ([OSError("ssl: certificate verify failed")], 1, False),
+    # A connection that could not be made: an offline build would wait out
+    # three connect timeouts per file before using what it has.
+    ([urllib.error.URLError(TimeoutError("timed out"))], 1, False),
+    ([urllib.error.URLError(ConnectionRefusedError())], 1, False),
+])
+def test_head_tries_a_transient_failure_again(monkeypatch, errors, want_calls, ok):
+    _no_wait(monkeypatch)
+    calls = []
+
+    def urlopen(req, timeout):
+        calls.append(req.get_method())
+        if len(calls) <= len(errors):
+            raise errors[len(calls) - 1]
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    h = download.head("https://example.org/x", "ua")
+    assert len(calls) == want_calls
+    assert (h is not None) == ok
+
+
+def test_head_refused_still_falls_back_to_the_ranged_get(monkeypatch):
+    _no_wait(monkeypatch)
+    calls = []
+
+    def urlopen(req, timeout):
+        calls.append(req.get_method())
+        if req.get_method() == "HEAD":
+            raise urllib.error.HTTPError(req.full_url, 501, "no HEAD", None, None)  # type: ignore[arg-type]
+        return _Resp(206, {"Content-Range": "bytes 0-0/1234", "ETag": '"e"'})
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert download.head("https://example.org/x", "ua")["Content-Length"] == "1234"
+    assert calls == ["HEAD", "GET"]
+
+
+@pytest.mark.parametrize("err,want", [
+    (TimeoutError("The read operation timed out"), True),
+    (ConnectionResetError(), True),
+    (ConnectionRefusedError(), True),
+    (http.client.IncompleteRead(b""), True),
+    (http.client.RemoteDisconnected("closed"), True),
+    (urllib.error.URLError(TimeoutError("timed out")), True),
+    (urllib.error.URLError(ConnectionRefusedError()), True),
+    (urllib.error.URLError("unknown url type"), False),
+    (download.IncompleteBody("short"), True),
+    (OSError("disk full"), False),
+    (ValueError("not an MBTiles"), False),
+])
+def test_what_counts_as_transient(err, want):
+    assert download._transient(err) is want
+
+
+@pytest.mark.parametrize("code,want", [(500, True), (502, True), (503, True), (504, True),
+                                       (429, True), (404, False), (403, False), (416, False)])
+def test_which_statuses_are_transient(code, want):
+    assert download._transient(urllib.error.HTTPError("u", code, "m", None, None)) is want  # type: ignore[arg-type]
+
+
+def test_a_body_cut_short_gets_every_try_with_waits(monkeypatch, tmp_path):
+    # urllib reads a connection closed mid-body (FIN, a TLS ragged EOF) as a
+    # short body: the commonest drop, tried like the others.
+    monkeypatch.setattr(download, "RETRY_WAIT", 5)
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    waits = []
+    monkeypatch.setattr(download.time, "sleep", waits.append)
+    seen = _flaky_stream(monkeypatch, ["short", "short"])
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert seen == [None, "bytes=5000-", "bytes=5000-"] and waits == [5, 10]
+    seen = _flaky_stream(monkeypatch, ["short"] * 10)
+    with pytest.raises(download.IncompleteBody):
+        cli.fetch_resumable("https://example.org/y", tmp_path / "y.pbf")
+    assert len(seen) == download.ATTEMPTS                       # not 2 x ATTEMPTS
+
+
+def test_incomplete_read_is_tried_again(monkeypatch, tmp_path):
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [http.client.IncompleteRead(b"x")])
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert seen == [None, "bytes=5000-"]
+
+
+def test_a_retry_after_too_few_bytes_for_the_format_check_starts_over(monkeypatch, tmp_path):
+    # 30 bytes arrived: check_head (it reads 64) never saw them, so the retry
+    # does not resume past them; a wrong file is then refused at its start.
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [TimeoutError("t")], cut_at=30)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.mbtiles",
+                               check_head=cli._check_mbtiles_head).read_bytes() == A
+    assert seen == [None, None]
+    html = b"<html>" + b"x" * (len(A) - 6)
+    headers = {**HEADERS, "Content-Length": str(len(html))}
+    monkeypatch.setattr(download, "head", lambda url, agent: headers)
+    seen = _flaky_stream(monkeypatch, [TimeoutError("t")], data=html, cut_at=30)
+    with pytest.raises(ValueError, match="not an MBTiles"):
+        cli.fetch_resumable("https://example.org/y", tmp_path / "y.mbtiles",
+                            check_head=cli._check_mbtiles_head)
+    assert seen == [None, None]
+
+
+def test_a_retry_that_resumes_into_a_wrong_range_starts_over(monkeypatch, tmp_path):
+    # The first GET (from byte 0) times out; its retry resumes and the server
+    # answers that resume with another range: start over, not fail.
+    from contextlib import contextmanager
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        rng = request_headers.get("Range")
+        seen.append(rng)
+        if len(seen) == 1:
+            def cut():
+                yield A[:5000]
+                raise TimeoutError("t")
+            yield 200, {"Content-Length": str(len(A))}, cut()
+        elif rng:
+            yield 206, {"Content-Range": f"bytes 7-{len(A) - 1}/{len(A)}", "Content-Length": str(len(A) - 7)}, iter([A[7:]])
+        else:
+            yield 200, {"Content-Length": str(len(A))}, iter([A])
+
+    monkeypatch.setattr(download, "_stream", stream)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert seen == [None, "bytes=5000-", None]

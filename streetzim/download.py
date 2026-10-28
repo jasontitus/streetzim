@@ -19,14 +19,20 @@ OpenFreeMap's published checksums, one task at a time per file.
 - dest.lock (fcntl) keeps two tasks from downloading the same file at once.
 
 Stdlib only; zimscraperlib's retrying session is used where installed.
+Without it (Python < 3.14), a timeout, a dropped connection, a 429 or a 5xx
+is tried again, ATTEMPTS tries in all (CI's monaco-e2e job timed out on
+Geofabrik now and then); on either path, so is a body that ends before its
+Content-Length. A download resumes where the server allows.
 """
 from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Generator, Iterator
@@ -37,6 +43,25 @@ from urllib.parse import urlsplit
 STAMP_KEYS = ("ETag", "Last-Modified", "Content-Length")
 BLOCK = 1 << 20
 OFM_PATH = re.compile(r"^/areas/([^/]+)/([^/]+)/tiles\.mbtiles$")
+ATTEMPTS = 3
+RETRY_WAIT = 5                          # seconds before the second try; twice that before the third
+
+
+def _transient(e: BaseException) -> bool:
+    """A failure another try may not meet: a timeout, a dropped or refused
+    connection, a body cut off mid-read, a 429 or a 5xx."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code == 429 or e.code >= 500
+    if isinstance(e, urllib.error.URLError):
+        return isinstance(e.reason, (TimeoutError, ConnectionError))
+    return isinstance(e, (TimeoutError, ConnectionError, http.client.IncompleteRead, IncompleteBody))
+
+
+def _wait(tries: int, url: str, e: BaseException, then: str = "") -> None:
+    secs = RETRY_WAIT * tries
+    print(f"    {url}: {e}; try {tries + 1} of {ATTEMPTS} in {secs} s"
+          + (f", {then}" if then else ""), flush=True)
+    time.sleep(secs)
 
 
 def name_of_url(url: str) -> str:
@@ -53,28 +78,39 @@ def _header(headers: dict[str, str], name: str) -> str:
 def head(url: str, user_agent: str) -> dict[str, str] | None:
     """The response headers for `url`: a HEAD request, or when the server
     refuses HEAD, a GET of its first byte (Content-Length then comes from
-    Content-Range). None when it cannot be reached."""
+    Content-Range). None when it cannot be reached (a transient failure is
+    tried ATTEMPTS times)."""
+    for tries in range(1, ATTEMPTS + 1):
+        try:
+            return _head_once(url, user_agent)
+        except (OSError, http.client.HTTPException) as e:
+            # Not a connection that could not be made (urllib's URLError,
+            # not an HTTP status): an offline build would wait out three
+            # connect timeouts per file before using what it has.
+            connect = isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError)
+            if connect or not _transient(e) or tries == ATTEMPTS:
+                return None
+            _wait(tries, url, e)
+    return None
+
+
+def _head_once(url: str, user_agent: str) -> dict[str, str] | None:
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": user_agent, "Accept-Encoding": "identity"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return dict(r.headers.items())
     except urllib.error.HTTPError:
-        pass                                   # HEAD refused (403, 405, ...)
-    except OSError:
-        return None
+        pass                                   # HEAD refused (403, 405, 501, ...)
     req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept-Encoding": "identity", "Range": "bytes=0-0"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            h = dict(r.headers.items())
-            m = re.match(r"bytes \d+-\d+/(\d+)$", _header(h, "Content-Range"))
-            if r.status == 206 and m:
-                h["Content-Length"] = m.group(1)
-                h.setdefault("Accept-Ranges", "bytes")
-            elif r.status != 200:
-                return None
-            return h
-    except OSError:
-        return None
+    with urllib.request.urlopen(req, timeout=30) as r:
+        h = dict(r.headers.items())
+        m = re.match(r"bytes \d+-\d+/(\d+)$", _header(h, "Content-Range"))
+        if r.status == 206 and m:
+            h["Content-Length"] = m.group(1)
+            h.setdefault("Accept-Ranges", "bytes")
+        elif r.status != 200:
+            return None
+        return h
 
 
 def stamp_of(h: dict[str, str] | None) -> dict[str, str] | None:
@@ -168,6 +204,25 @@ def _download(url: str, part: Path, offset: int, total: int, validator: str,
                 raise IncompleteBody(f"{url}: GET body has {sink.done - offset:,} bytes, "
                               f"expected {response_length}")
     return True
+
+
+def _download_retrying(url: str, part: Path, offset: int, total: int, validator: str,
+                       user_agent: str, check_head: Callable[[bytes], None] | None,
+                       ranges: bool) -> bool:
+    """_download, tried again after a transient failure, ATTEMPTS tries in
+    all. A try resumes from what arrived when the server takes ranges and at
+    least the first 64 bytes did (check_head has seen them); else it starts
+    over."""
+    for tries in range(1, ATTEMPTS + 1):
+        try:
+            return _download(url, part, offset, total, validator, user_agent, check_head)
+        except (OSError, http.client.HTTPException) as e:
+            if not _transient(e) or tries == ATTEMPTS:
+                raise
+            size = part.stat().st_size if part.exists() else 0
+            offset = size if ranges and 64 <= size < total else 0
+            _wait(tries, url, e, "resuming" if offset else "from the start")
+    raise AssertionError("unreachable")
 
 
 def ofm_sums_url(url: str) -> str | None:
@@ -353,24 +408,18 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
         else:
             print(f"  Downloading {url}" + (f" ({total / 1e6:,.0f} MB)" if total else ""))
         try:
-            wrote = _download(url, part, offset, total, validator, user_agent, check_head)
+            wrote = _download_retrying(url, part, offset, total, validator, user_agent,
+                                       check_head, ranges)
         except ValueError:                      # not the file wanted: don't resume it
             part.unlink(missing_ok=True)
             part_meta.unlink(missing_ok=True)
             raise
-        except IncompleteBody as e:
-            if attempt == 2:
-                raise
-            # The body ended early: resume from what arrived when the server
-            # allows it (the .part keeps its stamp), else start over.
-            size = part.stat().st_size if part.exists() else 0
-            offset = size if ranges and 0 < size < total else 0
-            print(f"    {e}: " + ("resuming" if offset else "starting over"), flush=True)
-            continue
         size = part.stat().st_size if part.exists() else 0
         if wrote and (not total or size == total):
             break
-        if attempt == 2 or not offset:
+        # Not wrote: a resume (this one's, or a retry's) answered with another
+        # range. A whole download of the wrong size is not tried again.
+        if attempt == 2 or (wrote and not offset):
             raise OSError(f"{url}: got {size:,} bytes, expected {total:,}")
         offset = 0                              # a resume that went wrong: start over
     if check_head is not None:
