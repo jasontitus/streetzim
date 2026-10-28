@@ -48,6 +48,9 @@ if os.environ.get("SHIP_PREFETCH_ONLY") == "1":
     if prc == 0:
         os.makedirs(os.path.dirname(mark), exist_ok=True)
         open(mark, "w").write("de\n" + file_id + "\n")
+        added = os.path.join(os.path.dirname(mark), "prefetch.added")   # ship_packs.sh clears it
+        if os.path.exists(added):
+            os.remove(added)
     open(log, "a").write(json.dumps({"prefetch_end": rid, "t": time.time()}) + "\n")
     sys.exit(prc)
 # its step 2: FAKE_SHIP_STEP2 "region:secs" long; FAKE_SHIP_MARKS=1: it fetched and marked the file; then its end marked
@@ -541,6 +544,21 @@ def test_a_viewer_swap_takes_its_parents_prefetch_mark(q: SimpleNamespace) -> No
     run = next(c for c in _calls(q, "ship") if c["ship"] == "alpha")
     assert run["prefetched"] and run["base"].endswith("osm-alpha-2026-10-24.zim"), run
     assert "osm-alpha-2026-10-24: its prefetch mark taken from its viewer swap's parent" in log_text(q)
+
+
+def test_languages_added_since_a_prefetch_are_prefetched_ahead(q: SimpleNamespace) -> None:
+    """alpha's mark names its file, but ship_packs.sh left languages added
+    since for a later run (packs/<base>/prefetch.added): not prefetched, so
+    its prefetch ahead runs before its run."""
+    for rid in ("alpha", "beta", "cont", "fail"):
+        _mark(q, rid)
+    (q.work / "packs" / "osm-alpha-2026-10-23" / "prefetch.added").write_text("eu\n")
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_PREFETCH_AHEAD="1")
+    assert r.returncode == 0, r.stderr
+    pre = [c["t"] for c in _calls(q, "prefetch_end") if c["prefetch_end"] == "alpha"]
+    run = next(c for c in _calls(q, "ship") if c["ship"] == "alpha")
+    assert pre and pre[0] < run["t"] and run["prefetched"], (pre, run)
+    assert [c["prefetch"] for c in _calls(q, "prefetch")] == ["alpha"]
 
 
 def test_a_new_file_of_a_region_is_prefetched_again(q: SimpleNamespace) -> None:

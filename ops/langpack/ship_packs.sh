@@ -171,6 +171,28 @@ say "menu: $LANGS; region languages: ${RL:-none}; packs: $PACK_LANGS"
   | while read -r l; do say "$l"; done
 [ -n "$LANGS" ] || { say "no languages to offer"; exit 1; }
 
+# Languages added since this file's prefetch (the menu grew: an entry of its own for a region
+# language beyond the cap) wait for a later run, so the languages fetched, built and gated go live
+# now: packs/<base>/prefetch.added names them, the queue's prefetch ahead fetches them (a Wikidata
+# pass of hours) and clears it, and the queue runs the region again for them (retry-langs). Not a
+# region language: every entry carries those, so they are fetched now.
+DEFERRED=
+if [ "${SHIP_PREFETCH_ONLY:-0}" != 1 ] && [ "$(sed -n 2p "$PACKS/prefetched" 2> /dev/null)" = "$(stat -c '%s %.9Y' "$BASE")" ]; then
+  DEFERRED=$("$PY" -c 'import sys
+old = {x for x in sys.argv[1].split(",") if x}
+added = [x for x in sys.argv[2].split(",") if x and x not in old]
+print("" if not old or set(added) & {x for x in sys.argv[3].split(",") if x} else ",".join(added))' \
+    "$(sed -n 1p "$PACKS/prefetched")" "$PACK_LANGS" "$RL")
+fi
+if [ -n "$DEFERRED" ]; then
+  drop() { "$PY" -c 'import sys; d = set(sys.argv[2].split(",")); print(",".join(x for x in sys.argv[1].split(",") if x and x not in d))' "$1" "$DEFERRED"; }
+  LANGS=$(drop "$LANGS"); PACK_LANGS=$(drop "$PACK_LANGS")
+  printf '%s\n' "$DEFERRED" > "$PACKS/prefetch.added.tmp" && mv -f "$PACKS/prefetch.added.tmp" "$PACKS/prefetch.added"
+  say "added since this file's prefetch: $DEFERRED: published without them now; the queue prefetches them ahead and runs $REGION again for them"
+else
+  [ "${SHIP_PREFETCH_ONLY:-0}" = 1 ] || rm -f "$PACKS/prefetch.added"
+fi
+
 # 2. network first (once per base file and pack languages: step 2 above)
 PF_MARK=$PACKS/prefetched
 PF_ID=$(printf '%s\n%s' "$PACK_LANGS" "$(stat -c '%s %.9Y' "$BASE")")
@@ -206,6 +228,7 @@ elif [ -n "$PACK_LANGS" ]; then
   if [ "$rc" = 0 ] || { { [ "$rc" = 1 ] || [ "$rc" = 124 ]; } && titles_ok "$PACKS/prefetch.out"; }; then
     [ "$rc" = 0 ] || say "prefetch: Wikidata text incomplete (throttled: see above); the packs say what they lack"
     printf '%s\n' "$PF_ID" > "$PF_MARK.tmp" && mv -f "$PF_MARK.tmp" "$PF_MARK"
+    rm -f "$PACKS/prefetch.added"
   else
     rm -f "$PF_MARK"
     say "prefetch incomplete (exit $rc: see above): a later run for this base fetches again; the packs say what they lack"
@@ -349,6 +372,11 @@ if [ -n "$TODO" ]; then
 else
   say "packs: all gated for this base already"
   rm -f "$PACKS/retry-langs"
+fi
+# the languages left for a later run (above) are listed with those that ran out of time
+if [ -n "$DEFERRED" ]; then
+  printf '%s\n' "$(echo $(cat "$PACKS/retry-langs" 2> /dev/null) ${DEFERRED//,/ })" > "$PACKS/retry-langs.tmp" \
+    && mv -f "$PACKS/retry-langs.tmp" "$PACKS/retry-langs"
 fi
 
 # 3a. the NVMe scratch, when the shared volume has room (tools/langpack/nvme.py)

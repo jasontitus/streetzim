@@ -721,6 +721,8 @@ finish() {  # region
 pf_marked() {  # zim: does packs/<base>/prefetched name this very file? (ship_packs.sh step 2)
   local id
   id=$(stat -L -c '%s %.9Y' "$MAPS_DIR/$1" 2> /dev/null) || return 1
+  # languages added since (packs/<base>/prefetch.added, ship_packs.sh): not prefetched until they are
+  [ ! -e "$LANGPACK_WORK/packs/${1%.zim}/prefetch.added" ] || return 1
   [ "$(sed -n 2p "$LANGPACK_WORK/packs/${1%.zim}/prefetched" 2> /dev/null)" = "$id" ] && return 0
   # a viewer swap's file takes its parent's mark (ops/langpack/prefetch_mark.py): its Wikipedia
   # is the parent's, in the cache already (once a pass: a parent without one stays without)

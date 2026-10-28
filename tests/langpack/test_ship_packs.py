@@ -185,6 +185,57 @@ def _pk(ship: SimpleNamespace, lang: str) -> str:
     return f"osm_testland_wiki-{lang}_2026-10-21_{lpzims.read_uuid(ship.base)[:8]}.zim"
 
 
+def _mark_langs(ship: SimpleNamespace, langs: str) -> Path:
+    """packs/<base>/prefetched for this very file, with these pack languages."""
+    mark = ship.work / "packs" / ship.tag / "prefetched"
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    st = ship.base.stat()
+    mark.write_text(f"{langs}\n{st.st_size} {st.st_mtime_ns // 10**9}.{st.st_mtime_ns % 10**9:09d}\n")
+    return mark
+
+
+def _menu(ship: SimpleNamespace) -> list[str]:
+    reg = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "region.json").read_text())
+    return [m["lang"] for m in reg["menu"]]
+
+
+def test_languages_added_since_the_prefetch_wait_for_a_later_run(ship: SimpleNamespace) -> None:
+    """The menu grew since this file's prefetch (th added, as Iberia's Basque
+    and Galician): the languages fetched go live now and th waits
+    (retry-langs, prefetch.added) instead of holding the run for a Wikidata
+    pass of hours; the prefetch ahead fetches it and clears the mark; the
+    next run adds it."""
+    mark = _mark_langs(ship, "de,fr")
+    r = _run(ship)
+    assert r.returncode == 0, r.stdout[-3000:]
+    assert _lines(ship.logs["prefetch"]) == [] and sorted(_lines(ship.logs["build"])) == ["de", "fr"]
+    assert (mark.parent / "prefetch.added").read_text().split() == ["th"]
+    assert (mark.parent / "retry-langs").read_text().split() == ["th"]
+    assert "th" not in _menu(ship) and {"de", "fr"} <= set(_menu(ship))
+    assert "added since this file's prefetch: th" in _log(ship)
+    r = _run(ship, SHIP_PREFETCH_ONLY="1")
+    assert r.returncode == 0, r.stdout[-3000:]
+    assert _lines(ship.logs["prefetch"])[-1].endswith("--langs de,fr,th --cache " + ship.env["WP_CACHE"])
+    assert mark.read_text().splitlines()[0] == "de,fr,th" and not (mark.parent / "prefetch.added").exists()
+    r = _run(ship)
+    assert r.returncode == 0, r.stdout[-3000:]
+    assert "th" in _lines(ship.logs["build"]) and "th" in _menu(ship)
+    assert not (mark.parent / "retry-langs").exists() and len(_lines(ship.logs["prefetch"])) == 1
+
+
+def test_a_region_language_added_since_the_prefetch_is_fetched_now(ship: SimpleNamespace) -> None:
+    """Every entry carries a region language: one added since the prefetch
+    is fetched in this run, not left for a later one."""
+    lpzims.write_base(ship.base, cfg_extra={"regionLanguages": ["th"]})
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": ship.base.name, "size": str(ship.base.stat().st_size), "md5": _md5(ship.base)}]}))
+    mark = _mark_langs(ship, "de,fr")
+    _run(ship)                          # (this base's entries, all carrying th, are over the budget)
+    assert _lines(ship.logs["prefetch"])[0].endswith("--langs de,fr,th --cache " + ship.env["WP_CACHE"])
+    assert not (mark.parent / "prefetch.added").exists() and "added since" not in _log(ship)
+    assert "th" in _lines(ship.logs["build"])
+
+
 def test_ships_the_core_languages(ship: SimpleNamespace, tmp_path: Path) -> None:
     r = _run(ship)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
