@@ -159,4 +159,28 @@ ok('Kiwix\'s Apple apps are told apart from browsers and from each other', () =>
   assert.strictEqual(L._szSignKiwixApp('http:', mac), '');          // kiwix-serve in Safari
 });
 
+
+const T = new Function(slice(HTML, '// BEGIN sign-load', '// END sign-load') + '\nreturn { _szInTurn };')();
+
+await (async () => {
+  const name = "the reader's files load one at a time, results in order";
+  try {
+    let open = 0, most = 0;
+    const log = [];
+    const job = (v, ms) => () => {
+      open++; most = Math.max(most, open); log.push('start ' + v);
+      return new Promise((resolve) => setTimeout(() => { open--; log.push('end ' + v); resolve(v); }, ms));
+    };
+    const got = await T._szInTurn([job('a', 30), job('b', 5), job('c', 15)]);
+    assert.deepStrictEqual(got, ['a', 'b', 'c']);
+    assert.strictEqual(most, 1);
+    assert.deepStrictEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+    assert.deepStrictEqual(await T._szInTurn([]), []);
+    // A failure stops the rest and rejects.
+    let ran = false;
+    await assert.rejects(T._szInTurn([() => Promise.reject(new Error('404')), () => { ran = true; return 1; }]), /404/);
+    assert.strictEqual(ran, false);
+    console.log('ok   ', name); pass++;
+  } catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
+})();
 console.log(`${pass} passed`);

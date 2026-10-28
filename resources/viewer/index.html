@@ -8363,6 +8363,21 @@ function _szSignKiwixApp(protocol, nav) {
   return '';
 }
 // END sign-env
+// BEGIN sign-load
+// The reader's files, one at a time: each job (a function returning a
+// promise) starts when the one before has ended; the results in order.
+// kiwix-serve 3.8.2 sometimes holds a download for ~100 s when the seven
+// files (46 MB for Manama) are asked for at once beside the map's tiles: 6
+// of 18 first photos waited 90-115 s (CI's 180 s budget ran out twice),
+// none of 20 in turn, and a plain HTTP server never did. In turn costs
+// nothing measurable (12-14 s for the whole first photo either way).
+function _szInTurn(jobs) {
+  var out = [];
+  return jobs.reduce(function (prev, job) {
+    return prev.then(job).then(function (v) { out.push(v); });
+  }, Promise.resolve()).then(function () { return out; });
+}
+// END sign-load
 function initSignSearch(map, config) {
 var path = config && config.ocr;
 var btn = document.getElementById('search-photo');
@@ -8412,8 +8427,14 @@ manifest = JSON.parse(t);
 return manifest;
 })).then(function (m) {
 var recs = m.rec || [];
-return Promise.all([getText(m.worker), getBytes(m.engine), getBytes(m.wasm), getBytes(m.det.model)]
-.concat(recs.map(function (r) { return Promise.all([getBytes(r.model), getText(r.dict)]); })))
+return _szInTurn([function () { return getText(m.worker); },
+function () { return getBytes(m.engine); },
+function () { return getBytes(m.wasm); },
+function () { return getBytes(m.det.model); }]
+.concat(recs.map(function (r) {
+return function () { return _szInTurn([function () { return getBytes(r.model); },
+function () { return getText(r.dict); }]); };
+})))
 .then(function (got) {
 var url = URL.createObjectURL(new Blob([got[0]], { type: 'application/javascript' }));
 worker = new Worker(url);

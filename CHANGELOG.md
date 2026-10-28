@@ -29,6 +29,7 @@ noticed them.
 
 ### Search
 - **Search with a photo** (`--ocr`, off by default): a camera button in the search box reads the text of a photo (a street sign, a shop front, an advert, a landmark's plate) offline with PaddleOCR models on ONNX Runtime's WebAssembly, in a worker, and searches the map for it with a fuzzy match that survives OCR slips; the lines read are listed under the photo to search for by hand. The builder adds a PP-OCRv6 tiny detector and a recognizer per script the map's names use (PP-OCRv6 small for Latin and CJK; PP-OCRv5 for Korean, Thai, Arabic, Cyrillic, Greek, Devanagari, Tamil, Telugu), pinned in the lock file; Monaco grows from 2.9 to 25.6 MB. Chosen by measurement across 42 languages against Tesseract.js and the other PP-OCR models (docs/ocr.md) (2026-10-28)
+- Fixed: on a map served by kiwix-serve, the first photo could wait 90-115 s for the reader's files (a third of the time). The viewer asked for all of them at once beside the map's tiles, and kiwix-serve 3.8.2 sometimes held them. It now fetches them one at a time: 20 of 20 first photos read in 12-14 s (2026-10-28)
 
 ## October 2026 (to 10-14)
 
