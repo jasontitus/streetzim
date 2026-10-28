@@ -104,7 +104,10 @@ for t in tests/chip_rules_js.test.mjs tests/chip_shards_js.test.mjs \
 
 CI (`.github/workflows/ci.yml`) runs all of that, with coverage, then builds
 Monaco end to end, validates it (including `zimcheck`) and loads the in-ZIM
-viewer in headless Chrome. It also builds the wheel and checks it installed
+viewer in headless Chrome. The sign reader (`--ocr`) is checked there too:
+every recognizer on signs in its script (`tools/ocr_scripts_check.mjs`),
+and photos of signs on Monaco and on an Arabic map, Manama
+(`tools/ocr_check.mjs`; [docs/ocr.md](docs/ocr.md#tests)). It also builds the wheel and checks it installed
 outside the checkout. It runs weekly too, to catch upstream drift.
 Coverage, the wheel and the (manual) PyPI workflow are in
 [docs/packaging.md](docs/packaging.md). A file the build reads at run time

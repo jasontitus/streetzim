@@ -143,7 +143,9 @@ worker lives.
 **Gaps.** Names whose letters a recognizer lacks lose them:
 Vietnamese stacked tone marks (ườ, ễ, ệ) and Yoruba underdots
 (ọ, ẹ, ṣ) are dropped, so "Đường Nguyễn Huệ" reads "Đưng Nguyn Hu".
-The fuzzy match still finds most of these. Urdu in Nastaliq lettering
+The fuzzy match still finds most of these. The Tamil model misreads the
+vowel sign ை (drawn before its consonant) even on a clean sign:
+"அண்ணா சாலை" reads "அண்ணா சா2ல", just found (75% similar). Urdu in Nastaliq lettering
 (most Pakistani signs) is not read by any engine we tried; Urdu in Naskh is.
 
 ## Where it works
@@ -182,12 +184,23 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
   manifest, map-config, the lock, and the flag's way to `create_zim`.
 - `tests/viewer_ocr_js.test.mjs`: line grouping and the fuzzy match, as
   they ship.
+- `tools/ocr_scripts_check.mjs` (CI): every recognizer reads its script.
+  Real place names in each (Chinese, Japanese, Korean, Thai, Arabic,
+  Persian, Cyrillic, Greek, Devanagari, Tamil, Telugu, Latin) are drawn as
+  signs, a clean plate and a rough photo with other text and small print,
+  read by the worker and models as a ZIM ships them (each script's
+  recognizer loaded beside the Latin/CJK one, as a map gets them), and
+  matched by the viewer's own code. It needs no map:
+  `python -m streetzim.ocr export DIR` writes the `ocr/` files with every
+  recognizer. It found a recognizer answering blank text confidently for a
+  script it does not read (now ignored by the worker).
 - `tools/ocr_check.mjs` (CI, on the Monaco ZIM built with `--ocr`):
   draws photos of signs of the map's own streets and shops (tilted, noisy,
   with other text and the town in small print), gives them to the file
   input and checks the place comes out first, then that picking it closes
   the sheet and moves the map. `NAMES` photographs given text instead
   ("text=>record name" for a sign in another script than the record's
-  name). Run by hand on Manama (`--bbox 50.50,26.15,50.64,26.27`, which
-  gets the `latin-cjk` and `arabic` recognizers): six Arabic signs,
-  streets, a mosque, a district and a numbered road, each first.
+  name). With `SCRIPT` and `QUERIES` it photographs the own-script names
+  of places the map's search finds: CI runs it on Manama
+  (`--bbox 50.50,26.15,50.64,26.27`, which gets the `latin-cjk` and
+  `arabic` recognizers) with Arabic signs of streets, mosques and markets.

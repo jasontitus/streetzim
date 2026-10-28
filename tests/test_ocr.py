@@ -165,3 +165,20 @@ def test_create_osm_zim_passes_the_plan_to_create_zim(tmp_path, monkeypatch, arg
         zim_illustration=None, zim_metadata=None)
     assert (seen["ocr"].recognizers if seen["ocr"] else None) == want
 
+
+
+def test_all_models_is_every_recognizer():
+    plan = ocr.all_models()
+    assert plan.detector == "det"
+    assert set(plan.recognizers) == set(ocr.recognizers_by_script().values())
+
+
+def test_export_writes_the_zim_entries_to_a_folder(tmp_path, offline):
+    """python -m streetzim.ocr export: the files tools/ocr_scripts_check.mjs reads."""
+    assert ocr.main(["export", str(tmp_path), "--scripts", "Thai,latn"]) == 0
+    manifest = json.loads((tmp_path / ocr.MANIFEST_ENTRY).read_text(encoding="utf-8"))
+    assert [r["name"] for r in manifest["rec"]] == ["thai", "latin-cjk"]
+    for rel in (manifest["worker"], manifest["engine"], manifest["wasm"], manifest["det"]["model"],
+                *(r["model"] for r in manifest["rec"]), *(r["dict"] for r in manifest["rec"])):
+        assert (tmp_path / rel).is_file(), rel
+    assert ocr.main(["export", str(tmp_path / "x"), "--scripts", "Hebr"]) == 1

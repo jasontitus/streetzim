@@ -15,7 +15,12 @@
 // "text on the sign=>its record's name" (an Arabic sign of a place the
 // search lists by its Latin name; "=>A/B" when two places share the sign's
 // name and either may come first); by default the first streets and POIs
-// of the map's own search whose names are 8-30 letters.
+// of the map's own search whose names are 8-30 letters. With SCRIPT (a
+// Unicode script name: Arabic, Thai, Han, ...) and QUERIES ("شا|مس"), the
+// signs are in that script instead: the own-script names (`nn`, else `n`)
+// of the first streets, POIs and places those searches find, 5-25 letters
+// of that script and spaces, and the photo passes when its place, or another
+// of exactly the sign's name, comes first.
 // Prints "OCR OK" when every check passed; exits 1 otherwise.
 import puppeteer from 'puppeteer-core';
 
@@ -41,7 +46,24 @@ try {
 
   // Places to photograph: given, or streets and POIs from the map's search.
   let names = (process.env.NAMES || '').split('|').filter(Boolean);
-  if (!names.length) {
+  if (!names.length && process.env.SCRIPT) {
+    names = await p.evaluate(async (script, queries) => {
+      const own = new RegExp(`^[\\p{Script=${script}} ]{5,25}$`, 'u');
+      const out = [], seen = {};
+      for (const q of queries) {
+        const found = await window.__szMap._queryPlaces(q);
+        for (const m of found) {
+          const it = m.item, text = (it.nn || it.n || '').trim();
+          if (['street', 'poi', 'place'].indexOf(it.t) < 0 || !own.test(text) || seen[text]) continue;
+          seen[text] = 1;
+          out.push(text + '=>' + it.n);
+          break;
+        }
+        if (out.length >= 4) break;
+      }
+      return out;
+    }, process.env.SCRIPT, (process.env.QUERIES || '').split('|').filter(Boolean));
+  } else if (!names.length) {
     names = await p.evaluate(async () => {
       const out = [];
       for (const q of ['av', 'bo', 'ru', 'pl', 'mu', 'ca']) {
@@ -113,11 +135,17 @@ try {
       lines: [...document.querySelectorAll('#ocr-lines .ocr-line')].map(b => b.textContent),
       results: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending])')]
         .map(r => r.getAttribute('data-name')),
+      // the first row's names as shown: its name and own-script name
+      shown: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending]) .search-result-name')]
+        .slice(0, 1).map(e => e.textContent),
     }));
     const ms = Date.now() - t0;
     console.log(`"${name}": ${got.status}: read ${JSON.stringify(got.lines)} in ${ms} ms; results ${JSON.stringify(got.results.slice(0, 3))}`);
     if (!done) { errs.push(`"${name}": nothing read or found in 180 s (${got.status})`); continue; }
-    if (want.split('/').indexOf(got.results[0]) < 0) errs.push(`"${name}": first result is ${JSON.stringify(got.results[0])}, not ${JSON.stringify(want)}`);
+    // Another place of exactly the sign's name may come first (two records
+    // of one street): its row shows that name.
+    const sameName = got.shown[0] && got.shown[0].split(' ').join('').indexOf(name.split(' ').join('')) >= 0;
+    if (want.split('/').indexOf(got.results[0]) < 0 && !sameName) errs.push(`"${name}": first result is ${JSON.stringify(got.results[0])}, not ${JSON.stringify(want)}`);
   }
 
   // Picking the result closes the sheet and flies the map there.

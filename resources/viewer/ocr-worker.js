@@ -46,7 +46,14 @@ function load(m) {
 
 function boxKey(box) { return JSON.stringify(box); }
 
-// Each detected box is read by every recognizer; the most confident wins.
+// A reading worth keeping: some letter or digit. A recognizer shown text
+// in a script it does not know may answer spaces or punctuation, and do it
+// confidently (PP-OCRv6's Latin/CJK model on Cyrillic): that must never
+// beat the recognizer that read the letters.
+var READABLE = /[\p{L}\p{N}]/u;
+
+// Each detected box is read by every recognizer; the most confident
+// readable reading wins.
 function read(e, input) {
   var image = SZOCR.normalizeInputToRgb(input);
   return e.det.run(image).then(function (boxes) {
@@ -57,8 +64,8 @@ function read(e, input) {
         return r.svc.run(image, boxes, { ordering: { sortByReadingOrder: false } }).then(function (res) {
           for (var i = 0; i < res.length; i++) {
             var k = boxKey(res[i].box), cur = best[k];
-            if (res[i].text && (!cur || res[i].confidence > cur.confidence)) {
-              best[k] = { text: res[i].text, confidence: res[i].confidence, box: res[i].box, script: r.script };
+            if (READABLE.test(res[i].text || '') && (!cur || res[i].confidence > cur.confidence)) {
+              best[k] = { text: res[i].text.trim(), confidence: res[i].confidence, box: res[i].box, script: r.script };
             }
           }
         });

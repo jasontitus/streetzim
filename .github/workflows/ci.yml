@@ -252,6 +252,18 @@ jobs:
           npm ci --no-audit --no-fund
           sudo apt-get update -q
           sudo apt-get install -y -q osmium-tool unzip
+          # The OCR checks draw signs in every script the sign reader reads.
+          sudo apt-get install -y -q fonts-noto-core fonts-noto-cjk
+
+      # The sign reader's runtime and models (--ocr; ~120 MB from Hugging Face
+      # and jsDelivr), cached by content hash with the glyph ranges until the
+      # lock file changes (streetzim/viewer_assets.py).
+      - name: Cache the pinned viewer assets and OCR models
+        uses: actions/cache@v4
+        with:
+          path: viewer-assets
+          key: viewer-assets-${{ hashFiles('resources/viewer-assets.lock.json') }}
+          restore-keys: viewer-assets-
 
       # Ubuntu's tilemaker (2.4) is too old for resources/tilemaker/*.lua.
       - name: Cache tilemaker ${{ env.TILEMAKER_REF }}
@@ -483,6 +495,51 @@ jobs:
             CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
             node tools/ocr_check.mjs | tee ocr.txt
           grep -q '^OCR OK' ocr.txt
+
+      # Every recognizer the sign reader can ship reads its own script: real
+      # place names in Chinese, Japanese, Korean, Thai, Arabic, Persian,
+      # Cyrillic, Greek, Devanagari, Tamil, Telugu and Latin drawn as signs
+      # (clean, and as a rough photo) and read by the worker and models as a
+      # ZIM ships them, then matched by the viewer's own code. No map needed.
+      - name: Every OCR recognizer reads its script (OCR scripts check)
+        run: |
+          python -m streetzim.ocr export ocr-all
+          OCR_DIR=ocr-all CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/ocr_scripts_check.mjs | tee ocr-scripts.txt
+          grep -q '^OCR SCRIPTS OK' ocr-scripts.txt
+
+      # The sign reader on a map in another script: Manama (Bahrain), whose
+      # names are half Arabic, so the build picks the Arabic recognizer
+      # beside the Latin one. Arabic signs of the map's own streets, mosques
+      # and markets, picked from its search, must find their place first.
+      # The extract is cached weekly like Monaco's; when the mirror is down
+      # and no copy is cached the check is skipped with a warning.
+      - name: Cache the Bahrain extract
+        uses: actions/cache@v4
+        with:
+          path: bahrain-latest.osm.pbf
+          key: bahrain-pbf-${{ steps.week.outputs.week }}
+          restore-keys: bahrain-pbf-
+      - name: Search with a photo on an Arabic map (Manama OCR check)
+        run: |
+          if [ ! -s bahrain-latest.osm.pbf ]; then
+            curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o bahrain.part \
+              https://download.openstreetmap.fr/extracts/asia/bahrain-latest.osm.pbf \
+              && osmium fileinfo -e -F pbf bahrain.part > /dev/null \
+              && mv bahrain.part bahrain-latest.osm.pbf
+          fi
+          if [ ! -s bahrain-latest.osm.pbf ]; then
+            echo "::warning::no Bahrain extract: the Arabic OCR check did not run"; exit 0
+          fi
+          python create_osm_zim.py --bbox 50.50,26.15,50.64,26.27 --name Manama \
+            --pbf bahrain-latest.osm.pbf --ocr -o osm-manama-ci.zim | tee manama-build.txt
+          grep -q 'OCR: .*recognizers: .*arabic' manama-build.txt
+          kiwix-serve --port 8904 osm-manama-ci.zim &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8904/content/osm-manama-ci/map-config.json >/dev/null && break; sleep 1; done
+          SCRIPT=Arabic QUERIES='شا|مس|مد|سو' ZIM_ORIGIN=http://127.0.0.1:8904/content/osm-manama-ci \
+            CHROME_PATH="$(command -v google-chrome || command -v chromium)" \
+            node tools/ocr_check.mjs | tee ocr-manama.txt
+          grep -q '^OCR OK' ocr-manama.txt
 
       # The viewer in another UI language (docs/i18n.md). The pseudo-locale
       # (?uilang=qps) brackets every translated string, so chrome text

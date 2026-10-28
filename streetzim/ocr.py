@@ -298,3 +298,49 @@ def prefetch(plan: Plan | None = None, lock: dict[str, Any] | None = None) -> No
     va.fetch_verified(wasm["url"], wasm["sha256"])
     for key in keys:
         va.fetch_verified(models[key]["url"], models[key]["sha256"])
+
+
+def all_models(lock: dict[str, Any] | None = None) -> Plan:
+    """Every pinned recognizer, in the lock's order (the per-script check)."""
+    models = ocr_lock(lock)[va.OCR_MODELS]["models"]
+    return Plan(detector(lock), tuple(k for k, m in models.items() if m["kind"] == "rec"))
+
+
+def export(dest: str, plan: Plan, lock: dict[str, Any] | None = None) -> list[str]:
+    """Write the ZIM entries of ``plan`` under ``dest`` (ocr/... as in a
+    ZIM), for testing the reader without a map: tools/ocr_scripts_check.mjs."""
+    import os
+    written = []
+    for path, _title, _mime, content in entries(plan, lock):
+        out = os.path.join(dest, path)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "wb") as f:
+            f.write(content)
+        written.append(path)
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    """python -m streetzim.ocr export DIR [--scripts Latn,Arab]: the sign
+    reader's files with every recognizer (or those reading --scripts)."""
+    import argparse
+    ap = argparse.ArgumentParser(prog="python -m streetzim.ocr", description=main.__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    ex = sub.add_parser("export", help="write ocr/ with the models, as a ZIM has it")
+    ex.add_argument("dest")
+    ex.add_argument("--scripts", help="ISO 15924 codes; default: every recognizer")
+    args = ap.parse_args(argv)
+    try:
+        plan = (choose_models(Counter(), 0, scripts=[s.strip().capitalize() for s in args.scripts.split(",")])
+                if args.scripts else all_models())
+        written = export(args.dest, plan)
+    except (ValueError, va.IntegrityError, va.DownloadError) as e:
+        print(f"error: {e}")
+        return 1
+    print(f"wrote {len(written)} files to {args.dest}/{ENTRY_DIR}: "
+          f"{', '.join((plan.detector, *plan.recognizers))}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
