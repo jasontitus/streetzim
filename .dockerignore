@@ -38,3 +38,6 @@ rust/**/target-*/
 /url_validation_cache.json
 /.pytest_cache/
 /.ruff_cache/
+# The sign reader's labelled photos (docs/ocr-test-set.md): a few hundred MB
+# the build never reads.
+/tests/fixtures/ocr-signs/

@@ -7,9 +7,9 @@ front, a landmark plaque. Today it is tested on synthetic signs only
 every viewer change can be scored per country, script and kind of sign: did
 the right place come up first, or in the top three?
 
-This file says what to collect and how to describe it. Scoring is a separate
-step (a harness that runs each photo through the viewer of its region's map,
-as a phone does).
+This file says what to collect and how to describe it; [Scoring](#scoring)
+says how the set is run through the viewer of each photo's map, as a phone
+does.
 
 ## What to collect
 
@@ -163,14 +163,17 @@ checking the labels fills them in.
 
 ## Folder and size
 
-    ocr-testset/       on the build host's data disk, beside the maps
-      manifest.jsonl
-      README.md        counts per country, kind and script; the gaps
-      bh/ tw/ jp/ ...  one folder per country code
+    tests/fixtures/ocr-signs/
+      manifest.jsonl     every photo's record
+      README.md          counts per country, kind and script; the gaps
+      ATTRIBUTIONS.md    each photo's credit, as its licence asks
+      bh/ tw/ jp/ ...    one folder per country code: the photos, each with
+                         its .source.json (licence, provenance), and the
+                         country's own manifest.jsonl
 
-Not in the git repository: the photos are a few hundred MB and some licences
-(CC BY-SA) ask for attribution with every copy. The manifest may go in the
-repo later, so keep personal data out of it.
+The photos keep their own licences (ATTRIBUTIONS.md), not the repository's.
+They are a few hundred MB: .dockerignore keeps them out of the build
+context, and no map carries them. Keep personal data out of the manifest.
 
 ## Done means
 
@@ -180,3 +183,23 @@ repo later, so keep personal data out of it.
 - Every record has a licence that allows republishing, an attribution,
   `lines` and `kind`; `expect` filled where the answer is known.
 - README.md lists the counts and what is missing.
+
+## Scoring
+
+`tools/ocr_photos.py` runs every photo through the sign reader of its
+region's map: the newest local `osm-<region>-<date>.zim`, served with
+today's viewer and the reader's models on top (`cloud/serve_zim_entries.py
+--overlay`), so a map built before the reader is scored as a map built now
+would be. A map's own recognizers are used when it has the reader; otherwise
+the Latin/CJK one and those of its photos' scripts.
+
+    python3 tools/ocr_photos.py --set tests/fixtures/ocr-signs --maps <maps folder> --out <out>
+    python3 tools/ocr_photos.py ... --regions bahrain,taipei      # some maps
+    python3 tools/ocr_photos.py --score <out>                     # score again
+
+Per photo: `read` (the share of the labelled `lines` read, each 80% of its
+letters in order), `query` (the line searched for is the labelled one),
+`found@1` and `found@3` (the labelled place among the first results, by
+`expect.record` or `expect.query`). `<out>/report.md` has the table per map,
+per kind and per photo; `<out>/raw.jsonl` what the reader read and found.
+Compare two viewers by running both and reading the reports side by side.
