@@ -338,8 +338,9 @@ main { max-width: 1160px; margin: 0 auto; padding: 18px 20px 40px; }
     return el;
   }
 
-  // The build worker's file, once it says it can serve it (HEAD: it answers
-  // without fetching the map), else the fallback: a phone's tap on a
+  // The build worker's file, once it serves its first byte (which it reads
+  // from archive.org: a file replaced or unreachable there fails here, not
+  // halfway through the download), else the fallback: a phone's tap on a
   // language version (else the /build/ page, which builds it there), and a
   // map with today's viewer on any device (else archive.org's file). Taps
   // while one is being checked, or on the same map within 5 s of its
@@ -353,8 +354,8 @@ main { max-width: 1160px; margin: 0 auto; padding: 18px 20px 40px; }
     checking = true;
     var ac = typeof AbortController === 'function' ? new AbortController() : null;
     var timer = setTimeout(function () { if (ac) ac.abort(); }, 4000);
-    fetch(url, { method: 'HEAD', cache: 'no-store', signal: ac ? ac.signal : undefined })
-      .then(function (r) { return r.ok; }, function () { return false; })
+    fetch(url, { headers: { Range: 'bytes=0-0' }, cache: 'no-store', signal: ac ? ac.signal : undefined })
+      .then(function (r) { try { if (r.body) r.body.cancel(); } catch (e) {} return r.ok; }, function () { return false; })
       .then(function (ok) {
         clearTimeout(timer);
         checking = false;

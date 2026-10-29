@@ -467,10 +467,11 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
 <script>
 /* A map's Download with today's viewer: the build worker serves it, made
    from the map's archive.org file and a new viewer (tools/langpack/
-   fresh_viewer.py, docs/fresh-viewer.md). The worker is asked first (a HEAD,
-   which it answers without fetching the map); when it cannot serve the file
-   (its daily budget used, switched off, no answer in 4 s), archive.org's
-   file (data-fallback) downloads instead. Another click while one is
+   fresh_viewer.py, docs/fresh-viewer.md). The worker is asked for the
+   file's first byte first, which it reads from archive.org; when it cannot
+   serve it (archive.org's file replaced or unreachable, the worker's daily
+   budget used, switched off, no answer in 4 s), archive.org's file
+   (data-fallback) downloads instead. Another click while one is
    checked, or within 5 s of a download starting, does nothing (a double tap
    must not start two downloads of a few GB). */
 document.addEventListener('click', function (e) {
@@ -486,9 +487,11 @@ document.addEventListener('click', function (e) {
     location.href = url;
     setTimeout(function () { a.removeAttribute('data-checking'); }, 5000);
   };
-  fetch(a.href, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
-    .then(function (r) { go(r.ok ? a.href : a.getAttribute('data-fallback')); },
-          function () { go(a.getAttribute('data-fallback')); });
+  fetch(a.href, { headers: { Range: 'bytes=0-0' }, cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+    .then(function (r) {
+      try { if (r.body) r.body.cancel(); } catch (err) {}
+      go(r.ok ? a.href : a.getAttribute('data-fallback'));
+    }, function () { go(a.getAttribute('data-fallback')); });
 });
 </script>
 <script>

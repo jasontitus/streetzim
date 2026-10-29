@@ -89,4 +89,4 @@ def test_the_card_downloads_the_fresh_file_with_archive_org_as_fallback(gen):
 
 def test_the_page_falls_back_to_archive_org():
     page = (ROOT / "web" / "template.html").read_text(encoding="utf-8")
-    assert "a[data-fallback]" in page and "method: 'HEAD'" in page and "data-fallback" in page
+    assert "a[data-fallback]" in page and "Range: 'bytes=0-0'" in page and "getAttribute('data-fallback')" in page

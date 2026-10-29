@@ -54,7 +54,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from cloud.viewer_slots import VIEWER_FILES, slot_needle  # noqa: E402
 from tools.langpack.lang_torrents import (  # noqa: E402
-    FILE_RE, ITEM_RE, LANG_RE, REGION_RE, auto_piece_size, blob_name, costs, make_torrent, webseed_url,
+    BLOB_RE, FILE_RE, ITEM_RE, LANG_RE, REGION_RE, auto_piece_size, blob_name, costs, make_torrent, webseed_url,
     write_atomic)
 
 FORMAT = "streetzim-fresh-viewer/1"
@@ -70,13 +70,36 @@ class FreshError(Exception):
 
 
 def viewer_rev(repo: str) -> str:
-    """The viewer's revision: the last commit that changed resources/viewer."""
+    """The viewer's revision: the last commit that changed resources/viewer,
+    which must have no uncommitted change (the new UUID and the file's name
+    come from the revision: other bytes under the same ones would be a
+    different book Kiwix takes for the same)."""
     r = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%h", "--", "resources/viewer"],
                        capture_output=True, text=True)
     rev = r.stdout.strip()
     if r.returncode or not re.fullmatch(r"[0-9a-f]{7,40}", rev):
         raise FreshError(f"no viewer revision in {repo} ({r.stderr.strip() or 'git log printed nothing'})")
+    d = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--", "resources/viewer"],
+                       capture_output=True, text=True)
+    if d.returncode or d.stdout.strip():
+        raise FreshError(f"resources/viewer in {repo} has uncommitted changes: commit them first\n{d.stdout.strip()[:500]}")
     return rev
+
+
+ETAG = re.compile(r'^"([0-9a-f]+)-([0-9a-f]+)"$')    # archive.org's: "<mtime hex>-<size hex>"
+
+
+def check_etag(etag: str, size: int) -> str:
+    """archive.org's ETag for the live file, as the worker sends it in
+    If-Range: quotes and all, its size part this file's (a wrong one makes
+    archive.org answer 200 to every range, and the worker calls the file
+    replaced)."""
+    m = ETAG.match(etag or "")
+    if not m:
+        raise FreshError(f"--etag {etag!r} is not archive.org's \"<mtime hex>-<size hex>\" (quote it in the shell)")
+    if int(m.group(2), 16) != size:
+        raise FreshError(f"--etag {etag} names a file of {int(m.group(2), 16)} bytes, not {size}")
+    return etag
 
 
 def fresh_name(zim_file: str, rev: str) -> str:
@@ -244,7 +267,7 @@ def compose(zim: str, work: str, repo: str, rev: str, name: str, full_copy: bool
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("region")
     ap.add_argument("zim", help="the local copy of the map's live archive.org file")
     ap.add_argument("--item", required=True, help="its archive.org item (streetzim-<region>)")
@@ -252,7 +275,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, help="where the index, blobs, torrent and fresh.json go")
     ap.add_argument("--webseed", required=True, help="the build worker's origin")
     ap.add_argument("--md5", required=True, help="the MD5 archive.org lists for the live file")
-    ap.add_argument("--etag", help="archive.org's ETag for it (\"<mtime hex>-<size hex>\")")
+    ap.add_argument("--etag", required=True, help="archive.org's ETag for it (\"<mtime hex>-<size hex>\", quotes included)")
     ap.add_argument("--viewer-root", default=ROOT, help="the checkout whose resources/viewer goes in")
     ap.add_argument("--rev", help="the viewer's revision (default: the last commit to resources/viewer)")
     ap.add_argument("--work", default=None, help="where the composed file is made (default: beside ZIM)")
@@ -274,6 +297,7 @@ def run(a) -> int:
     base_size = os.path.getsize(zim)
     lang = a.lang
     site_region = f"{a.region}-viewer"          # the worker's folder for it: build/recipes/<region>-viewer/
+    etag = check_etag(a.etag, base_size)
     print(f"fresh_viewer: {a.region}: checking {base_file} against archive.org's MD5", flush=True)
     if md5_file(zim) != a.md5.lower():
         raise FreshError(f"{zim} is not the file archive.org serves (MD5 {a.md5})")
@@ -296,7 +320,7 @@ def run(a) -> int:
             raise FreshError(f"UUID {uuid} is not the one swap_base_viewer.py wrote ({swap['new_uuid']})")
         windows = [(0, HEADER_LEN)] + slot_windows(path) + [(base_size - MD5_LEN, MD5_LEN)]
         runs = changed_runs(zim, path, windows)
-        index, blobs = build_index(site_region, lang, a.item, base_file, base_size, a.etag, path, name, uuid,
+        index, blobs = build_index(site_region, lang, a.item, base_file, base_size, etag, path, name, uuid,
                                    runs, a.webseed)
         plen = auto_piece_size(base_size)
         pieces, file_md5, body_md5, tail = read_index(index, blobs, zim, plen)
@@ -314,7 +338,7 @@ def run(a) -> int:
         fresh = {
             "format": FORMAT, "region": a.region, "site_region": site_region, "lang": lang, "viewer": rev,
             "base": {"item": a.item, "file": base_file, "size": base_size, "md5": a.md5.lower(),
-                     "etag": a.etag},
+                     "etag": etag},
             "file": name, "size": base_size, "uuid": uuid, "md5": index["md5"], "file_md5": file_md5,
             "webseed": index["webseed"], "torrent": index["torrent"], "infohash": infohash,
             "parts": len(index["parts"]), "blob_bytes": sum(len(d) for d in blobs.values()),
@@ -323,6 +347,12 @@ def run(a) -> int:
         }
         write_atomic(os.path.join(a.out, "fresh.json"), json.dumps(fresh, indent=1).encode())
         published = True
+        # an earlier viewer's blobs, torrent and index go: only this one is served
+        for f in os.listdir(a.out):
+            stale = (BLOB_RE.match(f) and f[3:-4] not in {s[:32] for s in blobs}) \
+                or ((f.endswith(".ws.json") or f.endswith(".torrent")) and f not in (f"{lang}.ws.json", f"{lang}.torrent"))
+            if stale:
+                os.unlink(os.path.join(a.out, f))
         print(json.dumps(fresh), flush=True)
         print(f"fresh_viewer: {a.region}: {name}: {len(index['parts'])} parts, "
               f"{fresh['blob_bytes']} bytes of blobs, {index['subrequests']['whole']} subrequests for the whole file",

@@ -17,10 +17,19 @@ const at = tpl.indexOf("a[data-fallback]");
 const script = tpl.slice(tpl.lastIndexOf('<script>', at), tpl.indexOf('</script>', at) + '</script>'.length);
 const requests = [];
 const worker = http.createServer((req, res) => {
-  requests.push(`${req.method} ${req.url}`);
-  const h = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
-  if (req.url.includes('/hawaii-viewer/')) { res.writeHead(503, { ...h, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
-  res.writeHead(200, { ...h, 'Content-Type': 'application/octet-stream', 'Content-Length': 4, 'Content-Disposition': 'attachment; filename="x.zim"' });
+  const LOG = requests, FAIL = req.url.includes('/hawaii-viewer/');
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range, If-Range',
+                 'Access-Control-Expose-Headers': 'Content-Range, Content-Length', 'Cache-Control': 'no-store' };
+  if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
+  LOG.push(`${req.method}${req.headers.range ? ' range' : ''} ${req.url}`);
+  if (FAIL) { res.writeHead(503, { ...cors, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
+  if (req.headers.range === 'bytes=0-0') {               // what the page asks first, as the worker answers it
+    res.writeHead(206, { ...cors, 'Content-Type': 'application/octet-stream', 'Content-Length': 1, 'Content-Range': 'bytes 0-0/4' });
+    res.end('Z');
+    return;
+  }
+  res.writeHead(200, { ...cors, 'Content-Type': 'application/octet-stream', 'Content-Length': 4,
+                       'Content-Disposition': 'attachment; filename="x.zim"' });
   res.end(req.method === 'HEAD' ? undefined : 'ZIM!');
 });
 await new Promise((r) => worker.listen(0, '127.0.0.1', r));

@@ -47,12 +47,17 @@ def fv(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(base=base, root=root, out=tmp_path / "out", work=tmp_path / "work", tmp=tmp_path)
 
 
-def run(fv: SimpleNamespace, *extra: str, md5sum: str | None = None, gates: str = "-") -> int:
+def etag(p: Path) -> str:
+    return '"6ae291e1-%x"' % p.stat().st_size          # archive.org's: "<mtime hex>-<size hex>"
+
+
+def run(fv: SimpleNamespace, *extra: str, md5sum: str | None = None, gates: str = "-", tag: str | None = None,
+        rev: str | None = REV) -> int:
     return fresh_viewer.main([
         "testland", str(fv.base), "--item", "streetzim-testland", "--lang", "en", "--out", str(fv.out),
-        "--webseed", WS, "--md5", md5sum or md5(fv.base), "--etag", '"6ae291e1-2d07ff2"',
-        "--viewer-root", str(fv.root), "--rev", REV, "--work", str(fv.work), "--gates", gates,
-        "--allow-full-copy", *extra])
+        "--webseed", WS, "--md5", md5sum or md5(fv.base), "--etag", tag or etag(fv.base),
+        "--viewer-root", str(fv.root), "--work", str(fv.work), "--gates", gates,
+        "--allow-full-copy", *(["--rev", rev] if rev else []), *extra])
 
 
 def materialize(index: dict, out: Path, base: Path) -> bytes:
@@ -86,7 +91,7 @@ def test_the_index_is_the_composed_file(fv: SimpleNamespace) -> None:
     assert lpzims.read_uuid(composed) != lpzims.read_uuid(fv.base) and fresh["uuid"] in index["webseed"]
     assert index["webseed"] == f"{WS}/merged/testland-viewer/en/{fresh['uuid']}/{fresh['file']}" == fresh["webseed"]
     assert index["sources"] == {"base": {"item": "streetzim-testland", "file": fv.base.name,
-                                         "size": fv.base.stat().st_size, "etag": '"6ae291e1-2d07ff2"'}}
+                                         "size": fv.base.stat().st_size, "etag": etag(fv.base)}}
     # what differs is the UUID, the viewer and the checksum: a few blobs, the rest the base's own bytes
     assert fresh["blob_bytes"] < 1_500_000 and fresh["subrequests"]["whole"] <= 12
     from libzim.reader import Archive
@@ -127,3 +132,56 @@ def test_a_base_without_viewer_slots_needs_a_rebuild(fv: SimpleNamespace, capsys
     lpzims.write_base(fv.base)                        # no slots: the viewer is in a compressed cluster
     assert run(fv) == 1 and not fv.out.exists()
     assert "viewer" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("tag", ['6ae291e1-16a00f', '"6ae291e1-2d07ff2"', ""])
+def test_archive_org_s_etag_is_required_as_the_worker_sends_it(fv: SimpleNamespace, tag: str) -> None:
+    """Without its quotes (the shell ate them), for a file of another size, or
+    none: the worker's If-Range would make archive.org answer 200 to every
+    range and the file would read as replaced (or a replaced one as not)."""
+    if tag == "":
+        with pytest.raises(SystemExit):              # argparse: --etag is required
+            fresh_viewer.main(["testland", str(fv.base), "--item", "streetzim-testland", "--lang", "en",
+                               "--out", str(fv.out), "--webseed", WS, "--md5", md5(fv.base)])
+    else:
+        assert run(fv, tag=tag) == 1
+    assert not fv.out.exists()
+
+
+def test_bytes_left_out_of_the_index_fail_its_own_checksum(fv: SimpleNamespace, monkeypatch) -> None:
+    """A changed run the index missed (one slot left out) would serve the
+    base's old bytes there: the index's own checksum does not match its last
+    16 bytes, and nothing is published."""
+    real = fresh_viewer.slot_windows
+    monkeypatch.setattr(fresh_viewer, "slot_windows", lambda p: real(p)[1:])
+    assert run(fv) == 1 and not fv.out.exists()
+
+
+def test_the_uuid_must_be_the_one_the_swap_wrote(fv: SimpleNamespace, monkeypatch) -> None:
+    real = fresh_viewer.compose
+    monkeypatch.setattr(fresh_viewer, "compose", lambda *a, **k: (real(*a, **k)[0], {"new_uuid": "0" * 8 + "-0000-0000-0000-" + "0" * 12}))
+    assert run(fv) == 1 and not fv.out.exists()
+
+
+def test_an_earlier_viewer_s_files_go(fv: SimpleNamespace) -> None:
+    fv.out.mkdir()
+    (fv.out / ("ws-" + "a" * 32 + ".bin")).write_bytes(b"an earlier viewer's blob")
+    (fv.out / "de.ws.json").write_text("{}")
+    (fv.out / "keep.txt").write_text("not ours")
+    assert run(fv) == 0
+    index = json.loads((fv.out / "en.ws.json").read_text())
+    names = sorted(p.name for p in fv.out.iterdir())
+    assert names == sorted(["en.ws.json", "en.torrent", "fresh.json", "keep.txt"] + [b["file"] for b in index["blobs"].values()]), names
+
+
+def test_an_uncommitted_viewer_is_refused(fv: SimpleNamespace, capsys) -> None:
+    """The new UUID and the file's name come from the viewer's revision:
+    other bytes under the same revision would be a book Kiwix takes for one
+    it has."""
+    git = ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", "-C", str(fv.root)]
+    subprocess.run(git + ["init", "-q"], check=True)
+    subprocess.run(git + ["add", "resources"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "viewer"], check=True)
+    (fv.root / "resources" / "viewer" / "index.html").write_bytes(V2["index.html"] + b"<!-- edited -->")
+    assert run(fv, rev=None) == 1 and not fv.out.exists()
+    assert "uncommitted" in capsys.readouterr().err

@@ -5,9 +5,10 @@
 // writes it from the real cloud/region-places.tsv); this serves it on
 // localhost with /drive/preview-config.js naming a stand-in build worker on
 // 127.0.0.1, whose origin replaces https://merged.invalid in catalog.json.
-// The stand-in answers HEAD and GET under /merged/: 503 for a path with
-// "/iceland/" or "/hawaii-viewer/", else 200 (GET: a few bytes as an attachment);
-// files under /fallback/ stand in for archive.org's. Prints one JSON
+// The stand-in answers under /merged/ as the worker does: 503 for a path with
+// "/iceland/" or "/hawaii-viewer/", else 206 for the first byte the page asks
+// first and 200 for the file (a few bytes as an attachment), its CORS
+// preflight too; files under /fallback/ stand in for archive.org's. Prints one JSON
 // object: {scenario: what the page showed}, plus pageErrors.
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as tools/langpack/builder_e2e.mjs.
 import http from 'node:http';
@@ -21,10 +22,18 @@ const { chromium } = await import(process.env.PLAYWRIGHT_CORE || 'playwright-cor
 const SITE = path.resolve(process.argv[2]);
 const merged = [];
 const worker = http.createServer((req, res) => {
-  merged.push(`${req.method} ${req.url}`);
-  const head = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
-  if (req.url.includes('/iceland/') || req.url.includes('/hawaii-viewer/')) { res.writeHead(503, { ...head, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
-  res.writeHead(200, { ...head, 'Content-Type': 'application/octet-stream', 'Content-Length': 4,
+  const LOG = merged, FAIL = req.url.includes('/iceland/') || req.url.includes('/hawaii-viewer/');
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range, If-Range',
+                 'Access-Control-Expose-Headers': 'Content-Range, Content-Length', 'Cache-Control': 'no-store' };
+  if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
+  LOG.push(`${req.method}${req.headers.range ? ' range' : ''} ${req.url}`);
+  if (FAIL) { res.writeHead(503, { ...cors, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
+  if (req.headers.range === 'bytes=0-0') {               // what the page asks first, as the worker answers it
+    res.writeHead(206, { ...cors, 'Content-Type': 'application/octet-stream', 'Content-Length': 1, 'Content-Range': 'bytes 0-0/4' });
+    res.end('Z');
+    return;
+  }
+  res.writeHead(200, { ...cors, 'Content-Type': 'application/octet-stream', 'Content-Length': 4,
                        'Content-Disposition': 'attachment; filename="x.zim"' });
   res.end(req.method === 'HEAD' ? undefined : 'ZIM!');
 });
@@ -112,6 +121,7 @@ await scenario('fresh', '#lang=all', {}, async (pg) => {
   const bar = (title) => pg.locator('.kx-book', { has: pg.locator('.kx-title', { hasText: new RegExp('^' + title + '$') }) }).locator('.kx-download').first();
   let dlP = pg.waitForEvent('download', { timeout: 15000 });
   await bar('Taipei').click();
+  await bar('Taipei').click();               // a double tap: one download
   const taipei = (await dlP).url();
   await pg.waitForTimeout(300);
   dlP = pg.waitForEvent('download', { timeout: 15000 });

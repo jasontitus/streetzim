@@ -19,16 +19,23 @@ A map's viewer files sit in fixed-size uncompressed slots
 viewer is the same bytes except the three slots, the UUID and the trailing
 MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
 
-1. checks ZIM is the file archive.org serves (size and MD5 as the item lists);
+1. checks ZIM is the file archive.org serves (size and MD5 as the item lists,
+   and the ETag the worker will send as If-Range: `"<mtime hex>-<size hex>"`,
+   quotes included, its size this file's);
 2. makes the map with this checkout's viewer (`tools/langpack/swap_base_viewer.py`:
    a reflink copy, the slots written, a fresh UUID derived from the old one
    and the viewer's revision, the MD5; every item but the viewer compared
    byte for byte). Kiwix tells books apart by UUID, so the file is a new
-   book; the same viewer again gives the same file (the same torrent);
+   book; the same viewer again gives the same file (the same torrent). A
+   viewer with uncommitted changes is refused: its revision would name
+   other bytes;
 3. gates it as Kiwix runs it (`tools/langpack/fresh_viewer_gates.sh`:
-   kiwix-serve, the UI, viewer and smoke gates of a base, and
-   `cloud/viewer_scroll_check.mjs`). Routing, search and zimcheck see the
-   same bytes as the live file, which passed them when it was built;
+   kiwix-serve, the UI, viewer and smoke gates of a base,
+   `cloud/viewer_scroll_check.mjs`, and a route in the viewer between the
+   region file's two points, `tools/langpack/zim_route_gate.mjs`: the
+   routing worker and panel are viewer code). zimcheck and the command-line
+   routing and search gates see the same data as the live file, which passed
+   them when it was built;
 4. writes, into `web/build/recipes/REGION-viewer/` (a folder of its own:
    `ops/langpack/publish_site.sh` replaces `REGION/` whole):
    - `L.ws.json`, the worker's segment index (streetzim-webseed/1): byte
@@ -44,14 +51,17 @@ MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
 
    The index's bytes are read once, for the torrent's pieces and two MD5s:
    that of all but the last 16 bytes must equal those 16 bytes, so the
-   worker serves exactly the file that passed the gates.
+   worker serves exactly the file that passed the gates. An earlier viewer's
+   blobs, index and torrent in the folder are removed.
 
 `web/generate.py` (`fresh_viewer`) points a card's Download (and the
 library page's) at the worker while `fresh.json` was made from the very
 file archive.org serves for the map; a newer map has none until it is made
-again. The page asks the worker first (a HEAD, which it answers without
-fetching the map) and downloads archive.org's file instead when the worker
-cannot serve it (its daily budget, switched off, no answer in 4 s).
+again. The page asks the worker for the file's first byte first, which it
+reads from archive.org, and downloads archive.org's file instead when the
+worker cannot serve it (archive.org's file replaced or unreachable, the
+worker's daily budget used, switched off, no answer in 4 s); a second tap on
+the same map within 5 s does nothing.
 
 ## Rollout
 
@@ -69,7 +79,13 @@ are about four reads of the file (Taipei: 74 s with the gates; all 75 maps,
 - A map built before viewer slots (2026-09-20) cannot get one; every live
   map was built after.
 - The worker's daily request budget is shared with the language versions'
-  webseeds; a browser download is one request.
+  webseeds; a browser download is two requests (the first byte, then the
+  file).
+- The worker must read the site that publishes the indexes: its
+  SITE_ORIGIN (build-proxy/wrangler.toml, `npx wrangler@4 deploy`).
+- When archive.org's file changes after the page's check, the worker
+  answers the download with its "out of date" text (a 404), which names
+  language versions: a worker change.
 
 ## Composable ZIMs (kiwix/overview#182)
 

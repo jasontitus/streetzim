@@ -127,12 +127,13 @@ def test_a_phone_folds_the_filters_and_downloads_directly(shown):
     assert bars["Greece"].startswith("Download - 1.4 GB"), bars
     assert "/merged/greece/de/" in ph["greece"], ph            # the worker said yes: the browser downloads it
     assert ph["iceland"].endswith("/build/?region=iceland&lang=de&go=1"), ph          # 503: the builder page
-    assert any(x.startswith("HEAD /merged/greece/") for x in shown["merged"]), shown["merged"]
+    assert any(x.startswith("GET range /merged/greece/") for x in shown["merged"]), shown["merged"]
 
 
 def test_a_map_with_todays_viewer_comes_from_the_worker_else_archive_org(shown):
     f = shown["fresh"]
     assert "/merged/taipei-viewer/en/" in f["taipei"], f
     assert f["hawaii"].endswith("/fallback/osm-hawaii.zim"), f           # the worker answered 503
-    assert any(x.startswith("HEAD /merged/hawaii-viewer/") for x in shown["merged"]), shown["merged"]
+    assert any(x.startswith("GET range /merged/hawaii-viewer/") for x in shown["merged"]), shown["merged"]
+    assert sum(x.startswith("GET range /merged/taipei-viewer/") for x in shown["merged"]) == 1, shown["merged"]   # a double tap asks once
     assert all(text.startswith("Download - ") for _t, text, _h, _a in f["bars"]), f["bars"]

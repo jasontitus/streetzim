@@ -1,6 +1,6 @@
 """The main page's Download of a map with today's viewer, in headless
 Chromium (tests/fresh_download_page.mjs, the template's own script): the
-build worker's file when it answers the HEAD, else archive.org's
+build worker's file when it serves the first byte, else archive.org's
 (data-fallback); one check for a double click.
 
 Needs the browser stack (NODE, CHROME_PATH, PLAYWRIGHT_CORE; BROWSER_LIBS on
@@ -28,5 +28,5 @@ def test_the_worker_s_file_else_archive_org():
     assert out["errors"] == []
     assert "/merged/taipei-viewer/en/" in out["taipei"], out
     assert out["hawaii"].endswith("/fallback/osm-hawaii.zim"), out
-    heads = [x for x in out["requests"] if x.startswith("HEAD /merged/taipei-viewer/")]
-    assert len(heads) == 1, out["requests"]                    # the double click asked once
+    asks = [x for x in out["requests"] if x.startswith("GET range /merged/taipei-viewer/")]
+    assert len(asks) == 1, out["requests"]                     # the first byte, once for a double click
