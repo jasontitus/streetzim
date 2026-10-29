@@ -803,24 +803,34 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     # written as no front article (2026-10-29: Taipei 5,276 of 5,963 pages
     # front before, 0 after; Bahrain, Thailand, Switzerland (de) the same),
     # and Kiwix counts no articles and opens no random one in such a file.
-    # A source with none (an earlier swap's) gets the build's own flags back,
-    # which follow the path (streetzim/zim_writer.py): index.html, the
-    # places' pages under search/ and their other names (redirects under
-    # search/) are front; places.html and the Wikipedia articles are not. A
-    # built map always has index.html front, so none at all means the swap.
+    # A source whose index.html is not front (an earlier swap's) gets the
+    # build's own flags back as well, which follow the path
+    # (streetzim/zim_writer.py): index.html, the places' pages under search/
+    # and their other names (redirects under search/) are front; places.html
+    # and the Wikipedia articles are not. A built map always has index.html
+    # front. Only HTML pages, and redirects to them, are ever front (a title
+    # listing of every entry, as some older builds wrote, fails zimcheck).
     from tools.langpack.index_pack import front_bitmap, is_front
     from tools.langpack.zimfmt import ZimReader
     src_front = front_bitmap(ZimReader(src_path))
-    restore_front = not any(src_front)
+    try:
+        restore_front = not is_front(src_front, src.get_entry_by_path("index.html")._index)
+    except KeyError:
+        restore_front = False
     if restore_front:
-        print("  front articles: the source has none (an earlier swap's); the build's are restored")
+        print("  front articles: the source's index.html is not one (an earlier swap's); the build's are restored")
 
     def _front(i: int, path: str, html: bool = True) -> bool:
-        if i >= src_visible:
+        if i >= src_visible or not html:
             return False
-        if restore_front:
-            return html and (path == "index.html" or path.startswith("search/"))
-        return is_front(src_front, i)
+        return is_front(src_front, i) or (restore_front and (path == "index.html" or path.startswith("search/")))
+
+    def _to_html(entry) -> bool:
+        for _ in range(8):
+            if not entry.is_redirect:
+                return entry.get_item().mimetype.startswith("text/html")
+            entry = entry.get_redirect_entry()
+        return False
     print(f"  source: {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
     print(f"  entries: {src_visible} visible / {src_total} total "
           f"(diff = X-namespace + special)")
@@ -1067,7 +1077,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         c.add_redirection(entry.path,
                                           entry.title or entry.path,
                                           target.path,
-                                          {"FRONT_ARTICLE": True} if _front(i, entry.path) else None)
+                                          {"FRONT_ARTICLE": True} if _front(i, entry.path, _to_html(target)) else None)
                         redirects += 1
                     except Exception as e:
                         print(f"  skip redirect {entry.path}: {e}")
@@ -1123,7 +1133,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=_pad_to_slot(path, replacements[path]),
-                                     compress=False, namespace=None, is_front=_front(i, path)))
+                                     compress=False, namespace=None, is_front=_front(i, path, mime.startswith("text/html"))))
                     replaced_paths.add(path)
                     swapped += 1
                     continue

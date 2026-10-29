@@ -77,3 +77,52 @@ def test_a_file_an_earlier_swap_left_without_front_articles_gets_the_builds_back
     svr.swap_viewer_rust(str(src), str(dst), tmp_dir=str(tmp_path / "t"))
     # places.html (a viewer file), wiki-article/* and the JSON stay as they were
     assert _fronts(dst) == {"index.html", "search/manama-73.html", "search/~7"}
+
+
+def _svr(name: str, monkeypatch: pytest.MonkeyPatch):
+    os.environ.setdefault("STREETZIM_ROOT", str(ROOT))
+    spec = importlib.util.spec_from_file_location(name, ROOT / "ops" / "cloud" / "swap_viewer_rust.py")
+    assert spec and spec.loader
+    svr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(svr)
+    monkeypatch.setattr(svr, "_on_root_fs", lambda p: False)
+    monkeypatch.setattr(svr, "_fs_type", lambda p: "ext4")
+    return svr
+
+
+def test_some_front_articles_but_not_index_html_gets_the_builds_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An earlier swap that flagged its own new pages front but not
+    index.html: the copied flags and the build's rule together."""
+    pytest.importorskip("streetzim.zim_writer")
+    from tests.langpack import lpzims
+    svr = _svr("swap_viewer_rust_front_partial", monkeypatch)
+    src = tmp_path / "osm-testland-2026-10-13.zim"
+    lpzims.write_base(src, slots=lpzims.VIEWER_V1, fronts=False,
+                      pages=[("search/manama-73.html", "Manama", "The capital")],
+                      front_redirects=[("search/~7", "Al Manamah", "search/manama-73.html")],
+                      front_pages=[("admin/capital.html", "Capital Governorate", "A governorate")])
+    assert _fronts(src) == {"admin/capital.html"}
+    dst = tmp_path / "out" / src.name
+    dst.parent.mkdir()
+    (tmp_path / "t").mkdir()
+    svr.swap_viewer_rust(str(src), str(dst), tmp_dir=str(tmp_path / "t"))
+    assert _fronts(dst) == {"index.html", "search/manama-73.html", "search/~7", "admin/capital.html"}
+
+
+def test_a_source_listing_every_entry_keeps_front_only_on_html(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Some older builds listed every entry as front: tiles and JSON are
+    never front after a swap (zimcheck's title index check)."""
+    pytest.importorskip("streetzim.zim_writer")
+    from tests.langpack import lpzims
+    svr = _svr("swap_viewer_rust_front_all", monkeypatch)
+    src = tmp_path / "osm-testland-2026-10-13.zim"
+    lpzims.write_base(src, slots=lpzims.VIEWER_V1, all_front=True,
+                      front_redirects=[("tiles/latest", "latest tile", "tiles/2/0/0.pbf")])
+    assert {"map-config.json", "tiles/0/0/0.pbf", "tiles/latest"} <= _fronts(src)
+    dst = tmp_path / "out" / src.name
+    dst.parent.mkdir()
+    (tmp_path / "t").mkdir()
+    svr.swap_viewer_rust(str(src), str(dst), tmp_dir=str(tmp_path / "t"))
+    got = _fronts(dst)
+    assert "index.html" in got and "wiki-article/Alpha_Town" in got
+    assert not {p for p in got if not (p.endswith(".html") or p.startswith("wiki-article/"))}, got

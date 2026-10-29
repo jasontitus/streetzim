@@ -89,7 +89,8 @@ VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
                extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
                front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None,
-               pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False, fronts: bool = True) -> str:
+               pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False, fronts: bool = True,
+               front_pages: list[tuple[str, str, str]] | None = None, all_front: bool = False) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
     (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
@@ -98,7 +99,10 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
     front pages (path, title, text); `fulltext`: with libzim's full-text index,
     as published bases carry it; `fronts=False`: nothing flagged front, not
     even index.html, as cloud/swap_viewer_rust.py left the bases it swapped
-    until 2026-10-29 (their own title index holds every page all the same)."""
+    until 2026-10-29 (their own title index holds every page all the same);
+    `front_pages`: pages (path, title, text) flagged front whatever `fronts`
+    says; `all_front`: every entry flagged front, tiles and JSON too, as some
+    older builds listed them."""
     with Creator(str(path)).config_indexing(fulltext, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -119,21 +123,23 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
         cfg = {"name": "Testland", "bounds": [19.0, 9.0, 22.0, 12.0], **(cfg_extra or {})}
         if wiki:
             cfg["hasWikiArticles"] = True
-        c.add_item(_Item("map-config.json", "", "application/json", json.dumps(cfg)))
+        c.add_item(_Item("map-config.json", "", "application/json", json.dumps(cfg), front=all_front))
         for z in range(3):
-            c.add_item(_Item(f"tiles/{z}/0/0.pbf", "", "application/x-protobuf", bytes([z]) * (100 + z)))
-        c.add_item(_Item("images/marker.webp", "", "image/webp", _webp(b"marker")))
+            c.add_item(_Item(f"tiles/{z}/0/0.pbf", "", "application/x-protobuf", bytes([z]) * (100 + z), front=all_front))
+        c.add_item(_Item("images/marker.webp", "", "image/webp", _webp(b"marker"), front=all_front))
         geo = {}
         if wiki:
             for i, (p, t) in enumerate(ARTICLES["en"]):
                 c.add_item(_Item(f"wiki-article/{p}", t, "text/html", _page(t, 1), front=fronts))
                 geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
-            c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: False})
+            c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: all_front})
         for pp, pt, px in pages or []:
             c.add_item(_Item(pp, pt, "text/html", _page(pt, pp.count("/"), px), front=fronts))
+        for pp, pt, px in front_pages or []:
+            c.add_item(_Item(pp, pt, "text/html", _page(pt, pp.count("/"), px), front=True))
         for rp, rt, tgt in front_redirects or []:
-            c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: fronts})
-        c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
+            c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: fronts or all_front})
+        c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo), front=all_front))
         for p, v in (extra or {}).items():
             c.add_item(_Item(p, "", "application/json", json.dumps(v)))
     return read_uuid(path)
