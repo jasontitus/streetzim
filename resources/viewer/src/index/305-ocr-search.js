@@ -20,8 +20,10 @@
 
 // BEGIN sign-lines
 // The detector's boxes ({text, box: {x, y, width, height}, script}) as text
-// lines in reading order: boxes that overlap vertically by half the
-// smaller one's height are one line, joined left to right (right to left
+// lines in reading order: boxes of comparable height (each at least 0.4 of
+// the other: small print inside a big line's band, a watermark, a screw
+// read as a letter, is a line of its own) that overlap vertically by half
+// the smaller one's height are one line, joined left to right (right to left
 // for Arabic), with no space between Chinese, Japanese or Thai words. A
 // box of two or more letters at least 1.5 times as tall as wide is a
 // vertical line of its own (Chinese and Japanese signs: 安平區 down the
@@ -29,13 +31,40 @@
 // Each line's size is its letters' height (a vertical line's width).
 var SZ_SIGN_RTL = { Arab: 1, Hebr: 1 };
 var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
+// A box the recognizers read in parts: the Latin model reads the digits of
+// "2912 طريق" and garbles the Arabic, the Arabic model reads طريق and
+// garbles the digits (a Bahraini address plate, 2026-10-29). When the most
+// confident reading has digits and no letters, and another (at least half
+// as sure) has letters, the box reads as that one's words and this one's
+// number: "طريق 2912", as the map's records name the road. Arabic-Indic and
+// Persian digits read as 0-9, as the records write them.
+function _szSignDigits(s) {
+  return String(s).replace(/[\u0660-\u0669]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x0630); })
+                  .replace(/[\u06F0-\u06F9]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x06C0); });
+}
+var SZ_SIGN_LETTER = /\p{L}/u;
+function _szSignCompose(it) {
+  var text = _szSignDigits(it.text).trim();
+  if (!SZ_SIGN_LETTER.test(text) && /\d/.test(text)) {
+    var words = null;
+    (it.readings || []).forEach(function (r) {
+      if (r && r.confidence >= 0.5 * it.confidence && SZ_SIGN_LETTER.test(r.text) && (!words || r.confidence > words.confidence)) words = r;
+    });
+    var w = words ? _szSignDigits(words.text).replace(/[\d\s.,:;'"()\-\u2013\u2014_\/\\]+/g, ' ').trim() : '';
+    if (w) return { text: w + ' ' + text, script: words.script };
+  }
+  return { text: text, script: it.script };
+}
 function _szSignVertical(it) {
   return it.box.height >= 1.5 * it.box.width && Array.from(String(it.text).trim()).length >= 2;
 }
 function _szSignLineGroups(items) {
   var boxes = (items || []).filter(function (it) {
     return it && it.text && it.box && it.box.height > 0;
-  }).slice().sort(function (a, b) {
+  }).map(function (it) {
+    var c = _szSignCompose(it);
+    return { text: c.text, box: it.box, script: c.script, confidence: it.confidence };
+  }).filter(function (it) { return it.text; }).sort(function (a, b) {
     return (a.box.y + a.box.height / 2) - (b.box.y + b.box.height / 2);
   });
   var lines = [];
@@ -43,7 +72,7 @@ function _szSignLineGroups(items) {
     var b = it.box, line = null, vertical = _szSignVertical(it);
     for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
-      if (L.vertical) continue;
+      if (L.vertical || b.height < 0.4 * L.height || L.height < 0.4 * b.height) continue;
       var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
       if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
     }
@@ -84,11 +113,28 @@ function _szSignMerge(fine, coarse, k) {
   var out = (fine || []).slice();
   (coarse || []).forEach(function (it) {
     if (!it || !it.box) return;
-    var c = { text: it.text, confidence: it.confidence, script: it.script,
+    var c = { text: it.text, confidence: it.confidence, script: it.script, readings: it.readings,
               box: { x: it.box.x * k, y: it.box.y * k, width: it.box.width * k, height: it.box.height * k } };
     if (!(fine || []).some(function (f) { return f && f.box && overlaps(f.box, c.box); })) out.push(c);
   });
   return out;
+}
+
+// A building number on its own line (no letters) beside a street that has
+// a number (letters and digits: "طريق 2912"), as on a Bahraini address
+// plate: the two as one more line, which an address record of that
+// building names ("Building 460 - مبنى 460 طريق 2912 - Road 2912"), weighed
+// as the street's line. A number matches no record by itself.
+function _szSignAddress(lines, tallest) {
+  var nums = lines.filter(function (L) { return /^\d+[A-Za-z]?$/.test(L.text); });
+  var streets = lines.filter(function (L) { return SZ_SIGN_LETTER.test(L.text) && /\d/.test(L.text); });
+  var out = [];
+  nums.forEach(function (N) {
+    streets.forEach(function (S) {
+      out.push({ text: S.text + ' ' + N.text, weight: 0.5 + 0.5 * S.size / (tallest || S.size) });
+    });
+  });
+  return out.slice(0, 4);
 }
 // END sign-lines
 
@@ -213,7 +259,9 @@ function initSignSearch(map, config) {
       return manifest;
     })).then(function (m) {
       var recs = m.rec || [];
-      return _szInTurn([function () { return getText(m.worker); },
+      // the worker: the page's own copy (part 026), else the ZIM's
+      var own = document.getElementById('sz-ocr-worker');
+      return _szInTurn([function () { return own ? Promise.resolve(own.textContent) : getText(m.worker); },
                         function () { return getBytes(m.engine); },
                         function () { return getBytes(m.wasm); },
                         function () { return getBytes(m.det.model); }]
@@ -462,7 +510,7 @@ function initSignSearch(map, config) {
       var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
       var weighted = lines.map(function (L) {
         return { text: L.text, weight: 0.5 + 0.5 * L.size / tallest };
-      });
+      }).concat(_szSignAddress(lines, tallest));
       // In the field: the sign's biggest line now, the line the first place
       // matched once found -- what was searched for, to edit and search as
       // typed, not everything the photo holds (a status bar, a watermark).

@@ -1933,6 +1933,113 @@ details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAg
 });
 })();
 </script>
+<script type="text/plain" id="sz-ocr-worker">
+/* StreetZim sign reader: text detection and recognition off the main
+   thread (docs/ocr.md). The builder writes this file into the ZIM as
+   ocr/ocr-worker.js with --ocr (streetzim/ocr.py). The page
+   (305-ocr-search.js) fetches every file itself -- this worker runs from a
+   blob: URL, as routing-worker.js does, and a ZIM reader may not serve a
+   worker's own requests -- and posts:
+     {type: 'load', engine, wasm, det: {model, preset}, rec: [{script, model, dict, reverse}]}
+     {type: 'read', id, image: {width, height, data}}
+   engine is the text of ocr/ocr-engine.js (ONNX Runtime Web and the
+   paddleocr runtime, vendored: tools/pin_viewer_assets.py --ocr), wasm the
+   bytes of ONNX Runtime's WebAssembly, the models' bytes and dictionaries
+   as ocr/manifest.json names them. It answers {type: 'loaded'} (with
+   error on failure), then {id, lines: [{text, confidence, box, script,
+   readings}]} per photo, one per text box the detector found, or {id,
+   error}: the most confident reading, and in `readings` every recognizer's
+   readable one ({text, confidence, script}), which the page puts together
+   where they read different parts of a line (_szSignCompose: the digits
+   of "2912 طريق" from the Latin model, the word from the Arabic one).
+   The page runs its own copy of this file (tools/build_viewer.py inlines it
+   as part 026), so a viewer swap updates it; ocr/ocr-worker.js in the ZIM
+   is what an older page runs. */
+/* global SZOCR */
+'use strict';
+var engine = null;   // {det, recs: [{script, svc}]} once loaded
+var loading = null;  // Promise of engine
+
+function load(m) {
+  var url = URL.createObjectURL(new Blob([m.engine], { type: 'application/javascript' }));
+  try { self.importScripts(url); } finally { URL.revokeObjectURL(url); }
+  var ort = SZOCR.ort;
+  ort.env.wasm.numThreads = 1;        // no cross-origin isolation in a ZIM reader
+  ort.env.wasm.wasmBinary = m.wasm;   // compiled from these bytes, never fetched
+  ort.env.logLevel = 'error';         // not the models' unused-initializer warnings
+  var opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
+  var preset = SZOCR.getModelPresetOptions(m.det.preset);
+  var det = ort.InferenceSession.create(new Uint8Array(m.det.model), opts).then(function (s) {
+    return new SZOCR.DetectionService(ort, s, Object.assign({}, preset.detection, m.det.options || {}));
+  });
+  // One session at a time: creating them all at once peaks higher.
+  return det.then(function (d) {
+    var recs = [];
+    return m.rec.reduce(function (p, r) {
+      return p.then(function () {
+        return ort.InferenceSession.create(new Uint8Array(r.model), opts).then(function (s) {
+          var dict = String(r.dict).replace(/\n$/, '').split('\n').concat([' ']);
+          recs.push({ script: r.script, svc: new SZOCR.RecognitionService(ort, s,
+            Object.assign({}, preset.recognition, { charactersDictionary: dict, reverseText: !!r.reverse })) });
+        });
+      });
+    }, Promise.resolve()).then(function () { return { det: d, recs: recs }; });
+  });
+}
+
+function boxKey(box) { return JSON.stringify(box); }
+
+// A reading worth keeping: some letter or digit. A recognizer shown text
+// in a script it does not know may answer spaces or punctuation, and do it
+// confidently (PP-OCRv6's Latin/CJK model on Cyrillic): that must never
+// beat the recognizer that read the letters.
+var READABLE = /[\p{L}\p{N}]/u;
+
+// Each detected box is read by every recognizer; the most confident
+// readable reading wins, and every readable one goes along with it.
+function read(e, input) {
+  var image = SZOCR.normalizeInputToRgb(input);
+  return e.det.run(image).then(function (boxes) {
+    var best = {}, all = {};
+    return e.recs.reduce(function (p, r) {
+      return p.then(function () {
+        if (!boxes.length) return null;
+        return r.svc.run(image, boxes, { ordering: { sortByReadingOrder: false } }).then(function (res) {
+          for (var i = 0; i < res.length; i++) {
+            var k = boxKey(res[i].box), cur = best[k];
+            if (!READABLE.test(res[i].text || '')) continue;
+            var reading = { text: res[i].text.trim(), confidence: res[i].confidence, script: r.script };
+            (all[k] = all[k] || []).push(reading);
+            if (!cur || res[i].confidence > cur.confidence) {
+              best[k] = { text: reading.text, confidence: reading.confidence, box: res[i].box, script: r.script };
+            }
+          }
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      return boxes.map(function (b) {
+        var k = boxKey(b);
+        if (best[k]) best[k].readings = all[k];
+        return best[k];
+      }).filter(Boolean);
+    });
+  });
+}
+
+self.onmessage = function (ev) {
+  var m = ev.data || {};
+  if (m.type === 'load') {
+    try { loading = load(m); } catch (err) { loading = Promise.reject(err); }
+    loading.then(function (e) { engine = e; self.postMessage({ type: 'loaded' }); },
+      function (err) { loading = null; self.postMessage({ type: 'loaded', error: String(err && err.message || err) }); });
+  } else if (m.type === 'read') {
+    (engine ? Promise.resolve(engine) : loading || Promise.reject(new Error('not loaded')))
+      .then(function (e) { return read(e, m.image); })
+      .then(function (lines) { self.postMessage({ id: m.id, lines: lines }); },
+        function (err) { self.postMessage({ id: m.id, error: String(err && err.message || err) }); });
+  }
+};
+</script>
 <script>
 var baseUrl = (function() {
 var href = window.location.href;
@@ -8331,8 +8438,10 @@ return scored;
 }
 // BEGIN sign-lines
 // The detector's boxes ({text, box: {x, y, width, height}, script}) as text
-// lines in reading order: boxes that overlap vertically by half the
-// smaller one's height are one line, joined left to right (right to left
+// lines in reading order: boxes of comparable height (each at least 0.4 of
+// the other: small print inside a big line's band, a watermark, a screw
+// read as a letter, is a line of its own) that overlap vertically by half
+// the smaller one's height are one line, joined left to right (right to left
 // for Arabic), with no space between Chinese, Japanese or Thai words. A
 // box of two or more letters at least 1.5 times as tall as wide is a
 // vertical line of its own (Chinese and Japanese signs: 安平區 down the
@@ -8340,13 +8449,40 @@ return scored;
 // Each line's size is its letters' height (a vertical line's width).
 var SZ_SIGN_RTL = { Arab: 1, Hebr: 1 };
 var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
+// A box the recognizers read in parts: the Latin model reads the digits of
+// "2912 طريق" and garbles the Arabic, the Arabic model reads طريق and
+// garbles the digits (a Bahraini address plate, 2026-10-29). When the most
+// confident reading has digits and no letters, and another (at least half
+// as sure) has letters, the box reads as that one's words and this one's
+// number: "طريق 2912", as the map's records name the road. Arabic-Indic and
+// Persian digits read as 0-9, as the records write them.
+function _szSignDigits(s) {
+  return String(s).replace(/[\u0660-\u0669]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x0630); })
+                  .replace(/[\u06F0-\u06F9]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x06C0); });
+}
+var SZ_SIGN_LETTER = /\p{L}/u;
+function _szSignCompose(it) {
+  var text = _szSignDigits(it.text).trim();
+  if (!SZ_SIGN_LETTER.test(text) && /\d/.test(text)) {
+    var words = null;
+    (it.readings || []).forEach(function (r) {
+      if (r && r.confidence >= 0.5 * it.confidence && SZ_SIGN_LETTER.test(r.text) && (!words || r.confidence > words.confidence)) words = r;
+    });
+    var w = words ? _szSignDigits(words.text).replace(/[\d\s.,:;'"()\-\u2013\u2014_\/\\]+/g, ' ').trim() : '';
+    if (w) return { text: w + ' ' + text, script: words.script };
+  }
+  return { text: text, script: it.script };
+}
 function _szSignVertical(it) {
   return it.box.height >= 1.5 * it.box.width && Array.from(String(it.text).trim()).length >= 2;
 }
 function _szSignLineGroups(items) {
   var boxes = (items || []).filter(function (it) {
     return it && it.text && it.box && it.box.height > 0;
-  }).slice().sort(function (a, b) {
+  }).map(function (it) {
+    var c = _szSignCompose(it);
+    return { text: c.text, box: it.box, script: c.script, confidence: it.confidence };
+  }).filter(function (it) { return it.text; }).sort(function (a, b) {
     return (a.box.y + a.box.height / 2) - (b.box.y + b.box.height / 2);
   });
   var lines = [];
@@ -8354,7 +8490,7 @@ function _szSignLineGroups(items) {
     var b = it.box, line = null, vertical = _szSignVertical(it);
     for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
-      if (L.vertical) continue;
+      if (L.vertical || b.height < 0.4 * L.height || L.height < 0.4 * b.height) continue;
       var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
       if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
     }
@@ -8395,11 +8531,28 @@ function _szSignMerge(fine, coarse, k) {
   var out = (fine || []).slice();
   (coarse || []).forEach(function (it) {
     if (!it || !it.box) return;
-    var c = { text: it.text, confidence: it.confidence, script: it.script,
+    var c = { text: it.text, confidence: it.confidence, script: it.script, readings: it.readings,
               box: { x: it.box.x * k, y: it.box.y * k, width: it.box.width * k, height: it.box.height * k } };
     if (!(fine || []).some(function (f) { return f && f.box && overlaps(f.box, c.box); })) out.push(c);
   });
   return out;
+}
+
+// A building number on its own line (no letters) beside a street that has
+// a number (letters and digits: "طريق 2912"), as on a Bahraini address
+// plate: the two as one more line, which an address record of that
+// building names ("Building 460 - مبنى 460 طريق 2912 - Road 2912"), weighed
+// as the street's line. A number matches no record by itself.
+function _szSignAddress(lines, tallest) {
+  var nums = lines.filter(function (L) { return /^\d+[A-Za-z]?$/.test(L.text); });
+  var streets = lines.filter(function (L) { return SZ_SIGN_LETTER.test(L.text) && /\d/.test(L.text); });
+  var out = [];
+  nums.forEach(function (N) {
+    streets.forEach(function (S) {
+      out.push({ text: S.text + ' ' + N.text, weight: 0.5 + 0.5 * S.size / (tallest || S.size) });
+    });
+  });
+  return out.slice(0, 4);
 }
 // END sign-lines
 // BEGIN sign-env
@@ -8503,7 +8656,8 @@ manifest = JSON.parse(t);
 return manifest;
 })).then(function (m) {
 var recs = m.rec || [];
-return _szInTurn([function () { return getText(m.worker); },
+var own = document.getElementById('sz-ocr-worker');
+return _szInTurn([function () { return own ? Promise.resolve(own.textContent) : getText(m.worker); },
 function () { return getBytes(m.engine); },
 function () { return getBytes(m.wasm); },
 function () { return getBytes(m.det.model); }]
@@ -8726,7 +8880,7 @@ showLines(lines);
 var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
 var weighted = lines.map(function (L) {
 return { text: L.text, weight: 0.5 + 0.5 * L.size / tallest };
-});
+}).concat(_szSignAddress(lines, tallest));
 var biggest = lines.filter(function (L) { return L.size === tallest; })[0].text;
 input.value = biggest;
 document.getElementById('search-clear').style.display = 'block';

@@ -10,8 +10,15 @@
    paddleocr runtime, vendored: tools/pin_viewer_assets.py --ocr), wasm the
    bytes of ONNX Runtime's WebAssembly, the models' bytes and dictionaries
    as ocr/manifest.json names them. It answers {type: 'loaded'} (with
-   error on failure), then {id, lines: [{text, confidence, box, script}]}
-   per photo, one per text box the detector found, or {id, error}. */
+   error on failure), then {id, lines: [{text, confidence, box, script,
+   readings}]} per photo, one per text box the detector found, or {id,
+   error}: the most confident reading, and in `readings` every recognizer's
+   readable one ({text, confidence, script}), which the page puts together
+   where they read different parts of a line (_szSignCompose: the digits
+   of "2912 طريق" from the Latin model, the word from the Arabic one).
+   The page runs its own copy of this file (tools/build_viewer.py inlines it
+   as part 026), so a viewer swap updates it; ocr/ocr-worker.js in the ZIM
+   is what an older page runs. */
 /* global SZOCR */
 'use strict';
 var engine = null;   // {det, recs: [{script, svc}]} once loaded
@@ -53,25 +60,32 @@ function boxKey(box) { return JSON.stringify(box); }
 var READABLE = /[\p{L}\p{N}]/u;
 
 // Each detected box is read by every recognizer; the most confident
-// readable reading wins.
+// readable reading wins, and every readable one goes along with it.
 function read(e, input) {
   var image = SZOCR.normalizeInputToRgb(input);
   return e.det.run(image).then(function (boxes) {
-    var best = {};
+    var best = {}, all = {};
     return e.recs.reduce(function (p, r) {
       return p.then(function () {
         if (!boxes.length) return null;
         return r.svc.run(image, boxes, { ordering: { sortByReadingOrder: false } }).then(function (res) {
           for (var i = 0; i < res.length; i++) {
             var k = boxKey(res[i].box), cur = best[k];
-            if (READABLE.test(res[i].text || '') && (!cur || res[i].confidence > cur.confidence)) {
-              best[k] = { text: res[i].text.trim(), confidence: res[i].confidence, box: res[i].box, script: r.script };
+            if (!READABLE.test(res[i].text || '')) continue;
+            var reading = { text: res[i].text.trim(), confidence: res[i].confidence, script: r.script };
+            (all[k] = all[k] || []).push(reading);
+            if (!cur || res[i].confidence > cur.confidence) {
+              best[k] = { text: reading.text, confidence: reading.confidence, box: res[i].box, script: r.script };
             }
           }
         });
       });
     }, Promise.resolve()).then(function () {
-      return boxes.map(function (b) { return best[boxKey(b)]; }).filter(Boolean);
+      return boxes.map(function (b) {
+        var k = boxKey(b);
+        if (best[k]) best[k].readings = all[k];
+        return best[k];
+      }).filter(Boolean);
     });
   });
 }

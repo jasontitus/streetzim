@@ -28,7 +28,7 @@ const M = new Function(
   '\nreturn { _szSignText, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN };')();
 const L = new Function(slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignKiwixApp };')();
+  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -171,6 +171,41 @@ ok('the coarse reading adds what the fine one missed, in the photo\'s scale, onc
   assert.deepStrictEqual(L._szSignMerge(park, [{ text: 'NoParking', box: { x: 26, y: 124, width: 74, height: 11 } }], 4).map((it) => it.text),
                          ['No Parking']);
   assert.deepStrictEqual(L._szSignMerge(fine, null, 2), fine);
+});
+
+ok('a box read in parts reads as one model\'s words and the other\'s number (a Bahraini address plate)', () => {
+  // the two recognizers on "2912 طريق" and "116 طريق" (Bahrain's map, 2026-10-29)
+  const plate = (num, conf, arab, aconf) => ({ text: num, confidence: conf, script: 'Latn',
+    readings: [{ text: num, confidence: conf, script: 'Latn' }, { text: arab, confidence: aconf, script: 'Arab' }] });
+  assert.deepStrictEqual(L._szSignCompose(plate('2912', 0.996, 'طرئيق91 ', 0.652)), { text: 'طرئيق 2912', script: 'Arab' });
+  assert.deepStrictEqual(L._szSignCompose(plate('116', 0.986, 'طريق1 ', 0.821)), { text: 'طريق 116', script: 'Arab' });
+  // a reading with letters is kept as it is; so is a number nothing else read letters in
+  assert.strictEqual(L._szSignCompose({ text: 'Road 9', confidence: 0.9, readings: [{ text: '9', confidence: 0.99 }] }).text, 'Road 9');
+  assert.strictEqual(L._szSignCompose({ text: '460', confidence: 1, readings: [{ text: '460', confidence: 1 }] }).text, '460');
+  // letters read with less than half the confidence are noise
+  assert.strictEqual(L._szSignCompose(plate('84', 0.99, 'ض', 0.3)).text, '84');
+  const lines = L._szSignLineGroups([
+    { text: '460', confidence: 1, box: { x: 140, y: 134, width: 300, height: 112 }, script: 'Latn', readings: [{ text: '460', confidence: 1, script: 'Latn' }] },
+    { ...plate('2912', 0.996, 'طرئيق91 ', 0.652), box: { x: 68, y: 413, width: 580, height: 174 } }]);
+  assert.deepStrictEqual(lines.map((l) => l.text), ['460', 'طرئيق 2912']);
+  // small print inside the road's band (a stock photo's watermark) is a line of its own
+  const marked = L._szSignLineGroups([
+    { ...plate('2912', 0.996, 'طرئيق91 ', 0.652), box: { x: 68, y: 413, width: 580, height: 174 } },
+    { text: 'a', confidence: 0.99, box: { x: 232, y: 425, width: 17, height: 17 }, script: 'Latn' },
+    { text: 'alan', confidence: 0.99, box: { x: 567, y: 517, width: 73, height: 51 }, script: 'Latn' }]);
+  assert.deepStrictEqual(marked.map((l) => l.text), ['طرئيق 2912', 'a', 'alan']);
+});
+
+ok('Arabic-Indic and Persian digits read as 0-9', () => {
+  assert.strictEqual(L._szSignDigits('طريق ١١٦'), 'طريق 116');
+  assert.strictEqual(L._szSignDigits('خیابان ۱۲۳'), 'خیابان 123');
+  assert.strictEqual(L._szSignCompose({ text: '٤٦٠', confidence: 1 }).text, '460');
+});
+
+ok('a building number beside a numbered street is also searched as an address', () => {
+  const a = L._szSignAddress([{ text: '460', size: 112 }, { text: 'طريق 2912', size: 174 }, { text: 'alamy', size: 20 }], 174);
+  assert.deepStrictEqual(a, [{ text: 'طريق 2912 460', weight: 1 }]);
+  assert.deepStrictEqual(L._szSignAddress([{ text: '460', size: 1 }, { text: 'Gate', size: 1 }], 1), []);
 });
 
 ok('boxes without text or size are skipped', () => {
