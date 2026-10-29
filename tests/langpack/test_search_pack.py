@@ -156,7 +156,8 @@ def test_kiwix_suggests_the_bases_other_names(sr: SimpleNamespace) -> None:
                     ("Бета", "wiki-article/Beta_BG")):
         assert path in _suggest(sr.base, q), q            # what the base's own index finds
         assert path in _suggest(sr.merged, q), q
-    assert sr.side["redirects"] == 2 and sr.side["per_source"]["base"]["redirects"] == 2, sr.side
+    # the base's two front redirects and its other one (wiki-article/Gamma): a base's redirects all go in
+    assert sr.side["redirects"] == 3 and sr.side["per_source"]["base"]["redirects"] == 3, sr.side
     assert sr.side["gate"]["ok"] and sr.side["gate"]["found"]["osm-testland-2026-10-13.zim (redirect)"]["suggest"]
 
 
@@ -196,7 +197,7 @@ def test_the_gate_requires_the_bases_redirects(sr: SimpleNamespace, tmp_path: Pa
     search gate's base parity (the base suggests them, the merged file not)."""
     real = getattr(index_pack, "entries", None)
     if real is not None:
-        monkeypatch.setattr(index_pack, "entries", lambda p: (r for r in real(p) if r[0] != "r"))
+        monkeypatch.setattr(index_pack, "entries", lambda p, **kw: (r for r in real(p, **kw) if r[0] != "r"))
     out = tmp_path / "osm_testland_search-de-th_2026-10-13_y.zim"
     index_pack.build(str(sr.base), [str(p) for p in sr.packs.values()], "de", "testland", str(out), None,
                      log=lambda m: None)
@@ -251,8 +252,8 @@ def test_pages_stream_into_the_writer(sr: SimpleNamespace, tmp_path: Path, monke
     made = [0]
 
     def counting(real):
-        def rows(p):
-            for r in real(p):
+        def rows(p, **kw):
+            for r in real(p, **kw):
                 made[0] += 1
                 yield r
         return rows
@@ -320,6 +321,70 @@ def test_a_search_pack_counts_only_for_its_base_and_exact_packs(sp: SimpleNamesp
     r = tool("merge_zim.py", sp.base, d4 / sp.de.name, "--index", d4 / sp.out.name, "-o", tmp_path / "x.zim",
              "--lang", "de", "--region", "testland")
     assert r.returncode != 0 and "built for base" in r.stderr
+    # one built by an older index_pack.py (another TEXT_VERSION) is built again
+    d5 = tmp_path / "s"
+    shutil.copytree(sp.packs, d5)
+    (d5 / (sp.out.name + ".json")).write_text(json.dumps(dict(side, text_version=index_pack.TEXT_VERSION - 1)))
+    assert find_search_pack(str(d5), str(sp.base), [str(d5 / sp.de.name)], "de") is None
+
+
+def test_a_published_base_is_found_whole(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """A published base flags none of its pages or redirects front (its
+    builder's own title index holds them all). The merged file must still
+    suggest the map's places, the base's own Wikipedia and their other names,
+    as the base does: none of them was in a search pack before 2026-10-29
+    (Bahrain's English version: "Manama", 0 suggestions, 13 of 23 versions
+    held back), and the pack's own gate, sampling the base's empty front
+    listing, checked nothing of the base."""
+    from tests.langpack import lpzims
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base, fronts=False, fulltext=True,
+                          pages=[("search/manama-73.html", "Manama · المنامة", "The capital")],
+                          front_redirects=[("~7", "Al Manamah", "search/manama-73.html")])
+    de = tmp_path / "osm_testland_wiki-de_2026-10-13.zim"
+    lpzims.write_pack(de, "de", u)
+    out = tmp_path / "osm_testland_search-de_2026-10-13_x.zim"
+    side = index_pack.build(str(base), [str(de)], "de", "testland", str(out), None, log=lambda m: None)
+    merged = tmp_path / "m.zim"
+    assert tool("merge_zim.py", base, de, "--index", out, "-o", merged, "--lang", "de", "--region", "testland").returncode == 0
+    # (this base is written by python-libzim, whose title index takes front
+    # pages only; a published base's builder takes them all: Bahrain's
+    # suggests "Manama")
+    for q, path in (("Manama", "search/manama-73.html"), ("Al Manamah", "~7"),      # the redirect, which Kiwix follows
+                    ("Alpha Town", "wiki-article/Alpha_Town")):
+        assert path in _suggest(merged, q), q
+    g = side["gate"]
+    assert g["ok"] and g["found"]["osm-testland-2026-10-13.zim"]["title"] == "Manama · المنامة", g
+    assert g["found"]["osm-testland-2026-10-13.zim (redirect)"]["suggest"], g
+    r = tool("search_gate.py", merged, base, "--lang", "de")
+    assert r.returncode == 0, r.stdout[-2000:]
+
+
+def test_a_rebuilt_search_pack_never_overwrites_one(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """archive.org and live recipes may hold a search pack by its name: one
+    built again on the same day (an older index_pack.py's) gets a new name."""
+    from tests.langpack import lpzims
+    packs = tmp_path / "packs"
+    packs.mkdir()
+    base = packs / lp.base.name
+    shutil.copy(lp.base, base)
+    shutil.copy(lp.packs["de"], packs / lp.packs["de"].name)
+    zc = lpzims.fake_zimcheck(tmp_path / "zc", "clean", None)
+    assert tool("pack_gate.py", packs / lp.packs["de"].name, "--base", base,
+                env={"PACK_GATE_ZIMCHECK": zc}).returncode == 0
+    u8 = lpzims_uuid8(base)
+    taken = packs / f"osm_testland_search-de_2026-10-13_{u8}.zim"
+    taken.write_bytes(b"an older pack")
+    r = tool("search_packs.py", base, packs, "--region", "testland", "--langs", "de", "--date", "2026-10-13")
+    assert r.returncode == 0, r.stderr[-2000:]
+    rows = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
+    assert rows[0]["search_pack"] == f"osm_testland_search-de_2026-10-13-2_{u8}.zim" and rows[0]["built"], rows
+    assert taken.read_bytes() == b"an older pack"
+
+
+def lpzims_uuid8(path: Path) -> str:
+    from tools.langpack.zimfmt import ZimReader
+    return ZimReader(str(path)).header.uuid.hex()[:8]
 
 
 def test_search_packs_one_per_pack_set(lp: SimpleNamespace, tmp_path: Path) -> None:

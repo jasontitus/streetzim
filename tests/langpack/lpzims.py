@@ -89,14 +89,16 @@ VIEWER_V1 = {"index.html": b"<html><body>map, viewer 1</body></html>",
 def write_base(path: Path, *, description: str = "Offline map of Testland", wiki: bool = True,
                extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
                front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None,
-               pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False) -> str:
+               pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False, fronts: bool = True) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
     (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
     (path, title, target) redirects in the title index, as a base's other
     names for its places ("Δήμος Παλλήνης" -> the Pallini page); `pages`: more
     front pages (path, title, text); `fulltext`: with libzim's full-text index,
-    as published bases carry it."""
+    as published bases carry it; `fronts=False`: the articles, pages and
+    redirects not flagged front, as a published base has them (its builder
+    flags none; its own title index holds them all)."""
     with Creator(str(path)).config_indexing(fulltext, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -124,13 +126,13 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
         geo = {}
         if wiki:
             for i, (p, t) in enumerate(ARTICLES["en"]):
-                c.add_item(_Item(f"wiki-article/{p}", t, "text/html", _page(t, 1), front=True))
+                c.add_item(_Item(f"wiki-article/{p}", t, "text/html", _page(t, 1), front=fronts))
                 geo[p] = [10.0 + i / 10, 20.0 + i / 10, "place", f"Q{i + 1}", ""]
             c.add_redirection("wiki-article/Gamma", "Gamma", "wiki-article/Gamma_Lake", {Hint.FRONT_ARTICLE: False})
         for pp, pt, px in pages or []:
-            c.add_item(_Item(pp, pt, "text/html", _page(pt, pp.count("/"), px), front=True))
+            c.add_item(_Item(pp, pt, "text/html", _page(pt, pp.count("/"), px), front=fronts))
         for rp, rt, tgt in front_redirects or []:
-            c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: True})
+            c.add_redirection(rp, rt, tgt, {Hint.FRONT_ARTICLE: fronts})
         c.add_item(_Item("wiki-geo-index.json", "", "application/json", json.dumps(geo)))
         for p, v in (extra or {}).items():
             c.add_item(_Item(p, "", "application/json", json.dumps(v)))

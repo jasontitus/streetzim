@@ -11,7 +11,8 @@ pack only with the same packs and the same language. For each entry without
 a search pack built for exactly these packs, this base and this language
 (recipe2.find_search_pack), this writes
 PACKS_DIR/osm_<R>_search-<langs>[.<L>]_<date>_<first 8 hex of the base's UUID>.zim
-with its sidecar and gate (".<L>" unless the set's one language beyond the
+(<date>-2, -3, ... when that name is taken: a rebuilt pack never overwrites
+one that archive.org and live recipes may hold) with its sidecar and gate (".<L>" unless the set's one language beyond the
 region's is L: search-de-fr-it-ja-rm is ja's, search-de-fr-it-rm.de de's).
 An entry with no pack needs none (the base's own indexes find everything in
 it), and an entry that lacks a pack it must carry (recipe2.wanted_packs: its
@@ -112,6 +113,10 @@ def main(argv: list[str] | None = None) -> int:
             own = [x for x in langs if x not in rl]
             tag = "" if own == [lang] else f".{lang}"
             out = os.path.join(a.packs_dir, f"osm_{a.region}_search-{'-'.join(langs)}{tag}_{a.date}_{u8}.zim")
+            n = 2
+            while os.path.exists(out):     # an older pack of that name: archive.org and live recipes may hold it, never overwritten
+                out = os.path.join(a.packs_dir, f"osm_{a.region}_search-{'-'.join(langs)}{tag}_{a.date}-{n}_{u8}.zim")
+                n += 1
             row.update(search_pack=os.path.basename(out), built=True, index_lang=lang)
             todo.append((row, (a.base, list(files), lang, a.region, out, a.cache, a.work_dir)))
     args = {id(row): x for row, x in todo}

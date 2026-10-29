@@ -315,9 +315,11 @@ def search_lang(L: str) -> str:
 def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str], lang: str) -> str | None:
     """The search pack (index_pack.py) in packs_dir built for exactly this
     base and these packs (its sidecar names their files and MD5s), indexed in
-    `lang` (search_lang of the version), and with a passing gate for its
-    bytes; the newest such, or None."""
+    `lang` (search_lang of the version), by this index_pack.py (its
+    TEXT_VERSION), and with a passing gate for its bytes; the newest such, or
+    None."""
     from tools.langpack.gatelib import md5_file
+    from tools.langpack.index_pack import TEXT_VERSION
     from tools.langpack.merge_zim import ZimReader, base_lineage
     lineage = base_lineage(base_path, ZimReader(base_path).header.uuid)
     want = {os.path.basename(p): md5_file(p) for p in pack_paths}
@@ -333,6 +335,8 @@ def find_search_pack(packs_dir: str, base_path: str, pack_paths: list[str], lang
         if side.get("packs") != want or str(side.get("base_uuid", "")).replace("-", "") not in lineage:
             continue
         if side.get("lang") != lang:
+            continue
+        if side.get("text_version") != TEXT_VERSION:    # built by another index_pack.py: rebuilt
             continue
         if pack_gate_ok(fp)[0]:
             found.append((os.path.getmtime(fp), fp))

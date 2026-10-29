@@ -11,10 +11,14 @@ found none of the packs' articles (search_gate.py: 0 of 8 on Greece el).
 A search pack is a small ZIM written by libzim itself (python-libzim, so the
 indexes are exactly what libzim reads): one empty item per page of the
 merged file, at the merged file's path, with the page's title and its text
-as libzim index data (front articles in the title index, every HTML page in
-the full-text one), and every front redirect of the base and the packs at
-its own path ("Δήμος Παλλήνης" -> the Pallini page: Kiwix suggests places by
-their other names). Its X/title/xapian and X/fulltext/xapian replace the
+as libzim index data (every HTML page in the full-text index; in the title
+index, every page of the base and the packs' front articles), and every
+redirect of the base and every front redirect of the packs at its own path ("Δήμος Παλλήνης" -> the Pallini page: Kiwix suggests
+places by their other names). A published base flags none of its pages or
+redirects front (its builder's own title index holds them all regardless),
+so the flags cannot say which of the base's go in: until 2026-10-29 none
+did, and Kiwix found none of the map's places or the base's own Wikipedia
+in a merged file (Bahrain's English version: "Manama", 0 suggestions). Its X/title/xapian and X/fulltext/xapian replace the
 base's in the merged file (merge_zim.py --index); its other entries are not
 carried over. Kiwix then finds the base's pages and the packs' articles
 alike, with libzim's own matching (case, accents, words inside titles).
@@ -51,8 +55,11 @@ from tools.langpack.merge_zim import peak_rss_mb  # noqa: E402
 
 FORMAT = "streetzim-search-pack/1"
 # The index-text cache's rows: 2 = libzim's folding (every Unicode mark, and
-# lowercase) and the front redirects. A new folding or row kind is a new version.
-TEXT_VERSION = 2
+# lowercase) and the front redirects; 3 = every page of the base in the title
+# index, and all its redirects. A new folding, row kind or rule is a new
+# version; a search pack of another version is not reused
+# (recipe2.find_search_pack).
+TEXT_VERSION = 3
 _DROP = re.compile(r"<(script|style|head|nav)\b.*?</\1\s*>", re.S | re.I)
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
@@ -111,10 +118,11 @@ def final_target(z, d, hm: set[int], hops: int = 8):
     return None
 
 
-def entries(path: str):
+def entries(path: str, base: bool = False):
     """Rows for the search pack, streamed in path order: ("p", path, title,
     front, text) for every HTML page of a ZIM, ("r", path, title, target)
-    for every front redirect that leads to one."""
+    for every front redirect that leads to one. Of a base (`base`): every
+    page front, and every redirect."""
     from libzim.reader import Archive
 
     from tools.langpack.zimfmt import ZimReader
@@ -126,14 +134,14 @@ def entries(path: str):
         if d.ns != ord("C"):
             continue
         if d.is_redirect:
-            if is_front(fronts, d.index) and (t := final_target(z, d, hm)) is not None:
+            if (base or is_front(fronts, d.index)) and (t := final_target(z, d, hm)) is not None:
                 yield "r", d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), \
                     t.path.decode("utf-8", "replace")
             continue
         if d.mime not in hm:
             continue
         item = a._get_entry_by_id(d.index).get_item()
-        yield "p", d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), is_front(fronts, d.index), \
+        yield "p", d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace"), base or is_front(fronts, d.index), \
             page_text(bytes(item.content))
 
 
@@ -151,14 +159,14 @@ def base_entries(base: str, cache: Path | None, log):
         return
     t0 = time.time()
     if not cf:
-        yield from entries(base)
+        yield from entries(base, base=True)
         return
     cf.parent.mkdir(parents=True, exist_ok=True)
     tmp = cf.with_name(cf.name + f".{os.getpid()}.tmp")
     n = 0
     try:
         with gzip.open(tmp, "wt", encoding="utf-8") as fh:
-            for r in entries(base):
+            for r in entries(base, base=True):
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
                 n += 1
                 yield r
@@ -269,8 +277,11 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
 def gate(out: str, base: str, packs: list[str]) -> dict:
     """The search pack's own check, written to OUT.gate.json: libzim opens it,
     it has both indexes, a page of the base and of every pack is found by
-    title suggestion (a pack's by full text too), and so is a front redirect
-    of the base by its own title."""
+    title suggestion (a pack's by full text too), and so is a redirect of the
+    base by its own title. The base's samples come from all its pages (a
+    place's page first) and redirects, not its front listing, which a
+    published base leaves empty: a gate that sampled from it checked nothing
+    of the base."""
     from libzim.reader import Archive
     from libzim.search import Query, Searcher
     from libzim.suggestion import SuggestionSearcher
@@ -290,10 +301,27 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
                 return d.path.decode("utf-8", "replace"), t
         return None
 
+    def base_sample(z, redirect: bool):
+        hm, best = html_mimes(z), None
+        for d in z.iter_dirents():
+            p, t = d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace")
+            if d.ns != ord("C") or d.is_redirect != redirect or len(t) < 4:
+                continue
+            if redirect:
+                if final_target(z, d, hm) is not None:
+                    return p, t
+            elif d.mime in hm:
+                if p.startswith("search/"):
+                    return p, t
+                best = best or (p, t)
+        return best
+
     found = {}
     for src in [base, *packs]:
         z = ZimReader(src)
-        for kind, sample in (("page", first(z, False)), ("redirect", first(z, True) if src == base else None)):
+        samples = (("page", base_sample(z, False)), ("redirect", base_sample(z, True))) if src == base \
+            else (("page", first(z, False)), ("redirect", None))
+        for kind, sample in samples:
             if sample is None:
                 continue
             p, t = sample
