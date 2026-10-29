@@ -1027,6 +1027,7 @@ BUILDER_NEWER = {}
 # (write_library_catalog): filled by _write_page, one entry per region.
 LIBRARY: dict[str, dict] = {}
 PLACES_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "cloud", "region-places.tsv")
+M49_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "cloud", "m49-countries.tsv")
 
 
 def library_dir():
@@ -1035,21 +1036,53 @@ def library_dir():
     return os.path.join(SCRIPT_DIR, "library")
 
 
-def load_places(path=PLACES_PATH):
-    """{region id: {continents, regions, countries, subregion}} from
-    cloud/region-places.tsv (lists split on ";")."""
-    out: dict[str, dict] = {}
+def _tsv_rows(path, ncols):
     with open(path, encoding="utf-8") as f:
         for line in f:
             if not line.strip() or line.startswith("#"):
                 continue
             cols = line.rstrip("\n").split("\t")
-            if len(cols) != 5:
-                raise ValueError(f"{path}: want 5 columns, got {len(cols)}: {line!r}")
-            rid, continents, regions, countries, sub = cols
-            split = lambda v: [x.strip() for x in v.split(";") if x.strip()]  # noqa: E731
-            out[rid] = {"continents": split(continents), "regions": split(regions),
-                        "countries": split(countries), "subregion": sub.strip()}
+            if len(cols) != ncols:
+                raise ValueError(f"{path}: want {ncols} columns, got {len(cols)}: {line!r}")
+            yield [c.strip() for c in cols]
+
+
+def load_m49(path=M49_PATH):
+    """{country: (UN M49 region, continent)} from cloud/m49-countries.tsv."""
+    return {c: (r, k) for c, r, k in _tsv_rows(path, 3)}
+
+
+def load_places(path=PLACES_PATH, m49=None):
+    """{region id: {continents, regions, countries, subregion, areas}} from
+    cloud/region-places.tsv: "@Europe" / "@Western Africa" expanded to the
+    countries of cloud/m49-countries.tsv, the regions and continents those
+    countries are in (plus the row's "also"). A country the table does not
+    know is an error."""
+    m49 = load_m49() if m49 is None else m49
+    all_regions = {r for r, _ in m49.values()}
+    all_continents = {k for _, k in m49.values()}
+    split = lambda v: [x.strip() for x in v.split(";") if x.strip()]  # noqa: E731
+    out: dict[str, dict] = {}
+    for rid, countries, sub, areas, also in _tsv_rows(path, 5):
+        names: list[str] = []
+        for c in split(countries):
+            if c.startswith("@"):            # every country of a continent or region
+                if c[1:] not in all_regions | all_continents:
+                    raise ValueError(f"{path}: {rid}: no continent or M49 region {c[1:]!r}")
+                names += sorted(n for n, (r, k) in m49.items() if c[1:] in (r, k))
+            elif c in m49:
+                names.append(c)
+            else:
+                raise ValueError(f"{path}: {rid}: {c!r} is not in {os.path.basename(M49_PATH)}")
+        names = list(dict.fromkeys(names))
+        extra = split(also)
+        bad = [x for x in extra if x not in all_regions | all_continents]
+        if bad:
+            raise ValueError(f"{path}: {rid}: also {bad} is no continent or M49 region")
+        regs = {m49[c][0] for c in names} | (set(extra) & all_regions)
+        conts = {m49[c][1] for c in names} | (set(extra) & all_continents)
+        out[rid] = {"continents": sorted(conts), "regions": sorted(regs), "countries": names,
+                    "subregion": sub, "areas": split(areas)}
     return out
 
 
@@ -1058,21 +1091,47 @@ def plain_text(html_text: str) -> str:
     return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", "", html_text))).strip()
 
 
-def write_library_catalog(library, builder_ids, places=None, out_dir=None):
+def builder_versions(recipes_dir=None):
+    """{region id: [{lang, label, size, webseed}]}: the language versions
+    the builder page offers, from the build/recipes/index.json this site
+    build wrote (write_build_index); {} without one."""
+    try:
+        with open(os.path.join(recipes_dir or build_recipes_dir(), "index.json"), encoding="utf-8") as f:
+            regions = json.load(f).get("regions") or []
+    except (OSError, ValueError):
+        return {}
+    return {r["id"]: [{"lang": m["lang"], "label": m.get("label") or m["lang"], "size": m.get("size"),
+                       "webseed": m.get("webseed")} for m in r.get("menu") or []]
+            for r in regions if isinstance(r, dict) and r.get("id")}
+
+
+def write_library_catalog(library, versions, places=None, out_dir=None, m49=None):
     """web/library/catalog.json: every live map (`library`, from
-    _write_page) with where it is (cloud/region-places.tsv) and whether
-    the builder offers it in other languages (`builder_ids`). The library
-    page (web/library/index.html) reads it beside build/recipes/index.json.
-    A live map without a places row fails the build. Returns the ids."""
-    places = load_places() if places is None else places
+    _write_page) with where it is (cloud/region-places.tsv) and the
+    builder's versions of it in other languages (`versions`, from
+    builder_versions), and the UN M49 region and continent of every country
+    named: the whole of what the library page (web/library/index.html)
+    reads, one small file for a phone. A live map without a places row is
+    listed without places (search still finds it) and named in a warning:
+    the main page must not wait for this one. Returns the ids."""
+    m49 = load_m49() if m49 is None else m49
+    places = load_places(m49=m49) if places is None else places
+    nowhere = {"continents": [], "regions": [], "countries": [], "subregion": "", "areas": []}
     missing = sorted(rid for rid in library if rid not in places)
     if missing:
-        raise ValueError(f"no row in cloud/region-places.tsv for live maps {missing}")
-    maps = [{**library[rid], "places": places[rid], "builder": rid in builder_ids}
+        print(f"WARNING: no row in cloud/region-places.tsv for live maps {missing}: the library page "
+              "lists them without places; add a row (id, countries, subregion, areas, also)")
+    maps = [{**library[rid], "size_label": human_size(library[rid].get("size")),
+             "places": places.get(rid, nowhere), "builder": bool(versions.get(rid)),
+             "versions": [{**v, "size_label": human_size(v.get("size"))} for v in versions.get(rid) or []]}
             for rid in sorted(library, key=lambda r: (library[r]["title"].casefold(), r))]
+    named = sorted({c for m in maps for c in m["places"]["countries"]})
+    countries = {c: m49[c][0] for c in named if c in m49}
+    regions = dict(m49.values())          # M49 region -> continent
     out_dir = out_dir or library_dir()
     os.makedirs(out_dir, exist_ok=True)
-    doc = {"format": "streetzim-library/1", "generated": datetime.date.today().isoformat(), "maps": maps}
+    doc = {"format": "streetzim-library/1", "generated": datetime.date.today().isoformat(),
+           "countries": countries, "regions": regions, "maps": maps}
     fd, tmp = tempfile.mkstemp(dir=out_dir, prefix="catalog.json.", suffix=".tmp")
     os.fchmod(fd, 0o644)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -1201,6 +1260,7 @@ def render_tier_header(label: str) -> str:
 
 
 def build_page():
+    LIBRARY.clear()                       # this build's live maps only
     archive_items = fetch_archive_items()
 
     # Validate that every region declares a known tier, fail loud if
@@ -1264,7 +1324,7 @@ def build_page():
         listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER)
         print(f"Builder page lists {len(listed)} regions whose base archive.org serves: {listed}")
     if os.path.isfile(os.path.join(library_dir(), "index.html")):
-        n = write_library_catalog(LIBRARY, set(listed))
+        n = write_library_catalog(LIBRARY, builder_versions() if listed else {})
         print(f"Library catalog: {len(n)} maps")
 
 

@@ -1,0 +1,248 @@
+# Countries and territories by UN M49 region (unstats.un.org/unsd/methodology/m49/),
+# for the library page's place filters (web/generate.py load_places): a map's
+# regions and continents follow from the countries in cloud/region-places.tsv.
+# Short English names. Not in M49 on their own, placed by geography: Kosovo
+# (Southern Europe), Taiwan (Eastern Asia). The Americas are split into North
+# America (Northern America, Central America, the Caribbean) and South America.
+# Columns (tab-separated): country	region	continent
+Algeria	Northern Africa	Africa
+Egypt	Northern Africa	Africa
+Libya	Northern Africa	Africa
+Morocco	Northern Africa	Africa
+Sudan	Northern Africa	Africa
+Tunisia	Northern Africa	Africa
+Western Sahara	Northern Africa	Africa
+Burundi	Eastern Africa	Africa
+Comoros	Eastern Africa	Africa
+Djibouti	Eastern Africa	Africa
+Eritrea	Eastern Africa	Africa
+Ethiopia	Eastern Africa	Africa
+Kenya	Eastern Africa	Africa
+Madagascar	Eastern Africa	Africa
+Malawi	Eastern Africa	Africa
+Mauritius	Eastern Africa	Africa
+Mayotte	Eastern Africa	Africa
+Mozambique	Eastern Africa	Africa
+Réunion	Eastern Africa	Africa
+Rwanda	Eastern Africa	Africa
+Seychelles	Eastern Africa	Africa
+Somalia	Eastern Africa	Africa
+South Sudan	Eastern Africa	Africa
+Tanzania	Eastern Africa	Africa
+Uganda	Eastern Africa	Africa
+Zambia	Eastern Africa	Africa
+Zimbabwe	Eastern Africa	Africa
+Angola	Middle Africa	Africa
+Cameroon	Middle Africa	Africa
+Central African Republic	Middle Africa	Africa
+Chad	Middle Africa	Africa
+Congo	Middle Africa	Africa
+DR Congo	Middle Africa	Africa
+Equatorial Guinea	Middle Africa	Africa
+Gabon	Middle Africa	Africa
+São Tomé and Príncipe	Middle Africa	Africa
+Botswana	Southern Africa	Africa
+Eswatini	Southern Africa	Africa
+Lesotho	Southern Africa	Africa
+Namibia	Southern Africa	Africa
+South Africa	Southern Africa	Africa
+Benin	Western Africa	Africa
+Burkina Faso	Western Africa	Africa
+Cabo Verde	Western Africa	Africa
+Côte d'Ivoire	Western Africa	Africa
+Gambia	Western Africa	Africa
+Ghana	Western Africa	Africa
+Guinea	Western Africa	Africa
+Guinea-Bissau	Western Africa	Africa
+Liberia	Western Africa	Africa
+Mali	Western Africa	Africa
+Mauritania	Western Africa	Africa
+Niger	Western Africa	Africa
+Nigeria	Western Africa	Africa
+Saint Helena	Western Africa	Africa
+Senegal	Western Africa	Africa
+Sierra Leone	Western Africa	Africa
+Togo	Western Africa	Africa
+Anguilla	Caribbean	North America
+Antigua and Barbuda	Caribbean	North America
+Aruba	Caribbean	North America
+Bahamas	Caribbean	North America
+Barbados	Caribbean	North America
+Bonaire	Caribbean	North America
+British Virgin Islands	Caribbean	North America
+Cayman Islands	Caribbean	North America
+Cuba	Caribbean	North America
+Curaçao	Caribbean	North America
+Dominica	Caribbean	North America
+Dominican Republic	Caribbean	North America
+Grenada	Caribbean	North America
+Guadeloupe	Caribbean	North America
+Haiti	Caribbean	North America
+Jamaica	Caribbean	North America
+Martinique	Caribbean	North America
+Montserrat	Caribbean	North America
+Puerto Rico	Caribbean	North America
+Saint Barthélemy	Caribbean	North America
+Saint Kitts and Nevis	Caribbean	North America
+Saint Lucia	Caribbean	North America
+Saint Martin	Caribbean	North America
+Saint Vincent and the Grenadines	Caribbean	North America
+Sint Maarten	Caribbean	North America
+Trinidad and Tobago	Caribbean	North America
+Turks and Caicos Islands	Caribbean	North America
+U.S. Virgin Islands	Caribbean	North America
+Belize	Central America	North America
+Costa Rica	Central America	North America
+El Salvador	Central America	North America
+Guatemala	Central America	North America
+Honduras	Central America	North America
+Mexico	Central America	North America
+Nicaragua	Central America	North America
+Panama	Central America	North America
+Argentina	South America	South America
+Bolivia	South America	South America
+Brazil	South America	South America
+Chile	South America	South America
+Colombia	South America	South America
+Ecuador	South America	South America
+Falkland Islands	South America	South America
+French Guiana	South America	South America
+Guyana	South America	South America
+Paraguay	South America	South America
+Peru	South America	South America
+Suriname	South America	South America
+Uruguay	South America	South America
+Venezuela	South America	South America
+Bermuda	Northern America	North America
+Canada	Northern America	North America
+Greenland	Northern America	North America
+Saint Pierre and Miquelon	Northern America	North America
+United States	Northern America	North America
+Kazakhstan	Central Asia	Asia
+Kyrgyzstan	Central Asia	Asia
+Tajikistan	Central Asia	Asia
+Turkmenistan	Central Asia	Asia
+Uzbekistan	Central Asia	Asia
+China	Eastern Asia	Asia
+Hong Kong	Eastern Asia	Asia
+Japan	Eastern Asia	Asia
+Macao	Eastern Asia	Asia
+Mongolia	Eastern Asia	Asia
+North Korea	Eastern Asia	Asia
+South Korea	Eastern Asia	Asia
+Taiwan	Eastern Asia	Asia
+Brunei	South-eastern Asia	Asia
+Cambodia	South-eastern Asia	Asia
+Indonesia	South-eastern Asia	Asia
+Laos	South-eastern Asia	Asia
+Malaysia	South-eastern Asia	Asia
+Myanmar	South-eastern Asia	Asia
+Philippines	South-eastern Asia	Asia
+Singapore	South-eastern Asia	Asia
+Thailand	South-eastern Asia	Asia
+Timor-Leste	South-eastern Asia	Asia
+Vietnam	South-eastern Asia	Asia
+Afghanistan	Southern Asia	Asia
+Bangladesh	Southern Asia	Asia
+Bhutan	Southern Asia	Asia
+India	Southern Asia	Asia
+Iran	Southern Asia	Asia
+Maldives	Southern Asia	Asia
+Nepal	Southern Asia	Asia
+Pakistan	Southern Asia	Asia
+Sri Lanka	Southern Asia	Asia
+Armenia	Western Asia	Asia
+Azerbaijan	Western Asia	Asia
+Bahrain	Western Asia	Asia
+Cyprus	Western Asia	Asia
+Georgia	Western Asia	Asia
+Iraq	Western Asia	Asia
+Israel	Western Asia	Asia
+Jordan	Western Asia	Asia
+Kuwait	Western Asia	Asia
+Lebanon	Western Asia	Asia
+Oman	Western Asia	Asia
+Palestine	Western Asia	Asia
+Qatar	Western Asia	Asia
+Saudi Arabia	Western Asia	Asia
+Syria	Western Asia	Asia
+Turkey	Western Asia	Asia
+United Arab Emirates	Western Asia	Asia
+Yemen	Western Asia	Asia
+Belarus	Eastern Europe	Europe
+Bulgaria	Eastern Europe	Europe
+Czechia	Eastern Europe	Europe
+Hungary	Eastern Europe	Europe
+Moldova	Eastern Europe	Europe
+Poland	Eastern Europe	Europe
+Romania	Eastern Europe	Europe
+Russia	Eastern Europe	Europe
+Slovakia	Eastern Europe	Europe
+Ukraine	Eastern Europe	Europe
+Åland Islands	Northern Europe	Europe
+Denmark	Northern Europe	Europe
+Estonia	Northern Europe	Europe
+Faroe Islands	Northern Europe	Europe
+Finland	Northern Europe	Europe
+Guernsey	Northern Europe	Europe
+Iceland	Northern Europe	Europe
+Ireland	Northern Europe	Europe
+Isle of Man	Northern Europe	Europe
+Jersey	Northern Europe	Europe
+Latvia	Northern Europe	Europe
+Lithuania	Northern Europe	Europe
+Norway	Northern Europe	Europe
+Svalbard and Jan Mayen	Northern Europe	Europe
+Sweden	Northern Europe	Europe
+United Kingdom	Northern Europe	Europe
+Albania	Southern Europe	Europe
+Andorra	Southern Europe	Europe
+Bosnia and Herzegovina	Southern Europe	Europe
+Croatia	Southern Europe	Europe
+Gibraltar	Southern Europe	Europe
+Greece	Southern Europe	Europe
+Holy See	Southern Europe	Europe
+Italy	Southern Europe	Europe
+Kosovo	Southern Europe	Europe
+Malta	Southern Europe	Europe
+Montenegro	Southern Europe	Europe
+North Macedonia	Southern Europe	Europe
+Portugal	Southern Europe	Europe
+San Marino	Southern Europe	Europe
+Serbia	Southern Europe	Europe
+Slovenia	Southern Europe	Europe
+Spain	Southern Europe	Europe
+Austria	Western Europe	Europe
+Belgium	Western Europe	Europe
+France	Western Europe	Europe
+Germany	Western Europe	Europe
+Liechtenstein	Western Europe	Europe
+Luxembourg	Western Europe	Europe
+Monaco	Western Europe	Europe
+Netherlands	Western Europe	Europe
+Switzerland	Western Europe	Europe
+Australia	Australia and New Zealand	Oceania
+New Zealand	Australia and New Zealand	Oceania
+Norfolk Island	Australia and New Zealand	Oceania
+Fiji	Melanesia	Oceania
+New Caledonia	Melanesia	Oceania
+Papua New Guinea	Melanesia	Oceania
+Solomon Islands	Melanesia	Oceania
+Vanuatu	Melanesia	Oceania
+Guam	Micronesia	Oceania
+Kiribati	Micronesia	Oceania
+Marshall Islands	Micronesia	Oceania
+Micronesia	Micronesia	Oceania
+Nauru	Micronesia	Oceania
+Northern Mariana Islands	Micronesia	Oceania
+Palau	Micronesia	Oceania
+American Samoa	Polynesia	Oceania
+Cook Islands	Polynesia	Oceania
+French Polynesia	Polynesia	Oceania
+Niue	Polynesia	Oceania
+Pitcairn	Polynesia	Oceania
+Samoa	Polynesia	Oceania
+Tokelau	Polynesia	Oceania
+Tonga	Polynesia	Oceania
+Tuvalu	Polynesia	Oceania
+Wallis and Futuna	Polynesia	Oceania
