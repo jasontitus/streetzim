@@ -242,13 +242,24 @@
     } catch (e) { return ''; }
   })();
   const MERGED_PATH_RE = /^\/merged\/[a-z0-9-]+\/[a-z]{2,3}(?:-[a-z0-9]+)?\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]+\.zim$/;
-  const previewHref = (url) => {
+  const mergedUrl = (url) => {
     if (!MERGED_ORIGIN || typeof url !== 'string') return null;
     let u;
     try { u = new URL(url); } catch (e) { return null; }
     if (u.origin !== MERGED_ORIGIN || url !== u.origin + u.pathname || !MERGED_PATH_RE.test(u.pathname)) return null;
-    return '/drive/?zim=' + encodeURIComponent(url);
+    return url;
   };
+  const previewHref = (url) => (mergedUrl(url) ? '/drive/?zim=' + encodeURIComponent(url) : null);
+
+  // On a phone or tablet, Download is the same file as one ordinary download
+  // from the build worker (the entry's webseed URL): the browser's own
+  // downloads keep going when the visitor switches apps or the screen goes
+  // off, and can pick up where they stopped. A file built in the page stops
+  // when the phone pauses the page (Firefox on Android stops the service
+  // worker that streams it). ?inbrowser=1 builds in the page anyway;
+  // ?direct=1 downloads directly on any device.
+  const phone = () => /Android|iPhone|iPad|iPod|Mobile/.test(navigator.userAgent) || (isWebKit && navigator.maxTouchPoints > 1);
+  const directUrl = (m) => (m && !q.has('inbrowser') && (q.get('direct') === '1' || phone()) ? mergedUrl(m.webseed) : null);
 
   async function getJSON(url, onBytes) {
     let r;
@@ -341,14 +352,14 @@
     for (const m of region.menu) {
       const li = document.createElement('li');
       const a2 = document.createElement('a');
-      a2.href = `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(m.lang)}&go=1`;
+      a2.href = directUrl(m) || `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(m.lang)}&go=1`;
       a2.textContent = `${pickerName(m.lang, m.label)}: ${region.title}`;
       a2.onclick = (ev) => {
         if (running || tooSoon(ev)) { ev.preventDefault(); return; }    // one build at a time
         if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
         ev.preventDefault();
         $('lang').value = m.lang; pickLang();
-        build('net');
+        start();
       };
       const meta = document.createElement('span');
       meta.className = 'dim';
@@ -379,7 +390,13 @@
         else if (MERGED_ORIGIN && m.webseed === undefined) {
           const shown = region;
           getJSON(m.torrent.replace(/\.torrent$/, '.ws.json'))
-            .then((ix) => { const h = previewHref(ix && ix.webseed); if (h && region === shown) show(h); })
+            .then((ix) => {
+              const h = previewHref(ix && ix.webseed);
+              if (!h || region !== shown) return;
+              m.webseed = ix.webseed; show(h);
+              if (directUrl(m)) a2.href = directUrl(m);
+              if (entry === m) showWay();        // Download can now be the direct one
+            })
             .catch(() => {});
         }
       }
@@ -416,6 +433,7 @@
       ? `The same ${region.title} map with its map language set to ${name}.`
       : `The ${region.title} map in ${name}, with Wikipedia in:`;
     $('oneclick').textContent = `Download ${name} ${region.title} (${fmtMB(entry.size)})`;
+    showWay();
     showEstimate();
     $('haveBaseSummary').textContent = nothingNew
       ? `Already have the ${region.title} map? Use it, with nothing else to download`
@@ -424,6 +442,15 @@
     // The recipe (10-15 MB) is fetched when it is needed (Build, or a copy
     // of the map to check), not on every change of language.
     checkBase();
+  }
+
+  // What Download does for this entry: the direct download, or a build here.
+  function showWay() {
+    const direct = !!directUrl(entry);
+    $('howBuilt').textContent = direct ? 'It downloads like any other file.'
+      : 'Your browser builds the file as it downloads, checks every byte, and saves it like any other download.';
+    $('keepOpen').hidden = direct; $('directNote').hidden = !direct;
+    $('inBrowser').href = `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(entry.lang)}&inbrowser=1`;
   }
 
   $('baseFile').onchange = () => {
@@ -875,14 +902,31 @@
 
   // ------------------------------------------------------------ build
   // ------------------------------------------------------------ build
-  // Two ways in. One click (#oneclick, a download link, ?go=1): packs, then
+  // Two ways in (on a phone, one click is the direct download above). One
+  // click (#oneclick, a download link, ?go=1): packs, then
   // the base map downloaded through the range proxy as it is needed, and the
   // file goes to the browser's downloads (no save dialog). "Build from my
   // copy" (#go): the visitor's own base file and, where the browser has
   // one, a save dialog. Both claim the running slot before their first
   // await, so a double click cannot start a second build.
   $('go').onclick = () => { if (!running && !$('go').disabled) build('file'); };
-  $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev)) build('net'); };
+  $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev)) start(); };
+  const start = () => { const url = directUrl(entry); if (url) directDownload(url); else build('net'); };
+
+  // The browser's own download of the whole file from the build worker:
+  // nothing runs in this page, so leaving it changes nothing.
+  function directDownload(url) {
+    const a = document.createElement('a');
+    a.href = url; a.rel = 'noopener';
+    document.body.append(a); a.click(); a.remove();
+    $('oneclick').classList.remove('attention'); $('goHint').hidden = true;
+    $('save').hidden = true;
+    setStatus(`Your browser is downloading ${entry.file_name || entry.name}.zim (${fmtMB(entry.size)}): look in its downloads. ` +
+      'You can switch apps or turn the screen off; if the download stops, retry it there.', true);
+    announce($('status').textContent);
+    $('after').hidden = false;
+    track('build_direct', { region: region.id, lang: entry.lang, size_mb: Math.round(entry.size / 1e6) });
+  }
 
   // The base map's URL on the range proxy: index.json's base.url, else made
   // from base.download (https://archive.org/download/<item>/<file>) and the

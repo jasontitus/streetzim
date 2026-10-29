@@ -9,6 +9,13 @@
 //
 // --merged-origin: the build worker origin the page's preview-config.js names
 // (STREETZIM_MERGED_ORIGIN): its entries' webseeds get "Preview in browser".
+// --merged-local ORIGIN: run the build worker here (build-proxy/merged-webseed.js
+// on the site and range-proxy stand-ins below) and serve the recipes with
+// ORIGIN, the webseed origin they were published with, replaced by its own.
+// --mode direct: what a phone does: Download is the browser's own download
+// of the entry's webseed URL (needs --merged-local); --user-agent UA makes
+// the page see a phone, else the page is opened with ?direct=1. PASS when
+// that download is byte-identical to the merge and no build ran in the page.
 // --proxy-url: the page uses that range proxy (the real one in front of
 // archive.org, web/drive/preview-config.js) instead of the local stand-in
 // below; then no --item is needed and the "proxy" counts stay 0.
@@ -66,7 +73,9 @@ const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
 const EXPECT = opt('--expect', 'pass');
 const PROXY_URL = opt('--proxy-url', '');
-const MERGED_ORIGIN = opt('--merged-origin', '');
+let MERGED_ORIGIN = opt('--merged-origin', '');
+const MERGED_LOCAL = opt('--merged-local', '');
+const USER_AGENT = opt('--user-agent', '');
 const WAIT_PREVIEWS = +opt('--wait-previews', '0');   // links that come later (from a segment index)
 const THROTTLE = opt('--throttle', '');
 const WATCH = +opt('--watch-secs', '0');
@@ -115,6 +124,12 @@ const page = http.createServer((req, res) => {
   if (p.startsWith('/build/recipes/')) {
     const f = within(RECIPES, p.slice('/build/recipes/'.length));
     if (!f) { res.writeHead(403); res.end(); return; }
+    if (MERGED_LOCAL && f.endsWith('.json') && fs.existsSync(f)) {      // the webseeds point at the local build worker
+      const body = Buffer.from(fs.readFileSync(f, 'utf8').split(MERGED_LOCAL).join(MERGED_ORIGIN));
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
+    }
     sendFile(req, res, f);
     return;
   }
@@ -157,6 +172,28 @@ await new Promise((r) => page.listen(0, 'localhost', r));
 await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
 PROXY = PROXY_URL || `http://127.0.0.1:${proxy.address().port}`;
 const PAGE = `http://localhost:${page.address().port}/build/`;
+let mergedServer = null;
+if (MERGED_LOCAL) {                          // the build worker, as serve-local.mjs runs it
+  const { createMergedHandler } = await import(new URL('../../build-proxy/merged-webseed.js', import.meta.url));
+  const { Readable } = await import('node:stream');
+  const handler = createMergedHandler({ site: `http://localhost:${page.address().port}`, upstream: PROXY + '/' });
+  mergedServer = http.createServer(async (req, res) => {
+    const headers = new Headers();
+    for (const n of ['range', 'if-range', 'origin']) if (typeof req.headers[n] === 'string') headers.set(n, req.headers[n]);
+    stats.merged = (stats.merged || 0) + 1;
+    let r;
+    try { r = await handler(new Request(MERGED_ORIGIN + req.url, { method: req.method, headers }), null); } catch (e) { res.writeHead(500); res.end(String(e)); return; }
+    const out = {};
+    r.headers.forEach((v, k) => { out[k] = v; });
+    res.writeHead(r.status, out);
+    if (!r.body || req.method === 'HEAD') { res.end(); return; }
+    const st = Readable.fromWeb(r.body);
+    st.on('error', () => res.destroy());
+    st.pipe(res);
+  });
+  await new Promise((r) => mergedServer.listen(0, '127.0.0.1', r));
+  MERGED_ORIGIN = `http://127.0.0.1:${mergedServer.address().port}`;
+}
 
 async function md5File(p) {
   return new Promise((res, rej) => {
@@ -167,7 +204,7 @@ async function md5File(p) {
 
 // The two servers keep node alive: whatever fails from here, end the
 // process (a browser that cannot start left it waiting forever).
-const quit = (code) => { page.close(); proxy.close(); process.exit(code); };
+const quit = (code) => { page.close(); proxy.close(); if (mergedServer) mergedServer.close(); process.exit(code); };
 process.on('unhandledRejection', (e) => { console.error('builder_e2e:', e && e.stack || e); quit(1); });
 let browser;
 try {
@@ -181,7 +218,7 @@ let allOk = true;
 async function runOne(L) {
   const t0 = Date.now();
   const recipe = JSON.parse(fs.readFileSync(path.join(RECIPES, REGION, `${L}.json`), 'utf8'));
-  const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L });
+  const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L, ...(USER_AGENT ? { userAgent: USER_AGENT } : {}) });
   await ctx.addInitScript(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }); });
   const pg = await ctx.newPage();
   await pg.setViewportSize({ width: VW, height: VH });
@@ -196,7 +233,7 @@ async function runOne(L) {
   pg.on('console', (m) => log.push(`${m.type()}: ${m.text()}`));
   pg.on('pageerror', (e) => log.push(`pageerror: ${e.message}`));
   const before = { ...stats, items: { ...stats.items }, files: { ...stats.files } };
-  await pg.goto(`${PAGE}?region=${encodeURIComponent(REGION)}&lang=${encodeURIComponent(L)}`);
+  await pg.goto(`${PAGE}?region=${encodeURIComponent(REGION)}&lang=${encodeURIComponent(L)}` + (MODE === 'direct' && !USER_AGENT ? '&direct=1' : ''));
   await pg.waitForFunction((l) => document.querySelector('#lang') && document.querySelector('#lang').value === l, L, { timeout: 60000 });
   if (WAIT_PREVIEWS) {
     await pg.waitForFunction((n) => document.querySelectorAll('#downloads li a.preview').length >= n, WAIT_PREVIEWS,
@@ -209,6 +246,8 @@ async function runOne(L) {
     torrents: [...document.querySelectorAll('#downloads li a.torrent')].map((a) => a.getAttribute('href')),
     previews: [...document.querySelectorAll('#downloads li a.preview')].map((a) => a.getAttribute('href')),
     packs: [...document.querySelectorAll('#packs li')].map((li) => li.textContent),
+    links: [...document.querySelectorAll('#downloads li > a:first-child')].map((a) => a.href),
+    directNote: !document.querySelector('#directNote').hidden, keepOpen: !document.querySelector('#keepOpen').hidden,
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });
   dlP.catch(() => {});                       // no download (an expected failure): closing the context rejects it
@@ -325,14 +364,15 @@ async function runOne(L) {
   }
   const status = await pg.waitForFunction(() => {
     const t = document.querySelector('#status').textContent;
-    if (/^(Done|Stopped|Not started)/.test(t)) return t;
+    if (/^(Done|Stopped|Not started|Your browser is downloading)/.test(t)) return t;
     const save = document.querySelector('#saveLink');
     return save ? 'SAVE ' + t : null;
   }, null, { timeout: STATUS_TIMEOUT * 1000, polling: 1000 }).then((h) => h.jsonValue());
   if (/^SAVE /.test(status)) await pg.click('#saveLink');     // built into browser storage: the Save step
   const res = { lang: L, mode: MODE, status, shown, expected_md5: recipe.file_md5, expected_size: recipe.size, log: log.slice(-15) };
-  if (/^(Done|SAVE )/.test(status)) {
+  if (/^(Done|SAVE |Your browser is downloading)/.test(status)) {
     const dl = await dlP;
+    res.download_url = dl.url();
     res.suggested = dl.suggestedFilename();
     const p = await dl.path();
     res.download_failure = await dl.failure();
@@ -347,16 +387,20 @@ async function runOne(L) {
                 items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
                 files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) };
   res.secs = Math.round((Date.now() - t0) / 1000);
+  res.ui = await uiEnd();
   res.pass = EXPECT === 'fail'
     ? /^(Stopped|Not started)/.test(String(status)) && !res.md5
     : res.md5 === recipe.file_md5 && res.bytes === recipe.size;
+  if (MODE === 'direct') {                   // the worker's file, and nothing built here
+    res.pass = res.pass && String(res.download_url || '').startsWith(`${MERGED_ORIGIN}/merged/${REGION}/${L}/`)
+      && res.ui.workerPhases.length === 0 && shown.directNote && !shown.keepOpen;
+  }
   res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
-  res.ui = await uiEnd();
   if (feedback) { res.feedback = feedback; res.phases = phases; }
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
   console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
                                md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, proxy_before_build: beforeBuild,
-                               feedback: res.feedback, phases: res.phases, ui: res.ui,
+                               feedback: res.feedback, phases: res.phases, ui: res.ui, download_url: res.download_url,
                                langOption: shown.langOption }));
   await ctx.close();
   return res.pass;

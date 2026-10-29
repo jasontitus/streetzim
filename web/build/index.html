@@ -55,7 +55,7 @@
 <main>
   <p class="dim"><a href="/">StreetZim</a></p>
   <h1>Maps in other languages</h1>
-  <p class="dim">A StreetZim map with its labels in your language and Wikipedia in your language and the region's own (as well as English). Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</p>
+  <p class="dim">A StreetZim map with its labels in your language and Wikipedia in your language and the region's own (as well as English). <span id="howBuilt">Your browser builds the file as it downloads, checks every byte, and saves it like any other download.</span></p>
 
   <p id="notice" role="alert"></p>
 
@@ -79,7 +79,8 @@
       <p id="elapsed" class="dim"></p>
     </div>
     <p id="estimate" class="dim"></p>
-    <p class="dim">Keep this tab open and the device awake until it finishes. Pausing the download for more than a minute, closing the tab or letting the device sleep stops it, and it starts over. On iPhone and iPad, keep Safari in front with the screen on.</p>
+    <p id="directNote" class="dim" hidden>Your browser downloads the file itself, so you can leave this page. <a id="inBrowser" href="?inbrowser=1">Build it in this browser instead</a> (checks every byte; keep this page in front until it finishes).</p>
+    <p id="keepOpen" class="dim">Keep this tab open and the device awake until it finishes. Pausing the download for more than a minute, closing the tab or letting the device sleep stops it, and it starts over. On iPhone and iPad, keep Safari in front with the screen on.</p>
     <p id="packStatus"></p>
     <button id="packRetry" class="secondary" hidden>Try again</button>
     <button id="startDl" hidden>Start download</button>
@@ -113,6 +114,6 @@
 <script src="/drive/preview-config.js"></script>
 <script src="build-config.js"></script>
 <script src="fetcher.js?v=4"></script>
-<script src="builder.js?v=4"></script>
+<script src="builder.js?v=5"></script>
 </body>
 </html>

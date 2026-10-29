@@ -315,3 +315,29 @@ def test_the_page_offers_each_torrent_and_builds_the_torrents_file(ship: SimpleN
     plen = info[b"piece length"]
     assert info[b"length"] == len(data)
     assert info[b"pieces"] == b"".join(hashlib.sha1(data[i:i + plen]).digest() for i in range(0, len(data), plen))
+
+
+FIREFOX_ANDROID = "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+
+
+def test_a_phone_downloads_the_file_from_the_build_worker(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
+    """On a phone the page builds nothing: Download, and every link of the
+    download list, is the browser's own download of the entry's webseed URL
+    (it goes on when the phone pauses the page, which stops a build there).
+    Through the build worker's own code, the file must be the gated merge."""
+    ws = "https://streetzim-build-proxy.example.workers.dev"
+    r = _run(ship, LANGPACK_WEBSEED=ws)
+    assert r.returncode == 0, r.stdout[-2000:]
+    rec = tmp_path / "recipes"
+    shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
+    assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
+                          capture_output=True).returncode == 0
+    p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
+    rc, rows = _e2e(p, "de", "direct", "--merged-local", ws, "--user-agent", FIREFOX_ANDROID)
+    assert rc == 0 and rows[0]["pass"], rows
+    res = json.loads((p.out / "e2e-de.json").read_text())
+    assert res["status"].startswith("Your browser is downloading"), res["status"]
+    assert all("/merged/testland/" in h for h in res["shown"]["links"]), res["shown"]["links"]
+    # the same page on a desktop builds in the page, as before
+    rc, rows = _e2e(p, "fr", "net", "--merged-local", ws)
+    assert rc == 0 and rows[0]["pass"] and rows[0]["ui"]["workerPhases"], rows
