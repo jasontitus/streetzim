@@ -21,9 +21,9 @@
 // BEGIN sign-lines
 // The detector's boxes ({text, box: {x, y, width, height}, script}) as text
 // lines in reading order: boxes of comparable height (each at least 0.4 of
-// the other: small print inside a big line's band, a watermark, a screw
-// read as a letter, is a line of its own) that overlap vertically by half
-// the smaller one's height are one line, joined left to right (right to left
+// the tallest box already in the line: small print inside a big line's
+// band, a watermark, a screw read as a letter, is a line of its own) that
+// overlap vertically by half the smaller one's height are one line, joined left to right (right to left
 // for Arabic), with no space between Chinese, Japanese or Thai words. A
 // box of two or more letters at least 1.5 times as tall as wide is a
 // vertical line of its own (Chinese and Japanese signs: 安平區 down the
@@ -36,8 +36,9 @@ var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
 // garbles the digits (a Bahraini address plate, 2026-10-29). When the most
 // confident reading has digits and no letters, and another (at least half
 // as sure) has letters, the box reads as that one's words and this one's
-// number: "طريق 2912", as the map's records name the road. Arabic-Indic and
-// Persian digits read as 0-9, as the records write them.
+// number: "طريق 2912", as the map's records name the road; when that
+// reading already holds the number ("23號", "42nd St"), it is taken as it
+// is. Arabic-Indic and Persian digits read as 0-9.
 function _szSignDigits(s) {
   return String(s).replace(/[\u0660-\u0669]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x0630); })
                   .replace(/[\u06F0-\u06F9]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x06C0); });
@@ -50,7 +51,9 @@ function _szSignCompose(it) {
     (it.readings || []).forEach(function (r) {
       if (r && r.confidence >= 0.5 * it.confidence && SZ_SIGN_LETTER.test(r.text) && (!words || r.confidence > words.confidence)) words = r;
     });
-    var w = words ? _szSignDigits(words.text).replace(/[\d\s.,:;'"()\-\u2013\u2014_\/\\]+/g, ' ').trim() : '';
+    var whole = words ? _szSignDigits(words.text).trim() : '';
+    if (whole && whole.replace(/\s+/g, '').indexOf(text.replace(/\s+/g, '')) >= 0) return { text: whole, script: words.script };
+    var w = whole.replace(/[\d\s.,:;'"()\-\u2013\u2014_\/\\]+/g, ' ').trim();
     if (w) return { text: w + ' ' + text, script: words.script };
   }
   return { text: text, script: it.script };
@@ -72,17 +75,17 @@ function _szSignLineGroups(items) {
     var b = it.box, line = null, vertical = _szSignVertical(it);
     for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
-      if (L.vertical || b.height < 0.4 * L.height || L.height < 0.4 * b.height) continue;
+      if (L.vertical || b.height < 0.4 * L.tallest || L.tallest < 0.4 * b.height) continue;
       var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
       if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
     }
     if (!line) {
-      line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical };
+      line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical, tallest: b.height };
       lines.push(line);
     } else {
       var x2 = Math.max(line.x + line.width, b.x + b.width), y2 = Math.max(line.y + line.height, b.y + b.height);
       line.x = Math.min(line.x, b.x); line.y = Math.min(line.y, b.y);
-      line.width = x2 - line.x; line.height = y2 - line.y;
+      line.width = x2 - line.x; line.height = y2 - line.y; line.tallest = Math.max(line.tallest, b.height);
     }
     line.items.push(it);
   });

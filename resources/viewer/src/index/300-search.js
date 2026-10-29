@@ -241,10 +241,18 @@ function _szTextScore(item, q, words, norm, visitor) {
 // vowel, an underdot, "Ƙ" read as "K"), so a record matches when one of
 // its names is within a few edits of part of a line, not when a line
 // contains it exactly. Letters that only differ by code point (Arabic and
-// Persian yeh and kaf) or by a hook are folded alike first.
+// Persian yeh and kaf) or by a hook are folded alike first, and Arabic-Indic
+// and Persian digits read as 0-9, on both sides: a sign's ٦ (or the 6 the
+// OCR read for it) matches a record's ٦ or 6 ("جامعة ٦ اكتوبر").
 var SZ_SIGN_VARIANTS = { 'ي': 'ی', 'ى': 'ی', 'ك': 'ک', 'ڪ': 'ک', 'ہ': 'ه', 'ە': 'ه',
                          'ۀ': 'ه', 'ɓ': 'b', 'ɗ': 'd', 'ƙ': 'k', 'ƴ': 'y', 'ı': 'i',
                          'ə': 'e', 'ŋ': 'n', 'ɛ': 'e', 'ɔ': 'o' };
+(function () {
+  for (var d = 0; d < 10; d++) {
+    SZ_SIGN_VARIANTS[String.fromCharCode(0x0660 + d)] = String(d);
+    SZ_SIGN_VARIANTS[String.fromCharCode(0x06F0 + d)] = String(d);
+  }
+})();
 var SZ_SIGN_MIN = 0.75;   // similarity a name needs (one wrong letter in four)
 
 // A name or line as the matcher compares it: folded as the search folds,
