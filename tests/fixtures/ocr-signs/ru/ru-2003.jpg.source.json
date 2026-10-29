@@ -1,0 +1,166 @@
+{
+  "id": "121a7601-94c8-4613-b9b1-29446798b780",
+  "bbox": [
+    37.637861217,
+    55.730475267,
+    37.637861217,
+    55.730475267
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/cea88226-5b2b-4d35-96c3-d43e6baac3d7/items/121a7601-94c8-4613-b9b1-29446798b780",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/cea88226-5b2b-4d35-96c3-d43e6baac3d7",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/cea88226-5b2b-4d35-96c3-d43e6baac3d7",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/12/1a/76/01/94c8-4613-b9b1-29446798b780.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/12/1a/76/01/94c8-4613-b9b1-29446798b780/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/12/1a/76/01/94c8-4613-b9b1-29446798b780/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      37.637861217,
+      55.730475267
+    ]
+  },
+  "providers": [
+    {
+      "id": "762819d8-d0d7-46ea-b50a-903f59499cf1",
+      "name": "solenoid jam",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "cea88226-5b2b-4d35-96c3-d43e6baac3d7",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Xiaomi",
+      "Exif.Image.Model": "22101316UG",
+      "Exif.Image.GPSTag": "312",
+      "Exif.Image.ExifTag": "184",
+      "Exif.Image.DateTime": "2025:09:15 18:40:40",
+      "Exif.Thumbnail.Make": "Xiaomi",
+      "Exif.Thumbnail.Model": "22101316UG",
+      "Xmp.exif.GPSAltitude": "0/1",
+      "Xmp.exif.GPSLatitude": "55,43.82851657N",
+      "Xmp.exif.GPSMapDatum": "WGS-84",
+      "Exif.Image.ImageWidth": "10904",
+      "Exif.Photo.SubSecTime": "983",
+      "Xmp.exif.GPSLongitude": "37,38.27167386E",
+      "Xmp.exif.GPSVersionID": "2.0.0.0",
+      "Exif.Image.ImageLength": "3552",
+      "Exif.Image.Orientation": "1",
+      "Exif.Photo.LightSource": "0",
+      "Exif.Thumbnail.DateTime": "2025:09:15 18:40:40",
+      "Xmp.exif.GPSAltitudeRef": "0",
+      "Xmp.exif.GPSLatitudeRef": "N",
+      "Exif.GPSInfo.GPSAltitude": "0/1",
+      "Exif.GPSInfo.GPSLatitude": "55/1 43828516/1000000 0/1",
+      "Exif.GPSInfo.GPSMapDatum": "WGS-84",
+      "Xmp.exif.GPSLongitudeRef": "E",
+      "Exif.GPSInfo.GPSLongitude": "37/1 38271673/1000000 0/1",
+      "Exif.GPSInfo.GPSVersionID": "2 0 0 0",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Photo.DateTimeOriginal": "2025:09:15 18:40:40",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.OffsetTimeOriginal": "+03:00",
+      "Exif.Thumbnail.JPEGInterchangeFormat": "584",
+      "Exif.Thumbnail.JPEGInterchangeFormatLength": "3875"
+    },
+    "created": "2025-09-16T19:02:21.213956+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-09-16T19:02:21.213956+00:00",
+    "datetime": "2025-09-15T15:40:40+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": [
+        {
+          "key": "transport",
+          "value": "walk"
+        }
+      ]
+    },
+    "datetimetz": "2025-09-15T18:40:40+03:00",
+    "annotations": [],
+    "view:azimuth": 0,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/12/1a/76/01/94c8-4613-b9b1-29446798b780.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "solenoid jam",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/12/1a/76/01/94c8-4613-b9b1-29446798b780/thumb.jpg",
+    "original_file:name": "PANO_20250915_184040.jpg",
+    "original_file:size": 11373008,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "22101316UG",
+      "camera_manufacturer": "Xiaomi",
+      "sensor_array_dimensions": [
+        10904,
+        3552
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

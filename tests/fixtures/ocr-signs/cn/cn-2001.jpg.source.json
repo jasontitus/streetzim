@@ -1,0 +1,516 @@
+{
+  "id": "87676851-25a6-4343-8e6f-524de3a44c96",
+  "bbox": [
+    106.449623108,
+    29.566968918,
+    106.449623108,
+    29.566968918
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/bff2c603-c8ec-4dcd-a608-6ad1b438d262/items/87676851-25a6-4343-8e6f-524de3a44c96",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/bff2c603-c8ec-4dcd-a608-6ad1b438d262",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/bff2c603-c8ec-4dcd-a608-6ad1b438d262",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "prev",
+      "href": "https://api.panoramax.xyz/api/collections/bff2c603-c8ec-4dcd-a608-6ad1b438d262/items/8296df49-5248-4cd6-aa18-09746d83d7e2",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.449623108,
+          29.566968918
+        ]
+      },
+      "id": "8296df49-5248-4cd6-aa18-09746d83d7e2"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/87/67/68/51/25a6-4343-8e6f-524de3a44c96.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/87/67/68/51/25a6-4343-8e6f-524de3a44c96/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/87/67/68/51/25a6-4343-8e6f-524de3a44c96/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      106.449623108,
+      29.566968918
+    ]
+  },
+  "providers": [
+    {
+      "id": "02f22a1e-7536-4bff-bee1-ee554c8369a3",
+      "name": "Ever W",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "bff2c603-c8ec-4dcd-a608-6ad1b438d262",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "HUAWEI",
+      "Exif.Image.Model": "HUAWEI Mate 50 Pro",
+      "Exif.Photo.Flash": "0",
+      "Exif.Image.GPSTag": "1158",
+      "Exif.Image.ExifTag": "302",
+      "Exif.Photo.FNumber": "200/100",
+      "Exif.Image.DateTime": "2025:05:19 10:22:00",
+      "Exif.Image.Software": "DCO-AL00 4.2.0.173(C00E162R5P8)",
+      "Exif.Photo.Contrast": "0",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.Sharpness": "0",
+      "Exif.Image.ImageWidth": "4096",
+      "Exif.Photo.ColorSpace": "65535",
+      "Exif.Photo.FileSource": "3",
+      "Exif.Photo.Saturation": "0",
+      "Exif.Photo.SubSecTime": "465000",
+      "Exif.Image.ImageLength": "3072",
+      "Exif.Image.Orientation": "0",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "48 50 49 48",
+      "Exif.Photo.FocalLength": "5750/1000",
+      "Exif.Photo.GainControl": "0",
+      "Exif.Photo.LightSource": "1",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "298000/1000000000",
+      "Exif.Photo.MeteringMode": "5",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "0/100",
+      "Exif.GPSInfo.GPSLatitude": "29/1 34/1 1088104/1000000",
+      "Exif.Image.BitsPerSample": "8 8 8",
+      "Exif.Photo.ApertureValue": "200/100",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.GPSInfo.GPSDateStamp": "2025:05:19",
+      "Exif.GPSInfo.GPSLongitude": "106/1 26/1 58643188/1000000",
+      "Exif.GPSInfo.GPSTimeStamp": "2/1 22/1 0/1",
+      "Exif.GPSInfo.GPSVersionID": "2 2 0 0",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.CustomRendered": "1",
+      "Exif.Photo.BrightnessValue": "2/-1",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "50",
+      "Exif.Photo.PixelXDimension": "4096",
+      "Exif.Photo.PixelYDimension": "3072",
+      "Exif.GPSInfo.GPSAltitudeRef": "1",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.ImageDescription": "_cuva",
+      "Exif.Image.YCbCrPositioning": "1",
+      "Exif.Photo.DateTimeOriginal": "2025:05:19 10:22:00",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2025:05:19 10:22:00",
+      "Exif.Photo.ExposureBiasValue": "0/10",
+      "Exif.Photo.ShutterSpeedValue": "290000/10000",
+      "Exif.Photo.SubSecTimeOriginal": "465000",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Photo.InteroperabilityTag": "1128",
+      "Exif.Photo.SubSecTimeDigitized": "465000",
+      "Exif.Photo.SubjectDistanceRange": "0",
+      "Exif.GPSInfo.GPSProcessingMethod": "CELLID",
+      "Exif.Iop.InteroperabilityVersion": "48 49 48 48",
+      "Exif.Photo.FocalLengthIn35mmFilm": "27",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0"
+    },
+    "created": "2025-05-19T02:22:36.708631+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-06-03T03:02:44.485815+00:00",
+    "datetime": "2025-05-19T02:22:00.465000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2025-05-19T02:22:00.465000+00:00",
+    "annotations": [
+      {
+        "id": "08a1c6a7-53fb-409e-8d25-76a351324299",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                429,
+                2112
+              ],
+              [
+                494,
+                2112
+              ],
+              [
+                494,
+                2176
+              ],
+              [
+                429,
+                2176
+              ],
+              [
+                429,
+                2112
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.839"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "213a83f7-e395-458c-8ee9-39446c9b36b4",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                1936,
+                1501
+              ],
+              [
+                2138,
+                1501
+              ],
+              [
+                2138,
+                1721
+              ],
+              [
+                1936,
+                1721
+              ],
+              [
+                1936,
+                1501
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.887"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "3aa145e4-a457-4020-bcb3-b19480ef911f",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                0,
+                2180
+              ],
+              [
+                24,
+                2180
+              ],
+              [
+                24,
+                2244
+              ],
+              [
+                0,
+                2244
+              ],
+              [
+                0,
+                2180
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.453"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "55a084cc-b642-46a5-8968-ce4deb35f28b",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                1600,
+                2024
+              ],
+              [
+                1792,
+                2024
+              ],
+              [
+                1792,
+                2224
+              ],
+              [
+                1600,
+                2224
+              ],
+              [
+                1600,
+                2024
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.888"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "7838f263-fae5-44e5-9992-cbf6f9d9f7bd",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                776,
+                2156
+              ],
+              [
+                833,
+                2156
+              ],
+              [
+                833,
+                2228
+              ],
+              [
+                776,
+                2228
+              ],
+              [
+                776,
+                2156
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.475"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "b3a71c36-996c-4596-a4a2-02cf73ec99de",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                1930,
+                1810
+              ],
+              [
+                2138,
+                1810
+              ],
+              [
+                2138,
+                2034
+              ],
+              [
+                1930,
+                2034
+              ],
+              [
+                1930,
+                1810
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.897"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "ba83ed6c-0d53-4605-8057-e081f75310f0",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                786,
+                2238
+              ],
+              [
+                822,
+                2238
+              ],
+              [
+                822,
+                2282
+              ],
+              [
+                786,
+                2282
+              ],
+              [
+                786,
+                2238
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.506"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      }
+    ],
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/87/67/68/51/25a6-4343-8e6f-524de3a44c96.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "Ever W",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/87/67/68/51/25a6-4343-8e6f-524de3a44c96/thumb.jpg",
+    "original_file:name": "IMG_20250519_102200.jpg",
+    "original_file:size": 5280274,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "Mate 50 Pro",
+      "focal_length": 5.75,
+      "field_of_view": 67,
+      "camera_manufacturer": "HUAWEI",
+      "sensor_array_dimensions": [
+        4096,
+        3072
+      ]
+    },
+    "geovisio:rank_in_collection": 2,
+    "quality:horizontal_accuracy": 5.0,
+    "panoramax:horizontal_pixel_density": 61
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

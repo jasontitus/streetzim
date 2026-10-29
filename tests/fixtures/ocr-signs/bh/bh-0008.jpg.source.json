@@ -1,0 +1,610 @@
+{
+  "flickr_url": "https://www.flickr.com/photos/drbeachvacation/5933407344/",
+  "license_url": "https://creativecommons.org/licenses/by/2.0/",
+  "photoModel": {
+    "title": "2011 Vacation Asia Middle East (Bahrain)",
+    "description": "(cc) Shashi Bellamkonda <a href=\"http://www.shashi.co\" rel=\"noreferrer nofollow\">www.shashi.co</a>Please credit as above if using this pictur",
+    "mediaType": "photo",
+    "contentType": 0,
+    "license": 4,
+    "isVideo": false,
+    "isOwner": false,
+    "sizes": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "width": 800,
+        "height": 534,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg"
+      }
+    },
+    "descendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "width": 800,
+        "height": 534,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg"
+      }
+    ],
+    "ascendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "width": 800,
+        "height": 534,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg"
+      }
+    ],
+    "aspectRatio": 1.499531396438613,
+    "needsInterstitial": false,
+    "canComment": false,
+    "canPublicComment": true,
+    "url": "/photos/drbeachvacation/5933407344",
+    "rotation": 0,
+    "owner": {
+      "pathAlias": "drbeachvacation",
+      "username": "ShashiBellamkonda",
+      "realname": "",
+      "displayname": "ShashiBellamkonda",
+      "nsid": "35899785@N00",
+      "url": "/photos/drbeachvacation/",
+      "isMe": false,
+      "buddyicon": {
+        "retina": "//live.staticflickr.com/2405/buddyicons/35899785@N00_r.jpg?1252781780#35899785@N00",
+        "large": "//live.staticflickr.com/2405/buddyicons/35899785@N00_l.jpg?1252781780#35899785@N00",
+        "medium": "//live.staticflickr.com/2405/buddyicons/35899785@N00_m.jpg?1252781780#35899785@N00",
+        "small": "//live.staticflickr.com/2405/buddyicons/35899785@N00_s.jpg?1252781780#35899785@N00",
+        "default": "//live.staticflickr.com/2405/buddyicons/35899785@N00.jpg?1252781780#35899785@N00"
+      },
+      "isPro": true,
+      "proBadge": "standard",
+      "isAdFree": false,
+      "isNoAds": true,
+      "dateCreated": "2006-06-08T06:00:39.000Z",
+      "location": "Potomac, USA",
+      "expiringPartner": false,
+      "uploadCount": null,
+      "uploadLimit": null,
+      "uploadLimitStatus": null,
+      "isCognitoUser": null,
+      "hasAuthorizedMobile": null,
+      "hasInvalidEmail": false,
+      "subscription": {
+        "isPastDue": false,
+        "isPro": false,
+        "isClosed": false
+      },
+      "contactsCacheUrl": false,
+      "segments": [],
+      "isEligibleForGifts": true,
+      "eligibleGifts": [
+        "year",
+        "month",
+        "week"
+      ],
+      "newFlow": true,
+      "marketingPrefsLink": "",
+      "contentRestrictions": null,
+      "id": "35899785@N00"
+    },
+    "engagement": {
+      "ownerNsid": "35899785@N00",
+      "isFaved": false,
+      "faveCount": 0,
+      "commentCount": 0,
+      "canFave": true,
+      "canShare": true,
+      "canDownload": true,
+      "noteCount": 0,
+      "viewCount": 68,
+      "isOwner": false,
+      "reactions": {
+        "like": {
+          "id": "like",
+          "count": 5,
+          "didViewerReact": true,
+          "canReact": true
+        },
+        "someOtherReaction": {
+          "id": "someOtherReaction",
+          "count": 3,
+          "didViewerReact": false,
+          "canReact": true
+        }
+      },
+      "id": "5933407344"
+    },
+    "secret": "7a609ef083",
+    "adEligibility": {
+      "isAdEligible": false,
+      "labels": [
+        "ProOwner"
+      ],
+      "highScoreLabels": [
+        "ProOwner"
+      ],
+      "lane": 1
+    },
+    "canAddMeta": false,
+    "oWidth": 1600,
+    "oHeight": 1067,
+    "safetyLevel": 0,
+    "sizesForAlbum": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "width": 800,
+        "height": 534,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/6132/5933407344_7a609ef083_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/6132/5933407344_7487dd0b26_h.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/6132/5933407344_9e1e842e42_o.jpg"
+      }
+    },
+    "visibilitySource": 1,
+    "isVideoPending": false,
+    "isVideoFailed": false,
+    "systemModerated": false,
+    "upgradeSizes": [],
+    "id": "5933407344"
+  },
+  "commons_source": {
+    "pageid": 34013970,
+    "ns": 6,
+    "title": "File:2011 Vacation Asia Middle East (Bahrain) (5933407344).jpg",
+    "imagerepository": "local",
+    "imageinfo": [
+      {
+        "size": 556918,
+        "width": 1600,
+        "height": 1067,
+        "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg/1280px-2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+        "thumbwidth": 1000,
+        "thumbheight": 667,
+        "responsiveUrls": {
+          "2": "https://upload.wikimedia.org/wikipedia/commons/7/7d/2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+        },
+        "thumbattribs": {
+          "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg/1280px-2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+          "decoding": "async",
+          "loading": "lazy",
+          "width": 1000,
+          "height": 667,
+          "srcset": "https://upload.wikimedia.org/wikipedia/commons/7/7d/2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled 2x"
+        },
+        "url": "https://upload.wikimedia.org/wikipedia/commons/7/7d/2011_Vacation_Asia_Middle_East_%28Bahrain%29_%285933407344%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "descriptionurl": "https://commons.wikimedia.org/wiki/File:2011_Vacation_Asia_Middle_East_(Bahrain)_(5933407344).jpg",
+        "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=34013970",
+        "extmetadata": {
+          "DateTime": {
+            "value": "2014-07-16 00:31:13",
+            "source": "mediawiki-metadata",
+            "hidden": ""
+          },
+          "ObjectName": {
+            "value": "2011 Vacation Asia Middle East (Bahrain) (5933407344)",
+            "source": "mediawiki-metadata"
+          },
+          "CommonsMetadataExtension": {
+            "value": 1.2,
+            "source": "extension",
+            "hidden": ""
+          },
+          "Categories": {
+            "value": "Taken with Canon EOS 400D|Road signs in Bahrain|Flickr images reviewed by FlickreviewR",
+            "source": "commons-categories",
+            "hidden": ""
+          },
+          "Assessments": {
+            "value": "",
+            "source": "commons-categories",
+            "hidden": ""
+          },
+          "ImageDescription": {
+            "value": "(cc) Shashi Bellamkonda <a rel=\"nofollow\" class=\"external text\" href=\"http://www.shashi.co\">www.shashi.co</a>Please credit as above if using this pictur",
+            "source": "commons-desc-page"
+          },
+          "DateTimeOriginal": {
+            "value": "2011-07-12 06:32",
+            "source": "commons-desc-page"
+          },
+          "Credit": {
+            "value": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/photos/drbeachvacation/5933407344/\">2011 Vacation Asia Middle East (Bahrain)</a>",
+            "source": "commons-desc-page"
+          },
+          "Artist": {
+            "value": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/people/35899785@N00\">ShashiBellamkonda</a> from Potomac, USA",
+            "source": "commons-desc-page"
+          },
+          "LicenseShortName": {
+            "value": "CC BY 2.0",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "UsageTerms": {
+            "value": "Creative Commons Attribution 2.0",
+            "source": "commons-desc-page"
+          },
+          "AttributionRequired": {
+            "value": "true",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "LicenseUrl": {
+            "value": "https://creativecommons.org/licenses/by/2.0",
+            "source": "commons-desc-page"
+          },
+          "Copyrighted": {
+            "value": "True",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "Restrictions": {
+            "value": "",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "License": {
+            "value": "cc-by-2.0",
+            "source": "commons-templates",
+            "hidden": ""
+          }
+        }
+      }
+    ]
+  }
+}

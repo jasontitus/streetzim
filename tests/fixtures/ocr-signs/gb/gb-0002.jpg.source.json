@@ -1,0 +1,17 @@
+{
+  "source": "geograph",
+  "source_url": "https://www.geograph.org.uk/photo/7127915",
+  "photo_id": "7127915",
+  "author": "Paul",
+  "license": "CC BY-SA 2.0",
+  "license_url": "http://creativecommons.org/licenses/by-sa/2.0/",
+  "original_url": "https://s0.geograph.org.uk/geophotos/07/12/79/7127915_8e343d55_original.jpg?sign=d7acf74a69",
+  "source_mainphoto_html": "<div class=\"shadow shadow_large\" id=\"mainphoto\"><img alt=\"Bean Village sign\" src=\"https://s0.geograph.org.uk/geophotos/07/12/79/7127915_8e343d55.jpg\" crossorigin=\"use-credentials\" width=\"408\" height=\"640\" srcset=\"https://s0.geograph.org.uk/geophotos/07/12/79/7127915_8e343d55.jpg 408w, https://s3.geograph.org.uk/geophotos/07/12/79/7127915_8e343d55_800x800.jpg 509w, https://s0.geograph.org.uk/geophotos/07/12/79/7127915_8e343d55_original.jpg?sign=d7acf74a69 652w\" onerror=\"retryCross(this)\" style=\"width:652px; max-width:min(100% , 59vh); height:auto;\"></div>",
+  "original_asset_verification": "The source photo page explicitly links this exact signed _original.jpg asset, distinct from its scaled _800x800.jpg and normal display JPEG. No _1024x1024.jpg substitute was used.",
+  "width": 652,
+  "height": 1024,
+  "bytes": 190579,
+  "sha256": "309d5e7f5978ecef941cb3f3b9b8f440a3fd8e9728bab62f92fafb36a1a563f5",
+  "local_transformations": [],
+  "visual_review": "Main sign text transcribed from the downloaded original JPEG."
+}

@@ -1,0 +1,17 @@
+{
+  "source": "geograph",
+  "source_url": "https://www.geograph.org.uk/photo/7022262",
+  "photo_id": "7022262",
+  "author": "Paul",
+  "license": "CC BY-SA 2.0",
+  "license_url": "http://creativecommons.org/licenses/by-sa/2.0/",
+  "original_url": "https://s0.geograph.org.uk/geophotos/07/02/22/7022262_770c4427_original.jpg?sign=3c7e29d636",
+  "source_mainphoto_html": "<div class=\"shadow shadow_large\" id=\"mainphoto\"><img alt=\"Plaxtol Village Sign \" src=\"https://s0.geograph.org.uk/geophotos/07/02/22/7022262_770c4427.jpg\" crossorigin=\"use-credentials\" width=\"406\" height=\"640\" srcset=\"https://s0.geograph.org.uk/geophotos/07/02/22/7022262_770c4427.jpg 406w, https://s2.geograph.org.uk/geophotos/07/02/22/7022262_770c4427_800x800.jpg 507w, https://s0.geograph.org.uk/geophotos/07/02/22/7022262_770c4427_original.jpg?sign=3c7e29d636 649w\" onerror=\"retryCross(this)\" style=\"width:649px; max-width:min(100% , 59vh); height:auto;\"></div>",
+  "original_asset_verification": "The source photo page explicitly links this exact signed _original.jpg asset, distinct from its scaled _800x800.jpg and normal display JPEG. No _1024x1024.jpg substitute was used.",
+  "width": 649,
+  "height": 1024,
+  "bytes": 75289,
+  "sha256": "f7180bdb8699e05b3114e6809923ad388779fcc04a623e4ccf935ec9884dd794",
+  "local_transformations": [],
+  "visual_review": "Main sign text transcribed from the downloaded original JPEG."
+}

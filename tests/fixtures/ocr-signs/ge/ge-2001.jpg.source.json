@@ -1,0 +1,275 @@
+{
+  "id": "4bcf8b69-719b-4920-8e69-eb9a9ff3252b",
+  "bbox": [
+    42.671739192,
+    42.260426144,
+    42.671739192,
+    42.260426144
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b/items/4bcf8b69-719b-4920-8e69-eb9a9ff3252b",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "prev",
+      "href": "https://api.panoramax.xyz/api/collections/bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b/items/77ab9b53-7934-4d53-b3f9-cc4939c34940",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          42.671706066,
+          42.260370524
+        ]
+      },
+      "id": "77ab9b53-7934-4d53-b3f9-cc4939c34940"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b/items/5be9d48f-f60a-4031-8d04-6e1c6b95bbe8",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          42.671780714,
+          42.260507571
+        ]
+      },
+      "id": "5be9d48f-f60a-4031-8d04-6e1c6b95bbe8"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/4b/cf/8b/69/719b-4920-8e69-eb9a9ff3252b.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/4b/cf/8b/69/719b-4920-8e69-eb9a9ff3252b/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/4b/cf/8b/69/719b-4920-8e69-eb9a9ff3252b/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      42.671739192,
+      42.260426144
+    ]
+  },
+  "providers": [
+    {
+      "id": "02ecc40d-9ba0-4cd8-bee1-1c5b494bdd3d",
+      "name": "Robot8A",
+      "roles": [
+        "producer"
+      ]
+    },
+    {
+      "name": "robot8a",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "bbb3f4d8-02eb-4bf7-abb6-240ac3e16f9b",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Apple",
+      "Exif.Image.Model": "iPhone XR",
+      "Exif.Image.Artist": "robot8a",
+      "Exif.Image.GPSTag": "200",
+      "Exif.Image.ExifTag": "110",
+      "Exif.Image.Orientation": "1",
+      "Exif.Photo.ExifVersion": "48 50 51 49",
+      "Exif.GPSInfo.GPSAltitude": "141585/1000",
+      "Exif.GPSInfo.GPSLatitude": "42/1 15/1 22653004/603531",
+      "Exif.GPSInfo.GPSLongitude": "42/1 40/1 9833835/538513",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Photo.DateTimeOriginal": "2020:01:15 09:35:36",
+      "Exif.GPSInfo.GPSImgDirection": "111206/1000",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.OffsetTimeOriginal": "+04:00",
+      "Exif.Photo.SubSecTimeOriginal": "605000",
+      "Exif.GPSInfo.GPSImgDirectionRef": "T"
+    },
+    "created": "2025-09-21T03:09:19.402269+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-12-29T20:53:59.659316+00:00",
+    "datetime": "2020-01-15T05:35:36.605000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2020-01-15T09:35:36.605000+04:00",
+    "annotations": [
+      {
+        "id": "5ecc1082-64c7-4103-9471-43c2dca30a9d",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                294,
+                1538
+              ],
+              [
+                379,
+                1538
+              ],
+              [
+                379,
+                1664
+              ],
+              [
+                294,
+                1664
+              ],
+              [
+                294,
+                1538
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.689"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "yes"
+          }
+        ]
+      },
+      {
+        "id": "e026c38c-cb9e-4d0e-98c2-a55156a9c788",
+        "shape": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                2976,
+                1362
+              ],
+              [
+                3059,
+                1362
+              ],
+              [
+                3059,
+                1535
+              ],
+              [
+                2976,
+                1535
+              ],
+              [
+                2976,
+                1362
+              ]
+            ]
+          ]
+        },
+        "semantics": [
+          {
+            "key": "classification_confidence[osm|traffic_sign=FR:B15]",
+            "value": "0.99"
+          },
+          {
+            "key": "classification_model[osm|traffic_sign=FR:B15]",
+            "value": "classify_fr_road_signs/0.13"
+          },
+          {
+            "key": "detection_confidence[osm|traffic_sign=yes]",
+            "value": "0.794"
+          },
+          {
+            "key": "detection_model[osm|traffic_sign=yes]",
+            "value": "SGBlur-yolo11s/0.1.0"
+          },
+          {
+            "key": "osm|traffic_sign",
+            "value": "FR:B15"
+          }
+        ]
+      }
+    ],
+    "view:azimuth": 111,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/4b/cf/8b/69/719b-4920-8e69-eb9a9ff3252b.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "Robot8A",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/4b/cf/8b/69/719b-4920-8e69-eb9a9ff3252b/thumb.jpg",
+    "original_file:name": "2020-01-15_09H35mn36s605.jpg",
+    "original_file:size": 3018127,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "iPhone XR",
+      "camera_manufacturer": "Apple",
+      "sensor_array_dimensions": [
+        4032,
+        3024
+      ]
+    },
+    "geovisio:rank_in_collection": 83,
+    "quality:horizontal_accuracy": 5.0
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

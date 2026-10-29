@@ -1,0 +1,638 @@
+{
+  "flickr_url": "https://www.flickr.com/photos/7451276@N08/8310950323",
+  "license_url": "https://creativecommons.org/licenses/by/2.0/",
+  "photoModel": {
+    "title": "大稻埕",
+    "description": "",
+    "mediaType": "photo",
+    "contentType": 0,
+    "license": 4,
+    "isVideo": false,
+    "isOwner": false,
+    "sizes": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "width": 100,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "width": 240,
+        "height": 180,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "width": 320,
+        "height": 240,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "width": 400,
+        "height": 300,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "width": 500,
+        "height": 375,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "width": 640,
+        "height": 480,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "width": 800,
+        "height": 600,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "width": 1024,
+        "height": 768,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "width": 1600,
+        "height": 1200,
+        "url": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg"
+      },
+      "k": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "width": 2048,
+        "height": 1536,
+        "url": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "width": 3264,
+        "height": 2448,
+        "url": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg"
+      }
+    },
+    "descendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "width": 3264,
+        "height": 2448,
+        "url": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "width": 2048,
+        "height": 1536,
+        "url": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "width": 1600,
+        "height": 1200,
+        "url": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "width": 1024,
+        "height": 768,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "width": 800,
+        "height": 600,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "width": 640,
+        "height": 480,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "width": 500,
+        "height": 375,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "width": 400,
+        "height": 300,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "width": 320,
+        "height": 240,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "width": 240,
+        "height": 180,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "width": 100,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg"
+      }
+    ],
+    "ascendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "width": 100,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "width": 240,
+        "height": 180,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "width": 320,
+        "height": 240,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "width": 400,
+        "height": 300,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "width": 500,
+        "height": 375,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "width": 640,
+        "height": 480,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "width": 800,
+        "height": 600,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "width": 1024,
+        "height": 768,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "width": 1600,
+        "height": 1200,
+        "url": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "width": 2048,
+        "height": 1536,
+        "url": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "width": 3264,
+        "height": 2448,
+        "url": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg"
+      }
+    ],
+    "aspectRatio": 1.3333333333333333,
+    "needsInterstitial": false,
+    "canComment": false,
+    "canPublicComment": true,
+    "url": "/photos/7451276@N08/8310950323",
+    "rotation": 0,
+    "owner": {
+      "pathAlias": "7451276@N08",
+      "username": "neverbutterfly",
+      "realname": "",
+      "displayname": "neverbutterfly",
+      "nsid": "7451276@N08",
+      "url": "/photos/7451276@N08/",
+      "isMe": false,
+      "buddyicon": {
+        "retina": "//live.staticflickr.com/7753/buddyicons/7451276@N08_r.jpg?1431652353#7451276@N08",
+        "large": "//live.staticflickr.com/7753/buddyicons/7451276@N08_l.jpg?1431652353#7451276@N08",
+        "medium": "//live.staticflickr.com/7753/buddyicons/7451276@N08_m.jpg?1431652353#7451276@N08",
+        "small": "//live.staticflickr.com/7753/buddyicons/7451276@N08_s.jpg?1431652353#7451276@N08",
+        "default": "//live.staticflickr.com/7753/buddyicons/7451276@N08.jpg?1431652353#7451276@N08"
+      },
+      "isPro": false,
+      "isAdFree": false,
+      "isNoAds": false,
+      "dateCreated": "2007-03-18T02:57:14.000Z",
+      "location": "",
+      "expiringPartner": false,
+      "uploadCount": null,
+      "uploadLimit": null,
+      "uploadLimitStatus": null,
+      "isCognitoUser": null,
+      "hasAuthorizedMobile": null,
+      "hasInvalidEmail": false,
+      "subscription": {
+        "isPastDue": false,
+        "isPro": false,
+        "isClosed": false
+      },
+      "contactsCacheUrl": false,
+      "segments": [],
+      "isEligibleForGifts": true,
+      "eligibleGifts": [
+        "year",
+        "month",
+        "week"
+      ],
+      "newFlow": true,
+      "marketingPrefsLink": "",
+      "contentRestrictions": null,
+      "id": "7451276@N08"
+    },
+    "engagement": {
+      "ownerNsid": "7451276@N08",
+      "isFaved": false,
+      "faveCount": 0,
+      "commentCount": 0,
+      "canFave": true,
+      "canShare": true,
+      "canDownload": true,
+      "noteCount": 0,
+      "viewCount": 180,
+      "isOwner": false,
+      "reactions": {
+        "like": {
+          "id": "like",
+          "count": 5,
+          "didViewerReact": true,
+          "canReact": true
+        },
+        "someOtherReaction": {
+          "id": "someOtherReaction",
+          "count": 3,
+          "didViewerReact": false,
+          "canReact": true
+        }
+      },
+      "id": "8310950323"
+    },
+    "secret": "22befbf96f",
+    "adEligibility": {
+      "isAdEligible": true,
+      "labels": [],
+      "highScoreLabels": [],
+      "lane": 1
+    },
+    "canAddMeta": false,
+    "oWidth": 3264,
+    "oHeight": 2448,
+    "safetyLevel": 0,
+    "sizesForAlbum": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "width": 100,
+        "height": 75,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "width": 240,
+        "height": 180,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "width": 320,
+        "height": 240,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "width": 400,
+        "height": 300,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "width": 500,
+        "height": 375,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "width": 640,
+        "height": 480,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "width": 800,
+        "height": 600,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "width": 1024,
+        "height": 768,
+        "url": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/8364/8310950323_22befbf96f_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "width": 1600,
+        "height": 1200,
+        "url": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/8364/8310950323_82cb6e82ac_h.jpg"
+      },
+      "k": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "width": 2048,
+        "height": 1536,
+        "url": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/8364/8310950323_8a84022ab4_k.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "width": 3264,
+        "height": 2448,
+        "url": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/8364/8310950323_73b725c2ee_o.jpg"
+      }
+    },
+    "visibilitySource": 1,
+    "isVideoPending": false,
+    "isVideoFailed": false,
+    "systemModerated": false,
+    "upgradeSizes": [],
+    "id": "8310950323"
+  },
+  "commons_source": {
+    "pageid": 63286818,
+    "ns": 6,
+    "title": "File:Taipei Dihua Street Post Office wooden sign 20120616.jpg",
+    "index": 12,
+    "imagerepository": "local",
+    "imageinfo": [
+      {
+        "size": 2680043,
+        "width": 3264,
+        "height": 2448,
+        "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b8/Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg/1280px-Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+        "thumbwidth": 1000,
+        "thumbheight": 750,
+        "responsiveUrls": {
+          "2": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+        },
+        "thumbattribs": {
+          "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b8/Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg/1280px-Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+          "decoding": "async",
+          "loading": "lazy",
+          "width": 1000,
+          "height": 750,
+          "srcset": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled 2x"
+        },
+        "url": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg",
+        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Taipei_Dihua_Street_Post_Office_wooden_sign_20120616.jpg",
+        "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=63286818",
+        "extmetadata": {
+          "DateTime": {
+            "value": "2017-10-10 05:30:47",
+            "source": "mediawiki-metadata",
+            "hidden": ""
+          },
+          "ObjectName": {
+            "value": "Taipei Dihua Street Post Office wooden sign 20120616",
+            "source": "mediawiki-metadata"
+          },
+          "CommonsMetadataExtension": {
+            "value": 1.2,
+            "source": "extension",
+            "hidden": ""
+          },
+          "Categories": {
+            "value": "Wooden signs in Taipei|Flickr images reviewed by FlickreviewR|Flickr files uploaded by Solomon203 in 2017|Taipei Dihua Street Post Office",
+            "source": "commons-categories",
+            "hidden": ""
+          },
+          "Assessments": {
+            "value": "",
+            "source": "commons-categories",
+            "hidden": ""
+          },
+          "ImageDescription": {
+            "value": "​臺北迪化街郵局大門上方木牌。",
+            "source": "commons-desc-page"
+          },
+          "DateTimeOriginal": {
+            "value": "2012-06-16 12:52:39",
+            "source": "commons-desc-page"
+          },
+          "Credit": {
+            "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.flickr.com/photos/7451276@N08/8310950323\">https://www.flickr.com/photos/7451276@N08/8310950323</a>",
+            "source": "commons-desc-page"
+          },
+          "Artist": {
+            "value": "neverbutterfly",
+            "source": "commons-desc-page"
+          },
+          "LicenseShortName": {
+            "value": "CC BY 2.0",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "UsageTerms": {
+            "value": "Creative Commons Attribution 2.0",
+            "source": "commons-desc-page"
+          },
+          "AttributionRequired": {
+            "value": "true",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "LicenseUrl": {
+            "value": "https://creativecommons.org/licenses/by/2.0",
+            "source": "commons-desc-page"
+          },
+          "Copyrighted": {
+            "value": "True",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "Restrictions": {
+            "value": "",
+            "source": "commons-desc-page",
+            "hidden": ""
+          },
+          "License": {
+            "value": "cc-by-2.0",
+            "source": "commons-templates",
+            "hidden": ""
+          }
+        }
+      }
+    ]
+  }
+}

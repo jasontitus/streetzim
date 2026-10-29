@@ -1,0 +1,535 @@
+{
+  "flickr_url": "https://www.flickr.com/photos/twang_dunga/6885961448/",
+  "license_url": "https://creativecommons.org/licenses/by/2.0/",
+  "photoModel": {
+    "title": "Taipei station",
+    "description": "",
+    "mediaType": "photo",
+    "contentType": 0,
+    "license": 4,
+    "isVideo": false,
+    "isOwner": false,
+    "sizes": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "width": 800,
+        "height": 533,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg"
+      },
+      "k": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "width": 2048,
+        "height": 1365,
+        "url": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "width": 3072,
+        "height": 2048,
+        "url": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg"
+      }
+    },
+    "descendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "width": 3072,
+        "height": 2048,
+        "url": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "width": 2048,
+        "height": 1365,
+        "url": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "width": 800,
+        "height": 533,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg"
+      }
+    ],
+    "ascendingSizes": [
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "width": 800,
+        "height": 533,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "width": 2048,
+        "height": 1365,
+        "url": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg"
+      },
+      {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "width": 3072,
+        "height": 2048,
+        "url": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg"
+      }
+    ],
+    "aspectRatio": 1.5003663003663004,
+    "needsInterstitial": false,
+    "canComment": false,
+    "canPublicComment": true,
+    "url": "/photos/twang_dunga/6885961448",
+    "rotation": 0,
+    "owner": {
+      "pathAlias": "twang_dunga",
+      "username": "Twang_Dunga",
+      "realname": "",
+      "displayname": "Twang_Dunga",
+      "nsid": "36449457@N00",
+      "url": "/photos/twang_dunga/",
+      "isMe": false,
+      "buddyicon": {
+        "retina": "//live.staticflickr.com/32/buddyicons/36449457@N00_r.jpg?1201758051#36449457@N00",
+        "large": "//live.staticflickr.com/32/buddyicons/36449457@N00_l.jpg?1201758051#36449457@N00",
+        "medium": "//live.staticflickr.com/32/buddyicons/36449457@N00_m.jpg?1201758051#36449457@N00",
+        "small": "//live.staticflickr.com/32/buddyicons/36449457@N00_s.jpg?1201758051#36449457@N00",
+        "default": "//live.staticflickr.com/32/buddyicons/36449457@N00.jpg?1201758051#36449457@N00"
+      },
+      "isPro": false,
+      "isAdFree": false,
+      "isNoAds": false,
+      "dateCreated": "2005-04-21T22:42:12.000Z",
+      "location": "Shinagawa Tokyo, Japan",
+      "expiringPartner": false,
+      "uploadCount": null,
+      "uploadLimit": null,
+      "uploadLimitStatus": null,
+      "isCognitoUser": null,
+      "hasAuthorizedMobile": null,
+      "hasInvalidEmail": false,
+      "subscription": {
+        "isPastDue": false,
+        "isPro": false,
+        "isClosed": false
+      },
+      "contactsCacheUrl": false,
+      "segments": [],
+      "isEligibleForGifts": true,
+      "eligibleGifts": [
+        "year",
+        "month",
+        "week"
+      ],
+      "newFlow": true,
+      "marketingPrefsLink": "",
+      "contentRestrictions": null,
+      "id": "36449457@N00"
+    },
+    "engagement": {
+      "ownerNsid": "36449457@N00",
+      "isFaved": false,
+      "faveCount": 0,
+      "commentCount": 0,
+      "canFave": true,
+      "canShare": true,
+      "canDownload": true,
+      "noteCount": 0,
+      "viewCount": 220,
+      "isOwner": false,
+      "reactions": {
+        "like": {
+          "id": "like",
+          "count": 5,
+          "didViewerReact": true,
+          "canReact": true
+        },
+        "someOtherReaction": {
+          "id": "someOtherReaction",
+          "count": 3,
+          "didViewerReact": false,
+          "canReact": true
+        }
+      },
+      "id": "6885961448"
+    },
+    "secret": "320afe58a2",
+    "adEligibility": {
+      "isAdEligible": true,
+      "labels": [],
+      "highScoreLabels": [],
+      "lane": 1
+    },
+    "canAddMeta": false,
+    "oWidth": 3072,
+    "oHeight": 2048,
+    "safetyLevel": 0,
+    "sizesForAlbum": {
+      "sq": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "width": 75,
+        "height": 75,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg",
+        "key": "sq",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_s.jpg"
+      },
+      "q": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "width": 150,
+        "height": 150,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg",
+        "key": "q",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_q.jpg"
+      },
+      "t": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "width": 100,
+        "height": 67,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg",
+        "key": "t",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_t.jpg"
+      },
+      "s": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "width": 240,
+        "height": 160,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg",
+        "key": "s",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_m.jpg"
+      },
+      "n": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "width": 320,
+        "height": 213,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg",
+        "key": "n",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_n.jpg"
+      },
+      "w": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "width": 400,
+        "height": 267,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg",
+        "key": "w",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_w.jpg"
+      },
+      "m": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "width": 500,
+        "height": 333,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg",
+        "key": "m",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2.jpg"
+      },
+      "z": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "width": 640,
+        "height": 427,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg",
+        "key": "z",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_z.jpg"
+      },
+      "c": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "width": 800,
+        "height": 533,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg",
+        "key": "c",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_c.jpg"
+      },
+      "l": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "width": 1024,
+        "height": 683,
+        "url": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg",
+        "key": "l",
+        "src": "//live.staticflickr.com/7264/6885961448_320afe58a2_b.jpg"
+      },
+      "h": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "width": 1600,
+        "height": 1067,
+        "url": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg",
+        "key": "h",
+        "src": "//live.staticflickr.com/7264/6885961448_42a05252cb_h.jpg"
+      },
+      "k": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "width": 2048,
+        "height": 1365,
+        "url": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg",
+        "key": "k",
+        "src": "//live.staticflickr.com/7264/6885961448_c4c2482107_k.jpg"
+      },
+      "o": {
+        "displayUrl": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "width": 3072,
+        "height": 2048,
+        "url": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+        "key": "o",
+        "src": "//live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg"
+      }
+    },
+    "visibilitySource": 1,
+    "isVideoPending": false,
+    "isVideoFailed": false,
+    "systemModerated": false,
+    "upgradeSizes": [],
+    "id": "6885961448"
+  },
+  "original_url": "https://live.staticflickr.com/7264/6885961448_4cdab60f3a_o.jpg",
+  "cache_file": "6885961448.jpg",
+  "commons_source": null
+}

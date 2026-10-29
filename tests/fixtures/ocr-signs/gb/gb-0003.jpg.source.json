@@ -1,0 +1,17 @@
+{
+  "source": "geograph",
+  "source_url": "https://www.geograph.org.uk/photo/7121461",
+  "photo_id": "7121461",
+  "author": "Paul",
+  "license": "CC BY-SA 2.0",
+  "license_url": "http://creativecommons.org/licenses/by-sa/2.0/",
+  "original_url": "https://s0.geograph.org.uk/geophotos/07/12/14/7121461_1b049fa9_original.jpg?sign=d3c83a08c5",
+  "source_mainphoto_html": "<div class=\"shadow shadow_large\" id=\"mainphoto\"><img alt=\"Broad Oak (Canterbury) Village Sign\" src=\"https://s0.geograph.org.uk/geophotos/07/12/14/7121461_1b049fa9.jpg\" crossorigin=\"use-credentials\" width=\"460\" height=\"640\" srcset=\"https://s0.geograph.org.uk/geophotos/07/12/14/7121461_1b049fa9.jpg 460w, https://s1.geograph.org.uk/geophotos/07/12/14/7121461_1b049fa9_800x800.jpg 574w, https://s0.geograph.org.uk/geophotos/07/12/14/7121461_1b049fa9_original.jpg?sign=d3c83a08c5 735w\" onerror=\"retryCross(this)\" style=\"width:735px; max-width:min(100% , 67vh); height:auto;\"></div>",
+  "original_asset_verification": "The source photo page explicitly links this exact signed _original.jpg asset, distinct from its scaled _800x800.jpg and normal display JPEG. No _1024x1024.jpg substitute was used.",
+  "width": 735,
+  "height": 1024,
+  "bytes": 352124,
+  "sha256": "407a7c6bf85ea80642970d9bb93355af5efe05c12419ea07907dd226b473829f",
+  "local_transformations": [],
+  "visual_review": "Main sign text transcribed from the downloaded original JPEG."
+}

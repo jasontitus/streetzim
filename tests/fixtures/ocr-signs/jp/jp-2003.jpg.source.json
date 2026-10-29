@@ -1,0 +1,224 @@
+{
+  "id": "f7ff2e78-4eaf-4c58-95ee-7267ff520343",
+  "bbox": [
+    135.506175,
+    34.666263889,
+    135.506175,
+    34.666263889
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/0cda60a1-6774-4b69-b199-f7834955cb85/items/f7ff2e78-4eaf-4c58-95ee-7267ff520343",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/0cda60a1-6774-4b69-b199-f7834955cb85",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/0cda60a1-6774-4b69-b199-f7834955cb85",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/f7/ff/2e/78/4eaf-4c58-95ee-7267ff520343.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/f7/ff/2e/78/4eaf-4c58-95ee-7267ff520343/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/f7/ff/2e/78/4eaf-4c58-95ee-7267ff520343/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      135.506175,
+      34.666263889
+    ]
+  },
+  "providers": [
+    {
+      "id": "1ff68b1b-29b2-428f-a96e-e867963b8fda",
+      "name": "ねこねーちゃん",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "0cda60a1-6774-4b69-b199-f7834955cb85",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Apple",
+      "Exif.Image.Model": "iPhone 14",
+      "Exif.Photo.Flash": "16",
+      "Exif.Image.GPSTag": "2526",
+      "Exif.Image.ExifTag": "216",
+      "Exif.Photo.FNumber": "3/2",
+      "Xmp.mwg-rs.Regions": "type=\"Struct\"",
+      "Xmp.xmp.CreateDate": "2026-09-06T12:06:35",
+      "Xmp.xmp.ModifyDate": "2026-09-06T12:06:35",
+      "Exif.Image.DateTime": "2026:09:06 12:06:35",
+      "Exif.Image.Software": "26.5.2",
+      "Exif.Photo.LensMake": "Apple",
+      "Xmp.xmp.CreatorTool": "26.5.2",
+      "Exif.Photo.LensModel": "iPhone 14 back camera 5.7mm f/1.5",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.ColorSpace": "1",
+      "Exif.Photo.OffsetTime": "+09:00",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "48 50 51 50",
+      "Exif.Photo.FocalLength": "57/10",
+      "Exif.Photo.SubjectArea": "3473 2929 133 142",
+      "Exif.Image.HostComputer": "iPhone 14",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "1/327",
+      "Exif.Photo.MeteringMode": "5",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "143245/16209",
+      "Exif.GPSInfo.GPSLatitude": "34/1 39/1 5855/100",
+      "Exif.Photo.ApertureValue": "27767/23734",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.GPSInfo.GPSLongitude": "135/1 30/1 2223/100",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.CompositeImage": "2",
+      "Xmp.photoshop.DateCreated": "2026-09-06T12:06:35",
+      "Exif.Photo.BrightnessValue": "73563/11414",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "50",
+      "Exif.Photo.PixelXDimension": 3024,
+      "Exif.Photo.PixelYDimension": 4032,
+      "Iptc.Envelope.CharacterSet": "\u001b%G",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Photo.DateTimeOriginal": "2026:09:06 12:06:35",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSImgDirection": "4129/100",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2026:09:06 12:06:35",
+      "Exif.Photo.ExposureBiasValue": "0/1",
+      "Exif.Photo.LensSpecification": "2988413/524283 2988413/524283 3/2 3/2",
+      "Exif.Photo.ShutterSpeedValue": "99183/11875",
+      "Exif.Photo.OffsetTimeOriginal": "+09:00",
+      "Exif.Photo.SubSecTimeOriginal": "486",
+      "Iptc.Application2.DateCreated": "2026-09-06",
+      "Iptc.Application2.TimeCreated": "12:06:35+00:00",
+      "Exif.Photo.OffsetTimeDigitized": "+09:00",
+      "Exif.Photo.SubSecTimeDigitized": "486",
+      "Iptc.Application2.RecordVersion": "2",
+      "Exif.Photo.FocalLengthIn35mmFilm": "26",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Iptc.Application2.DigitizationDate": "2026-09-06",
+      "Iptc.Application2.DigitizationTime": "12:06:35+00:00",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList": "['']",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:AppliedToDimensions": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Type": "Face",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Type": "Face",
+      "Xmp.mwg-rs.Regions/mwg-rs:AppliedToDimensions/stDim:h": "3024",
+      "Xmp.mwg-rs.Regions/mwg-rs:AppliedToDimensions/stDim:w": "4032",
+      "Xmp.mwg-rs.Regions/mwg-rs:AppliedToDimensions/stDim:unit": "pixel",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Extensions": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Extensions": "type=\"Struct\"",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area/stArea:h": "0.049000000000000044",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area/stArea:w": "0.035000000000000031",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area/stArea:x": "0.86250000000000004",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area/stArea:y": "0.96350000000000002",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area/stArea:h": "0.040000000000000036",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area/stArea:w": "0.028000000000000025",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area/stArea:x": "0.82899999999999996",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area/stArea:y": "0.86399999999999999",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Area/stArea:unit": "normalized",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Area/stArea:unit": "normalized",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Extensions/apple-fi:FaceID": "1770",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Extensions/apple-fi:FaceID": "1766",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Extensions/apple-fi:AngleInfoYaw": "17",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Extensions/apple-fi:AngleInfoYaw": "10",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Extensions/apple-fi:AngleInfoRoll": "277",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Extensions/apple-fi:AngleInfoRoll": "299",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[1]/mwg-rs:Extensions/apple-fi:ConfidenceLevel": "1",
+      "Xmp.mwg-rs.Regions/mwg-rs:RegionList[2]/mwg-rs:Extensions/apple-fi:ConfidenceLevel": "1"
+    },
+    "created": "2026-09-06T03:06:47.526778+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2026-09-06T03:06:47.526778+00:00",
+    "datetime": "2026-09-06T03:06:35.486000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2026-09-06T12:06:35.486000+09:00",
+    "annotations": [],
+    "view:azimuth": 41,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/f7/ff/2e/78/4eaf-4c58-95ee-7267ff520343.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "ねこねーちゃん",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/f7/ff/2e/78/4eaf-4c58-95ee-7267ff520343/thumb.jpg",
+    "original_file:name": "PX_20260906_120635514.jpg",
+    "original_file:size": 3871884,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "iPhone 14",
+      "focal_length": 5.7,
+      "field_of_view": 69,
+      "camera_manufacturer": "Apple",
+      "sensor_array_dimensions": [
+        3024,
+        4032
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0,
+    "panoramax:horizontal_pixel_density": 44
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

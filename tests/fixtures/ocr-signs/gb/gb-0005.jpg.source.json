@@ -1,0 +1,17 @@
+{
+  "source": "geograph",
+  "source_url": "https://www.geograph.org.uk/photo/6803712",
+  "photo_id": "6803712",
+  "author": "Paul",
+  "license": "CC BY-SA 2.0",
+  "license_url": "http://creativecommons.org/licenses/by-sa/2.0/",
+  "original_url": "https://s0.geograph.org.uk/geophotos/06/80/37/6803712_32a1c0de_original.jpg?sign=ea44f8d8c5",
+  "source_mainphoto_html": "<div class=\"shadow shadow_large\" id=\"mainphoto\"><img alt=\"Dartford town sign\" src=\"https://s0.geograph.org.uk/geophotos/06/80/37/6803712_32a1c0de.jpg\" crossorigin=\"use-credentials\" width=\"433\" height=\"640\" srcset=\"https://s0.geograph.org.uk/geophotos/06/80/37/6803712_32a1c0de.jpg 433w, https://s0.geograph.org.uk/geophotos/06/80/37/6803712_32a1c0de_800x800.jpg 541w, https://s0.geograph.org.uk/geophotos/06/80/37/6803712_32a1c0de_original.jpg?sign=ea44f8d8c5 692w\" onerror=\"retryCross(this)\" style=\"width:692px; max-width:min(100% , 63vh); height:auto;\"></div>",
+  "original_asset_verification": "The source photo page explicitly links this exact signed _original.jpg asset, distinct from its scaled _800x800.jpg and normal display JPEG. No _1024x1024.jpg substitute was used.",
+  "width": 692,
+  "height": 1024,
+  "bytes": 147039,
+  "sha256": "65d228215604e1416642ab74200cf7119102990b4ae1bb4f3927bbf42599259b",
+  "local_transformations": [],
+  "visual_review": "Main sign text transcribed from the downloaded original JPEG."
+}
