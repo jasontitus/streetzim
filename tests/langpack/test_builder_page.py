@@ -317,27 +317,58 @@ def test_the_page_offers_each_torrent_and_builds_the_torrents_file(ship: SimpleN
     assert info[b"pieces"] == b"".join(hashlib.sha1(data[i:i + plen]).digest() for i in range(0, len(data), plen))
 
 
+
 FIREFOX_ANDROID = "Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+CHROME_ANDROID_TABLET = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+WS = "https://streetzim-build-proxy.example.workers.dev"
 
 
-def test_a_phone_downloads_the_file_from_the_build_worker(ship: SimpleNamespace, tmp_path: Path) -> None:  # noqa: F811
-    """On a phone the page builds nothing: Download, and every link of the
-    download list, is the browser's own download of the entry's webseed URL
-    (it goes on when the phone pauses the page, which stops a build there).
-    Through the build worker's own code, the file must be the gated merge."""
-    ws = "https://streetzim-build-proxy.example.workers.dev"
-    r = _run(ship, LANGPACK_WEBSEED=ws)
+@pytest.fixture
+def webseeded(ship: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:  # noqa: F811
+    """The site with language torrents, so every entry has a webseed URL."""
+    r = _run(ship, LANGPACK_WEBSEED=WS)
     assert r.returncode == 0, r.stdout[-2000:]
     rec = tmp_path / "recipes"
     shutil.copytree(ship.work / "site" / "testland" / "recipes" / "testland", rec / "testland")
     assert subprocess.run([sys.executable, str(ROOT / "tools" / "langpack" / "site_index.py"), str(rec)],
                           capture_output=True).returncode == 0
-    p = SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
-    rc, rows = _e2e(p, "de", "direct", "--merged-local", ws, "--user-agent", FIREFOX_ANDROID)
+    return SimpleNamespace(ship=ship, rec=rec, packs=ship.work / "packs" / ship.base.name[:-4], out=tmp_path / "out")
+
+
+@pytest.mark.parametrize("device,lang,click", [(["--user-agent", FIREFOX_ANDROID, "--double"], "de", "button"),
+                                               (["--user-agent", CHROME_ANDROID_TABLET, "--double"], "fr", "list"),
+                                               (["--ipad"], "th", "button")])
+def test_a_phone_downloads_the_file_from_the_build_worker(webseeded: SimpleNamespace, device: list[str], lang: str,
+                                                          click: str) -> None:
+    """On a phone or tablet the page builds nothing: Download, or the
+    language's link in the download list, is the browser's own download of
+    the entry's webseed URL (it goes on when the phone pauses the page, which
+    stops a build there). Through the build worker's own code, the file must
+    be the gated merge. The list keeps its links to this page (stable ones,
+    to share)."""
+    rc, rows = _e2e(webseeded, lang, "direct", "--merged-local", WS, "--click", click, "--status-timeout-secs", "120", *device)
     assert rc == 0 and rows[0]["pass"], rows
-    res = json.loads((p.out / "e2e-de.json").read_text())
-    assert res["status"].startswith("Your browser is downloading"), res["status"]
-    assert all("/merged/testland/" in h for h in res["shown"]["links"]), res["shown"]["links"]
-    # the same page on a desktop builds in the page, as before
-    rc, rows = _e2e(p, "fr", "net", "--merged-local", ws)
+    res = json.loads((webseeded.out / f"e2e-{lang}.json").read_text())
+    assert res["status"].startswith("Downloading ") and "in your browser" in res["status"], res["status"]
+    assert all("&go=1" in h for h in res["shown"]["links"]) and not res["shown"]["directLinks"], res["shown"]
+    # one HEAD that checks the worker can serve it, then one download: a double tap does not start
+    # a second (Chromium would block a second download itself; the second HEAD shows the attempt)
+    assert res["merged_heads"] == 1 and res["merged_gets"] == 1, (res["merged_heads"], res["merged_gets"])
+
+
+def test_a_phone_builds_in_the_page_when_the_worker_cannot_serve(webseeded: SimpleNamespace) -> None:
+    """The build worker over its daily budget (503 to everything): the phone
+    is told why and the page builds the file, as on a desktop."""
+    rc, rows = _e2e(webseeded, "de", "net", "--merged-local", WS, "--merged-status", "503", "--user-agent", FIREFOX_ANDROID,
+                    "--status-timeout-secs", "120")
     assert rc == 0 and rows[0]["pass"] and rows[0]["ui"]["workerPhases"], rows
+    assert "answered 503" in (rows[0]["ui"]["directWhy"] or ""), rows[0]["ui"]
+    assert rows[0]["ui"]["keepOpenDuring"], rows[0]["ui"]          # it says to keep the page open
+
+
+def test_a_desktop_builds_in_the_page_and_offers_the_direct_link(webseeded: SimpleNamespace) -> None:
+    rc, rows = _e2e(webseeded, "fr", "net", "--merged-local", WS)
+    assert rc == 0 and rows[0]["pass"] and rows[0]["ui"]["workerPhases"], rows
+    shown = json.loads((webseeded.out / "e2e-fr.json").read_text())["shown"]
+    assert all("&go=1" in h for h in shown["links"]) and shown["keepOpen"] and not shown["directNote"], shown
+    assert len(shown["directLinks"]) == len(shown["links"]) and all("/merged/testland/" in h for h in shown["directLinks"]), shown

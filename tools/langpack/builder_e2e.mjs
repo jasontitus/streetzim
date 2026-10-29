@@ -14,8 +14,12 @@
 // ORIGIN, the webseed origin they were published with, replaced by its own.
 // --mode direct: what a phone does: Download is the browser's own download
 // of the entry's webseed URL (needs --merged-local); --user-agent UA makes
-// the page see a phone, else the page is opened with ?direct=1. PASS when
-// that download is byte-identical to the merge and no build ran in the page.
+// the page see a phone (--ipad: an iPad, which says it is a Mac), else the
+// page is opened with ?direct=1. PASS when that download is byte-identical
+// to the merge and no build ran in the page.
+// --merged-status N: the local build worker answers every request with N
+// (over its budget: 503); --click list: the language's link in the download
+// list instead of the Download button.
 // --proxy-url: the page uses that range proxy (the real one in front of
 // archive.org, web/drive/preview-config.js) instead of the local stand-in
 // below; then no --item is needed and the "proxy" counts stay 0.
@@ -75,7 +79,11 @@ const EXPECT = opt('--expect', 'pass');
 const PROXY_URL = opt('--proxy-url', '');
 let MERGED_ORIGIN = opt('--merged-origin', '');
 const MERGED_LOCAL = opt('--merged-local', '');
-const USER_AGENT = opt('--user-agent', '');
+const IPAD = argv.includes('--ipad');
+const USER_AGENT = opt('--user-agent', IPAD ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' : '');
+const MERGED_STATUS = +opt('--merged-status', '0');
+const CLICK = opt('--click', 'button');
+const DOUBLE = argv.includes('--double');    // two quick clicks (a double tap)
 const WAIT_PREVIEWS = +opt('--wait-previews', '0');   // links that come later (from a segment index)
 const THROTTLE = opt('--throttle', '');
 const WATCH = +opt('--watch-secs', '0');
@@ -181,6 +189,13 @@ if (MERGED_LOCAL) {                          // the build worker, as serve-local
     const headers = new Headers();
     for (const n of ['range', 'if-range', 'origin']) if (typeof req.headers[n] === 'string') headers.set(n, req.headers[n]);
     stats.merged = (stats.merged || 0) + 1;
+    if (req.method === 'GET') stats.mergedGets = (stats.mergedGets || 0) + 1;
+    if (req.method === 'HEAD') stats.mergedHeads = (stats.mergedHeads || 0) + 1;
+    if (MERGED_STATUS) {
+      res.writeHead(MERGED_STATUS, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' });
+      res.end('stand-in status\n');
+      return;
+    }
     let r;
     try { r = await handler(new Request(MERGED_ORIGIN + req.url, { method: req.method, headers }), null); } catch (e) { res.writeHead(500); res.end(String(e)); return; }
     const out = {};
@@ -220,6 +235,12 @@ async function runOne(L) {
   const recipe = JSON.parse(fs.readFileSync(path.join(RECIPES, REGION, `${L}.json`), 'utf8'));
   const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L, ...(USER_AGENT ? { userAgent: USER_AGENT } : {}) });
   await ctx.addInitScript(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }); });
+  if (IPAD) {                                // iPadOS Safari: a Mac's user agent, Apple's vendor, a touch screen
+    await ctx.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, 'vendor', { get: () => 'Apple Computer, Inc.', configurable: true });
+      Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5, configurable: true });
+    });
+  }
   const pg = await ctx.newPage();
   await pg.setViewportSize({ width: VW, height: VH });
   if (THROTTLE) {
@@ -247,6 +268,7 @@ async function runOne(L) {
     previews: [...document.querySelectorAll('#downloads li a.preview')].map((a) => a.getAttribute('href')),
     packs: [...document.querySelectorAll('#packs li')].map((li) => li.textContent),
     links: [...document.querySelectorAll('#downloads li > a:first-child')].map((a) => a.href),
+    directLinks: [...document.querySelectorAll('#downloads li a.direct')].map((a) => a.href),
     directNote: !document.querySelector('#directNote').hidden, keepOpen: !document.querySelector('#keepOpen').hidden,
     button: document.querySelector('#oneclick').textContent, notice: document.querySelector('#notice').textContent }));
   const dlP = pg.waitForEvent('download', { timeout: 0 });
@@ -270,6 +292,7 @@ async function runOne(L) {
       push(ui.packStatusTexts, q('#packStatus') && q('#packStatus').textContent);
       push(ui.buttonTexts, q('#oneclick').textContent); push(ui.buttonTexts, q('#go') && q('#go').textContent);
       push(ui.phases, q('#job') && q('#job').dataset.phase);
+      if (q('#job') && !q('#job').hidden && q('#keepOpen')) ui.keepOpenDuring = ui.keepOpenDuring || !q('#keepOpen').hidden;
       const v = q('#prog') && q('#prog').getAttribute('value');
       if (v !== null && v !== undefined && ui.bar[ui.bar.length - 1] !== +v && ui.bar.length < 4000) ui.bar.push(+v);
     }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
@@ -281,6 +304,7 @@ async function runOne(L) {
     const btn = (b) => b && { text: b.textContent, cls: b.className, disabled: b.disabled, ariaDisabled: b.getAttribute('aria-disabled') };
     const lp = window.__szProgress || null;
     return Object.assign({}, window.__ui, { oneclick: btn(q('#oneclick')), go: btn(q('#go')), activeEnd: a ? a.id || a.tagName : null,
+      directWhy: q('#directWhy') && !q('#directWhy').hidden ? q('#directWhy').textContent : null,
       jobHidden: q('#job') ? q('#job').hidden : null, langDisabled: q('#lang') ? q('#lang').disabled : null,
       workerPhases: window.__szPhaseLog || [],
       lastProgress: lp && { written: lp.written, size: lp.size, map: lp.map, packs: lp.packs, base: lp.base && { got: lp.base.got, size: lp.base.size } } });
@@ -350,7 +374,9 @@ async function runOne(L) {
     await pg.waitForFunction(() => !document.querySelector('#oneclick').disabled, null, { timeout: 60000 });
     await pg.waitForTimeout(1200);           // the page ignores a key press within 1 s of being ready (not a click; to be safe)
     beforeBuild = snap();
-    await pg.click('#oneclick');
+    const target = CLICK === 'list' ? `#downloads li > a[href*="lang=${L}&"]` : '#oneclick';
+    await pg.click(target);
+    if (DOUBLE) { await pg.waitForTimeout(250); await pg.click(target); }
     if (WATCH) feedback = await watch();
   }
   if (FEEDBACK_ONLY) {
@@ -364,13 +390,14 @@ async function runOne(L) {
   }
   const status = await pg.waitForFunction(() => {
     const t = document.querySelector('#status').textContent;
-    if (/^(Done|Stopped|Not started|Your browser is downloading)/.test(t)) return t;
-    const save = document.querySelector('#saveLink');
-    return save ? 'SAVE ' + t : null;
+    const save = document.querySelector('#saveLink');      // built into browser storage ("Done ...; one more step")
+    if (save) return 'SAVE ' + t;
+    if (/^(Done|Stopped|Not started)/.test(t) || /^Downloading .* in your browser:/.test(t)) return t;
+    return null;
   }, null, { timeout: STATUS_TIMEOUT * 1000, polling: 1000 }).then((h) => h.jsonValue());
   if (/^SAVE /.test(status)) await pg.click('#saveLink');     // built into browser storage: the Save step
   const res = { lang: L, mode: MODE, status, shown, expected_md5: recipe.file_md5, expected_size: recipe.size, log: log.slice(-15) };
-  if (/^(Done|SAVE |Your browser is downloading)/.test(status)) {
+  if (/^(Done|SAVE )/.test(status) || /^Downloading .* in your browser:/.test(status)) {
     const dl = await dlP;
     res.download_url = dl.url();
     res.suggested = dl.suggestedFilename();
@@ -382,6 +409,10 @@ async function runOne(L) {
     fs.renameSync(p, res.saved);
   }
   res.proxy_before_build = beforeBuild;
+  res.merged_requests = stats.merged || 0;
+  await pg.waitForTimeout(DOUBLE ? 1500 : 0);   // time for a second download to start, if it would
+  res.merged_gets = stats.mergedGets || 0;
+  res.merged_heads = stats.mergedHeads || 0;
   res.proxy = { ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
                 refused: stats.proxyRefused - before.proxyRefused,
                 items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),

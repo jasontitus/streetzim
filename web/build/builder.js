@@ -10,7 +10,8 @@
 // /drive/preview-config.js (window.STREETZIM_PREVIEW_PROXY).
 //
 // Analytics: GA4 (the site's Firebase project) gets packs_start, packs_end,
-// build_start, build_progress (25/50/75%), build_end and build_probe, so we
+// build_start, build_progress (25/50/75%), build_end, build_probe and
+// build_direct (a phone's direct download: region, language, size), so we
 // learn what download speeds visitors really get: region, language, sizes,
 // speeds and timings, never file names. Nothing is loaded or sent before the
 // visitor's first click on the page; GA is loaded with the first report. Nothing is sent when the visitor
@@ -352,7 +353,7 @@
     for (const m of region.menu) {
       const li = document.createElement('li');
       const a2 = document.createElement('a');
-      a2.href = directUrl(m) || `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(m.lang)}&go=1`;
+      a2.href = `?region=${encodeURIComponent(region.id)}&lang=${encodeURIComponent(m.lang)}&go=1`;
       a2.textContent = `${pickerName(m.lang, m.label)}: ${region.title}`;
       a2.onclick = (ev) => {
         if (running || tooSoon(ev)) { ev.preventDefault(); return; }    // one build at a time
@@ -366,6 +367,22 @@
       const wiki = m.packs.map((p) => langName(p.lang, p.label.replace(/ Wikipedia$/, ''))).join(' + ');
       meta.textContent = `${m.label} · ${fmtMB(m.size)} · ${wiki} Wikipedia`;
       li.append(a2, meta);
+      // The same file straight from the build worker, where a click here
+      // builds it in the page (desktops; a tablet asking for the desktop site).
+      const dUrl = mergedUrl(m.webseed);
+      if (dUrl && !directUrl(m)) {
+        const d = document.createElement('a');
+        d.href = dUrl; d.textContent = 'Direct download'; d.className = 'direct';
+        d.title = `${pickerName(m.lang, m.label)}: ${region.title}, downloaded by your browser from the build server (it can resume; not checked in this page)`;
+        d.onclick = (ev) => {
+          if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
+          ev.preventDefault();
+          if (running || tooSoon(ev)) return;
+          $('lang').value = m.lang; pickLang();
+          startDirect(dUrl, false);
+        };
+        li.append(d);
+      }
       // The same file as a torrent (lang_torrents.py): byte for byte what
       // this page builds, downloaded by a torrent client from the build
       // worker and from anyone seeding it.
@@ -394,7 +411,6 @@
               const h = previewHref(ix && ix.webseed);
               if (!h || region !== shown) return;
               m.webseed = ix.webseed; show(h);
-              if (directUrl(m)) a2.href = directUrl(m);
               if (entry === m) showWay();        // Download can now be the direct one
             })
             .catch(() => {});
@@ -433,6 +449,7 @@
       ? `The same ${region.title} map with its map language set to ${name}.`
       : `The ${region.title} map in ${name}, with Wikipedia in:`;
     $('oneclick').textContent = `Download ${name} ${region.title} (${fmtMB(entry.size)})`;
+    $('directWhy').hidden = true;
     showWay();
     showEstimate();
     $('haveBaseSummary').textContent = nothingNew
@@ -444,8 +461,11 @@
     checkBase();
   }
 
-  // What Download does for this entry: the direct download, or a build here.
+  // What Download does for this entry: the direct download, or a build here
+  // (during a build in the page, whichever way it started, "keep this tab
+  // open" shows).
   function showWay() {
+    if (running) { $('keepOpen').hidden = false; $('directNote').hidden = true; return; }
     const direct = !!directUrl(entry);
     $('howBuilt').textContent = direct ? 'It downloads like any other file.'
       : 'Your browser builds the file as it downloads, checks every byte, and saves it like any other download.';
@@ -911,21 +931,48 @@
   // await, so a double click cannot start a second build.
   $('go').onclick = () => { if (!running && !$('go').disabled) build('file'); };
   $('oneclick').onclick = (ev) => { if (!running && !$('oneclick').disabled && !tooSoon(ev)) start(); };
-  const start = () => { const url = directUrl(entry); if (url) directDownload(url); else build('net'); };
+  function start() { const url = directUrl(entry); if (url) startDirect(url, true); else build('net'); }
 
-  // The browser's own download of the whole file from the build worker:
-  // nothing runs in this page, so leaving it changes nothing.
-  function directDownload(url) {
+  // The browser's own download of the whole file from the build worker
+  // (nothing runs in this page, so leaving it changes nothing), once the
+  // worker says it can serve it: a HEAD, which it answers after its daily
+  // meter, the version's index and the subrequest fit, without fetching the
+  // map. Otherwise (over its budget, switched off, the version out of date,
+  // no answer in 4 s) the page builds the file here (fallback; a desktop's
+  // "Direct download" says why and stops). Taps while one is being checked,
+  // and for 5 s after a download started, are ignored: a double tap must not
+  // start two downloads of a few GB.
+  let directBusy = false, directAt = -1e9;
+  async function startDirect(url, fallback) {
+    if (directBusy || performance.now() - directAt < 5000) return;
+    directBusy = true;
+    const m = entry;
+    let why = null;
+    try {
+      const r = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined });
+      if (!r.ok) why = `the build server answered ${r.status}`;
+    } catch (e) { why = e && e.name === 'TimeoutError' ? 'the build server did not answer' : 'the build server could not be reached'; }
+    directBusy = false;
+    if (entry !== m || running) return;          // the visitor moved on
+    if (why) {
+      $('directWhy').hidden = false;
+      $('directWhy').textContent = `The direct download is not available right now (${why}). ` +
+        (fallback ? 'This page builds the file instead: keep it open and in front until it finishes.' : 'Use Download above, or try again later.');
+      track('build_direct', { region: region.id, lang: m.lang, size_mb: Math.round(m.size / 1e6), ok: 0 });
+      if (fallback) build('net');
+      return;
+    }
+    directAt = performance.now();
     const a = document.createElement('a');
     a.href = url; a.rel = 'noopener';
     document.body.append(a); a.click(); a.remove();
     $('oneclick').classList.remove('attention'); $('goHint').hidden = true;
-    $('save').hidden = true;
-    setStatus(`Your browser is downloading ${entry.file_name || entry.name}.zim (${fmtMB(entry.size)}): look in its downloads. ` +
+    $('save').hidden = true; $('directWhy').hidden = true;
+    setStatus(`Downloading ${m.file_name || m.name}.zim (${fmtMB(m.size)}) in your browser: if it asks, accept the download, then look in its downloads. ` +
       'You can switch apps or turn the screen off; if the download stops, retry it there.', true);
     announce($('status').textContent);
     $('after').hidden = false;
-    track('build_direct', { region: region.id, lang: entry.lang, size_mb: Math.round(entry.size / 1e6) });
+    track('build_direct', { region: region.id, lang: m.lang, size_mb: Math.round(m.size / 1e6), ok: 1 });
   }
 
   // The base map's URL on the range proxy: index.json's base.url, else made
@@ -942,6 +989,7 @@
 
   async function build(mode) {
     running = { starting: true, mode };
+    showWay();
     $('oneclick').classList.remove('attention');
     // Visible at once, before anything is fetched: the button busy, the job panel.
     jobStart(mode === 'file' ? $('go') : $('oneclick'));
@@ -952,6 +1000,7 @@
       announce($('status').textContent);
     } finally {
       if (job.on || running) { running = null; releaseScreen(); if (job.on) jobEnd(false); else checkReady(); }
+      showWay();
     }
   }
 
