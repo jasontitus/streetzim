@@ -28,7 +28,7 @@ const M = new Function(
   '\nreturn { _szSignText, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN };')();
 const L = new Function(slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignKiwixApp };')();
+  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignKiwixApp };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -139,6 +139,38 @@ ok('Arabic boxes join right to left; Chinese and Thai words without a space', ()
     { text: 'สีลม', box: { x: 45, y: 10, width: 40, height: 20 }, script: 'Thai' },
   ]);
   assert.strictEqual(th[0].text, 'ถนนสีลม');
+});
+
+ok('a vertical line is a line of its own, sized by its letters (a Tainan house-number plate)', () => {
+  const lines = L._szSignLineGroups([
+    { text: '84', box: { x: 330, y: 275, width: 475, height: 365 }, script: 'Hani' },
+    { text: '安平區', box: { x: 80, y: 60, width: 140, height: 540 }, script: 'Hani' },
+    { text: '延平街', box: { x: 240, y: 62, width: 560, height: 175 }, script: 'Hani' },
+  ]);
+  assert.deepStrictEqual(lines.map((l) => l.text), ['安平區', '延平街', '84']);
+  assert.deepStrictEqual(lines.map((l) => l.size), [140, 175, 365]);
+  // one tall letter is no vertical line: it joins the line beside it
+  const one = L._szSignLineGroups([
+    { text: '街', box: { x: 0, y: 0, width: 20, height: 40 }, script: 'Hani' },
+    { text: '延平', box: { x: 25, y: 5, width: 50, height: 30 }, script: 'Hani' },
+  ]);
+  assert.deepStrictEqual(one.map((l) => l.text), ['街延平']);
+});
+
+ok('the coarse reading adds what the fine one missed, in the photo\'s scale, once', () => {
+  const fine = [{ text: '84', box: { x: 330, y: 275, width: 475, height: 365 }, script: 'Hani' }];
+  const coarse = [{ text: '84', box: { x: 75, y: 60, width: 110, height: 85 }, script: 'Hani' },
+                  { text: '延平街', box: { x: 55, y: 14, width: 128, height: 40 }, script: 'Hani' }];
+  const m = L._szSignMerge(fine, coarse, 4.4);
+  assert.deepStrictEqual(m.map((it) => it.text), ['84', '延平街']);
+  assert.deepStrictEqual(m[1].box, { x: 55 * 4.4, y: 14 * 4.4, width: 128 * 4.4, height: 40 * 4.4 });
+  // the same text elsewhere on the photo is another line
+  assert.strictEqual(L._szSignMerge(fine, [{ text: '84', box: { x: 0, y: 0, width: 10, height: 10 } }], 1).length, 2);
+  // what the fine reading read, read again in another spelling, adds nothing
+  const park = [{ text: 'No Parking', box: { x: 100, y: 500, width: 300, height: 40 }, script: 'Latn' }];
+  assert.deepStrictEqual(L._szSignMerge(park, [{ text: 'NoParking', box: { x: 26, y: 124, width: 74, height: 11 } }], 4).map((it) => it.text),
+                         ['No Parking']);
+  assert.deepStrictEqual(L._szSignMerge(fine, null, 2), fine);
 });
 
 ok('boxes without text or size are skipped', () => {

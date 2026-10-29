@@ -8310,9 +8310,16 @@ return scored;
 // The detector's boxes ({text, box: {x, y, width, height}, script}) as text
 // lines in reading order: boxes that overlap vertically by half the
 // smaller one's height are one line, joined left to right (right to left
-// for Arabic), with no space between Chinese, Japanese or Thai words.
+// for Arabic), with no space between Chinese, Japanese or Thai words. A
+// box of two or more letters at least 1.5 times as tall as wide is a
+// vertical line of its own (Chinese and Japanese signs: 安平區 down the
+// side of a house-number plate), never joined to the lines beside it.
+// Each line's size is its letters' height (a vertical line's width).
 var SZ_SIGN_RTL = { Arab: 1, Hebr: 1 };
 var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
+function _szSignVertical(it) {
+  return it.box.height >= 1.5 * it.box.width && Array.from(String(it.text).trim()).length >= 2;
+}
 function _szSignLineGroups(items) {
   var boxes = (items || []).filter(function (it) {
     return it && it.text && it.box && it.box.height > 0;
@@ -8321,14 +8328,15 @@ function _szSignLineGroups(items) {
   });
   var lines = [];
   boxes.forEach(function (it) {
-    var b = it.box, line = null;
-    for (var i = 0; i < lines.length && !line; i++) {
+    var b = it.box, line = null, vertical = _szSignVertical(it);
+    for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
+      if (L.vertical) continue;
       var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
       if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
     }
     if (!line) {
-      line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [] };
+      line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical };
       lines.push(line);
     } else {
       var x2 = Math.max(line.x + line.width, b.x + b.width), y2 = Math.max(line.y + line.height, b.y + b.height);
@@ -8346,8 +8354,29 @@ function _szSignLineGroups(items) {
       if (i && !(SZ_SIGN_NOSPACE.test(text.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0)))) text += ' ';
       text += t;
     });
-    return { text: text, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl };
+    return { text: text, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
+             size: L.vertical ? L.width : L.height };
   });
+}
+
+// The boxes of the photo's second, coarse reading (readBoth) that add to
+// the fine one's: scaled by k back to the photo, only where the fine
+// reading found nothing (a box overlapping a fine one by 30% of the smaller
+// of the two is the same text, read again, perhaps spelt otherwise).
+function _szSignMerge(fine, coarse, k) {
+  var overlaps = function (a, b) {
+    var w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    var h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 && w * h >= 0.3 * Math.min(a.width * a.height, b.width * b.height);
+  };
+  var out = (fine || []).slice();
+  (coarse || []).forEach(function (it) {
+    if (!it || !it.box) return;
+    var c = { text: it.text, confidence: it.confidence, script: it.script,
+              box: { x: it.box.x * k, y: it.box.y * k, width: it.box.width * k, height: it.box.height * k } };
+    if (!(fine || []).some(function (f) { return f && f.box && overlaps(f.box, c.box); })) out.push(c);
+  });
+  return out;
 }
 // END sign-lines
 // BEGIN sign-env
@@ -8417,6 +8446,7 @@ var takeFile = document.getElementById('search-photo-take');
 var pickRow = document.getElementById('ocr-pick');
 var againBtn = document.getElementById('ocr-again');
 var MAX_SIDE = 1600;     // the detector works at 960; crops are read sharper
+var COARSE_SIDE = 384;
 var IDLE_MS = 60000;
 var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
 function kiwixApp() { return window.__szSignKiwixApp || _szSignKiwixApp(location.protocol, navigator); }
@@ -8607,6 +8637,25 @@ img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('not an i
 img.src = url;
 });
 }
+function coarseCopy() {
+var k = COARSE_SIDE / Math.max(canvas.width, canvas.height);
+if (k > 0.6) return null;
+var c = document.createElement('canvas');
+c.width = Math.max(1, Math.round(canvas.width * k));
+c.height = Math.max(1, Math.round(canvas.height * k));
+var ctx = c.getContext('2d');
+ctx.drawImage(canvas, 0, 0, c.width, c.height);
+var d = ctx.getImageData(0, 0, c.width, c.height);
+return { k: c.width / canvas.width, image: { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) } };
+}
+function readBoth(image) {
+var coarse = coarseCopy();
+return read(image).then(function (fine) {
+if (!coarse) return fine;
+return read(coarse.image).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
+function () { return fine; });
+});
+}
 function outline(lines) {
 var ctx = canvas.getContext('2d');
 ctx.lineWidth = Math.max(2, canvas.width / 300);
@@ -8641,7 +8690,7 @@ resultsEl.innerHTML = '';
 resultsEl.style.display = 'none';
 setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
 var t0 = Date.now();
-loadPhoto(f).then(read).then(function (items) {
+loadPhoto(f).then(readBoth).then(function (items) {
 var lines = _szSignLineGroups(items);
 dbg('sign reader: ' + lines.length + ' lines in ' + (Date.now() - t0) + ' ms');
 outline(lines);
@@ -8651,11 +8700,11 @@ return;
 }
 setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
 showLines(lines);
-var tallest = Math.max.apply(null, lines.map(function (L) { return L.box.height; }));
+var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
 var weighted = lines.map(function (L) {
-return { text: L.text, weight: 0.5 + 0.5 * L.box.height / tallest };
+return { text: L.text, weight: 0.5 + 0.5 * L.size / tallest };
 });
-var biggest = lines.filter(function (L) { return L.box.height === tallest; })[0].text;
+var biggest = lines.filter(function (L) { return L.size === tallest; })[0].text;
 input.value = biggest;
 document.getElementById('search-clear').style.display = 'block';
 return map._searchSign(weighted).then(function (found) {
