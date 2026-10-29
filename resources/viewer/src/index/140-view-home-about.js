@@ -34,8 +34,9 @@
 // streetzim/__about__.py. A ZIM's map-config.json names the release that
 // built it (`generator`); the viewer is patched in later, so both are shown.
 // SZ_VIEWER_BUILD tells two viewers of one release apart: tools/build_viewer.py
-// writes the first 8 hex digits of the built file's SHA-256 into it, so a
-// map's About says which viewer it carries (empty in the parts).
+// writes the viewer's fingerprint into it (a hash of the files a viewer swap
+// puts in a map), so a map's About says which viewer it carries (empty in
+// the parts).
 var SZ_VIEWER_VERSION = '1.0.0';
 var SZ_VIEWER_BUILD = '';
 var SZ_VIEW_PREFIX = 'streetzim.view.';

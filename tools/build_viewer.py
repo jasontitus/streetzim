@@ -15,8 +15,10 @@ comments the browser only downloads.
 Edit the parts, not index.html, then rebuild, run
 scripts/sync-drive-viewer.sh, and commit all three.
 
-The built file names itself: SZ_VIEWER_BUILD, shown in the About panel,
-is the first 8 hex digits of its SHA-256 (taken before it is written in).
+The built file names its viewer: SZ_VIEWER_BUILD, shown in the About
+panel, is the first 8 hex digits of the SHA-256 of the three files a viewer
+swap puts in a map (index.html, taken before it is written in, places.html
+and routing-worker.js).
 
 It first runs tools/build_i18n.py, which owns part 005-i18n.html, the
 SZ-I18N block in places.html and resources/viewer/i18n/en.json: the UI
@@ -81,19 +83,28 @@ def joined() -> str:
 
 
 BUILD_STAMP = "var SZ_VIEWER_BUILD = '';"
+# The other files a viewer swap writes into a map (cloud/swap_viewer_rust.py).
+FINGERPRINTED = ("places.html", "routing-worker.js")
+
+
+def fingerprint(blank_index: bytes) -> str:
+    """The viewer's fingerprint: the first 8 hex digits of the SHA-256 of
+    index.html (its stamp empty), places.html and routing-worker.js."""
+    h = hashlib.sha256(blank_index)
+    for name in FINGERPRINTED:
+        h.update(b"\0" + name.encode() + b"\0" + (TARGET.parent / name).read_bytes())
+    return h.hexdigest()[:8]
 
 
 def build() -> bytes:
     """The joined, compacted parts, with SZ_VIEWER_BUILD (part 140) set to
-    the first 8 hex digits of their SHA-256 (taken with it empty): the
-    About panel's viewer fingerprint."""
+    the viewer's fingerprint: what the About panel shows."""
     data = viewer_compact.compact_build(
         [(p.name, p.read_text(encoding="utf-8")) for p in parts()]).encode("utf-8")
     stamp = BUILD_STAMP.encode("utf-8")
     if data.count(stamp) != 1:
         raise SystemExit(f"{BUILD_STAMP!r} must be in the parts exactly once (part 140)")
-    fp = hashlib.sha256(data).hexdigest()[:8]
-    return data.replace(stamp, BUILD_STAMP.replace("''", f"'{fp}'").encode("utf-8"))
+    return data.replace(stamp, BUILD_STAMP.replace("''", f"'{fingerprint(data)}'").encode("utf-8"))
 
 
 def main() -> int:

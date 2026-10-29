@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-cc7c4205bb';
+const SHELL_CACHE = 'streetzim-drive-shell-f41dcc8e47';
 
 const SHELL_URLS = [
   './',

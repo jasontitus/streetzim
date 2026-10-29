@@ -116,7 +116,9 @@ function tokens(src) {
   return ast.tokens.map((t) => t.type + " " + t.value);
 }
 const srcScripts = inlineScripts(parts.map((p) => p.text).join(""));
-const builtScripts = inlineScripts(readFileSync(join(VIEWER, "index.html"), "utf8"));
+// The built file names itself (SZ_VIEWER_BUILD, tools/build_viewer.py); the parts leave it empty.
+const builtScripts = inlineScripts(readFileSync(join(VIEWER, "index.html"), "utf8")
+  .replace(/var SZ_VIEWER_BUILD = '[0-9a-f]{8}';/, "var SZ_VIEWER_BUILD = '';"));
 if (srcScripts.length !== builtScripts.length) {
   console.log(`index.html has ${builtScripts.length} inline scripts, its parts ${srcScripts.length}`);
   problems++;

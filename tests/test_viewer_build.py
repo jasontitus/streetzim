@@ -26,14 +26,18 @@ def test_every_part_is_used_and_nonempty():
 
 def test_the_built_viewer_names_itself():
     """SZ_VIEWER_BUILD (the About panel's fingerprint) is the first 8 hex
-    digits of the built file's SHA-256, taken with it empty; the parts keep
-    it empty."""
+    digits of the SHA-256 of index.html (taken with it empty), places.html
+    and routing-worker.js, the files a viewer swap writes; the parts keep it
+    empty."""
     import hashlib
     import re
-    data = (ROOT / "resources" / "viewer" / "index.html").read_bytes()
+    viewer = ROOT / "resources" / "viewer"
+    data = (viewer / "index.html").read_bytes()
     m = re.findall(rb"var SZ_VIEWER_BUILD = '([0-9a-f]{8})';", data)
     assert len(m) == 1, m
-    blank = data.replace(b"var SZ_VIEWER_BUILD = '" + m[0] + b"';", b"var SZ_VIEWER_BUILD = '';")
-    assert hashlib.sha256(blank).hexdigest()[:8] == m[0].decode()
+    h = hashlib.sha256(data.replace(b"var SZ_VIEWER_BUILD = '" + m[0] + b"';", b"var SZ_VIEWER_BUILD = '';"))
+    for name in ("places.html", "routing-worker.js"):
+        h.update(b"\0" + name.encode() + b"\0" + (viewer / name).read_bytes())
+    assert h.hexdigest()[:8] == m[0].decode()
     about = (ROOT / "resources" / "viewer" / "src" / "index" / "140-view-home-about.js").read_text(encoding="utf-8")
     assert about.count("var SZ_VIEWER_BUILD = '';") == 1
