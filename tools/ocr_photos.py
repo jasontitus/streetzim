@@ -55,23 +55,30 @@ if str(ROOT) not in sys.path:
 
 READ_MIN = 0.8
 _DIGITS = {**{0x660 + i: str(i) for i in range(10)}, **{0x6F0 + i: str(i) for i in range(10)}}
+# Accents on Latin, Greek and Cyrillic letters, Arabic vowel signs and the
+# tatweel: written or not, read or not, the same name ("Zurich", "Zürich").
+_DROP = {*range(0x300, 0x370), *range(0x64B, 0x660), 0x670, 0x640}
 
 
 def norm(s: str) -> str:
     """Letters, marks and digits only, folded: what two readings of one sign share."""
-    s = unicodedata.normalize("NFKC", s or "").translate(_DIGITS).casefold()
-    return "".join(c for c in s if unicodedata.category(c)[0] in "LMN")
+    s = unicodedata.normalize("NFKD", s or "").translate(_DIGITS).casefold()
+    s = "".join(c for c in s if ord(c) not in _DROP and unicodedata.category(c)[0] in "LMN")
+    return unicodedata.normalize("NFC", s)
 
 
 def coverage(want: str, got: str) -> float:
-    """The share of ``want``'s letters found in ``got``, in order."""
+    """The share of ``want``'s letters found in ``got``, in order, in runs of
+    two or more (single letters scattered over a long line are no reading:
+    "GST" in "OFFICE NAGPUR SODS SERVICESTRANSPOR")."""
     a, b = norm(want), norm(got)
     if not a:
         return 0.0
     if a in b:
         return 1.0
+    run = 2 if len(a) > 2 else 1
     m = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    return sum(blk.size for blk in m.get_matching_blocks()) / len(a)
+    return sum(blk.size for blk in m.get_matching_blocks() if blk.size >= run) / len(a)
 
 
 def same_place(name: str, want: str) -> bool:
@@ -176,7 +183,7 @@ def overlay_for(arc: Any, records: list[dict[str, Any]], models: Path, dest: Pat
                 if s in by_script and by_script[s] not in names:
                     names.append(by_script[s])
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("index.html", "places.html"):
+    for name in ("index.html", "places.html", "routing-worker.js"):     # as a viewer swap writes them
         (dest / name).write_bytes(viewer_page(name, VIEWER_DIR, cfg))
     cfg["ocr"] = _ocr.MANIFEST_ENTRY
     (dest / "map-config.json").write_text(json.dumps(cfg), encoding="utf-8")
@@ -208,16 +215,21 @@ def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: 
                       encoding="utf-8")
     env = dict(os.environ, ZIM_ORIGIN=f"http://127.0.0.1:{srv.server_address[1]}", PHOTOS=str(photos))
     raws: list[dict[str, Any]] = []
+
+    def take(out: str | bytes | None) -> None:
+        text = out.decode("utf-8", "replace") if isinstance(out, bytes) else out or ""
+        for line in text.splitlines():
+            if line.startswith("{"):
+                raws.append(json.loads(line))
     try:
         p = subprocess.run([os.environ.get("NODE", "node"), str(ROOT / "tools" / "ocr_photos.mjs")],
                            env=env, capture_output=True, text=True,
                            timeout=600 + 200 * len(records))
-        for line in p.stdout.splitlines():
-            if line.startswith("{"):
-                raws.append(json.loads(line))
+        take(p.stdout)
         if p.returncode and not raws:
             raws.append({"error": (p.stderr or p.stdout)[-400:]})
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        take(e.stdout)                       # the photos read before it hung
         raws.append({"error": "timed out"})
     finally:
         srv.shutdown()
@@ -240,7 +252,7 @@ def report(records: list[dict[str, Any]], raws: dict[str, dict[str, Any]], notes
         by_region[s["region"]].append(s)
     pos = [s for s in scores if s["kind"] != "negative" and s["status"] != "not run"]
     md = ["# Sign reader on the photo set", "",
-          f"{len(pos)} photos read (of {len(scores)}): lines read {_pct([(s['read'] or 0) >= 0.5 for s in pos])} "
+          f"{len(pos)} photos of a place read ({len(scores) - len(pos)} more: negatives, or not run): lines read {_pct([(s['read'] or 0) >= 0.5 for s in pos])} "
           f"(half or more of a sign's lines), the labelled line searched for {_pct([s['query'] for s in pos])}, "
           f"the place first {_pct([s['found1'] for s in pos])}, in the first three {_pct([s['found3'] for s in pos])}.",
           "", "| map | photos | recognizers | read | query | found@1 | found@3 | median s |",

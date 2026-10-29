@@ -24,6 +24,8 @@ def test_norm_folds_what_two_readings_of_a_sign_share() -> None:
     assert op.norm("خیابان ۱۲") == op.norm("خیابان12")
     assert op.norm("Bab Al-Bahrain!") == "babalbahrain"
     assert op.norm("  ") == ""
+    assert op.norm("Zürich HB") == op.norm("Zurich HB") and op.norm("مَال") == op.norm("مال")
+    assert op.norm("नगर") != op.norm("नागर")         # an Indic vowel sign is a letter, kept
 
 
 def test_coverage_is_the_share_of_the_labelled_line_read_in_order() -> None:
@@ -32,6 +34,8 @@ def test_coverage_is_the_share_of_the_labelled_line_read_in_order() -> None:
     assert 0.5 < op.coverage("Bani Jamrah", "Bani Jarah") < 1.0
     assert op.coverage("Bani Jamrah", "Riffa") < 0.5
     assert op.coverage("", "anything") == 0.0
+    assert op.coverage("GST", "OFFICE NAGPUR SODS SERVICESTRANSPOR") < op.READ_MIN   # scattered letters
+    assert op.coverage("ONLY", "Ocean National Library") < op.READ_MIN
 
 
 def test_same_place_needs_the_names_to_be_close() -> None:
