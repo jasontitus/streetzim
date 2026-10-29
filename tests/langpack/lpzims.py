@@ -96,9 +96,9 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
     (path, title, target) redirects in the title index, as a base's other
     names for its places ("Δήμος Παλλήνης" -> the Pallini page); `pages`: more
     front pages (path, title, text); `fulltext`: with libzim's full-text index,
-    as published bases carry it; `fronts=False`: the articles, pages and
-    redirects not flagged front, as a published base has them (its builder
-    flags none; its own title index holds them all)."""
+    as published bases carry it; `fronts=False`: nothing flagged front, not
+    even index.html, as cloud/swap_viewer_rust.py left the bases it swapped
+    until 2026-10-29 (their own title index holds every page all the same)."""
     with Creator(str(path)).config_indexing(fulltext, "eng") as c:
         c.set_mainpath("index.html")
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
@@ -107,7 +107,7 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
             c.add_metadata(k, v)
         c.add_illustration(48, _png())
         if slots is None:
-            c.add_item(_Item("index.html", "Testland", "text/html", "<html><body>map</body></html>", front=True))
+            c.add_item(_Item("index.html", "Testland", "text/html", "<html><body>map</body></html>", front=fronts))
         else:
             if str(ROOT) not in __import__("sys").path:
                 __import__("sys").path.insert(0, str(ROOT))
@@ -115,7 +115,7 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
             for name, mime in (("index.html", "text/html"), ("places.html", "text/html"),
                                ("routing-worker.js", "application/javascript")):
                 c.add_item(_Item(name, "Testland" if name == "index.html" else "", mime,
-                                 pad_to_slot(name, slots[name]), front=name == "index.html", compress=False))
+                                 pad_to_slot(name, slots[name]), front=fronts and name == "index.html", compress=False))
         cfg = {"name": "Testland", "bounds": [19.0, 9.0, 22.0, 12.0], **(cfg_extra or {})}
         if wiki:
             cfg["hasWikiArticles"] = True

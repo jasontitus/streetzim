@@ -803,12 +803,24 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     # written as no front article (2026-10-29: Taipei 5,276 of 5,963 pages
     # front before, 0 after; Bahrain, Thailand, Switzerland (de) the same),
     # and Kiwix counts no articles and opens no random one in such a file.
+    # A source with none (an earlier swap's) gets the build's own flags back,
+    # which follow the path (streetzim/zim_writer.py): index.html, the
+    # places' pages under search/ and their other names (redirects under
+    # search/) are front; places.html and the Wikipedia articles are not. A
+    # built map always has index.html front, so none at all means the swap.
     from tools.langpack.index_pack import front_bitmap, is_front
     from tools.langpack.zimfmt import ZimReader
     src_front = front_bitmap(ZimReader(src_path))
+    restore_front = not any(src_front)
+    if restore_front:
+        print("  front articles: the source has none (an earlier swap's); the build's are restored")
 
-    def _front(i: int) -> bool:
-        return i < src_visible and is_front(src_front, i)
+    def _front(i: int, path: str, html: bool = True) -> bool:
+        if i >= src_visible:
+            return False
+        if restore_front:
+            return html and (path == "index.html" or path.startswith("search/"))
+        return is_front(src_front, i)
     print(f"  source: {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
     print(f"  entries: {src_visible} visible / {src_total} total "
           f"(diff = X-namespace + special)")
@@ -1055,7 +1067,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         c.add_redirection(entry.path,
                                           entry.title or entry.path,
                                           target.path,
-                                          {"FRONT_ARTICLE": True} if _front(i) else None)
+                                          {"FRONT_ARTICLE": True} if _front(i, entry.path) else None)
                         redirects += 1
                     except Exception as e:
                         print(f"  skip redirect {entry.path}: {e}")
@@ -1111,7 +1123,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=_pad_to_slot(path, replacements[path]),
-                                     compress=False, namespace=None, is_front=_front(i)))
+                                     compress=False, namespace=None, is_front=_front(i, path)))
                     replaced_paths.add(path)
                     swapped += 1
                     continue
@@ -1147,7 +1159,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     ) or len(data) < 200 * 1024 * 1024
                     c.add_item(_Item(path, mime, title=title,
                                      data=staged_data, file_path=staged_file,
-                                     compress=compress, namespace=None, is_front=_front(i)))
+                                     compress=compress, namespace=None, is_front=_front(i, path, mime.startswith("text/html"))))
                     kept += 1
                 del data
 

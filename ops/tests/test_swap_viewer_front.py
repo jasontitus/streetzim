@@ -50,3 +50,30 @@ def test_the_swap_keeps_the_front_articles(tmp_path: Path, monkeypatch: pytest.M
     (tmp_path / "t").mkdir()
     svr.swap_viewer_rust(str(src), str(dst), tmp_dir=str(tmp_path / "t"))
     assert _fronts(dst) == before
+
+
+def test_a_file_an_earlier_swap_left_without_front_articles_gets_the_builds_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No front article at all (a file the old swap wrote): the build's rule,
+    by path, as streetzim/zim_writer.py writes them: index.html, the places'
+    pages under search/ and their other names; not places.html nor the
+    Wikipedia articles."""
+    pytest.importorskip("streetzim.zim_writer")
+    from tests.langpack import lpzims
+    os.environ.setdefault("STREETZIM_ROOT", str(ROOT))
+    spec = importlib.util.spec_from_file_location("swap_viewer_rust_front_restore", ROOT / "ops" / "cloud" / "swap_viewer_rust.py")
+    assert spec and spec.loader
+    svr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(svr)
+    monkeypatch.setattr(svr, "_on_root_fs", lambda p: False)
+    monkeypatch.setattr(svr, "_fs_type", lambda p: "ext4")
+    src = tmp_path / "osm-testland-2026-10-13.zim"
+    lpzims.write_base(src, slots=lpzims.VIEWER_V1, fronts=False,
+                      pages=[("search/manama-73.html", "Manama", "The capital")],
+                      front_redirects=[("search/~7", "Al Manamah", "search/manama-73.html")])
+    assert not _fronts(src)
+    dst = tmp_path / "out" / src.name
+    dst.parent.mkdir()
+    (tmp_path / "t").mkdir()
+    svr.swap_viewer_rust(str(src), str(dst), tmp_dir=str(tmp_path / "t"))
+    # places.html (a viewer file), wiki-article/* and the JSON stay as they were
+    assert _fronts(dst) == {"index.html", "search/manama-73.html", "search/~7"}
