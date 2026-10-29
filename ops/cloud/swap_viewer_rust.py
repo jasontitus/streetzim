@@ -798,6 +798,17 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     src = Archive(src_path)
     src_total = src.all_entry_count
     src_visible = src.entry_count
+    # Which of the source's entries are front articles (its titleOrdered/v1
+    # listing): each keeps its flag. Without it every page and redirect was
+    # written as no front article (2026-10-29: Taipei 5,276 of 5,963 pages
+    # front before, 0 after; Bahrain, Thailand, Switzerland (de) the same),
+    # and Kiwix counts no articles and opens no random one in such a file.
+    from tools.langpack.index_pack import front_bitmap, is_front
+    from tools.langpack.zimfmt import ZimReader
+    src_front = front_bitmap(ZimReader(src_path))
+
+    def _front(i: int) -> bool:
+        return i < src_visible and is_front(src_front, i)
     print(f"  source: {src_path} ({os.path.getsize(src_path)/1024/1024:.1f} MB)")
     print(f"  entries: {src_visible} visible / {src_total} total "
           f"(diff = X-namespace + special)")
@@ -1043,7 +1054,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     try:
                         c.add_redirection(entry.path,
                                           entry.title or entry.path,
-                                          target.path)
+                                          target.path,
+                                          {"FRONT_ARTICLE": True} if _front(i) else None)
                         redirects += 1
                     except Exception as e:
                         print(f"  skip redirect {entry.path}: {e}")
@@ -1099,7 +1111,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=_pad_to_slot(path, replacements[path]),
-                                     compress=False, namespace=None))
+                                     compress=False, namespace=None, is_front=_front(i)))
                     replaced_paths.add(path)
                     swapped += 1
                     continue
@@ -1135,7 +1147,7 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     ) or len(data) < 200 * 1024 * 1024
                     c.add_item(_Item(path, mime, title=title,
                                      data=staged_data, file_path=staged_file,
-                                     compress=compress, namespace=None))
+                                     compress=compress, namespace=None, is_front=_front(i)))
                     kept += 1
                 del data
 
