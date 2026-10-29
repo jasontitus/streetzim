@@ -10,6 +10,24 @@
 // --proxy-url: the page uses that range proxy (the real one in front of
 // archive.org, web/drive/preview-config.js) instead of the local stand-in
 // below; then no --item is needed and the "proxy" counts stay 0.
+//
+// Feedback (what a visitor sees after the click):
+//   --throttle DOWN_KBPS:UP_KBPS:LATENCY_MS  Chromium's network emulation
+//        (CDP Network.emulateNetworkConditions) for the page and its worker
+//   --watch-secs S   record every visible change of the job panel, the
+//        button and the status from the click on, for S seconds or until
+//        the build ends: "feedback": first_change_ms (click to the first
+//        change), max_gap_ms (longest time without any visible change),
+//        max_progress_gap_ms (without a change of the phase line or the bar)
+//   --feedback-only  stop after the watch (the build is abandoned): PASS when
+//        the first change came within 200 ms and no gap reached 1.5 s
+//   --viewport WxH (default 1280x900)   --shots DIR  a screenshot per phase
+// Every run records "ui": the texts #baseCheck (a live region) and
+// #packStatus took, the buttons' labels, the phases in order, every value
+// of the bar, the focused element during and after the job, the busy
+// button at the end, and the worker's last progress message.
+//   --corrupt-times N  corrupt only the first N answers (a transient fault)
+//   --status-timeout-secs S  how long to wait for the page's final word (7200)
 // Two local servers stand in for the site and the range proxy:
 //   page  http://localhost:P1/  WEB_DIR, with /build/recipes/ = RECIPES_DIR and
 //         /drive/preview-config.js naming the proxy below (the one place the
@@ -46,6 +64,14 @@ const MODE = opt('--mode', 'net');
 const BASE = opt('--base');
 const EXPECT = opt('--expect', 'pass');
 const PROXY_URL = opt('--proxy-url', '');
+const THROTTLE = opt('--throttle', '');
+const WATCH = +opt('--watch-secs', '0');
+const FEEDBACK_ONLY = argv.includes('--feedback-only');
+const [VW, VH] = opt('--viewport', '1280x900').split('x').map(Number);
+const SHOTS = opt('--shots', '');
+const CORRUPT_TIMES = +opt('--corrupt-times', '0');
+const STATUS_TIMEOUT = +opt('--status-timeout-secs', '7200');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CORRUPT = (() => {
   const c = opt('--corrupt'); if (!c) return null;
   const m = /^([^/]+)\/([^@]+)@(\d+)$/.exec(c); if (!m) throw new Error('--corrupt ITEM/FILE@OFFSET');
@@ -112,7 +138,8 @@ const proxy = http.createServer((req, res) => {
   const fk = decodeURIComponent(m[2]); stats.files[fk] = (stats.files[fk] || 0) + 1;
   res.writeHead(206, { ...CORS, 'Content-Type': 'application/octet-stream', 'Content-Length': b - a + 1,
                        'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes' });
-  if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b) {
+  if (CORRUPT && CORRUPT.item === m[1] && CORRUPT.file === decodeURIComponent(m[2]) && a <= CORRUPT.at && CORRUPT.at <= b
+      && !(CORRUPT_TIMES && (stats.corrupted || 0) >= CORRUPT_TIMES)) {
     const buf = Buffer.alloc(b - a + 1);
     const fd = fs.openSync(f, 'r'); fs.readSync(fd, buf, 0, buf.length, a); fs.closeSync(fd);
     buf[CORRUPT.at - a] ^= 0xff; stats.corrupted = (stats.corrupted || 0) + 1;
@@ -152,6 +179,14 @@ async function runOne(L) {
   const ctx = await browser.newContext({ acceptDownloads: true, locale: L === 'en' ? 'en-US' : L });
   await ctx.addInitScript(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }); });
   const pg = await ctx.newPage();
+  await pg.setViewportSize({ width: VW, height: VH });
+  if (THROTTLE) {
+    const [down, up, lat] = THROTTLE.split(':').map(Number);
+    const cdp = await ctx.newCDPSession(pg);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: lat || 0,
+      downloadThroughput: down * 1000 / 8, uploadThroughput: (up || down) * 1000 / 8 });
+  }
   const log = [];
   pg.on('console', (m) => log.push(`${m.type()}: ${m.text()}`));
   pg.on('pageerror', (e) => log.push(`pageerror: ${e.message}`));
@@ -170,7 +205,85 @@ async function runOne(L) {
   const snap = () => ({ ranges: stats.proxyRanges - before.proxyRanges, bytes: stats.proxyBytes - before.proxyBytes,
                         items: Object.fromEntries(Object.entries(stats.items).map(([k, v]) => [k, v - (before.items[k] || 0)])),
                         files: Object.fromEntries(Object.entries(stats.files).map(([k, v]) => [k, v - (before.files[k] || 0)])) });
-  let beforeBuild = null;                     // what the proxy served before Build was pressed
+  let beforeBuild = null, feedback = null;    // what the proxy served before Build was pressed; the watch
+  // what the page showed, from now on (not only after the click)
+  await pg.evaluate(() => {
+    const q = (s) => document.querySelector(s);
+    const ui = window.__ui = { baseCheckTexts: [], packStatusTexts: [], buttonTexts: [], phases: [], bar: [], phaseWrites: 0,
+                               activeDuring: null };
+    const push = (arr, v) => { if (v && arr[arr.length - 1] !== v && arr.length < 400) arr.push(v); };
+    new MutationObserver((recs) => {
+      for (const r of recs) {
+        const t = r.target.nodeType === 3 ? r.target.parentNode : r.target;
+        if (t && t.id === 'phase' && r.type !== 'attributes') ui.phaseWrites++;
+      }
+      push(ui.baseCheckTexts, q('#baseCheck') && q('#baseCheck').textContent);
+      push(ui.packStatusTexts, q('#packStatus') && q('#packStatus').textContent);
+      push(ui.buttonTexts, q('#oneclick').textContent); push(ui.buttonTexts, q('#go') && q('#go').textContent);
+      push(ui.phases, q('#job') && q('#job').dataset.phase);
+      const v = q('#prog') && q('#prog').getAttribute('value');
+      if (v !== null && v !== undefined && ui.bar[ui.bar.length - 1] !== +v && ui.bar.length < 4000) ui.bar.push(+v);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    document.addEventListener('click', () => setTimeout(() => {
+      const a = document.activeElement; ui.activeDuring = a ? a.id || a.tagName : null; }, 1000), { capture: true, once: true });
+  });
+  const uiEnd = () => pg.evaluate(() => {
+    const q = (s) => document.querySelector(s), a = document.activeElement;
+    const btn = (b) => b && { text: b.textContent, cls: b.className, disabled: b.disabled, ariaDisabled: b.getAttribute('aria-disabled') };
+    const lp = window.__szProgress || null;
+    return Object.assign({}, window.__ui, { oneclick: btn(q('#oneclick')), go: btn(q('#go')), activeEnd: a ? a.id || a.tagName : null,
+      jobHidden: q('#job') ? q('#job').hidden : null, langDisabled: q('#lang') ? q('#lang').disabled : null,
+      workerPhases: window.__szPhaseLog || [],
+      lastProgress: lp && { written: lp.written, size: lp.size, map: lp.map, packs: lp.packs, base: lp.base && { got: lp.base.got, size: lp.base.size } } });
+  });
+  // every visible change from the click on (page time), and the click itself
+  await pg.evaluate(() => {
+    window.__vis = []; window.__prog = []; window.__progText = []; window.__clickAt = null;
+    document.addEventListener('click', () => { if (window.__clickAt === null) window.__clickAt = performance.now(); }, true);
+    const q = (s) => document.querySelector(s);
+    const progSig = () => [q('#phase') && q('#phase').textContent, q('#prog') && q('#prog').getAttribute('value'),
+                           q('#job') && q('#job').hidden].join('|');
+    const sig = () => [progSig(), q('#elapsed') && q('#elapsed').textContent, q('#oneclick').textContent,
+                       q('#oneclick').className, q('#go') && q('#go').textContent, q('#status').textContent].join('|');
+    let last = sig(), lastP = progSig();
+    new MutationObserver(() => {
+      if (window.__clickAt === null) return;
+      const now = performance.now(), s = sig(), p = progSig();
+      if (s !== last) { last = s; window.__vis.push(now); }
+      if (p !== lastP) { lastP = p; window.__prog.push(now); window.__progText.push(p.slice(0, 160)); }
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  const phases = [];
+  let shotN = 0;
+  const shot = async (tag) => {
+    if (!SHOTS) return;
+    fs.mkdirSync(SHOTS, { recursive: true });
+    await pg.screenshot({ path: path.join(SHOTS, `${L}-${VW}x${VH}-${String(++shotN).padStart(2, '0')}-${tag}.png`), fullPage: false });
+  };
+  // after the click: the phases seen (a screenshot each), until the watch ends or the build does
+  const watch = async () => {
+    const tEnd = Date.now() + WATCH * 1000;
+    let seen = null;
+    while (Date.now() < tEnd) {
+      const st = await pg.evaluate(() => ({ phase: document.querySelector('#job') ? document.querySelector('#job').dataset.phase || '' : '',
+                                            status: document.querySelector('#status').textContent }));
+      if (st.phase && st.phase !== seen) { seen = st.phase; phases.push(st.phase); await shot(st.phase); }
+      if (/^(Done|Stopped|Not started)/.test(st.status)) { await shot('end'); break; }
+      await sleep(150);
+    }
+    return pg.evaluate(() => {
+      const c = window.__clickAt, now = performance.now();
+      const gaps = (ts) => { let m = 0, prev = c; for (const t of [...ts, now]) { m = Math.max(m, t - prev); prev = t; } return Math.round(m); };
+      // where the longest wait for the phase line or the bar was: the line before it, and after
+      let gi = -1, gm = -1, prev = c;
+      window.__prog.forEach((t, i) => { if (t - prev > gm) { gm = t - prev; gi = i; } prev = t; });
+      const around = gi >= 0 ? { at_s: Math.round((window.__prog[gi] - c) / 100) / 10, before: window.__progText[gi - 1] || null,
+                                  after: window.__progText[gi] } : null;
+      return { first_change_ms: window.__vis.length ? Math.round(window.__vis[0] - c) : null, max_gap_ms: gaps(window.__vis),
+               max_progress_gap_ms: gaps(window.__prog), longest_progress_gap: around, changes: window.__vis.length,
+               watched_s: Math.round((now - c) / 1000) };
+    });
+  };
   if (MODE === 'file') {
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
@@ -183,18 +296,29 @@ async function runOne(L) {
     if (ready !== 'ready') throw new Error(`Build never enabled: ${ready}`);
     beforeBuild = snap();
     await pg.click('#go');
+    if (WATCH) feedback = await watch();
   } else {
     await pg.waitForFunction(() => !document.querySelector('#oneclick').disabled, null, { timeout: 60000 });
     await pg.waitForTimeout(1200);           // the page ignores a key press within 1 s of being ready (not a click; to be safe)
     beforeBuild = snap();
     await pg.click('#oneclick');
+    if (WATCH) feedback = await watch();
+  }
+  if (FEEDBACK_ONLY) {
+    const fb = feedback || {};
+    const res = { lang: L, mode: MODE, viewport: `${VW}x${VH}`, throttle: THROTTLE, feedback: fb, phases, ui: await uiEnd(),
+                  pass: fb.first_change_ms !== null && fb.first_change_ms < 200 && fb.max_gap_ms < 1500 };
+    fs.writeFileSync(path.join(OUT, `feedback-${L}-${VW}x${VH}.json`), JSON.stringify(res, null, 1));
+    console.log(JSON.stringify(res));
+    await Promise.race([ctx.close().catch(() => {}), sleep(10000)]);
+    return res.pass;
   }
   const status = await pg.waitForFunction(() => {
     const t = document.querySelector('#status').textContent;
     if (/^(Done|Stopped|Not started)/.test(t)) return t;
     const save = document.querySelector('#saveLink');
     return save ? 'SAVE ' + t : null;
-  }, null, { timeout: 120 * 60000, polling: 1000 }).then((h) => h.jsonValue());
+  }, null, { timeout: STATUS_TIMEOUT * 1000, polling: 1000 }).then((h) => h.jsonValue());
   if (/^SAVE /.test(status)) await pg.click('#saveLink');     // built into browser storage: the Save step
   const res = { lang: L, mode: MODE, status, shown, expected_md5: recipe.file_md5, expected_size: recipe.size, log: log.slice(-15) };
   if (/^(Done|SAVE )/.test(status)) {
@@ -217,9 +341,12 @@ async function runOne(L) {
     ? /^(Stopped|Not started)/.test(String(status)) && !res.md5
     : res.md5 === recipe.file_md5 && res.bytes === recipe.size;
   res.expect = EXPECT; res.corrupted = stats.corrupted || 0;
+  res.ui = await uiEnd();
+  if (feedback) { res.feedback = feedback; res.phases = phases; }
   fs.writeFileSync(path.join(OUT, `e2e-${L}.json`), JSON.stringify(res, null, 1));
   console.log(JSON.stringify({ lang: L, mode: MODE, expect: EXPECT, pass: res.pass, status: String(status).slice(0, 160), bytes: res.bytes,
                                md5: res.md5, expected: recipe.file_md5, secs: res.secs, proxy: res.proxy, proxy_before_build: beforeBuild,
+                               feedback: res.feedback, phases: res.phases, ui: res.ui,
                                langOption: shown.langOption }));
   await ctx.close();
   return res.pass;

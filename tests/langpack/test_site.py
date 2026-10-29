@@ -188,6 +188,7 @@ MUTANTS = {
     "pack_item": ("recipes/de.json", lambda d: d["packs"]["de"].__setitem__(
         "url", d["packs"]["de"]["url"].replace("/testland-packs/", "/testland-fr/"))),
     "index_md5": ("recipes/index.json", lambda d: d["regions"][0]["menu"][1].__setitem__("md5", "0" * 32)),
+    "recipe_bytes": ("recipes/index.json", lambda d: d["regions"][0]["menu"][0].__setitem__("recipe_bytes", 1)),
     "region_json": ("recipes/region.json", lambda d: d["base"].__setitem__("size", 1)),
     "base_item": ("recipes/index.json+region.json", _base_item),
     "base_uuid": ("recipes/th.json", lambda d: d["base"].__setitem__("uuid", "0" * 32)),
@@ -221,7 +222,8 @@ def test_site_check_kills(name: str, site: SimpleNamespace, tmp_path: Path) -> N
     assert rc != 0 and any(ln.startswith("FAIL") for ln in lines), lines
     # the check meant for it fired (others may too): review r3 M-5
     want = {"pack_sha": "fr/fr: chunk sha256 != local", "base_sha": "de: base chunk sha256 != local base",
-            "base_md5": "index base md5", "slots": "de: recipe viewer slots != the local base's"}.get(name)
+            "base_md5": "index base md5", "slots": "de: recipe viewer slots != the local base's",
+            "recipe_bytes": "recipe_bytes 1 != the recipe's"}.get(name)
     if want:
         assert any(want in ln for ln in lines), (want, lines)
 

@@ -122,6 +122,105 @@
   document.addEventListener('visibilitychange', () => { if (busy() && document.visibilityState === 'visible') holdScreen(); });
   window.addEventListener('beforeunload', (e) => { if (busy()) { e.preventDefault(); e.returnValue = ''; } });
   const fmtMB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB');
+  const fmtMB1 = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB');
+  // progress numbers: MB, one decimal under 10 MB, KB under 1 MB, GB over 1 GB
+  const fmtB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b >= 1e7 ? (b / 1e6).toFixed(0) + ' MB'
+    : b >= 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.round(b / 1e3) + ' KB');
+  const fmtSpeed = (bps) => (bps > 0 ? ` · ${(bps / 1e6).toFixed(1)} MB/s` : '');
+  const fmtClock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  // Every string a build job shows, in one place (the page is localized
+  // later from here).
+  const T = {
+    preparing: 'Preparing…',
+    plan: (got, total) => `Loading the build plan… ${fmtB(got)}` + (total ? ` of ${fmtB(total)}` : ''),
+    checking: (got, total, bps) => `Checking Wikipedia packs: ${fmtB(got)} of ${fmtB(total)}` + fmtSpeed(bps),
+    connecting: (title) => `Connecting to the ${title} map…`,
+    map: (got, total, bps, left) => `Downloading the map: ${fmtB(got)} of ${fmtB(total)}` + fmtSpeed(bps)
+      + (left > 0 ? ` · about ${fmtDur(left)} left` : ''),
+    copying: (done, total) => `Building from your copy: ${fmtB(done)} of ${fmtB(total)}`,
+    finishing: (done, total) => `Finishing the file: ${fmtB(done)} of ${fmtB(total)}`,
+    packs: (got, total, bps) => `Downloading Wikipedia: ${fmtB(got)} of ${fmtB(total)}` + fmtSpeed(bps),
+    verifying: 'Verifying…',
+    saving: (saved, total) => 'Saving…' + (saved > 0 ? ` ${fmtB(saved)} of ${fmtB(total)}` : ''),
+    waiting: (s, got, total) => `Waiting for the connection… ${s < 120 ? Math.round(s) + ' s' : Math.round(s / 60) + ' min'} without data`
+      + ` (it keeps trying for 30 min); ${fmtB(got)} of ${fmtB(total)} so far`,
+    elapsed: (s) => `${fmtClock(s)} so far — keep this tab open`,
+    // the busy button: what is going on, in a word, and how far
+    button: (phase, frac) => ({ prepare: 'Preparing…', plan: 'Preparing…', check: 'Checking…', copy: 'Building…',
+                                finishing: 'Finishing…', verify: 'Verifying…', saving: 'Saving…' }[phase] || 'Downloading…')
+      + (frac > 0 ? ` ${Math.floor(frac * 100)}%` : ''),
+    note: (text, note) => (note ? `${text} — ${note}` : text),
+    phases: { plan: 'Loading the build plan.', check: 'Checking the Wikipedia packs.', map: 'Downloading the map.',
+              packs: 'Downloading Wikipedia.', copy: 'Building the file from your copy.', finishing: 'Finishing the file.',
+              verify: 'Verifying the file.',
+              saving: 'Saving the file.' },
+  };
+  // The job panel: shown within the click's own task (before anything is
+  // fetched), one progress bar for the whole job, the phase in words and
+  // numbers, and a clock that moves every second while work goes on.
+  const job = { on: false, t0: 0, phase: '', btn: null, btnText: '', tick: null };
+  function jobStart(btn) {
+    job.on = true; job.t0 = performance.now(); job.phase = '';
+    if (job.btn && job.btn !== btn) jobButton(false);
+    job.btn = btn; job.btnText = btn.textContent;
+    jobButton(true);
+    $('job').hidden = false;
+    try { $('job').scrollIntoView({ block: 'nearest' }); } catch (e) { /* old browsers */ }
+    jobFrac = 0; jobPending = null;
+    jobShow('prepare', T.preparing, null);
+    jobFlush();                                  // within the click, not a frame later
+    clearInterval(job.tick);
+    job.tick = setInterval(jobTick, 1000);
+  }
+  // The busy button keeps its focus (a disabled one would drop it to the
+  // page): aria-disabled, and its click is ignored while a job runs.
+  function jobButton(busy) {
+    const b = job.btn;
+    if (!b) return;
+    b.classList.toggle('busy', busy);
+    if (busy) { b.disabled = false; b.setAttribute('aria-disabled', 'true'); b.setAttribute('aria-busy', 'true'); b.textContent = T.preparing; }
+    else { b.textContent = job.btnText; b.removeAttribute('aria-busy'); b.removeAttribute('aria-disabled'); }
+  }
+  // What the panel should show; written to the page at most once a frame
+  // (progress can come thousands of times a second). The bar never goes
+  // back, and neither does the phase.
+  const PHASES = ['prepare', 'plan', 'check', 'map', 'copy', 'packs', 'finishing', 'verify', 'saving'];
+  let jobPending = null, jobFrame = 0, jobFrac = 0;
+  function jobShow(phase, line, frac) {
+    if (!job.on) return;
+    if (job.phase && PHASES.indexOf(phase) < PHASES.indexOf(job.phase)) phase = job.phase;
+    if (phase !== job.phase && T.phases[phase]) announce(T.phases[phase]);   // milestones only, for screen readers
+    job.phase = phase;
+    if (frac != null && isFinite(frac)) jobFrac = Math.max(jobFrac, Math.min(1, frac));
+    jobPending = { phase, line, frac: frac == null || !isFinite(frac) ? null : jobFrac };
+    if (!jobFrame) jobFrame = requestAnimationFrame(jobFlush);
+  }
+  function jobFlush() {
+    jobFrame = 0;
+    const v = jobPending;
+    if (!v || !job.on) return;
+    jobPending = null;
+    $('job').dataset.phase = v.phase;
+    if ($('phase').textContent !== v.line) $('phase').textContent = v.line;
+    const pr = $('prog');
+    if (v.frac == null) pr.removeAttribute('value');
+    else if (+pr.getAttribute('value') !== v.frac) pr.value = v.frac;
+    if (job.btn) {
+      const label = T.button(v.phase, v.frac || 0);
+      if (job.btn.textContent !== label) job.btn.textContent = label;
+    }
+    jobTick();
+  }
+  function jobTick() { if (job.on) $('elapsed').textContent = T.elapsed((performance.now() - job.t0) / 1000); }
+  function jobEnd(done) {
+    job.on = false; clearInterval(job.tick);
+    if (jobFrame) { cancelAnimationFrame(jobFrame); jobFrame = 0; }
+    jobPending = null;
+    jobButton(false);
+    if (done) { $('prog').value = 1; $('phase').textContent = ''; $('elapsed').textContent = ''; }
+    else $('job').hidden = true;
+    checkReady();
+  }
   const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
   // "{proxy}/item/file" -> the configured range proxy; any other URL as is.
   // The build worker (build/build-config.js) when one is set, else the
@@ -133,10 +232,26 @@
     return PROXY + u.slice('{proxy}'.length);
   };
 
-  async function getJSON(url) {
+  async function getJSON(url, onBytes) {
     let r;
     try { r = await fetch(url, { cache: 'no-cache' }); } catch (e) { throw new Error('no connection (' + (e.message || e) + ')'); }
     if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { status: r.status });
+    // read in pieces to say how much has come (a recipe is 10-15 MB)
+    if (onBytes && r.body && r.body.getReader) {
+      const reader = r.body.getReader(), parts = [];
+      let n = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value); n += value.length; onBytes(n);
+        }
+      } catch (e) { throw new Error('no connection (' + (e.message || e) + ')'); }
+      const all = new Uint8Array(n);
+      let o = 0;
+      for (const x of parts) { all.set(x, o); o += x.length; }
+      try { return JSON.parse(new TextDecoder().decode(all)); } catch (e) { throw new Error('the file is damaged'); }
+    }
     try { return await r.json(); } catch (e) { throw new Error('the file is damaged'); }
   }
 
@@ -265,7 +380,8 @@
       ? `Already have the ${region.title} map? Use it, with nothing else to download`
       : `Already have the ${region.title} map? Use it and download only ${fmtMB(entry.download_bytes)}`;
     $('go').textContent = `Build ${name} ${region.title} from my copy`;
-    recipeFor(entry).catch((e) => { $('notice').textContent = `Could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`; });
+    // The recipe (10-15 MB) is fetched when it is needed (Build, or a copy
+    // of the map to check), not on every change of language.
     checkBase();
   }
 
@@ -313,7 +429,8 @@
     else {
       out.textContent = 'Checking the file…';
       let b = null;
-      try { b = (await recipeFor(entry)).base; } catch (e) { verdict = `Could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`; }
+      const want = entry, bytes = $('baseProgress');
+      try { b = (await recipeFor(entry, (n) => { if (seq === baseSeq) bytes.textContent = T.plan(n, want.recipe_bytes); })).base; } catch (e) { verdict = `Could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`; }
       if (b) {
         const key = [file.name, file.size, file.lastModified, b.file, b.size, b.uuid, b.sha256[0], b.sha256[b.sha256.length - 1]].join('|');
         try {
@@ -323,6 +440,7 @@
       }
     }
     if (seq !== baseSeq) return;     // a newer file or language took over
+    $('baseProgress').textContent = '';
     if (verdict === true) { baseOk = true; out.className = 'ok'; out.textContent = '✓ right file'; }
     else { out.className = 'bad'; out.textContent = verdict; }
     checkReady();
@@ -419,7 +537,7 @@
   // recipe (the first chunk the build needs; false if one could not be had,
   // or a newer call took over). Without force it waits for a right base file
   // (the "build from my copy" path).
-  async function ensurePacks(force) {
+  async function ensurePacks(force, onAgg) {
     if (!force && running) return false;   // a build's own download is running; leave it
     const seq = ++packSeq;
     if (packAbort) packAbort.abort();
@@ -440,14 +558,28 @@
     const evBase = { region: region.id, lang: entry.lang, packs: ids.join(','), download_mb: Math.round((entry.download_bytes || 0) / 1e6) };
     const ac = packAbort = new AbortController();
     if (ids.length) track('packs_start', evBase);
+    // the chunks to check, in bytes: the progress says how far it is
+    const chunkLen = (p, k) => Math.min(p.chunk, p.size - k * p.chunk);
+    const todo = ids.filter((id) => !packSeeds.has(seedKey(rec.packs[id], firstChunk(rec, id))));
+    const total = todo.reduce((t, id) => t + chunkLen(rec.packs[id], firstChunk(rec, id)), 0);
+    let before = 0, high = 0, note = null;
+    // never back (a damaged chunk is downloaded again from 0); a retry's note stays 15 s
+    const showAgg = (got, why) => {
+      if (why) note = { text: why, at: performance.now() };
+      high = Math.max(high, before + got);
+      const bps = net.ms ? net.bytes / (net.ms / 1000) : 0;
+      const n = note && performance.now() - note.at < 15000 ? note.text : null;
+      if (onAgg) onAgg(high, total, bps, n);
+      else out.textContent = T.note(T.checking(high, total, bps), n);
+    };
     try {
-      for (const id of ids) {
+      for (const id of todo) {
         const p = rec.packs[id], name = packName(id);
         const k = firstChunk(rec, id), key = seedKey(p, k);
-        if (packSeeds.has(key)) continue;
-        out.textContent = `Checking ${name}…`;
-        const buf = await checkChunk(p, k, ac.signal, (got, note) => { if (note) out.textContent = `Checking ${name} — ${note}`; })
+        showAgg(0);
+        const buf = await checkChunk(p, k, ac.signal, (got, why) => showAgg(got, why ? `${name}: ${why}` : null))
           .catch((e) => { e.pack = name; throw e; });
+        before += chunkLen(p, k);
         if (seq !== packSeq) return false;     // the language changed meanwhile
         packSeeds.set(key, { k, buf });
       }
@@ -467,9 +599,12 @@
     packAbort = null;
     if (ids.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
     packsOk = true;
-    out.className = 'ok';
     const wiki = ids.filter((id) => id !== 'search');
-    out.textContent = wiki.length ? `✓ ${wiki.map(packName).join(', ')}${ids.includes('search') ? ' and the search index' : ''} ready: ${fmtMB(entry.download_bytes || 0)} to download with the map` : '';
+    if (onAgg) out.textContent = '';                 // a build under way: its panel says it
+    else {
+      out.className = 'ok';
+      out.textContent = wiki.length ? `✓ ${wiki.map(packName).join(', ')}${ids.includes('search') ? ' and the search index' : ''} ready: ${fmtMB(entry.download_bytes || 0)} to download with the map` : '';
+    }
     checkReady();
     return true;
   }
@@ -482,20 +617,31 @@
   }
 
   function checkReady() {
-    $('go').disabled = !(baseOk && packsOk && region && entry) || !!running;
-    $('oneclick').disabled = !(region && entry) || !!running;
+    for (const [id, ok] of [['go', baseOk && packsOk && region && entry], ['oneclick', region && entry]]) {
+      const b = $(id);
+      if (job.on && b === job.btn) b.disabled = false;           // busy: aria-disabled, keeps its focus
+      else b.disabled = !ok || !!running;
+    }
     for (const id of ['region', 'lang', 'baseFile']) $(id).disabled = !!running;
   }
 
   // The recipe of the chosen language; fetched once per language.
   const recipes = new Map();
-  function recipeFor(e) {
+  // onBytes(got): how much of the recipe has come (every caller waiting
+  // for the same fetch hears it).
+  const recipeListeners = new Map();
+  function recipeFor(e, onBytes) {
+    if (onBytes) {
+      if (!recipeListeners.has(e.recipe)) recipeListeners.set(e.recipe, new Set());
+      recipeListeners.get(e.recipe).add(onBytes);
+    }
     if (!recipes.has(e.recipe)) {
-      const p = getJSON(e.recipe).then((r) => {
+      const p = getJSON(e.recipe, (n) => { for (const f of recipeListeners.get(e.recipe) || []) f(n); }).then((r) => {
         for (const pk of Object.values(r.packs || {})) pk.url = viaProxy(pk.url);
         return r;
       });
       p.catch(() => recipes.delete(e.recipe));     // a later try fetches it again
+      p.finally(() => recipeListeners.delete(e.recipe)).catch(() => {});
       recipes.set(e.recipe, p);
     }
     return recipes.get(e.recipe);
@@ -712,16 +858,40 @@
   async function build(mode) {
     running = { starting: true, mode };
     $('oneclick').classList.remove('attention');
+    // Visible at once, before anything is fetched: the button busy, the job panel.
+    jobStart(mode === 'file' ? $('go') : $('oneclick'));
+    setStatus('', true);
+    try { await buildJob(mode); }
+    catch (e) {                      // nothing may leave the page busy
+      setStatus('Stopped: ' + (e && e.message || e), true);
+      announce($('status').textContent);
+    } finally {
+      if (job.on || running) { running = null; releaseScreen(); if (job.on) jobEnd(false); else checkReady(); }
+    }
+  }
+
+  async function buildJob(mode) {
     checkReady();                    // locks region, language and file too
     $('save').hidden = true; $('after').hidden = true;
     holdScreen();
     let recipe, fileName, sinkInfo = null, baseUrl = null;
     const notStarted = (msg) => {
-      running = null; releaseScreen(); checkReady();
+      running = null; releaseScreen(); jobEnd(false);
       setStatus('Not started: ' + msg, true); announce($('status').textContent);
     };
-    try { recipe = await recipeFor(entry); }
-    catch (e) { notStarted(`could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`); return; }
+    // The whole job's progress (one bar): from the network, what the recipe,
+    // the pack checks and the build download, of all of it; from a copy, the
+    // recipe and the file written.
+    const planTotal = entry.recipe_bytes || 0;
+    const netTotal = planTotal + (mode === 'net' ? region.base.size : 0) + (entry.download_bytes || 0);
+    let planGot = 0, checkGot = 0;
+    try {
+      recipe = await recipeFor(entry, (n) => {
+        planGot = n;
+        jobShow('plan', T.plan(n, planTotal), mode === 'net' && planTotal ? n / netTotal : null);
+      });
+    } catch (e) { notStarted(`could not load the recipe for ${langName(entry.lang, entry.label)} (${e.message || e}). Try again later.`); return; }
+    planGot = planGot || planTotal;
     fileName = `${recipe.file_name || recipe.name}.zim`;
     if (mode === 'file') {
       try { sinkInfo = await prepareSink(fileName, recipe.size, true); }
@@ -729,12 +899,15 @@
     } else {
       baseUrl = baseUrlFor(region, recipe);
       if (!baseUrl) { notStarted(`the ${region.title} map cannot be downloaded from here yet. Download the map file, then use "Already have the map?".`); return; }
-      setStatus('Starting…', true);
       // Browser storage must have room before anything is downloaded.
       const room = willUseOpfs() ? await opfsRoomError(recipe.size) : null;
       if (room) { notStarted(room + '.'); return; }
-      if (!await ensurePacks(true)) {  // #packStatus says why
-        running = null; releaseScreen(); checkReady();
+      jobShow('check', T.checking(0, 0, 0), planGot / netTotal);
+      if (!await ensurePacks(true, (got, total, bps, why) => {
+        checkGot = got;
+        jobShow('check', T.note(T.checking(got, total, bps), why), (planGot + got) / netTotal);
+      })) {  // #packStatus says why
+        running = null; releaseScreen(); jobEnd(false);
         setStatus('Not started: Wikipedia could not be downloaded (see above). Nothing was saved.', true);
         return;
       }
@@ -750,8 +923,8 @@
     const worker = new Worker('assembler-worker.js?v=4');
     running = { worker, base, t0, sent: new Set(), mode };
     checkReady();
-    setStatus(mode === 'net' ? `Downloading the ${region.title} map…` : 'Starting…', true);
-    announce(mode === 'net' ? `Downloading and building the file. Keep this tab open.` : 'Building the file. Keep this tab open.');
+    if (mode === 'net') jobShow('map', T.connecting(region.title), (planGot + checkGot) / netTotal);
+    else jobShow('copy', T.copying(0, recipe.size), 0);
     let note = null;
     const result = await new Promise((resolve) => {
       worker.onmessage = async (e) => {
@@ -767,24 +940,28 @@
           note = { text: d.text, at: performance.now() };
         } else if (d.type === 'progress') {
           const { written, size, ms, closing } = d;
-          $('prog').value = written / size;
-          let text;
-          if (closing && sinkInfo && sinkInfo.sink === 'sw') text = `All ${fmtMB(size)} built and checked; your browser is saving the rest`;
-          else if (mode === 'net' && d.base && d.base.got < d.base.size) {
+          window.__szProgress = d;                   // the last one, and the worker's phases, for the page's tests
+          const plog = window.__szPhaseLog || (window.__szPhaseLog = []);
+          if (plog[plog.length - 1] !== d.phase) plog.push(d.phase);
+          // the phase the worker is in, in words and numbers; the bar: the whole job
+          const got = d.base ? d.base.got : 0, bps = d.base ? d.base.bps : 0;
+          const frac = mode === 'net' ? (planGot + checkGot + got) / netTotal : written / size;
+          let phase, text;
+          if (closing || d.phase === 'saving') { phase = 'saving'; text = T.saving(d.saved || 0, size); }
+          else if (d.phase === 'verify') { phase = 'verify'; text = T.verifying; }
+          else if (d.phase === 'finishing') { phase = 'finishing'; text = T.finishing(written, size); }
+          else if (d.waiting) { phase = job.phase || 'map'; text = T.waiting(d.waiting / 1000, got, d.base ? d.base.size : size); }
+          else if (d.phase === 'packs' && d.packs && d.packs.size) { phase = 'packs'; text = T.packs(d.packs.got, d.packs.size, bps); }
+          else if (mode === 'net' && d.map && d.map.size) {
             // Speed over the last 30 s; time left from the average since the
             // first byte (the proxy's speed swings too much for the former).
-            const left = d.base.size - d.base.got, bps = d.base.bps, avg = d.base.avg || bps;
-            text = `Downloading the ${region.title} map: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)}` +
-              (bps > 0 ? `, ${(bps / 1e6).toFixed(1)} MB/s` : '') + (avg > 0 && ms > 20000 ? `, about ${fmtDur(left / avg)} left` : '');
-          } else text = `${fmtMB(written)} of ${fmtMB(size)}` +
-            (d.base && d.base.got ? ` (Wikipedia: ${fmtMB(d.base.got)} of ${fmtMB(d.base.size)} downloaded)` : '');
-          if (d.waiting) {
-            const w = d.waiting / 1000;
-            text = `Waiting for the connection… (${w < 120 ? Math.round(w) + ' s' : Math.round(w / 60) + ' min'} without data; ` +
-              `it keeps trying for 30 min). ${fmtMB(d.base ? d.base.got : written)} of ${fmtMB(d.base ? d.base.size : size)} so far`;
-          } else if (note && performance.now() - note.at < 15000) text += ` (${note.text})`;
-          if (!sinkInfo && written === 0 && mode === 'net' && !(d.base && d.base.got)) text = `Connecting to the ${region.title} map…`;
-          setStatus(text + ' — keep this tab open', closing);
+            const avg = d.base.avg || bps;
+            phase = 'map';
+            text = d.map.got ? T.map(d.map.got, d.map.size, bps, avg > 0 && ms > 20000 ? (d.base.size - got) / avg : 0)
+              : T.connecting(region.title);
+          } else { phase = 'copy'; text = T.copying(written, size); }
+          if (note && performance.now() - note.at < 15000 && !d.waiting) text += ` (${note.text})`;
+          jobShow(phase, text, frac);
           for (const p of [25, 50, 75]) {
             if (written / size * 100 >= p && !running.sent.has(p)) {
               running.sent.add(p);
@@ -824,7 +1001,7 @@
       hidden_s: Math.round(hiddenMs / 1000), hash_ok: result.ok ? 1 : 0 }));
     running = null;
     releaseScreen();
-    checkReady();
+    jobEnd(result.ok);               // after running: the button is enabled again, focus and all
     if (result.ok) {
       const secs = Math.round(result.ms / 1000);
       const tail = ` ${fmtMB(result.size)} in ${secs < 120 ? secs + ' s' : fmtDur(secs)}` +
