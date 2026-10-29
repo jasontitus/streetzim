@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetZim map library</title>
+<meta name="description" content="Offline OpenStreetMap maps for Kiwix in many languages: pick a language, then a continent, region, country or area, or search.">
+<link rel="icon" href="/drive/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap">
+<style>
+/* The look of Kiwix's own library (browse.library.kiwix.org): a grey bar
+   of filters, a count, and a grid of book cards with a download bar. */
+:root {
+  --bar: #f4f6f8; --text: #0c0c0c; --muted: #6b6b6b; --line: #e3e3e3;
+  --card: #f7f7f7; --pill: #858585; --button: #909090; --blue: #00b2e2; --blue-dark: #0097c0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.kx-nav { background: var(--bar); padding: 10px 20px 12px; display: flex; align-items: flex-start; gap: 16px; }
+.kx-filters { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 230px)); gap: 10px 20px; }
+.kx-filter {
+  appearance: none; -webkit-appearance: none; width: 100%; height: 30px; padding: 0 30px 0 10px;
+  border: 1px solid #c9c9c9; border-radius: 10px; background: #fff; color: var(--text); font: 13px system-ui, sans-serif;
+  background-image: linear-gradient(45deg, transparent 50%, #fff 50%), linear-gradient(135deg, #fff 50%, transparent 50%),
+                    linear-gradient(var(--pill), var(--pill));
+  background-position: right 13px center, right 8px center, right 0 top 0;
+  background-size: 5px 5px, 5px 5px, 30px 100%; background-repeat: no-repeat;
+}
+.kx-filter.kx-lang { background-color: var(--pill); color: #fff; border-color: var(--pill); }
+.kx-filter:disabled { opacity: .5; }
+.kx-search { display: flex; gap: 10px; grid-column: span 2; max-width: 480px; }
+.kx-search input {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid #b5b2b2; border-radius: 10px; font: 13px system-ui, sans-serif;
+}
+.kx-search button { height: 30px; padding: 0 22px; border: 1px solid #b5b2b2; border-radius: 10px; background: var(--button); color: #fff; font: 13px system-ui, sans-serif; cursor: pointer; }
+.kx-search button:hover { background: #7a7a7a; }
+.kx-home { display: flex; align-items: center; gap: 6px; color: var(--text); text-decoration: none; font: 600 14px Poppins, system-ui, sans-serif; white-space: nowrap; height: 30px; }
+.kx-home img { width: 26px; height: 26px; border-radius: 6px; }
+main { max-width: 1160px; margin: 0 auto; padding: 18px 20px 40px; }
+.kx-count { font: 700 16px Poppins, system-ui, sans-serif; color: #333; margin: 0 0 14px; }
+.kx-note { color: var(--muted); font-size: 13px; margin: -8px 0 14px; }
+.kx-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 24px 30px; }
+.kx-book { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); min-height: 260px; }
+.kx-book-head { display: flex; align-items: center; gap: 12px; padding: 10px 10px 0; }
+.kx-book-head img { width: 48px; height: 48px; flex: none; border-radius: 4px; }
+.kx-title { font: 600 13px/1.3 Poppins, system-ui, sans-serif; color: var(--text); overflow-wrap: anywhere; }
+.kx-title small { display: block; font-weight: 400; color: var(--muted); }
+.kx-desc { margin: 12px 10px 8px; font-size: 12.5px; color: #3c3c3c; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.kx-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 0 10px 10px; }
+.kx-lang-tag { background: #fff; border-radius: 4px; padding: 4px 6px; font: 700 11px system-ui, sans-serif; text-transform: uppercase; }
+.kx-tags { color: #8a8a8a; font-size: 12px; text-align: end; overflow-wrap: anywhere; }
+.kx-tags a { color: #8a8a8a; }
+.kx-download { display: block; background: var(--blue); color: #fff; text-align: center; text-decoration: none; padding: 8px 6px; font-size: 13px; }
+.kx-download:hover { background: var(--blue-dark); }
+.kx-download svg { width: 12px; height: 12px; vertical-align: -1px; margin-inline-end: 4px; fill: currentColor; }
+.kx-more { display: block; text-align: center; font-size: 12px; padding: 6px; color: #1a73e8; text-decoration: none; border-top: 1px solid var(--line); background: #fff; }
+.kx-empty { color: var(--muted); padding: 30px 0; }
+@media (max-width: 640px) {
+  .kx-nav { flex-direction: column-reverse; padding: 14px 16px; }
+  .kx-filters { width: 100%; grid-template-columns: 1fr; gap: 10px; }
+  .kx-filter, .kx-search { max-width: none; }
+  .kx-search { grid-column: auto; }
+  main { padding: 16px; }
+  .kx-list { grid-template-columns: 1fr; gap: 18px; }
+  .kx-book { min-height: 0; }
+}
+</style>
+</head>
+<body>
+<div class="kx-nav">
+  <form class="kx-filters" id="filters" role="search">
+    <select id="f-lang" class="kx-filter kx-lang" aria-label="Language"></select>
+    <select id="f-continent" class="kx-filter" aria-label="Continent"></select>
+    <select id="f-region" class="kx-filter" aria-label="Region"></select>
+    <select id="f-country" class="kx-filter" aria-label="Country"></select>
+    <select id="f-sub" class="kx-filter" aria-label="Area"></select>
+    <div class="kx-search">
+      <input id="f-q" type="search" placeholder="Search" aria-label="Search maps" enterkeyhint="search">
+      <button type="submit">Search</button>
+    </div>
+  </form>
+  <a class="kx-home" href="/"><img src="/drive/icon-192.png" alt="">StreetZim</a>
+</div>
+<main>
+  <h3 class="kx-count" id="count">Loading maps…</h3>
+  <p class="kx-note" id="note" hidden></p>
+  <div class="kx-list" id="list"></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var BASE_NAMES = { en: 'English', de: 'Deutsch' };
+  // The language's English name beside its own ("ไทย — Thai"), where the
+  // browser knows it.
+  var english = (function () {
+    try { var dn = new Intl.DisplayNames(['en'], { type: 'language' }); return function (c) { try { return dn.of(c); } catch (e) { return ''; } }; }
+    catch (e) { return function () { return ''; }; }
+  })();
+  function langLabel(code, own) {
+    var en = english(code);
+    return own && en && en.toLowerCase() !== String(own).toLowerCase() ? own + ' — ' + en : (own || en || code);
+  }
+  var DL = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 1h2v8.6l3-3 1.4 1.4L8 13.4 2.6 8 4 6.6l3 3V1zM2 14h12v1.5H2z"/></svg>';
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { maps: [], builder: {}, langs: [] };
+
+  function fold(s) {   // case and accents off, for the search
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+  function size(n) {
+    if (!n) return '';
+    var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+    while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+    return (n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i];
+  }
+  function readHash() {
+    var o = {};
+    location.hash.replace(/^#/, '').split('&').forEach(function (kv) {
+      if (!kv) return;
+      var i = kv.indexOf('=');
+      o[decodeURIComponent(kv.slice(0, i < 0 ? kv.length : i))] = i < 0 ? '' : decodeURIComponent(kv.slice(i + 1));
+    });
+    return o;
+  }
+  function writeHash(o) {
+    var parts = Object.keys(o).filter(function (k) { return o[k]; }).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(o[k]);
+    });
+    history.replaceState(null, '', location.pathname + location.search + (parts.length ? '#' + parts.join('&') : ''));
+  }
+
+  // One card per map in the chosen language: the map itself where it is in
+  // that language, else the builder's version in it; with no language
+  // chosen, each map once, in its own language.
+  function entries(lang) {
+    var out = [];
+    state.maps.forEach(function (m) {
+      var b = state.builder[m.id];
+      var langs = b ? b.menu.map(function (e) { return e.lang; }) : [];
+      if (!lang || m.language === lang) {
+        out.push({ map: m, lang: m.language, label: BASE_NAMES[m.language] || m.language, size: m.size,
+                   href: m.download, built: false, others: langs.filter(function (l) { return l !== m.language; }).length });
+      } else if (b) {
+        var e = b.menu.filter(function (x) { return x.lang === lang; })[0];
+        if (e) out.push({ map: m, lang: lang, label: e.label || lang, size: e.size,
+                          href: '/build/?region=' + encodeURIComponent(m.id) + '&lang=' + encodeURIComponent(lang),
+                          built: true, others: 0 });
+      }
+    });
+    return out;
+  }
+
+  // Where a region and a country sit, from the maps that name just one.
+  function homes() {
+    var regionOf = {}, continentOf = {};
+    state.maps.forEach(function (m) {
+      var p = m.places;
+      if (p.continents.length === 1) p.regions.forEach(function (r) { continentOf[r] = continentOf[r] || p.continents[0]; });
+      p.countries.forEach(function (c) { if (p.regions.length === 1 || !regionOf[c]) regionOf[c] = p.regions[0]; });
+    });
+    return { regionOf: regionOf, continentOf: continentOf };
+  }
+
+  function matches(m, f, H) {
+    var p = m.places;
+    if (f.continent && p.continents.indexOf(f.continent) < 0) return false;
+    if (f.region && p.regions.indexOf(f.region) < 0) return false;
+    if (f.country) {
+      var has = p.countries.indexOf(f.country) >= 0 ||
+                (!p.countries.length && p.regions.indexOf(H.regionOf[f.country]) >= 0);
+      if (!has) return false;
+    }
+    if (f.sub && p.subregion && p.subregion !== f.sub) return false;
+    return true;
+  }
+
+  function options(sel, all, values, current) {
+    sel.textContent = '';
+    var first = document.createElement('option');
+    first.value = ''; first.textContent = all; sel.appendChild(first);
+    values.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v[0]; o.textContent = v[1]; sel.appendChild(o);
+    });
+    sel.value = values.some(function (v) { return v[0] === current; }) ? current : '';
+    sel.disabled = values.length === 0;
+    return sel.value;
+  }
+  var uniq = function (a) { return a.filter(function (v, i) { return v && a.indexOf(v) === i; }).sort(function (x, y) { return x.localeCompare(y); }); };
+
+  function render() {
+    var h = readHash();
+    var f = { lang: $('f-lang').value, continent: $('f-continent').value, region: $('f-region').value,
+              country: $('f-country').value, sub: $('f-sub').value, q: $('f-q').value.trim() };
+    var H = homes();
+    var list = entries(f.lang);
+    // Each filter offers what the ones before it leave.
+    var cont = uniq([].concat.apply([], list.map(function (e) { return e.map.places.continents; })));
+    f.continent = options($('f-continent'), 'All continents', cont.map(function (c) { return [c, c]; }), f.continent);
+    var l1 = list.filter(function (e) { return matches(e.map, { continent: f.continent }, H); });
+    var regs = uniq([].concat.apply([], l1.map(function (e) { return e.map.places.regions; })))
+      .filter(function (r) { return !f.continent || (H.continentOf[r] || f.continent) === f.continent; });
+    f.region = options($('f-region'), 'All regions', regs.map(function (r) { return [r, r]; }), f.region);
+    var l2 = l1.filter(function (e) { return matches(e.map, { region: f.region }, H); });
+    var ctry = uniq([].concat.apply([], l2.map(function (e) { return e.map.places.countries; })))
+      .filter(function (c) { return !f.region || H.regionOf[c] === f.region; });
+    f.country = options($('f-country'), 'All countries', ctry.map(function (c) { return [c, c]; }), f.country);
+    var l3 = l2.filter(function (e) { return matches(e.map, { country: f.country }, H); });
+    var subs = f.country ? uniq(l3.map(function (e) { return e.map.places.subregion; })) : [];
+    f.sub = options($('f-sub'), 'All areas', subs.map(function (s) { return [s, s]; }), f.sub);
+    var shown = l3.filter(function (e) { return matches(e.map, { sub: f.sub }, H); });
+    if (f.q) {
+      var words = fold(f.q).split(/\s+/);
+      shown = shown.filter(function (e) {
+        var p = e.map.places;
+        var hay = fold([e.map.title, e.map.description, p.continents.join(' '), p.regions.join(' '),
+                        p.countries.join(' '), p.subregion, e.label, english(e.lang), e.lang].join(' '));
+        return words.every(function (w) { return hay.indexOf(w) >= 0; });
+      });
+    }
+    // An area's own map before the larger ones that hold it.
+    if (f.sub) shown.sort(function (a, b) { return (b.map.places.subregion === f.sub) - (a.map.places.subregion === f.sub); });
+    writeHash({ lang: f.lang, continent: f.continent, region: f.region, country: f.country, area: f.sub, q: f.q });
+    $('count').textContent = shown.length + (shown.length === 1 ? ' map' : ' maps');
+    var note = $('note');
+    note.hidden = !f.lang || f.lang === 'en';
+    note.textContent = 'Maps in this language are put together from the map and its language pack when you download them.';
+    var box = $('list');
+    box.textContent = '';
+    if (!shown.length) {
+      var em = document.createElement('p'); em.className = 'kx-empty';
+      em.textContent = 'No map matches. Clear a filter, or choose another language.';
+      box.appendChild(em);
+    }
+    shown.forEach(function (e) { box.appendChild(card(e)); });
+  }
+
+  function card(e) {
+    var m = e.map, p = m.places;
+    var el = document.createElement('article'); el.className = 'kx-book';
+    var head = document.createElement('div'); head.className = 'kx-book-head';
+    var img = document.createElement('img'); img.src = '/drive/icon-192.png'; img.alt = ''; img.loading = 'lazy';
+    var t = document.createElement('div'); t.className = 'kx-title'; t.textContent = m.title;
+    if (e.built) { var s = document.createElement('small'); s.textContent = e.label; t.appendChild(s); }
+    head.appendChild(img); head.appendChild(t); el.appendChild(head);
+    var d = document.createElement('p'); d.className = 'kx-desc'; d.textContent = m.description; el.appendChild(d);
+    var foot = document.createElement('div'); foot.className = 'kx-foot';
+    var tag = document.createElement('span'); tag.className = 'kx-lang-tag'; tag.textContent = e.lang; tag.title = e.label;
+    var tags = document.createElement('span'); tags.className = 'kx-tags';
+    tags.textContent = [p.subregion || (p.countries.length === 1 ? p.countries[0] : p.regions[0]), m.date].filter(Boolean).join(' · ');
+    if (m.preview && !e.built) {
+      tags.appendChild(document.createTextNode(' · '));
+      var pv = document.createElement('a'); pv.href = m.preview; pv.textContent = 'Preview'; tags.appendChild(pv);
+    }
+    foot.appendChild(tag); foot.appendChild(tags); el.appendChild(foot);
+    var dl = document.createElement('a'); dl.className = 'kx-download'; dl.href = e.href;
+    dl.innerHTML = DL;   // a constant icon; the text below is set as text
+    dl.appendChild(document.createTextNode((e.built ? 'Build & download - ' : 'Download - ') + size(e.size)));
+    el.appendChild(dl);
+    if (e.others > 0) {
+      var more = document.createElement('a'); more.className = 'kx-more';
+      more.href = '/build/?region=' + encodeURIComponent(m.id);
+      more.textContent = 'Also in ' + e.others + ' other languages';
+      el.appendChild(more);
+    }
+    return el;
+  }
+
+  function languages() {
+    var seen = {}, out = [];
+    state.maps.forEach(function (m) { if (!seen[m.language]) { seen[m.language] = 1; out.push([m.language, BASE_NAMES[m.language] || m.language]); } });
+    Object.keys(state.builder).forEach(function (id) {
+      state.builder[id].menu.forEach(function (e) { if (!seen[e.lang]) { seen[e.lang] = 1; out.push([e.lang, e.label || e.lang]); } });
+    });
+    return out.map(function (l) { return [l[0], langLabel(l[0], l[1])]; })
+              .sort(function (a, b) { return a[1].localeCompare(b[1]); });
+  }
+
+  Promise.all([
+    fetch('catalog.json').then(function (r) { return r.json(); }),
+    fetch('../build/recipes/index.json').then(function (r) { return r.ok ? r.json() : { regions: [] }; }).catch(function () { return { regions: [] }; })
+  ]).then(function (got) {
+    state.maps = got[0].maps || [];
+    (got[1].regions || []).forEach(function (r) { state.builder[r.id] = r; });
+    var langs = languages(), h = readHash();
+    var want = h.lang !== undefined ? h.lang : (navigator.language || 'en').slice(0, 2).toLowerCase();
+    if (!langs.some(function (l) { return l[0] === want; })) want = h.lang === '' ? '' : 'en';
+    options($('f-lang'), 'All languages', langs, want);
+    ['continent', 'region', 'country'].forEach(function (k) {
+      var sel = $('f-' + k); if (h[k]) { options(sel, '', [[h[k], h[k]]], h[k]); }
+    });
+    if (h.area) options($('f-sub'), '', [[h.area, h.area]], h.area);
+    $('f-q').value = h.q || '';
+    render();
+  }).catch(function (err) {
+    $('count').textContent = 'The map list could not be loaded (' + err.message + ').';
+  });
+  ['f-lang', 'f-continent', 'f-region', 'f-country', 'f-sub'].forEach(function (id, i, ids) {
+    $(id).addEventListener('change', function () {
+      // A place filter clears the narrower ones after it; the language keeps them.
+      if (id !== 'f-lang') ids.slice(i + 1).forEach(function (later) { $(later).value = ''; });
+      render();
+    });
+  });
+  $('filters').addEventListener('submit', function (ev) { ev.preventDefault(); render(); });
+  var typing = null;
+  $('f-q').addEventListener('input', function () { clearTimeout(typing); typing = setTimeout(render, 200); });
+})();
+</script>
+</body>
+</html>

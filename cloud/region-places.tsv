@@ -1,0 +1,86 @@
+# Where each map on the site is, for the library page's filters (web/library/,
+# written by web/generate.py into web/library/catalog.json).
+# Columns (tab-separated): id	continents	regions	countries	subregion
+#   continents: Africa, Asia, Europe, North America, Oceania, South America
+#   regions: the UN M49 subregion names (Northern Europe, South-eastern Asia,
+#     Middle Africa, ...); a map over several lists each.
+#   countries: the countries the map covers in full or in good part; empty
+#     for a continent map, which covers every country of its regions.
+#   subregion: for a map inside one country (a state, a city), its name.
+# Lists are separated by ";". Every id in web/generate.py REGIONS has a row
+# (tests/test_library_catalog.py).
+europe	Europe	Northern Europe;Western Europe;Southern Europe;Eastern Europe		
+united-states	North America	Northern America	United States	
+south-america	South America	South America	Colombia;Venezuela;Guyana;Suriname;French Guiana;Ecuador;Peru;Bolivia;Paraguay;Uruguay;Chile;Brazil;Argentina	
+africa	Africa	Northern Africa;Western Africa;Middle Africa;Eastern Africa;Southern Africa		
+africa-light	Africa	Northern Africa;Western Africa;Middle Africa;Eastern Africa;Southern Africa		
+indian-subcontinent	Asia	Southern Asia	India;Pakistan;Bangladesh;Sri Lanka;Nepal;Bhutan;Maldives	
+china	Asia	Eastern Asia	China	
+russia	Europe;Asia	Eastern Europe	Russia	
+australia-nz	Oceania	Australia and New Zealand	Australia;New Zealand	
+southeast-asia	Asia	South-eastern Asia	Thailand;Vietnam;Myanmar;Cambodia;Laos;Malaysia;Singapore;Indonesia;Philippines;Brunei;Timor-Leste	
+thailand	Asia	South-eastern Asia	Thailand	
+canada	North America	Northern America	Canada	
+west-asia	Asia	Western Asia	Turkey;Syria;Lebanon;Israel;Palestine;Jordan;Iraq;Iran;Kuwait;Saudi Arabia;Bahrain;Qatar;United Arab Emirates;Oman;Yemen	
+central-asia	Asia	Central Asia	Kazakhstan;Uzbekistan;Turkmenistan;Tajikistan;Kyrgyzstan;Afghanistan	
+korea-mongolia	Asia	Eastern Asia	South Korea;North Korea;Mongolia	
+caucasus	Asia	Western Asia	Georgia;Armenia;Azerbaijan	
+pacific-islands	Oceania	Melanesia;Micronesia	Papua New Guinea;Fiji;Solomon Islands;Vanuatu;New Caledonia;Palau;Micronesia;Marshall Islands;Nauru;Tuvalu;Kiribati	
+west-africa	Africa	Western Africa	Nigeria;Ghana;Côte d'Ivoire;Senegal;Mali;Burkina Faso;Guinea;Benin;Togo;Sierra Leone;Liberia;Niger	
+southern-africa	Africa	Southern Africa	South Africa;Namibia;Botswana;Zimbabwe;Mozambique;Zambia;Malawi;Lesotho;Eswatini	
+east-africa	Africa	Eastern Africa	Kenya;Tanzania;Uganda;Ethiopia;Rwanda;Burundi;Somalia;South Sudan	
+central-america-caribbean	North America	Central America;Caribbean	Belize;Guatemala;Honduras;El Salvador;Nicaragua;Costa Rica;Panama;Cuba;Jamaica;Haiti;Dominican Republic;Puerto Rico	
+himalayas	Asia	Southern Asia	Nepal;Bhutan;India;Pakistan;China	
+baltics	Europe	Northern Europe	Estonia;Latvia;Lithuania	
+brazil	South America	South America	Brazil	
+argentina	South America	South America	Argentina	
+mexico	North America	Central America	Mexico	
+ukraine	Europe	Eastern Europe	Ukraine;Moldova;Russia	
+japan	Asia	Eastern Asia	Japan	
+iran	Asia	Southern Asia	Iran	
+bahrain	Asia	Western Asia	Bahrain	
+egypt	Africa	Northern Africa	Egypt	
+switzerland	Europe	Western Europe	Switzerland;Liechtenstein	
+switzerland-de	Europe	Western Europe	Switzerland;Liechtenstein	
+switzerland-de-ultralight	Europe	Western Europe	Switzerland;Liechtenstein	
+switzerland-border-de-ultralight	Europe	Western Europe	Switzerland;Liechtenstein	
+switzerland-light	Europe	Western Europe	Switzerland;Liechtenstein	
+iceland	Europe	Northern Europe	Iceland	
+turkey	Asia	Western Asia	Turkey	
+south-korea	Asia	Eastern Asia	South Korea	
+taiwan	Asia	Eastern Asia	Taiwan	
+taipei	Asia	Eastern Asia	Taiwan	Taipei
+east-coast-us	North America	Northern America	United States	East Coast
+midwest-us	North America	Northern America	United States	Midwest
+west-coast-us	North America	Northern America	United States	West Coast
+central-us	North America	Northern America	United States	Mountain West
+california	North America	Northern America	United States	California
+hawaii	North America	Northern America	United States	Hawaii
+alaska	North America	Northern America	United States	Alaska
+new-york-state	North America	Northern America	United States	New York
+florida	North America	Northern America	United States	Florida
+carolinas	North America	Northern America	United States	North and South Carolina
+nyc-metro	North America	Northern America	United States	New York City area
+chicago-metro	North America	Northern America	United States	Chicago area
+greater-la	North America	Northern America	United States	Los Angeles area
+texas	North America	Northern America	United States	Texas
+colorado	North America	Northern America	United States	Colorado
+silicon-valley	North America	Northern America	United States	San Francisco Bay Area
+washington-dc	North America	Northern America	United States	Washington, D.C.
+hispaniola	North America	Caribbean	Haiti;Dominican Republic	
+france	Europe	Western Europe	France	
+germany	Europe	Western Europe	Germany	
+italy	Europe	Southern Europe	Italy	
+poland	Europe	Eastern Europe	Poland	
+greece	Europe	Southern Europe	Greece	
+britain-ireland	Europe	Northern Europe	United Kingdom;Ireland	
+iberia	Europe	Southern Europe	Spain;Portugal;Andorra	
+benelux	Europe	Western Europe	Netherlands;Belgium;Luxembourg	
+nordics	Europe	Northern Europe	Norway;Sweden;Finland;Denmark	
+austria-czech	Europe	Western Europe;Eastern Europe	Austria;Czechia;Slovakia	
+balkans	Europe	Southern Europe	Slovenia;Croatia;Bosnia and Herzegovina;Serbia;Montenegro;Albania;North Macedonia;Kosovo	
+carpathians	Europe	Eastern Europe	Romania;Hungary;Bulgaria	
+north-africa	Africa	Northern Africa	Morocco;Algeria;Tunisia;Libya;Mauritania;Western Sahara	
+horn-of-africa	Africa	Eastern Africa	Ethiopia;Somalia;Eritrea;Djibouti;South Sudan;Kenya	
+central-africa	Africa	Middle Africa	DR Congo;Cameroon;Chad;Central African Republic;Gabon;Congo;Equatorial Guinea;Angola;Zambia	
+east-polynesia	Oceania	Polynesia	French Polynesia;Cook Islands	

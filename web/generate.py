@@ -20,7 +20,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-from html import escape
+from html import escape, unescape
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "template.html")
@@ -1023,6 +1023,64 @@ BUILDER_LIVE = {}
 BUILDER_NEWER = {}
 
 
+# Every live map as the site's cards show it, for web/library/catalog.json
+# (write_library_catalog): filled by _write_page, one entry per region.
+LIBRARY: dict[str, dict] = {}
+PLACES_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "cloud", "region-places.tsv")
+
+
+def library_dir():
+    """web/library/, read when called: tests point SCRIPT_DIR elsewhere, and
+    a path fixed at import wrote their made-up maps into the real catalog."""
+    return os.path.join(SCRIPT_DIR, "library")
+
+
+def load_places(path=PLACES_PATH):
+    """{region id: {continents, regions, countries, subregion}} from
+    cloud/region-places.tsv (lists split on ";")."""
+    out: dict[str, dict] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip() or line.startswith("#"):
+                continue
+            cols = line.rstrip("\n").split("\t")
+            if len(cols) != 5:
+                raise ValueError(f"{path}: want 5 columns, got {len(cols)}: {line!r}")
+            rid, continents, regions, countries, sub = cols
+            split = lambda v: [x.strip() for x in v.split(";") if x.strip()]  # noqa: E731
+            out[rid] = {"continents": split(continents), "regions": split(regions),
+                        "countries": split(countries), "subregion": sub.strip()}
+    return out
+
+
+def plain_text(html_text: str) -> str:
+    """A card description (HTML entities, the odd tag) as plain text."""
+    return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", "", html_text))).strip()
+
+
+def write_library_catalog(library, builder_ids, places=None, out_dir=None):
+    """web/library/catalog.json: every live map (`library`, from
+    _write_page) with where it is (cloud/region-places.tsv) and whether
+    the builder offers it in other languages (`builder_ids`). The library
+    page (web/library/index.html) reads it beside build/recipes/index.json.
+    A live map without a places row fails the build. Returns the ids."""
+    places = load_places() if places is None else places
+    missing = sorted(rid for rid in library if rid not in places)
+    if missing:
+        raise ValueError(f"no row in cloud/region-places.tsv for live maps {missing}")
+    maps = [{**library[rid], "places": places[rid], "builder": rid in builder_ids}
+            for rid in sorted(library, key=lambda r: (library[r]["title"].casefold(), r))]
+    out_dir = out_dir or library_dir()
+    os.makedirs(out_dir, exist_ok=True)
+    doc = {"format": "streetzim-library/1", "generated": datetime.date.today().isoformat(), "maps": maps}
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix="catalog.json.", suffix=".tmp")
+    os.fchmod(fd, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, os.path.join(out_dir, "catalog.json"))
+    return [m["id"] for m in maps]
+
+
 def write_build_index(live, recipes_dir=None, newer=None):
     """web/build/recipes/index.json: the published regions whose base
     archive.org serves (`live`: {region id: True}; builder_link), by title,
@@ -1201,9 +1259,13 @@ def build_page():
 
     for lang, _name, sub in LANGUAGES:
         _write_page(archive_items, lang, sub)
+    listed = []
     if os.path.isdir(build_recipes_dir()):
         listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER)
         print(f"Builder page lists {len(listed)} regions whose base archive.org serves: {listed}")
+    if os.path.isfile(os.path.join(library_dir(), "index.html")):
+        n = write_library_catalog(LIBRARY, set(listed))
+        print(f"Library catalog: {len(n)} maps")
 
 
 def render_lang_picker(lang):
@@ -1372,6 +1434,17 @@ def _write_page(archive_items, lang, sub):
                 print(f"  {region['id']}: torrent names {torrent_name!r} but the "
                       f"live ZIM is {zim_filename!r} — omitting Torrent button "
                       f"(regenerate with cloud/generate_all_torrents.py)")
+            built = zim_build_date(zim_filename, zim_file_meta)
+            item_id = f"streetzim-{region['id']}"
+            LIBRARY[region["id"]] = {
+                "id": region["id"], "title": region["title"], "description": plain_text(region["description"]),
+                "tier": region["tier"], "language": region.get("language", "en"),
+                "file": zim_filename, "size": zim_size, "date": built[0] if built else None,
+                "download": f"https://archive.org/download/{item_id}/{urllib.parse.quote(zim_filename)}",
+                "details": f"https://archive.org/details/{item_id}",
+                "torrent": f"/torrents/{region['id']}.torrent" if torrent_ok else None,
+                "preview": ("/drive/?zim=" + urllib.parse.quote(f"https://archive.org/download/{item_id}/{zim_filename}", safe=":/"))
+                           if preview else None}
             cards.append(render_live_card(
                 region, (human_size(zim_size).replace(".", ",") if lang == "de"
                          else human_size(zim_size)),

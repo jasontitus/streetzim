@@ -92,3 +92,6 @@ htmlcov/
 /ops/langpack/node_modules/
 # The builder page's recipes: site data written by ops/langpack/publish_site.sh, not source
 /web/build/recipes/
+
+# Written by web/generate.py at every site build (the library page reads it).
+/web/library/catalog.json
