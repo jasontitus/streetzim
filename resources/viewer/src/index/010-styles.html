@@ -406,8 +406,16 @@
     background: var(--hover-bg); color: var(--text-primary);
     font: inherit; font-size: 14px; font-weight: 600; line-height: 1.25; text-align: center; cursor: pointer;
   }
+  .ocr-tile span { max-width: 100%; overflow-wrap: anywhere; }   /* "Nufotografuokite" at 320 px */
   .ocr-tile.primary { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
   .ocr-tile:disabled { opacity: 0.45; border-style: dashed; cursor: default; }
+  /* Landscape phones: the sheet has half of 320-430 px. The tiles go flat
+     so the note above them (Kiwix on iOS) and both still fit; #ocr-pick
+     outranks the touch rules' min-height below. */
+  @media (max-height: 500px) {
+    #ocr-pick .ocr-tile { flex-direction: row; justify-content: center; min-height: 44px; padding: 8px; }
+    #ocr-pick .ocr-tile svg { width: 22px; height: 22px; flex: none; }
+  }
   #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
   #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   #ocr-lines .ocr-line {

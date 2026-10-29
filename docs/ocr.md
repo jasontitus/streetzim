@@ -64,9 +64,11 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
 
 ## How it works
 
-1. **The photo.** The button opens the device's file picker
-   (`<input type="file" accept="image/*">`, no `capture`), which on a phone
-   offers the camera and the photo library. A photo can also be dropped
+1. **The photo.** On a phone or tablet the button opens a choice in the
+   photo sheet: **Take a photo** (`<input type="file" accept="image/*"
+   capture="environment">`: the camera straight away) or **Choose a photo**
+   (the same input without `capture`: the library or files). On a desktop
+   it opens the file picker at once. A photo can also be dropped
    anywhere on the page or pasted (an image pasted into a text field with
    text alongside stays text). The photo is scaled to at most
    1600 px on its longest side and drawn on the sheet that opens over the
@@ -164,7 +166,7 @@ vowel sign ை (drawn before its consonant) even on a clean sign:
 | reader | camera / photo |
 |---|---|
 | a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone, file picker on a desktop |
-| Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera button first shows a note and a "Choose a photo" button. The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
+| Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera's choice shows Take a photo off, with a note saying why, and Choose a photo as the blue one (`_szSignPickMode`). The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
 | Kiwix for macOS | drop a photo on the map, or paste one with ⌘V. The app does not answer the web view's open-panel request (`WKUIDelegate` `runOpenPanelWith`, absent from kiwix-apple as of 2026-10-23), so the file picker never opens: the camera button first shows a note saying so (the `zim:` scheme on a Mac, `sign-env`). The fix belongs in the app |
 | Kiwix for Android | no: its WebView opens no file chooser, so the viewer hides the button there (an Android WebView's user agent says `; wv)`) |
 
@@ -212,9 +214,12 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
   input and checks the place comes out first and the search field holds
   its line; then that picking it hides the sheet, moves the map and leaves
   the photo on the camera button, which brings the photo and its places
-  back; that photos given by the picker, dropped on the map and pasted are
-  all read; and that in Kiwix's iOS and macOS apps (forced) the camera
-  opens their notes, not the picker. `NAMES` photographs given text instead
+  back, with its lines, after the sheet's camera opened the tiles; that
+  photos given by Take a photo's camera input (while the tiles are open,
+  which must give way), by Choose a photo's input, dropped on the map and
+  pasted are all read, in turn; and that the camera's choice is right on a
+  phone (both tiles, Take a photo blue, each opening its own input), in
+  Kiwix on iOS (Take a photo off) and on macOS (the drop note, no tiles). `NAMES` photographs given text instead
   ("text=>record name" for a sign in another script than the record's
   name). With `SCRIPT` and `QUERIES` it photographs the own-script names
   of places the map's search finds: CI runs it on Manama

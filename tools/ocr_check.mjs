@@ -78,15 +78,23 @@ try {
       const r = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
                   take: shown(take) ? (take.disabled ? 'off' : take.classList.contains('primary') ? 'first' : 'on') : 'none',
                   choose: shown(choose) ? (choose.classList.contains('primary') ? 'first' : 'on') : 'none',
-                  photo: !document.getElementById('ocr-canvas').hidden };
+                  photo: !document.getElementById('ocr-canvas').hidden,
+                  again: !document.getElementById('ocr-again').hidden, opened: [] };
+      // Which input each tile opens (the picker itself cannot open here).
+      const click = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function () {
+        r.opened.push(this.id + (this.getAttribute('capture') ? '+' + this.getAttribute('capture') : ''));
+      };
+      try { take.click(); choose.click(); } finally { HTMLInputElement.prototype.click = click; }
       document.getElementById('ocr-close').click();
       window.__szSignKiwixApp = '';
       return r;
     }, app);
-    const want = { '': { state: 'choose', take: 'first', choose: 'on' },
-                   ios: { state: 'pick', take: 'off', choose: 'first' },
-                   mac: { state: 'drop', take: 'none', choose: 'none' } }[app];
-    if (!(got.open && !got.photo && got.state === want.state && got.take === want.take && got.choose === want.choose)) {
+    const want = { '': { state: 'choose', take: 'first', choose: 'on', opened: 'search-photo-take+environment,search-photo-file' },
+                   ios: { state: 'pick', take: 'off', choose: 'first', opened: 'search-photo-file' },
+                   mac: { state: 'drop', take: 'none', choose: 'none', opened: 'search-photo-file' } }[app];
+    if (!(got.open && !got.photo && !got.again && got.state === want.state && got.take === want.take &&
+          got.choose === want.choose && got.opened.join(',') === want.opened)) {
       errs.push(`${app ? 'Kiwix ' + app : 'a phone browser'}: the camera's choice is not what it should be: ` +
                 JSON.stringify(got) + ', want ' + JSON.stringify(want));
     }
@@ -121,7 +129,7 @@ try {
           if ((m.item.t === 'street' || m.item.t === 'poi') && /^[\p{L} '\-.]{8,30}$/u.test(n) &&
               out.indexOf(n) < 0) { out.push(n); break; }
         }
-        if (out.length >= 3) break;
+        if (out.length >= 4) break;
       }
       return out;
     });
@@ -131,6 +139,11 @@ try {
   for (const [i, entry] of names.entries()) {
     const [name, want = name] = entry.split('=>');
     const t0 = Date.now();
+    // The first of every four photos comes in while the tiles are open (the
+    // camera's choice on a phone): it must take their place.
+    if (i % 4 === 0) {
+      await p.evaluate(() => { window.__szSignKiwixApp = ''; document.getElementById('search-photo').click(); });
+    }
     // A photo of a sign, made in the page and given to the file input.
     await p.evaluate(async (name, seed) => {
       let s = seed * 9301 + 49297;
@@ -166,14 +179,14 @@ try {
       }
       x.putImageData(img, 0, 0);
       const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.75));
-      // As a phone's picker gives it (Choose a photo, then Take a photo's
-      // camera input), dropped on the map, or pasted: the ways in where no
-      // picker opens (Kiwix for macOS).
+      // In turn: Take a photo's camera input (the tiles open), Choose a
+      // photo's input, dropped on the map, pasted: the last two are the ways
+      // in where no picker opens (Kiwix for macOS).
       const dt = new DataTransfer();
       dt.items.add(new File([blob], 'sign.jpg', { type: 'image/jpeg' }));
-      const how = seed % 4;
-      if (how === 1 || how === 3) {
-        const input = document.getElementById(how === 1 ? 'search-photo-file' : 'search-photo-take');
+      const how = (seed - 1) % 4;
+      if (how === 0 || how === 1) {
+        const input = document.getElementById(how === 0 ? 'search-photo-take' : 'search-photo-file');
         input.files = dt.files;
         input.dispatchEvent(new Event('change', { bubbles: true }));
       } else if (how === 2) {
@@ -199,6 +212,8 @@ try {
       // the first row's names as shown: its name and own-script name
       shown: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending]) .search-result-name')]
         .slice(0, 1).map(e => e.textContent),
+      tiles: !document.getElementById('ocr-pick').hidden,
+      again: !document.getElementById('ocr-again').hidden,
     }));
     const ms = Date.now() - t0;
     console.log(`"${name}": ${got.status}: read ${JSON.stringify(got.lines)} in ${ms} ms; results ${JSON.stringify(got.results.slice(0, 3))}`);
@@ -207,6 +222,9 @@ try {
       // Its answer would land on the next photo: stop here.
       errs.push(`"${name}": nothing read or found in 180 s (${got.status}), at ${since(Date.now())}`);
       break;
+    }
+    if (got.tiles || !got.again) {
+      errs.push(`"${name}": with the photo shown, the tiles are ${got.tiles ? 'still there' : 'gone'} and the sheet's camera ${got.again ? 'shows' : 'is hidden'}`);
     }
     // The line the place matched, as read ("Bab AI Bahrain" for "Bab Al
     // Bahrain" is still that line), not every line of the photo.
@@ -220,8 +238,11 @@ try {
   }
 
   // Picking the result hides the sheet, flies the map there and keeps the
-  // photo on the camera button; tapping it brings the photo and its places back.
+  // photo on the camera button; tapping it brings the photo, its lines and
+  // its places back, even after the sheet's camera opened the tiles first.
   if (names.length && !errs.length) {
+    const lines = await p.evaluate(() => document.querySelectorAll('#ocr-lines .ocr-line').length);
+    await p.evaluate(() => document.getElementById('ocr-again').click());
     const before = await p.evaluate(() => window.__szMap.getCenter().toArray());
     const first = await p.evaluate(() =>
       document.querySelector('#search-results .search-result:not([data-sz-pending])').getAttribute('data-name'));
@@ -246,6 +267,11 @@ try {
         document.getElementById('search-results').style.display !== 'none' && row ? row.getAttribute('data-name') : null;
     }, { timeout: 30000 }).then(h => h.jsonValue(), () => null);
     if (back !== first) errs.push(`back to the photo: the sheet and its places did not come back (first result ${JSON.stringify(back)})`);
+    const again = await p.evaluate(() => ({ lines: document.querySelectorAll('#ocr-lines .ocr-line').length,
+                                             tiles: !document.getElementById('ocr-pick').hidden }));
+    if (again.lines !== lines || again.tiles) {
+      errs.push(`back to the photo: ${again.lines} of its ${lines} lines, tiles ${again.tiles ? 'shown' : 'hidden'}`);
+    }
   }
   const sheetErrors = pageErrors.filter(m => !/ResizeObserver/.test(m));
   if (sheetErrors.length) errs.push('page errors: ' + sheetErrors.join(' | '));

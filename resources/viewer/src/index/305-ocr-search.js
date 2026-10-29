@@ -284,6 +284,7 @@ function initSignSearch(map, config) {
     canvas.hidden = false;
     pickRow.hidden = true;
     againBtn.hidden = false;
+    showLines(last.lines);   // the tiles, opened since, emptied them
     setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
     input.value = last.query;
     document.getElementById('search-clear').style.display = 'block';
