@@ -291,11 +291,17 @@
     max-width: calc(100% - 128px);
     font-family: var(--ui-font);
   }
-  /* Hidden when the find-results "Search this area" pill is on
-     screen — the two affordances would otherwise compete for the
-     same top-center band. Class-based with !important so a stray
-     inline display from a third party can't beat it. */
+  /* Hidden while the routing panel is open (it has its own fields).
+     Class-based with !important so a stray inline display can't beat it.
+     The "Search this area" pill hides while the search dropdown is open
+     (it would sit on the results) and where it has no room above the
+     result strip (_placeSearchAreaPill): the search box stays. */
   #search-container.streetzim-hidden { display: none !important; }
+  body.sz-search-open #find-search-area-btn, #find-search-area-btn.sz-no-room { visibility: hidden !important; pointer-events: none !important; }
+  /* An open dropdown is above the find-results strip (z-index 1500), which
+     otherwise covers its lower rows on a short screen (568x320 landscape:
+     the strip starts at 123 px), and below the place sheet (1700). */
+  body.sz-search-open #search-container { z-index: 1550; }
   /* Chip rail beneath the search input — the on-map find UI.
      Tapping a chip fetches the corresponding category-index file,
      filters by current viewport, and renders as pins + carousel

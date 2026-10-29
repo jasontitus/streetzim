@@ -593,18 +593,25 @@ function initSearch(map) {
   // of it on a 568x320 landscape phone, a strip of it in portrait, and the
   // results are what the reader taps then (#25). Watched rather than set
   // where the dropdown opens: several places open it (typing, the sign
-  // reader, history), and routing and the "Search this area" pill hide the
-  // whole search box with the dropdown still open in it.
+  // reader, history), and routing hides the whole search box with the
+  // dropdown still open in it. While the dropdown is open the body carries
+  // .sz-search-open, which hides the "Search this area" pill (it would sit
+  // on the results); when it closes the pill is placed again
+  // (_placeSearchAreaPill: the chip rail moved back up).
   (function() {
     var row = document.getElementById('controls');
     if (!row || !resultsEl || typeof MutationObserver === 'undefined') return;
     function sync() {
       var hide = false;
-      if (resultsEl.style.display === 'block' && resultsEl.getClientRects().length) {
+      var open = resultsEl.style.display === 'block' && resultsEl.getClientRects().length > 0;
+      if (open) {
         var a = resultsEl.getBoundingClientRect(), b = row.getBoundingClientRect();
         hide = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
       }
       row.classList.toggle('sz-under-results', hide);
+      var was = document.body.classList.contains('sz-search-open');
+      document.body.classList.toggle('sz-search-open', open);
+      if (was && !open && typeof _placeSearchAreaPill === 'function') _placeSearchAreaPill();
     }
     var watch = new MutationObserver(sync);
     watch.observe(resultsEl, { attributes: true, attributeFilter: ['style'], childList: true });

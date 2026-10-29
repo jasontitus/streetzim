@@ -160,7 +160,7 @@ function initRouting(map, config) {
   // the panel's x is unreachable. Reported from a shipped mexico ZIM.
   // The overlap gate never saw it: the panel is display:none on load, so the
   // detector measured it as absent on all eleven regions that passed.
-  // Same treatment the find-results pill already gets (#search-container
+  // So the box is hidden while the panel is open (#search-container
   // .streetzim-hidden, !important so a stray inline display can't beat it).
   var searchBoxEl = document.getElementById('search-container');
 

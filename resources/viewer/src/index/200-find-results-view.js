@@ -546,24 +546,45 @@ function _renderFindResultsStrip(map, stash) {
   document.addEventListener('keydown', _findResultsKeydown);
 }
 
+// Where the "Search this area" pill goes. Just below the search input and
+// its chip rail, which stay: hiding the search box while the pill was up
+// left a reader who had panned after a search (a photo search, 2026-10-29)
+// with no search bar and no way back to it. Measured from the input and the
+// rail, not the box, which holds the dropdown too (the pill hides while the
+// dropdown is open: body.sz-search-open, 300-search.js). Where it would
+// reach into the result strip (a 568x320 landscape phone) it hides
+// (.sz-no-room): the search bar matters more. Run again on a resize or
+// rotation and when the dropdown closes.
+var SEARCH_AREA_PILL_H = 40;
+function _placeSearchAreaPill() {
+  var btn = _findResultsState.searchAreaBtn;
+  if (!btn || document.body.classList.contains('sz-search-open')) return;
+  var bottom = 0;
+  ['search-input', 'find-chips'].forEach(function(id) {
+    var el = document.getElementById(id);
+    var r = el && el.getClientRects().length ? el.getBoundingClientRect() : null;
+    if (r && r.height > 0) bottom = Math.max(bottom, r.bottom);
+  });
+  var strip = document.getElementById('find-results-strip');
+  var sr = strip && strip.getClientRects().length ? strip.getBoundingClientRect() : null;
+  var top = bottom ? Math.round(bottom) + 8 : 0;
+  btn.classList.toggle('sz-no-room', !!(top && sr && sr.height > 0 && top + SEARCH_AREA_PILL_H > sr.top - 4));
+  btn.style.top = top ? top + 'px' : 'calc(14px + var(--top-inset, 0px))';
+}
+(function() {
+  window.addEventListener('resize', _placeSearchAreaPill);
+  window.addEventListener('orientationchange', function() { setTimeout(_placeSearchAreaPill, 250); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', _placeSearchAreaPill);
+})();
+
 function _showSearchAreaPill(map) {
   if (_findResultsState.searchAreaBtn) return; // already on screen
-  // The pill sits just below the search box (and its chip rail), which
-  // stays: hiding the box while the pill was up left a reader who had
-  // panned after a search (a photo search, 2026-10-29) with no search bar
-  // and no idea how to get it back.
-  var searchContainer = document.getElementById('search-container');
-  var below = 14;
-  if (searchContainer && getComputedStyle(searchContainer).display !== 'none') {
-    var sr = searchContainer.getBoundingClientRect();
-    if (sr.height > 0) below = Math.round(sr.bottom) + 8;
-  }
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
   btn.type = 'button';
   btn.textContent = szT('find.search_this_area', 'Search this area');
   btn.style.cssText = (
-    'position:fixed; left:50%; top:' + (below === 14 ? 'calc(14px + var(--top-inset, 0px))' : below + 'px') + '; transform:translateX(-50%);'
+    'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
@@ -584,6 +605,7 @@ function _showSearchAreaPill(map) {
   });
   document.body.appendChild(btn);
   _findResultsState.searchAreaBtn = btn;
+  _placeSearchAreaPill();
   // Two RAFs so the initial style flush takes the opacity-0 starting
   // point; otherwise the transition skips and the button pops in.
   requestAnimationFrame(function() {
@@ -598,6 +620,8 @@ function _hideSearchAreaPill() {
   var btn = _findResultsState.searchAreaBtn;
   if (!btn) return;
   _findResultsState.searchAreaBtn = null;
+  // Its id goes now: while it fades it is no hole in _findVisibleRect.
+  btn.removeAttribute('id');
   btn.style.opacity = '0';
   setTimeout(function() {
     if (btn.parentNode) btn.parentNode.removeChild(btn);
