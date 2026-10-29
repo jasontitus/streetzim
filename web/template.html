@@ -465,6 +465,33 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
 {{MAPS}}
     </div>
 <script>
+/* A map's Download with today's viewer: the build worker serves it, made
+   from the map's archive.org file and a new viewer (tools/langpack/
+   fresh_viewer.py, docs/fresh-viewer.md). The worker is asked first (a HEAD,
+   which it answers without fetching the map); when it cannot serve the file
+   (its daily budget used, switched off, no answer in 4 s), archive.org's
+   file (data-fallback) downloads instead. Another click while one is
+   checked, or within 5 s of a download starting, does nothing (a double tap
+   must not start two downloads of a few GB). */
+document.addEventListener('click', function (e) {
+  var a = e.target.closest && e.target.closest('a[data-fallback]');
+  if (!a || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  if (a.getAttribute('data-checking')) return;
+  a.setAttribute('data-checking', '1');
+  var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 4000);
+  var go = function (url) {
+    clearTimeout(timer);
+    location.href = url;
+    setTimeout(function () { a.removeAttribute('data-checking'); }, 5000);
+  };
+  fetch(a.href, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+    .then(function (r) { go(r.ok ? a.href : a.getAttribute('data-fallback')); },
+          function () { go(a.getAttribute('data-fallback')); });
+});
+</script>
+<script>
 /* Client-side filter over the rendered cards. ~70 maps in five sections was
    a long scan with no way to search -- typing "france" now narrows to it.
    Matches the title AND the description, so "coast", "alps" or "danube"

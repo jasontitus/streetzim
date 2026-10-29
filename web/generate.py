@@ -951,6 +951,52 @@ def build_recipes_dir():
     return os.path.join(SCRIPT_DIR, "build", "recipes")
 
 
+FRESH_FORMAT = "streetzim-fresh-viewer/1"
+FRESH_PATH = re.compile(r"^/merged/([a-z0-9-]+)-viewer/[a-z]{2,3}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}"
+                        r"-[0-9a-f]{12}/[A-Za-z0-9._-]+\.zim$")
+
+
+def merged_origin():
+    """The build worker's origin, as the site names it to the pages
+    (web/drive/preview-config.js STREETZIM_MERGED_ORIGIN); '' without one."""
+    try:
+        with open(os.path.join(SCRIPT_DIR, "drive", "preview-config.js"), encoding="utf-8") as f:
+            m = re.search(r"STREETZIM_MERGED_ORIGIN\s*=\s*'(https://[A-Za-z0-9.-]+)'", f.read())
+    except OSError:
+        return ""
+    return m.group(1) if m else ""
+
+
+def fresh_viewer(region_id, zim_filename, zim_md5, recipes_dir=None, origin=None):
+    """The map with today's viewer that the build worker serves
+    (tools/langpack/fresh_viewer.py: build/recipes/<region>-viewer/fresh.json
+    and its segment index), when it was made from this very live file (name and
+    MD5): {"url", "file", "viewer"}; else None (a newer map is live and has
+    no fresh viewer yet, or there is none: the card offers archive.org's
+    file, as before). docs/fresh-viewer.md."""
+    d = os.path.join(recipes_dir or build_recipes_dir(), f"{region_id}-viewer")
+    try:
+        with open(os.path.join(d, "fresh.json"), encoding="utf-8") as f:
+            fr = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(fr, dict) or fr.get("format") != FRESH_FORMAT or fr.get("region") != region_id:
+        return None
+    base = fr.get("base") or {}
+    if base.get("file") != zim_filename or not zim_md5 or str(base.get("md5") or "").lower() != str(zim_md5).lower():
+        return None
+    if not os.path.isfile(os.path.join(d, f"{fr.get('lang')}.ws.json")):
+        return None
+    url = str(fr.get("webseed") or "")
+    u = urllib.parse.urlsplit(url)
+    origin = merged_origin() if origin is None else origin
+    m = FRESH_PATH.match(u.path)
+    if (not origin or f"{u.scheme}://{u.netloc}" != origin or u.query or u.fragment or not m
+            or m.group(1) != region_id or not url.endswith("/" + str(fr.get("file")))):
+        return None
+    return {"url": url, "file": fr["file"], "viewer": fr.get("viewer")}
+
+
 def build_page_regions(recipes_dir=None):
     """{region id: {"file", "md5"}} of the base of every region published
     for the builder page (/build/): web/build/recipes/<id>/region.json, as
@@ -1173,7 +1219,7 @@ def write_build_index(live, recipes_dir=None, newer=None):
 
 
 def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
-                     build_date=None, preview=False, lang="en", build_page=False):
+                     build_date=None, preview=False, lang="en", build_page=False, fresh=None):
     """Render a map card with active download/torrent/details buttons.
 
     `torrent_ok=False` drops the Torrent button: the committed .torrent
@@ -1186,6 +1232,10 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
 
     `build_page=True` adds "Build in another language", the builder page
     for this region (see build_page_regions).
+
+    `fresh` (fresh_viewer): Download is the map with today's viewer, which
+    the build worker serves; data-fallback names archive.org's file, which
+    the page downloads instead when the worker cannot serve it (template.html).
     """
     tx = CARD_TEXT[lang]
     item_id = f"streetzim-{region['id']}"
@@ -1226,6 +1276,15 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         f'data-track="torrent" data-region="{region["id"]}" data-title="{title_attr}">Torrent</a>'
         if torrent_ok else ""
     )
+    archive_url = f"https://archive.org/download/{item_id}/{zim_file_attr}"
+    if fresh:
+        download_html = (
+            f'<a class="btn btn-primary" href="{escape(fresh["url"], quote=True)}" data-fallback="{archive_url}" '
+            f'data-track="download" data-region="{region["id"]}" data-title="{title_attr}">{tx["download"]}</a>')
+    else:
+        download_html = (
+            f'<a class="btn btn-primary" href="{archive_url}" '
+            f'data-track="download" data-region="{region["id"]}" data-title="{title_attr}">{tx["download"]}</a>')
     return f"""      <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title">{escape(region["title"])}</div>
@@ -1233,7 +1292,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         </div>{date_html}
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://archive.org/download/{item_id}/{zim_file_attr}" data-track="download" data-region="{region["id"]}" data-title="{title_attr}">{tx["download"]}</a>{preview_html}{build_html}{torrent_html}
+          {download_html}{preview_html}{build_html}{torrent_html}
           <a class="btn btn-secondary" href="https://archive.org/details/{item_id}" data-track="details" data-region="{region["id"]}" data-title="{title_attr}">{tx["info"]}</a>
         </div>
       </div>"""
@@ -1496,11 +1555,14 @@ def _write_page(archive_items, lang, sub):
                       f"(regenerate with cloud/generate_all_torrents.py)")
             built = zim_build_date(zim_filename, zim_file_meta)
             item_id = f"streetzim-{region['id']}"
+            fresh = fresh_viewer(region["id"], zim_filename, (zim_file_meta or {}).get("md5"))
+            archive_url = f"https://archive.org/download/{item_id}/{urllib.parse.quote(zim_filename)}"
             LIBRARY[region["id"]] = {
                 "id": region["id"], "title": region["title"], "description": plain_text(region["description"]),
                 "tier": region["tier"], "language": region.get("language", "en"),
                 "file": zim_filename, "size": zim_size, "date": built[0] if built else None,
-                "download": f"https://archive.org/download/{item_id}/{urllib.parse.quote(zim_filename)}",
+                "download": fresh["url"] if fresh else archive_url,
+                "fallback": archive_url if fresh else None,
                 "details": f"https://archive.org/details/{item_id}",
                 "torrent": f"/torrents/{region['id']}.torrent" if torrent_ok else None,
                 "preview": ("/drive/?zim=" + urllib.parse.quote(f"https://archive.org/download/{item_id}/{zim_filename}", safe=":/"))
@@ -1513,7 +1575,8 @@ def _write_page(archive_items, lang, sub):
                 build_date=zim_build_date(zim_filename, zim_file_meta),
                 preview=preview, lang=lang,
                 build_page=builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
-                                        (details or {}).get("files"))))
+                                        (details or {}).get("files")),
+                fresh=fresh))
             if region["id"] in builder:
                 ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
                                   (details or {}).get("files"))

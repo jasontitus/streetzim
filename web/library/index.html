@@ -323,6 +323,9 @@ main { max-width: 1160px; margin: 0 auto; padding: 18px 20px 40px; }
     }
     dl.setAttribute('aria-label', m.title + ' (' + e.label + '): ' + (e.built && !e.direct ? 'build and download, ' : 'download, ') + label);
     if (e.direct) dl.addEventListener('click', function (ev) { directClick(ev, e.direct, e.href); });
+    // A map with today's viewer (the build worker's file, docs/fresh-viewer.md):
+    // archive.org's when the worker cannot serve it.
+    else if (!e.built && m.fallback) dl.addEventListener('click', function (ev) { directClick(ev, e.href, m.fallback); });
     dl.innerHTML = DL;   // a constant icon; the text below is set as text
     dl.appendChild(document.createTextNode((e.built && !e.direct ? 'Build & download - ' : 'Download - ') + label));
     el.appendChild(dl);
@@ -335,21 +338,29 @@ main { max-width: 1160px; margin: 0 auto; padding: 18px 20px 40px; }
     return el;
   }
 
-  // A phone's tap on a language version: the browser's own download from
-  // the build worker once it says it can serve it (HEAD: it answers without
-  // fetching the map), else the /build/ page, which builds it there. Taps
-  // while one is being checked are ignored.
-  var checking = false;
+  // The build worker's file, once it says it can serve it (HEAD: it answers
+  // without fetching the map), else the fallback: a phone's tap on a
+  // language version (else the /build/ page, which builds it there), and a
+  // map with today's viewer on any device (else archive.org's file). Taps
+  // while one is being checked, or on the same map within 5 s of its
+  // download starting, are ignored (a double tap must not start two
+  // downloads of a few GB).
+  var checking = false, started = {};
   function directClick(ev, url, fallback) {
     if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
     ev.preventDefault();
-    if (checking) return;
+    if (checking || (started[url] && Date.now() - started[url] < 5000)) return;
     checking = true;
     var ac = typeof AbortController === 'function' ? new AbortController() : null;
     var timer = setTimeout(function () { if (ac) ac.abort(); }, 4000);
     fetch(url, { method: 'HEAD', cache: 'no-store', signal: ac ? ac.signal : undefined })
       .then(function (r) { return r.ok; }, function () { return false; })
-      .then(function (ok) { clearTimeout(timer); checking = false; location.href = ok ? url : fallback; });
+      .then(function (ok) {
+        clearTimeout(timer);
+        checking = false;
+        started[url] = Date.now();
+        location.href = ok ? url : fallback;
+      });
   }
 
   function languages() {

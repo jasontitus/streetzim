@@ -46,6 +46,12 @@ def shown(tmp_path_factory: pytest.TempPathFactory) -> dict:
     versions = {rid: [{"lang": "de", "label": "Deutsch", "size": 1_500_000_000,
                        "webseed": f"https://merged.invalid/merged/{rid}/de/0b8fad05-13d1-5ed9-9cca-b7930cf38270/osm_de_{rid}.zim"}]
                 for rid in ("greece", "iceland")}
+    for rid in ("taipei", "hawaii"):                  # today's viewer, from the build worker
+        library[rid]["fallback"] = f"/fallback/osm-{rid}.zim"
+        library[rid]["download"] = (f"https://merged.invalid/merged/{rid}-viewer/en/0b8fad05-13d1-5ed9-9cca-b7930cf38270/"
+                                    f"osm-{rid}-2026-10-26.v5590ad0.zim")
+        (site / "fallback").mkdir(exist_ok=True)
+        (site / "fallback" / f"osm-{rid}.zim").write_bytes(b"ZIM archive.org stand-in")
     gen.write_library_catalog(library, versions, out_dir=str(site / "library"))
     r = subprocess.run([os.environ["NODE"], str(ROOT / "tests" / "library_page.mjs"), str(site)],
                        capture_output=True, text=True, timeout=600)
@@ -122,3 +128,11 @@ def test_a_phone_folds_the_filters_and_downloads_directly(shown):
     assert "/merged/greece/de/" in ph["greece"], ph            # the worker said yes: the browser downloads it
     assert ph["iceland"].endswith("/build/?region=iceland&lang=de&go=1"), ph          # 503: the builder page
     assert any(x.startswith("HEAD /merged/greece/") for x in shown["merged"]), shown["merged"]
+
+
+def test_a_map_with_todays_viewer_comes_from_the_worker_else_archive_org(shown):
+    f = shown["fresh"]
+    assert "/merged/taipei-viewer/en/" in f["taipei"], f
+    assert f["hawaii"].endswith("/fallback/osm-hawaii.zim"), f           # the worker answered 503
+    assert any(x.startswith("HEAD /merged/hawaii-viewer/") for x in shown["merged"]), shown["merged"]
+    assert all(text.startswith("Download - ") for _t, text, _h, _a in f["bars"]), f["bars"]

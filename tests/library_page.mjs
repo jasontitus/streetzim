@@ -6,7 +6,8 @@
 // localhost with /drive/preview-config.js naming a stand-in build worker on
 // 127.0.0.1, whose origin replaces https://merged.invalid in catalog.json.
 // The stand-in answers HEAD and GET under /merged/: 503 for a path with
-// "/iceland/", else 200 (GET: a few bytes as an attachment). Prints one JSON
+// "/iceland/" or "/hawaii-viewer/", else 200 (GET: a few bytes as an attachment);
+// files under /fallback/ stand in for archive.org's. Prints one JSON
 // object: {scenario: what the page showed}, plus pageErrors.
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as tools/langpack/builder_e2e.mjs.
 import http from 'node:http';
@@ -22,7 +23,7 @@ const merged = [];
 const worker = http.createServer((req, res) => {
   merged.push(`${req.method} ${req.url}`);
   const head = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
-  if (req.url.includes('/iceland/')) { res.writeHead(503, { ...head, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
+  if (req.url.includes('/iceland/') || req.url.includes('/hawaii-viewer/')) { res.writeHead(503, { ...head, 'Content-Type': 'text/plain' }); res.end('over budget\n'); return; }
   res.writeHead(200, { ...head, 'Content-Type': 'application/octet-stream', 'Content-Length': 4,
                        'Content-Disposition': 'attachment; filename="x.zim"' });
   res.end(req.method === 'HEAD' ? undefined : 'ZIM!');
@@ -105,6 +106,19 @@ await scenario('lang-all', '#lang=all&country=Japan', { locale: 'de-DE' }, async
 });
 await scenario('german', '', { locale: 'de-DE' });
 await scenario('desktop-de', '#lang=de');
+// maps with today's viewer (the worker's file): Taipei's worker answers,
+// Hawaii's does not (archive.org's file, here /fallback/, instead)
+await scenario('fresh', '#lang=all', {}, async (pg) => {
+  const bar = (title) => pg.locator('.kx-book', { has: pg.locator('.kx-title', { hasText: new RegExp('^' + title + '$') }) }).locator('.kx-download').first();
+  let dlP = pg.waitForEvent('download', { timeout: 15000 });
+  await bar('Taipei').click();
+  const taipei = (await dlP).url();
+  await pg.waitForTimeout(300);
+  dlP = pg.waitForEvent('download', { timeout: 15000 });
+  await bar('Hawaii').click();
+  const hawaii = (await dlP).url();
+  return { taipei, hawaii, bars: (await show(pg)).bars.filter((b) => b[0] === 'Taipei' || b[0] === 'Hawaii') };
+});
 await scenario('phone', '#lang=de', { ua: PHONE, viewport: { width: 360, height: 780 } }, async (pg) => {
   const first = await show(pg);
   await pg.tap('#f-places'); await pg.waitForTimeout(100);
