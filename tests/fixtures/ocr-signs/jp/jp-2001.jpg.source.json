@@ -1,0 +1,190 @@
+{
+  "id": "969de7e3-519b-44ff-a92c-bb06e8c43044",
+  "bbox": [
+    137.242219401,
+    37.354697311,
+    137.242219401,
+    37.354697311
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "id": "a8367ac1-5353-4a7d-8eb2-0b7b8d5fd110",
+      "rel": "related",
+      "href": "/api/collections/48389f0b-e5f9-47bd-8b84-8d0b6b992258/items/a8367ac1-5353-4a7d-8eb2-0b7b8d5fd110",
+      "type": "application/geo+json",
+      "datetime": "2024-05-10T19:07:44Z",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.242162032,
+          37.354623335
+        ]
+      }
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/9ab88197-6a84-4c95-ba6c-f99d14b2a961/items/969de7e3-519b-44ff-a92c-bb06e8c43044",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/9ab88197-6a84-4c95-ba6c-f99d14b2a961",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/9ab88197-6a84-4c95-ba6c-f99d14b2a961",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "prev",
+      "href": "https://api.panoramax.xyz/api/collections/9ab88197-6a84-4c95-ba6c-f99d14b2a961/items/08389e07-14bc-428c-adf9-fa9b194b775f",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.242211189,
+          37.354698823
+        ]
+      },
+      "id": "08389e07-14bc-428c-adf9-fa9b194b775f"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/9ab88197-6a84-4c95-ba6c-f99d14b2a961/items/2540a645-c962-4a62-a1ef-0f642629853e",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.242224921,
+          37.354692103
+        ]
+      },
+      "id": "2540a645-c962-4a62-a1ef-0f642629853e"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/96/9d/e7/e3/519b-44ff-a92c-bb06e8c43044.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/96/9d/e7/e3/519b-44ff-a92c-bb06e8c43044/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/96/9d/e7/e3/519b-44ff-a92c-bb06e8c43044/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      137.242219401,
+      37.354697311
+    ]
+  },
+  "providers": [
+    {
+      "id": "59efd8b7-aeb9-401e-8a28-fd4e6d58aa62",
+      "name": "motocultrice",
+      "roles": [
+        "producer"
+      ]
+    },
+    {
+      "name": "Zaneo",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "9ab88197-6a84-4c95-ba6c-f99d14b2a961",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Apple",
+      "Exif.Image.Model": "iPhone",
+      "Exif.Image.Artist": "Zaneo",
+      "Exif.Image.GPSTag": "172",
+      "Exif.Image.ExifTag": "94",
+      "Exif.GPSInfo.GPSAltitude": "10341/1000",
+      "Exif.GPSInfo.GPSLatitude": "37/1 21/1 12730341/752815",
+      "Exif.GPSInfo.GPSLongitude": "137/1 14/1 26321403/822805",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Photo.DateTimeOriginal": "2024:05:11 04:08:44",
+      "Exif.GPSInfo.GPSImgDirection": "255736/1000",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.OffsetTimeOriginal": "+09:00",
+      "Exif.Photo.SubSecTimeOriginal": "548000",
+      "Exif.GPSInfo.GPSImgDirectionRef": "T"
+    },
+    "created": "2025-01-24T17:31:37.186540+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-06-03T03:02:44.485815+00:00",
+    "datetime": "2024-05-10T19:08:44.548000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2024-05-11T04:08:44.548000+09:00",
+    "annotations": [],
+    "view:azimuth": 256,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/96/9d/e7/e3/519b-44ff-a92c-bb06e8c43044.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "motocultrice",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/96/9d/e7/e3/519b-44ff-a92c-bb06e8c43044/thumb.jpg",
+    "original_file:name": "2024-05-11_04H08mn44s548.jpg",
+    "original_file:size": 2651532,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "iPhone",
+      "camera_manufacturer": "Apple",
+      "sensor_array_dimensions": [
+        4032,
+        3024
+      ]
+    },
+    "geovisio:rank_in_collection": 2,
+    "quality:horizontal_accuracy": 5.0
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

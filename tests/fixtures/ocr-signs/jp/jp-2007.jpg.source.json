@@ -1,0 +1,201 @@
+{
+  "id": "7b10fa96-474f-4568-8cb1-74980c88442f",
+  "bbox": [
+    135.503705556,
+    34.666380556,
+    135.503705556,
+    34.666380556
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/3ac48a4a-632b-4019-88dc-8b2eb7e4a60c/items/7b10fa96-474f-4568-8cb1-74980c88442f",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/3ac48a4a-632b-4019-88dc-8b2eb7e4a60c",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/3ac48a4a-632b-4019-88dc-8b2eb7e4a60c",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/3ac48a4a-632b-4019-88dc-8b2eb7e4a60c/items/97c82202-1c72-4d35-9cfd-d779a729a1c9",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          135.505188889,
+          34.662819444
+        ]
+      },
+      "id": "97c82202-1c72-4d35-9cfd-d779a729a1c9"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/7b/10/fa/96/474f-4568-8cb1-74980c88442f.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/7b/10/fa/96/474f-4568-8cb1-74980c88442f/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/7b/10/fa/96/474f-4568-8cb1-74980c88442f/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      135.503705556,
+      34.666380556
+    ]
+  },
+  "providers": [
+    {
+      "id": "0380d727-d845-404a-9709-7b9e8458527f",
+      "name": "Veetooleck",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "3ac48a4a-632b-4019-88dc-8b2eb7e4a60c",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Apple",
+      "Exif.Image.Model": "iPhone 15",
+      "Exif.Photo.Flash": "16",
+      "Exif.Image.GPSTag": "2526",
+      "Exif.Image.ExifTag": "214",
+      "Exif.Photo.FNumber": "8/5",
+      "Exif.Image.DateTime": "2026:09:06 12:02:30",
+      "Exif.Image.Software": "26.6",
+      "Exif.Photo.LensMake": "Apple",
+      "Exif.Photo.LensModel": "iPhone 15 back camera 5.96mm f/1.6",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.ColorSpace": "1",
+      "Exif.Photo.OffsetTime": "+09:00",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "48 50 51 50",
+      "Exif.Photo.FocalLength": "149/25",
+      "Exif.Photo.SubjectArea": "2018 1512 2117 1331",
+      "Exif.Image.HostComputer": "iPhone 15",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "1/1783",
+      "Exif.Photo.MeteringMode": "5",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "136791/17329",
+      "Exif.GPSInfo.GPSLatitude": "34/1 39/1 5897/100",
+      "Exif.Photo.ApertureValue": "14447/10653",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.GPSInfo.GPSLongitude": "135/1 30/1 1334/100",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.CompositeImage": "2",
+      "Exif.Photo.BrightnessValue": "17175/1948",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "50",
+      "Exif.Photo.PixelXDimension": 3024,
+      "Exif.Photo.PixelYDimension": 4032,
+      "Iptc.Envelope.CharacterSet": "\u001b%G",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Photo.DateTimeOriginal": "2026:09:06 12:02:30",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSImgDirection": "2257/25",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2026:09:06 12:02:30",
+      "Exif.Photo.ExposureBiasValue": "0/1",
+      "Exif.Photo.LensSpecification": "6249513/1048576 6249513/1048576 8/5 8/5",
+      "Exif.Photo.ShutterSpeedValue": "74896/6935",
+      "Exif.Photo.OffsetTimeOriginal": "+09:00",
+      "Exif.Photo.SubSecTimeOriginal": "523",
+      "Iptc.Application2.DateCreated": "2026-09-06",
+      "Iptc.Application2.TimeCreated": "12:02:30+00:00",
+      "Exif.Photo.OffsetTimeDigitized": "+09:00",
+      "Exif.Photo.SubSecTimeDigitized": "523",
+      "Iptc.Application2.RecordVersion": "2",
+      "Exif.Photo.FocalLengthIn35mmFilm": "26",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Iptc.Application2.DigitizationDate": "2026-09-06",
+      "Iptc.Application2.DigitizationTime": "12:02:30+00:00"
+    },
+    "created": "2026-09-06T06:20:23.509176+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2026-09-06T06:20:23.509176+00:00",
+    "datetime": "2026-09-06T03:02:30.523000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2026-09-06T12:02:30.523000+09:00",
+    "annotations": [],
+    "view:azimuth": 90,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/7b/10/fa/96/474f-4568-8cb1-74980c88442f.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "Veetooleck",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/7b/10/fa/96/474f-4568-8cb1-74980c88442f/thumb.jpg",
+    "original_file:name": "PX_20260906_120230548.jpg",
+    "original_file:size": 3655572,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "iPhone 15",
+      "focal_length": 5.96,
+      "field_of_view": 69,
+      "camera_manufacturer": "Apple",
+      "sensor_array_dimensions": [
+        3024,
+        4032
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0,
+    "panoramax:horizontal_pixel_density": 44
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

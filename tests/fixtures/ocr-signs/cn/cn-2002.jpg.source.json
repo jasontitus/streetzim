@@ -1,0 +1,206 @@
+{
+  "id": "a938dfae-6949-42d3-ae79-1b7f2d41d8ef",
+  "bbox": [
+    106.441390991,
+    29.562704086,
+    106.441390991,
+    29.562704086
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/c5670b20-0774-4000-9c88-3c65a1901422/items/a938dfae-6949-42d3-ae79-1b7f2d41d8ef",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/c5670b20-0774-4000-9c88-3c65a1901422",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/c5670b20-0774-4000-9c88-3c65a1901422",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/c5670b20-0774-4000-9c88-3c65a1901422/items/0744b604-597e-487a-acef-f9fe84a9f4da",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.441390991,
+          29.562704086
+        ]
+      },
+      "id": "0744b604-597e-487a-acef-f9fe84a9f4da"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/a9/38/df/ae/6949-42d3-ae79-1b7f2d41d8ef.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/a9/38/df/ae/6949-42d3-ae79-1b7f2d41d8ef/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/a9/38/df/ae/6949-42d3-ae79-1b7f2d41d8ef/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      106.441390991,
+      29.562704086
+    ]
+  },
+  "providers": [
+    {
+      "id": "02f22a1e-7536-4bff-bee1-ee554c8369a3",
+      "name": "Ever W",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "c5670b20-0774-4000-9c88-3c65a1901422",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "HUAWEI",
+      "Exif.Image.Model": "HUAWEI Mate 50 Pro",
+      "Exif.Photo.Flash": "0",
+      "Exif.Image.GPSTag": "1140",
+      "Exif.Image.ExifTag": "284",
+      "Exif.Photo.FNumber": "200/100",
+      "Exif.Image.DateTime": "2025:05:19 10:23:35",
+      "Exif.Image.Software": "DCO-AL00 4.2.0.173(C00E162R5P8)",
+      "Exif.Photo.Contrast": "0",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.Sharpness": "0",
+      "Exif.Image.ImageWidth": "4096",
+      "Exif.Photo.ColorSpace": "65535",
+      "Exif.Photo.FileSource": "3",
+      "Exif.Photo.Saturation": "0",
+      "Exif.Photo.SubSecTime": "337000",
+      "Exif.Image.ImageLength": "3072",
+      "Exif.Image.Orientation": "0",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "48 50 49 48",
+      "Exif.Photo.FocalLength": "5750/1000",
+      "Exif.Photo.GainControl": "0",
+      "Exif.Photo.LightSource": "1",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "445000/1000000000",
+      "Exif.Photo.MeteringMode": "5",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "0/100",
+      "Exif.GPSInfo.GPSLatitude": "29/1 33/1 45734710/1000000",
+      "Exif.Image.BitsPerSample": "8 8 8",
+      "Exif.Photo.ApertureValue": "200/100",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.GPSInfo.GPSDateStamp": "2025:05:19",
+      "Exif.GPSInfo.GPSLongitude": "106/1 26/1 29007568/1000000",
+      "Exif.GPSInfo.GPSTimeStamp": "2/1 23/1 35/1",
+      "Exif.GPSInfo.GPSVersionID": "2 2 0 0",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.CustomRendered": "1",
+      "Exif.Photo.BrightnessValue": "2/-1",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "50",
+      "Exif.Photo.PixelXDimension": "4096",
+      "Exif.Photo.PixelYDimension": "3072",
+      "Exif.GPSInfo.GPSAltitudeRef": "1",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.YCbCrPositioning": "1",
+      "Exif.Photo.DateTimeOriginal": "2025:05:19 10:23:35",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2025:05:19 10:23:35",
+      "Exif.Photo.ExposureBiasValue": "0/10",
+      "Exif.Photo.ShutterSpeedValue": "290000/10000",
+      "Exif.Photo.SubSecTimeOriginal": "337000",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Photo.InteroperabilityTag": "1110",
+      "Exif.Photo.SubSecTimeDigitized": "337000",
+      "Exif.Photo.SubjectDistanceRange": "0",
+      "Exif.GPSInfo.GPSProcessingMethod": "CELLID",
+      "Exif.Iop.InteroperabilityVersion": "48 49 48 48",
+      "Exif.Photo.FocalLengthIn35mmFilm": "27",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0"
+    },
+    "created": "2025-05-19T02:23:57.487319+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-06-03T03:02:44.485815+00:00",
+    "datetime": "2025-05-19T02:23:35.337000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2025-05-19T02:23:35.337000+00:00",
+    "annotations": [],
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/a9/38/df/ae/6949-42d3-ae79-1b7f2d41d8ef.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "Ever W",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/a9/38/df/ae/6949-42d3-ae79-1b7f2d41d8ef/thumb.jpg",
+    "original_file:name": "IMG_20250519_102335.jpg",
+    "original_file:size": 5424964,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "Mate 50 Pro",
+      "focal_length": 5.75,
+      "field_of_view": 67,
+      "camera_manufacturer": "HUAWEI",
+      "sensor_array_dimensions": [
+        4096,
+        3072
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0,
+    "panoramax:horizontal_pixel_density": 61
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

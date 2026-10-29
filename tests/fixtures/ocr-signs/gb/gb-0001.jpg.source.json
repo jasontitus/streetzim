@@ -1,0 +1,17 @@
+{
+  "source": "geograph",
+  "source_url": "https://www.geograph.org.uk/photo/7532240",
+  "photo_id": "7532240",
+  "author": "Paul",
+  "license": "CC BY-SA 2.0",
+  "license_url": "http://creativecommons.org/licenses/by-sa/2.0/",
+  "original_url": "https://s0.geograph.org.uk/geophotos/07/53/22/7532240_3ffeb54b_original.jpg?sign=cddcc787d5",
+  "source_mainphoto_html": "<div class=\"shadow shadow_large\" id=\"mainphoto\"><img alt=\"Ightham Village Sign (Close Up)\" src=\"https://s0.geograph.org.uk/geophotos/07/53/22/7532240_3ffeb54b.jpg\" crossorigin=\"use-credentials\" width=\"452\" height=\"640\" srcset=\"https://s0.geograph.org.uk/geophotos/07/53/22/7532240_3ffeb54b.jpg 452w, https://s0.geograph.org.uk/geophotos/07/53/22/7532240_3ffeb54b_800x800.jpg 566w, https://s0.geograph.org.uk/geophotos/07/53/22/7532240_3ffeb54b_original.jpg?sign=cddcc787d5 724w\" onerror=\"retryCross(this)\" style=\"width:724px; max-width:min(100% , 66vh); height:auto;\"></div>",
+  "original_asset_verification": "The source photo page explicitly links this exact signed _original.jpg asset, distinct from its scaled _800x800.jpg and normal display JPEG. No _1024x1024.jpg substitute was used.",
+  "width": 724,
+  "height": 1024,
+  "bytes": 366771,
+  "sha256": "2c730000e2a592a82e2903a6fc707a119956e92eb9d658346260eb6363f618fb",
+  "local_transformations": [],
+  "visual_review": "Main sign text transcribed from the downloaded original JPEG."
+}

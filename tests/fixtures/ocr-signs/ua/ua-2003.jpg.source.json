@@ -1,0 +1,217 @@
+{
+  "id": "83f02072-bcbd-4421-9113-00990f9abbc6",
+  "bbox": [
+    36.290990542,
+    49.989497876,
+    36.290990542,
+    49.989497876
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/659a1bd5-c262-4d92-865c-39241cb55c68/items/83f02072-bcbd-4421-9113-00990f9abbc6",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/659a1bd5-c262-4d92-865c-39241cb55c68",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/659a1bd5-c262-4d92-865c-39241cb55c68",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "prev",
+      "href": "https://api.panoramax.xyz/api/collections/659a1bd5-c262-4d92-865c-39241cb55c68/items/36ca1fbd-5e66-42fc-9450-ad8cdff162b6",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          36.291081132,
+          49.989499603
+        ]
+      },
+      "id": "36ca1fbd-5e66-42fc-9450-ad8cdff162b6"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/659a1bd5-c262-4d92-865c-39241cb55c68/items/c022baa6-1ddd-483f-bae8-cebcd64bcb2f",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          36.290899953,
+          49.989496149
+        ]
+      },
+      "id": "c022baa6-1ddd-483f-bae8-cebcd64bcb2f"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/83/f0/20/72/bcbd-4421-9113-00990f9abbc6.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/83/f0/20/72/bcbd-4421-9113-00990f9abbc6/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/83/f0/20/72/bcbd-4421-9113-00990f9abbc6/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      36.290990542,
+      49.989497876
+    ]
+  },
+  "providers": [
+    {
+      "id": "0c78f007-1a84-497b-ab56-b523d54486f0",
+      "name": "dehtiarne",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "659a1bd5-c262-4d92-865c-39241cb55c68",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Xiaomi",
+      "Exif.Image.Model": "2201117SY",
+      "Exif.Photo.Flash": "16",
+      "Exif.Image.GPSTag": "819",
+      "Exif.Image.ExifTag": "337",
+      "Exif.Photo.FNumber": "1890/1000",
+      "Exif.Image.DateTime": "2026:04:03 18:11:08",
+      "Exif.Image.Software": "Panoramax App 1.7.2-62",
+      "Exif.Image.ImageWidth": "1920",
+      "Exif.Photo.ColorSpace": "1",
+      "Exif.Photo.SubSecTime": "573",
+      "Exif.Image.ImageLength": "1440",
+      "Exif.Image.Orientation": "1",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "0220",
+      "Exif.Photo.FocalLength": "5890/1000",
+      "Exif.Photo.LightSource": "255",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "83310/10000000",
+      "Exif.Photo.MeteringMode": "2",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.Thumbnail.Software": "Panoramax App 1.7.2-62",
+      "Exif.GPSInfo.GPSAltitude": "1354000/10000",
+      "Exif.GPSInfo.GPSLatitude": "49/1 59/1 221923530/10000000",
+      "Exif.GPSInfo.GPSLongitude": "36/1 17/1 275659522/10000000",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.BrightnessValue": "99/10",
+      "Exif.Photo.ExposureProgram": "0",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "210",
+      "Exif.Photo.PixelXDimension": "1920",
+      "Exif.Photo.PixelYDimension": "1440",
+      "Exif.Photo.SensitivityType": "0",
+      "Exif.Thumbnail.Compression": "6",
+      "Exif.Thumbnail.Orientation": "1",
+      "Exif.Thumbnail.XResolution": "72/1",
+      "Exif.Thumbnail.YResolution": "72/1",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.ImageDescription": "",
+      "Exif.Image.YCbCrPositioning": "2",
+      "Exif.Photo.DateTimeOriginal": "2026:04:03 18:11:08",
+      "Exif.Photo.DigitalZoomRatio": "100/100",
+      "Exif.Photo.MaxApertureValue": "0/100",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSImgDirection": "162/100",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2026:04:03 18:11:08",
+      "Exif.Photo.ExposureBiasValue": "0/10",
+      "Exif.Photo.ShutterSpeedValue": "0/0",
+      "Exif.Photo.SubSecTimeOriginal": "573",
+      "Exif.Thumbnail.ResolutionUnit": "2",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Photo.InteroperabilityTag": "973",
+      "Exif.Photo.SubSecTimeDigitized": "573",
+      "Exif.Thumbnail.YCbCrPositioning": "2",
+      "Exif.Photo.FocalLengthIn35mmFilm": "0",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Exif.Photo.RecommendedExposureIndex": "0",
+      "Exif.Thumbnail.JPEGInterchangeFormat": "1185",
+      "Exif.Thumbnail.JPEGInterchangeFormatLength": "22528"
+    },
+    "created": "2026-04-03T15:11:51.274419+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2026-04-03T15:11:51.274419+00:00",
+    "datetime": "2026-04-03T15:11:08.573000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2026-04-03T15:11:08.573000+00:00",
+    "annotations": [],
+    "view:azimuth": 2,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/83/f0/20/72/bcbd-4421-9113-00990f9abbc6.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "dehtiarne",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/83/f0/20/72/bcbd-4421-9113-00990f9abbc6/thumb.jpg",
+    "original_file:name": "PX_20260403_181108600.jpg",
+    "original_file:size": 772037,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "2201117SY",
+      "focal_length": 5.89,
+      "camera_manufacturer": "Xiaomi",
+      "sensor_array_dimensions": [
+        1920,
+        1440
+      ]
+    },
+    "geovisio:rank_in_collection": 24,
+    "quality:horizontal_accuracy": 5.0
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

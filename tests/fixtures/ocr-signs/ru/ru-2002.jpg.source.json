@@ -1,0 +1,206 @@
+{
+  "id": "71297cdd-593d-43dc-9ed2-f3313f4749dc",
+  "bbox": [
+    92.889658333,
+    56.011333333,
+    92.889658333,
+    56.011333333
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/2e8a37a7-2d03-4afe-9ed2-5a61d8675048/items/71297cdd-593d-43dc-9ed2-f3313f4749dc",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/2e8a37a7-2d03-4afe-9ed2-5a61d8675048",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/2e8a37a7-2d03-4afe-9ed2-5a61d8675048",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/71/29/7c/dd/593d-43dc-9ed2-f3313f4749dc.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/71/29/7c/dd/593d-43dc-9ed2-f3313f4749dc/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/71/29/7c/dd/593d-43dc-9ed2-f3313f4749dc/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      92.889658333,
+      56.011333333
+    ]
+  },
+  "providers": [
+    {
+      "id": "074eaae6-dfcb-4572-ac24-ae431d887b5e",
+      "name": "coteyka",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "2e8a37a7-2d03-4afe-9ed2-5a61d8675048",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "Google",
+      "Exif.Image.Model": "Pixel 4a",
+      "Exif.Photo.Flash": "16",
+      "Exif.Image.GPSTag": "979",
+      "Exif.Image.ExifTag": "244",
+      "Exif.Photo.FNumber": "173/100",
+      "Exif.Image.DateTime": "2024:11:07 10:26:13",
+      "Exif.Image.Software": "HDR+ 1.0.540104767zdr",
+      "Exif.Photo.Contrast": "0",
+      "Exif.Photo.LensMake": "Google",
+      "Exif.Photo.LensModel": "Pixel 4a back camera 4.38mm f/1.73",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.Sharpness": "0",
+      "Exif.Image.ImageWidth": "3024",
+      "Exif.Photo.ColorSpace": "1",
+      "Exif.Photo.OffsetTime": "+07:00",
+      "Exif.Photo.Saturation": "0",
+      "Exif.Photo.SubSecTime": "712",
+      "Exif.Image.ImageLength": "4032",
+      "Exif.Image.Orientation": "1",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "48 50 51 50",
+      "Exif.Photo.FocalLength": "4380/1000",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "9928/1000000",
+      "Exif.Photo.MeteringMode": "2",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "11309/100",
+      "Exif.GPSInfo.GPSLatitude": "56/1 0/1 4080/100",
+      "Exif.Photo.ApertureValue": "158/100",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.GPSInfo.GPSDateStamp": "2024:11:07",
+      "Exif.GPSInfo.GPSLongitude": "92/1 53/1 2277/100",
+      "Exif.GPSInfo.GPSTimeStamp": "3/1 25/1 33/1",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Photo.CompositeImage": "3",
+      "Exif.Photo.CustomRendered": "1",
+      "Exif.Thumbnail.ImageWidth": "378",
+      "Exif.Photo.BrightnessValue": "429/100",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "48",
+      "Exif.Photo.PixelXDimension": "3024",
+      "Exif.Photo.PixelYDimension": "4032",
+      "Exif.Photo.SubjectDistance": "2048/1000",
+      "Exif.Thumbnail.Compression": "6",
+      "Exif.Thumbnail.ImageLength": "504",
+      "Exif.Thumbnail.Orientation": "1",
+      "Exif.Thumbnail.XResolution": "72/1",
+      "Exif.Thumbnail.YResolution": "72/1",
+      "Xmp.xmpNote.HasExtendedXMP": "23CDA27A15A5FC76C27755555197A9ED",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.YCbCrPositioning": "1",
+      "Exif.Photo.DateTimeOriginal": "2024:11:07 10:26:13",
+      "Exif.Photo.DigitalZoomRatio": "0/1",
+      "Exif.Photo.MaxApertureValue": "158/100",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSImgDirection": "316/1",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2024:11:07 10:26:13",
+      "Exif.Photo.ExposureBiasValue": "0/6",
+      "Exif.Photo.ShutterSpeedValue": "665/100",
+      "Exif.Photo.OffsetTimeOriginal": "+07:00",
+      "Exif.Photo.SubSecTimeOriginal": "712",
+      "Exif.Thumbnail.ResolutionUnit": "2",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Photo.InteroperabilityTag": "949",
+      "Exif.Photo.OffsetTimeDigitized": "+07:00",
+      "Exif.Photo.SubSecTimeDigitized": "712",
+      "Exif.GPSInfo.GPSImgDirectionRef": "M",
+      "Exif.Photo.SubjectDistanceRange": "2",
+      "Exif.Iop.InteroperabilityVersion": "48 49 48 48",
+      "Exif.Photo.FocalLengthIn35mmFilm": "27",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Exif.Thumbnail.JPEGInterchangeFormat": "1334",
+      "Exif.Thumbnail.JPEGInterchangeFormatLength": "30334"
+    },
+    "created": "2024-12-11T06:14:48.421643+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-06-03T03:02:44.485815+00:00",
+    "datetime": "2024-11-07T03:26:13.712000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2024-11-07T10:26:13.712000+07:00",
+    "annotations": [],
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/71/29/7c/dd/593d-43dc-9ed2-f3313f4749dc.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "coteyka",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/71/29/7c/dd/593d-43dc-9ed2-f3313f4749dc/thumb.jpg",
+    "original_file:name": "PXL_20241107_032613712.jpg",
+    "original_file:size": 1849840,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "Pixel 4a",
+      "focal_length": 4.38,
+      "camera_manufacturer": "Google",
+      "sensor_array_dimensions": [
+        3024,
+        4032
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

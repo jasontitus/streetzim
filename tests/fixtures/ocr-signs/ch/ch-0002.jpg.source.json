@@ -1,0 +1,224 @@
+{
+  "assets": {
+    "hd": {
+      "description": "Highest resolution available of this picture",
+      "href": "https://panoramax.openstreetmap.fr/images/f5/a5/61/8d/9b18-4a08-b7ee-b8092fac643e.jpg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "type": "image/jpeg"
+    },
+    "sd": {
+      "description": "Picture in standard definition (fixed width of 2048px)",
+      "href": "https://panoramax.openstreetmap.fr/derivates/f5/a5/61/8d/9b18-4a08-b7ee-b8092fac643e/sd.jpg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "type": "image/jpeg"
+    },
+    "thumb": {
+      "description": "Picture in low definition (fixed width of 500px)",
+      "href": "https://panoramax.openstreetmap.fr/derivates/f5/a5/61/8d/9b18-4a08-b7ee-b8092fac643e/thumb.jpg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "type": "image/jpeg"
+    }
+  },
+  "bbox": [
+    8.544347457,
+    47.376843094,
+    8.544347457,
+    47.376843094
+  ],
+  "collection": "9353f8aa-f1fb-495e-818f-921271fd7ae9",
+  "geometry": {
+    "coordinates": [
+      8.544347457,
+      47.376843094
+    ],
+    "type": "Point"
+  },
+  "id": "f5a5618d-9b18-4a08-b7ee-b8092fac643e",
+  "links": [
+    {
+      "href": "https://panoramax.openstreetmap.fr/api/",
+      "rel": "root",
+      "title": "Instance catalog",
+      "type": "application/json"
+    },
+    {
+      "href": "https://panoramax.openstreetmap.fr/api/collections/9353f8aa-f1fb-495e-818f-921271fd7ae9",
+      "rel": "parent",
+      "type": "application/json"
+    },
+    {
+      "href": "https://panoramax.openstreetmap.fr/api/collections/9353f8aa-f1fb-495e-818f-921271fd7ae9/items/f5a5618d-9b18-4a08-b7ee-b8092fac643e",
+      "rel": "self",
+      "type": "application/geo+json"
+    },
+    {
+      "href": "https://panoramax.openstreetmap.fr/api/collections/9353f8aa-f1fb-495e-818f-921271fd7ae9",
+      "rel": "collection",
+      "type": "application/json"
+    },
+    {
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "rel": "license",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          8.544353729,
+          47.376875461
+        ],
+        "type": "Point"
+      },
+      "href": "https://panoramax.openstreetmap.fr/api/collections/9353f8aa-f1fb-495e-818f-921271fd7ae9/items/e50f0d0b-40cf-4e31-9861-26826780c281",
+      "id": "e50f0d0b-40cf-4e31-9861-26826780c281",
+      "rel": "next",
+      "type": "application/geo+json"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          8.54432769,
+          47.376813223
+        ],
+        "type": "Point"
+      },
+      "href": "https://panoramax.openstreetmap.fr/api/collections/9353f8aa-f1fb-495e-818f-921271fd7ae9/items/6ba1e405-bdc1-4be1-be8b-bb6f26f69081",
+      "id": "6ba1e405-bdc1-4be1-be8b-bb6f26f69081",
+      "rel": "prev",
+      "type": "application/geo+json"
+    }
+  ],
+  "properties": {
+    "annotations": [],
+    "collection": {
+      "semantics": []
+    },
+    "created": "2024-07-31T22:10:51.855765+00:00",
+    "datetime": "2024-06-07T08:20:06.338000+00:00",
+    "datetimetz": "2024-06-07T10:20:06.338000+02:00",
+    "exif": {
+      "Exif.GPSInfo.GPSAltitude": "2289419/5000",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSDateStamp": "2024:06:07",
+      "Exif.GPSInfo.GPSLatitude": "47/1 22/1 372616/10171",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.GPSInfo.GPSLongitude": "8/1 32/1 326604/8237",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.GPSInfo.GPSSpeed": "113225/8646",
+      "Exif.GPSInfo.GPSSpeedRef": "K",
+      "Exif.GPSInfo.GPSTimeStamp": "8/1 20/1 6/1",
+      "Exif.GPSInfo.GPSVersionID": "2 3 0 0",
+      "Exif.Image.DateTime": "2024:06:07 10:20:06",
+      "Exif.Image.ExifTag": "8",
+      "Exif.Image.GPSTag": "1012",
+      "Exif.Image.ImageDescription": "DCIM\\132GOPRO\\G0059304.JPG",
+      "Exif.Image.Make": "GoPro",
+      "Exif.Image.Model": "HERO9 Black",
+      "Exif.Image.Orientation": "3",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Image.Software": "HD9.01.01.72.00",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YCbCrPositioning": "1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Iop.InteroperabilityVersion": "48 49 48 48",
+      "Exif.Photo.ApertureValue": "250/100",
+      "Exif.Photo.BodySerialNumber": "C3441325737265",
+      "Exif.Photo.ColorSpace": "0",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Exif.Photo.CompressedBitsPerPixel": "1/250",
+      "Exif.Photo.Contrast": "0",
+      "Exif.Photo.CustomRendered": "0",
+      "Exif.Photo.DateTimeDigitized": "2024:06:07 10:20:06",
+      "Exif.Photo.DateTimeOriginal": "2024:06:07 10:20:06",
+      "Exif.Photo.DeviceSettingDescription": "0 0 0 0",
+      "Exif.Photo.DigitalZoomRatio": "1024/1024",
+      "Exif.Photo.ExifVersion": "48 50 50 49",
+      "Exif.Photo.ExposureBiasValue": "32768/65536",
+      "Exif.Photo.ExposureIndex": "2876516216/2696710768",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.ExposureTime": "1/962",
+      "Exif.Photo.FNumber": "25/10",
+      "Exif.Photo.FileSource": "3",
+      "Exif.Photo.Flash": "32",
+      "Exif.Photo.FlashpixVersion": "8 9 10 11",
+      "Exif.Photo.FocalLength": "3/1",
+      "Exif.Photo.FocalLengthIn35mmFilm": "15",
+      "Exif.Photo.GainControl": "0",
+      "Exif.Photo.ISOSpeedRatings": "258",
+      "Exif.Photo.InteroperabilityTag": "542",
+      "Exif.Photo.LightSource": "0",
+      "Exif.Photo.MaxApertureValue": "250/100",
+      "Exif.Photo.MeteringMode": "1",
+      "Exif.Photo.PixelXDimension": "5184",
+      "Exif.Photo.PixelYDimension": "3888",
+      "Exif.Photo.Saturation": "0",
+      "Exif.Photo.SceneCaptureType": "1",
+      "Exif.Photo.SceneType": "1",
+      "Exif.Photo.SensingMethod": "2",
+      "Exif.Photo.Sharpness": "0",
+      "Exif.Photo.ShutterSpeedValue": "10/1",
+      "Exif.Photo.SubSecTime": "3380",
+      "Exif.Photo.SubSecTimeDigitized": "3380",
+      "Exif.Photo.SubSecTimeOriginal": "3380",
+      "Exif.Photo.SubjectDistance": "0/1",
+      "Exif.Photo.SubjectDistanceRange": "0",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.Thumbnail.Compression": "6",
+      "Exif.Thumbnail.JPEGInterchangeFormat": "44020",
+      "Exif.Thumbnail.JPEGInterchangeFormatLength": "18052",
+      "Exif.Thumbnail.ResolutionUnit": "2",
+      "Exif.Thumbnail.XResolution": "72/1",
+      "Exif.Thumbnail.YResolution": "72/1"
+    },
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/f5/a5/61/8d/9b18-4a08-b7ee-b8092fac643e.jpg",
+    "geovisio:producer": "paulb_imagery",
+    "geovisio:rank_in_collection": 1588,
+    "geovisio:status": "ready",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/f5/a5/61/8d/9b18-4a08-b7ee-b8092fac643e/thumb.jpg",
+    "geovisio:visibility": "anyone",
+    "license": "CC-BY-SA-4.0",
+    "original_file:name": "20240607_05350.jpg",
+    "original_file:size": 2060524,
+    "panoramax:horizontal_pixel_density": 56,
+    "pers:interior_orientation": {
+      "camera_manufacturer": "GoPro",
+      "camera_model": "HERO9 Black",
+      "field_of_view": 92,
+      "focal_length": 3.0,
+      "sensor_array_dimensions": [
+        5184,
+        3888
+      ]
+    },
+    "quality:horizontal_accuracy": 4.0,
+    "semantics": [],
+    "updated": "2025-06-03T03:02:44.485815+00:00",
+    "view:azimuth": 10
+  },
+  "providers": [
+    {
+      "id": "c4c02fb9-f163-4731-869f-015cf040d076",
+      "name": "paulb_imagery",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ],
+  "stac_version": "1.0.0",
+  "type": "Feature"
+}

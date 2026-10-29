@@ -1,0 +1,196 @@
+{
+  "id": "2e2d2d4d-9772-450f-ac3f-edc4eac48a08",
+  "bbox": [
+    36.231415831,
+    49.988945773,
+    36.231415831,
+    49.988945773
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://spdx.org/licenses/CC-BY-SA-4.0.html",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/6e702976-580b-419c-8fb3-cf7bd364e6f8/items/2e2d2d4d-9772-450f-ac3f-edc4eac48a08",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/6e702976-580b-419c-8fb3-cf7bd364e6f8",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/6e702976-580b-419c-8fb3-cf7bd364e6f8",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "prev",
+      "href": "https://api.panoramax.xyz/api/collections/6e702976-580b-419c-8fb3-cf7bd364e6f8/items/e9e230fc-67ff-4de3-a9d6-55081a80d565",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.814524111,
+          50.8679165
+        ]
+      },
+      "id": "e9e230fc-67ff-4de3-a9d6-55081a80d565"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/6e702976-580b-419c-8fb3-cf7bd364e6f8/items/dd15139e-ea86-47b8-abef-afbb3d8d336a",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          5.68644619,
+          45.103401184
+        ]
+      },
+      "id": "dd15139e-ea86-47b8-abef-afbb3d8d336a"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.mapcomplete.org",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "mapcomplete"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.mapcomplete.org/permanent/2e/2d/2d/4d/9772-450f-ac3f-edc4eac48a08.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.mapcomplete.org/derivatives/2e/2d/2d/4d/9772-450f-ac3f-edc4eac48a08/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.mapcomplete.org/derivatives/2e/2d/2d/4d/9772-450f-ac3f-edc4eac48a08/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      36.231415831,
+      49.988945773
+    ]
+  },
+  "providers": [
+    {
+      "id": "f887e536-ca60-4c70-8f0c-fd480787296c",
+      "name": "mapcomplete",
+      "roles": [
+        "producer"
+      ]
+    },
+    {
+      "name": "Mykhailo25",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "6e702976-580b-419c-8fb3-cf7bd364e6f8",
+  "properties": {
+    "exif": {
+      "Exif.Image.Artist": "Mykhailo25",
+      "Exif.Image.GPSTag": "220",
+      "Exif.Image.ExifTag": "106",
+      "Exif.Image.Software": "Google",
+      "Exif.Image.Orientation": "1",
+      "Exif.Photo.ExifVersion": "48 50 50 48",
+      "Exif.GPSInfo.GPSLatitude": "49/1 59/1 5730157/283604",
+      "Exif.GPSInfo.GPSDateStamp": "2025-01-27",
+      "Exif.GPSInfo.GPSLongitude": "36/1 13/1 22724025/427972",
+      "Exif.GPSInfo.GPSTimeStamp": "23/1 53/1 35/1",
+      "Exif.Photo.PixelXDimension": "2448",
+      "Exif.Photo.PixelYDimension": "3264",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.YCbCrSubSampling": "2 2",
+      "Exif.Photo.DateTimeOriginal": "2025-01-27 23:53:35",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.OffsetTimeOriginal": "+00:00",
+      "Exif.Photo.SubSecTimeOriginal": "693000"
+    },
+    "created": "2025-01-27T23:53:37.029776+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2026-08-26T12:29:55.912931+00:00",
+    "datetime": "2025-01-27T23:53:35.693000+00:00",
+    "semantics": [
+      {
+        "key": "description:en:generated",
+        "value": "A rectangular black commemorative plaque with gold Ukrainian lettering is mounted on a textured, light-colored stone wall. Above the plaque is a reddish-brown horizontal pipe, and to the right is a vertical metal pole. The text on the plaque identifies the street as being named after the prominent Ukrainian writer H. F. Kvitka-Osnovyanynko, including his dates of 1778–1843."
+      },
+      {
+        "key": "description:en:generated:model",
+        "value": "gemma4:12b"
+      },
+      {
+        "key": "description:en:generated:prompt",
+        "value": "You are a tool that describes pictures, so that people with lower vision can get a feel of the picture. Describe the picture in a few sentences. Focus on the foreground objects. Give a succinct, factual description. Do not describe lighting conditions"
+      },
+      {
+        "key": "description:en:generated:thinking",
+        "value": "I need to describe the image for a person with low vision.\n\n1.  **Identify the main subject:** A black plaque mounted on a stone wall.\n2.  **Describe the surroundings:** A building's exterior wall made of large, light-colored stone blocks. There's a red pipe/gutter and a silver pole near the plaque.\n3.  **Describe the text on the plaque:** The text is in Ukrainian. It mentions \"ВУЛИЦЯ НАЗВАНА ІМ'ЯМ ВИДАТНОГО УКРАЇНСЬКОГО ПИСЬМЕННИКА Г. Ф. КВІТКИ-ОСНОВ'ЯНЕНКА 1778-1843 рр.\"\n4.  **Structure the description:**\n    *   Start with the main object (the plaque).\n    *   Describe the material and color of the plaque.\n    *   Mention the text on the plaque (or describe its appearance).\n    *   Describe the wall and nearby architectural features.\n5.  **Refine the description for clarity and brevity:**\n    *   \"A rectangular black plaque with gold lettering is mounted on a light-colored, rough stone wall.\"\n    *   \"The plaque contains several lines of Ukrainian text about a famous Ukrainian writer, H. F. Kvitka-Osnovyanynko, including his life dates: 1778-1843.\"\n    *   \"Above the plaque is a horizontal red-colored pipe, and to its right is a vertical metallic pole.\"\n\nLet's double check the text:\nВУЛИЦЯ (STREET)\nНАЗВАНА ІМ'ЯМ (NAMED AFTER)\nВИДАТНОГО УКРАЇНСЬКОГО (EMINENT UKRAINIAN)\nПИСЬМЕННИКА (WRITER)\nГ.Ф.КВІТКИ-ОСНОВ'ЯНЕНКА (H.F. KVITKA-OSNOVYANKA)\n1778-1843 рр. (1778-1843 yrs.)\n\nOkay, the summary should be concise.\n\nFinal description plan:\n- A black commemorative plaque is mounted on a wall of large, light-colored stone blocks.\n- The plaque features gold lettering in Ukrainian, honoring a Ukrainian writer.\n- A red gutter pipe runs above the plaque, and a vertical metal pole is situated to its right."
+      },
+      {
+        "key": "description:en:generated:time",
+        "value": "2026-08-26T12:29:55.7818678Z"
+      }
+    ],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2025-01-27T23:53:35.693000+00:00",
+    "annotations": [],
+    "view:azimuth": 260,
+    "geovisio:image": "/permanent/2e/2d/2d/4d/9772-450f-ac3f-edc4eac48a08.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "mapcomplete",
+    "geovisio:thumbnail": "/derivatives/2e/2d/2d/4d/9772-450f-ac3f-edc4eac48a08/thumb.jpg",
+    "original_file:name": "IMG_20210612_144632.jpg",
+    "original_file:size": 966218,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "sensor_array_dimensions": [
+        2448,
+        3264
+      ]
+    },
+    "geovisio:rank_in_collection": 5739
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}

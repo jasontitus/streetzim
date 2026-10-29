@@ -1,0 +1,211 @@
+{
+  "id": "12331acf-1318-4218-9187-61b97f0c538b",
+  "bbox": [
+    109.958793639,
+    27.558982833,
+    109.958793639,
+    27.558982833
+  ],
+  "type": "Feature",
+  "links": [
+    {
+      "rel": "license",
+      "href": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "title": "License for this object (CC-BY-SA-4.0)"
+    },
+    {
+      "rel": "self",
+      "href": "https://api.panoramax.xyz/api/collections/6f707262-ddf4-4f3f-af1f-6efafdbfe702/items/12331acf-1318-4218-9187-61b97f0c538b",
+      "type": "application/geo+json"
+    },
+    {
+      "rel": "collection",
+      "href": "https://api.panoramax.xyz/api/collections/6f707262-ddf4-4f3f-af1f-6efafdbfe702",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "https://api.panoramax.xyz/api/collections/6f707262-ddf4-4f3f-af1f-6efafdbfe702",
+      "type": "application/json"
+    },
+    {
+      "rel": "root",
+      "href": "https://api.panoramax.xyz/api",
+      "type": "application/json",
+      "title": "Instance catalog"
+    },
+    {
+      "rel": "next",
+      "href": "https://api.panoramax.xyz/api/collections/6f707262-ddf4-4f3f-af1f-6efafdbfe702/items/4c50aea4-0775-48fa-b4b4-7ae86ad0653d",
+      "type": "application/geo+json",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          109.958900444,
+          27.559032417
+        ]
+      },
+      "id": "4c50aea4-0775-48fa-b4b4-7ae86ad0653d"
+    },
+    {
+      "rel": "via",
+      "href": "https://panoramax.openstreetmap.fr",
+      "type": "application/json",
+      "title": "Link to the original instance",
+      "instance_name": "osm-fr"
+    }
+  ],
+  "assets": {
+    "hd": {
+      "href": "https://panoramax.openstreetmap.fr/images/12/33/1a/cf/1318-4218-9187-61b97f0c538b.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "data"
+      ],
+      "title": "HD picture",
+      "description": "Highest resolution available of this picture"
+    },
+    "sd": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/12/33/1a/cf/1318-4218-9187-61b97f0c538b/sd.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "visual"
+      ],
+      "title": "SD picture",
+      "description": "Picture in standard definition (fixed width of 2048px)"
+    },
+    "thumb": {
+      "href": "https://panoramax.openstreetmap.fr/derivates/12/33/1a/cf/1318-4218-9187-61b97f0c538b/thumb.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail",
+      "description": "Picture in low definition (fixed width of 500px)"
+    }
+  },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      109.958793639,
+      27.558982833
+    ]
+  },
+  "providers": [
+    {
+      "id": "ed9fa131-af4e-42f6-8e3c-ed8bf742b139",
+      "name": "sykul",
+      "roles": [
+        "producer"
+      ]
+    }
+  ],
+  "collection": "6f707262-ddf4-4f3f-af1f-6efafdbfe702",
+  "properties": {
+    "exif": {
+      "Exif.Image.Make": "samsung",
+      "Exif.Image.Model": "SM-A125F",
+      "Exif.Photo.Flash": "16",
+      "Exif.Image.GPSTag": "848",
+      "Exif.Image.ExifTag": "346",
+      "Exif.Photo.FNumber": "2000/1000",
+      "Exif.Image.DateTime": "2025:07:15 18:01:22",
+      "Exif.Image.Software": "MediaTek Camera Application",
+      "Exif.Image.ImageWidth": "4000",
+      "Exif.Photo.ColorSpace": "1",
+      "Exif.Photo.SubSecTime": "342",
+      "Exif.Image.ImageLength": "3000",
+      "Exif.Image.Orientation": "1",
+      "Exif.Image.XResolution": "72/1",
+      "Exif.Image.YResolution": "72/1",
+      "Exif.Photo.ExifVersion": "0220",
+      "Exif.Photo.FocalLength": "4600/1000",
+      "Exif.Photo.LightSource": "255",
+      "Exif.Photo.ExposureMode": "0",
+      "Exif.Photo.ExposureTime": "9996000/1000000000",
+      "Exif.Photo.MeteringMode": "2",
+      "Exif.Photo.WhiteBalance": "0",
+      "Exif.GPSInfo.GPSAltitude": "240/1",
+      "Exif.GPSInfo.GPSLatitude": "27/1 33/1 323382/10000",
+      "Exif.Photo.ApertureValue": "2000/1000",
+      "Exif.GPSInfo.GPSDateStamp": "2025:07:15",
+      "Exif.GPSInfo.GPSLongitude": "109/1 57/1 316571/10000",
+      "Exif.GPSInfo.GPSTimeStamp": "10/1 1/1 22/1",
+      "Exif.GPSInfo.GPSVersionID": "2 2 0 0",
+      "Exif.Image.ResolutionUnit": "2",
+      "Exif.Thumbnail.ImageWidth": "512",
+      "Exif.Photo.BrightnessValue": "0/10",
+      "Exif.Photo.ExposureProgram": "2",
+      "Exif.Photo.FlashpixVersion": "48 49 48 48",
+      "Exif.Photo.ISOSpeedRatings": "51",
+      "Exif.Photo.PixelXDimension": "4000",
+      "Exif.Photo.PixelYDimension": "3000",
+      "Exif.Photo.SensitivityType": "0",
+      "Exif.Thumbnail.Compression": "6",
+      "Exif.Thumbnail.ImageLength": "384",
+      "Exif.Thumbnail.Orientation": "1",
+      "Exif.Thumbnail.XResolution": "72/1",
+      "Exif.Thumbnail.YResolution": "72/1",
+      "Exif.GPSInfo.GPSAltitudeRef": "0",
+      "Exif.GPSInfo.GPSLatitudeRef": "N",
+      "Exif.Image.ImageDescription": "",
+      "Exif.Image.YCbCrPositioning": "2",
+      "Exif.Photo.DateTimeOriginal": "2025:07:15 18:01:22",
+      "Exif.Photo.DigitalZoomRatio": "100/100",
+      "Exif.Photo.MaxApertureValue": "200/100",
+      "Exif.Photo.SceneCaptureType": "0",
+      "Exif.GPSInfo.GPSLongitudeRef": "E",
+      "Exif.Photo.DateTimeDigitized": "2025:07:15 18:01:22",
+      "Exif.Photo.ExposureBiasValue": "0/10",
+      "Exif.Photo.ShutterSpeedValue": "6644/1000",
+      "Exif.Photo.SubSecTimeOriginal": "342",
+      "Exif.Thumbnail.ResolutionUnit": "2",
+      "Exif.Iop.InteroperabilityIndex": "R98",
+      "Exif.Photo.InteroperabilityTag": "1129",
+      "Exif.Photo.SubSecTimeDigitized": "342",
+      "Exif.Thumbnail.YCbCrPositioning": "2",
+      "Exif.GPSInfo.GPSProcessingMethod": "GPS",
+      "Exif.Photo.FocalLengthIn35mmFilm": "25",
+      "Exif.Photo.ComponentsConfiguration": "1 2 3 0",
+      "Exif.Photo.RecommendedExposureIndex": "0",
+      "Exif.Thumbnail.JPEGInterchangeFormat": "1289",
+      "Exif.Thumbnail.JPEGInterchangeFormatLength": "63872"
+    },
+    "created": "2025-07-28T17:54:32.954389+00:00",
+    "license": "CC-BY-SA-4.0",
+    "updated": "2025-07-28T17:54:32.954389+00:00",
+    "datetime": "2025-07-15T10:01:22.342000+00:00",
+    "semantics": [],
+    "collection": {
+      "semantics": []
+    },
+    "datetimetz": "2025-07-15T10:01:22.342000+00:00",
+    "annotations": [],
+    "view:azimuth": 65,
+    "geovisio:image": "https://panoramax.openstreetmap.fr/images/12/33/1a/cf/1318-4218-9187-61b97f0c538b.jpg",
+    "geovisio:status": "ready",
+    "geovisio:producer": "sykul",
+    "geovisio:thumbnail": "https://panoramax.openstreetmap.fr/derivates/12/33/1a/cf/1318-4218-9187-61b97f0c538b/thumb.jpg",
+    "original_file:name": "IMG_20250715_180122.jpg",
+    "original_file:size": 2796474,
+    "geovisio:visibility": "anyone",
+    "pers:interior_orientation": {
+      "camera_model": "SM-A125F",
+      "focal_length": 4.6,
+      "field_of_view": 72,
+      "camera_manufacturer": "samsung",
+      "sensor_array_dimensions": [
+        4000,
+        3000
+      ]
+    },
+    "geovisio:rank_in_collection": 1,
+    "quality:horizontal_accuracy": 5.0,
+    "panoramax:horizontal_pixel_density": 56
+  },
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+  ]
+}
