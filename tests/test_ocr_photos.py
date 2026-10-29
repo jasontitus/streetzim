@@ -68,6 +68,24 @@ def test_a_photo_half_read_searched_for_another_line_and_found_third() -> None:
     assert (s["query"], s["found1"], s["found3"]) == (False, False, True)
 
 
+def test_a_result_is_found_by_its_own_script_name_and_the_signs_lines() -> None:
+    rec = _rec(id="tw-0001", region="taipei", kind="street sign",
+               lines=[{"text": "朱崙街", "lang": "zh"}, {"text": "Lane 53巷", "lang": "zh"}],
+               expect={"query": "朱崙街53巷", "record": ""})
+    raw = {"status": "searched", "lines": ["朱崙街", "53巷"], "field": "朱崙街",
+           "results": [{"name": "Zhulun Street", "shown": "Zhulun Street 朱崙街"}]}
+    s = op.score(rec, raw)
+    assert (s["query"], s["found1"]) == (True, True)
+    assert op.result_names({"name": "Zhulun Street", "shown": "Zhulun Street 朱崙街"}) == ["Zhulun Street", "朱崙街"]
+    # a line is matched whole: "Medical centre" on the sign is not every medical centre
+    clinic = _rec(lines=[{"text": "Al'med"}, {"text": "медицинский центр"}], expect={"query": "Al'med Krasnoyarsk"})
+    assert not op.score(clinic, {"status": "searched", "lines": ["x"], "field": "x",
+                                 "results": [{"name": "Медицинский центр Здоровье", "shown": ""}]})["found3"]
+    # another street of the sign's district is not it
+    other = dict(raw, results=[{"name": "Section 3, Zhongxiao Road", "shown": "Section 3, Zhongxiao Road 忠孝路"}])
+    assert not op.score(rec, other)["found3"]
+
+
 def test_a_photo_not_run_scores_nothing_and_a_negative_passes_on_nothing_found() -> None:
     s = op.score(_rec(), {})
     assert (s["status"], s["read"], s["query"], s["found3"]) == ("not run", 0.0, False, False)

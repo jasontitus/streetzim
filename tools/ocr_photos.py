@@ -12,9 +12,12 @@ phone's photo picker would. Each photo is scored on:
 - query: whether the line searched for is the labelled one (`expect.query`,
   or one of the labelled lines);
 - found@1 / found@3: whether a result among the first one / three is the
-  labelled place (its name holds `expect.record` or `expect.query`, or the
-  other way around). Many set photos are of places a map may not have: read
-  `found` with `expect.in_map` in mind;
+  labelled place: its name or own-script name (a Taipei street is
+  "Zhulun Street", 朱崙街) holds `expect.record` or `expect.query`, or the
+  other way around, or is one of the labelled lines exactly (a line alone,
+  "Medical centre", would match any such place by containment). Many set
+  photos are of places a map may not have, and until the labels name their
+  records this is approximate: read `found` with `expect.in_map` in mind;
 - negatives (kind "negative"): pass when nothing is found (a negative's
   photo may also hold signs the map has: read its row).
 
@@ -85,9 +88,17 @@ def same_place(name: str, want: str) -> bool:
 
 
 def wanted_names(rec: dict[str, Any]) -> list[str]:
+    """The labelled place's names: the record's and the query."""
     exp = rec.get("expect") or {}
-    out = [exp.get("record") or "", exp.get("query") or ""]
-    return [x for x in out if x.strip()]
+    return [x for x in (exp.get("record") or "", exp.get("query") or "") if norm(x)]
+
+
+def result_names(r: dict[str, Any]) -> list[str]:
+    """A result row's names: its record's and the own-script one the row
+    shows after it ("Zhulun Street 朱崙街")."""
+    name, shown = r.get("name", ""), r.get("shown", "").strip()
+    own = shown[len(name):].strip() if name and shown.startswith(name) else shown
+    return [x for x in (name, own) if norm(x)]
 
 
 def label_lines(rec: dict[str, Any]) -> list[str]:
@@ -102,13 +113,15 @@ def score(rec: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     field = raw.get("field", "") if raw.get("status") == "searched" else ""
     want_lines = label_lines(rec)
     read = [max((coverage(w, g) for g in lines), default=0.0) for w in want_lines]
-    names = [r.get("name", "") for r in raw.get("results") or []]
-    shown = [r.get("shown", "") for r in raw.get("results") or []]
+    rows = raw.get("results") or []
+    names = [r.get("name", "") for r in rows]
     wanted = wanted_names(rec)
+    exact = {norm(x) for x in want_lines}
     queries = wanted + want_lines + [ln.get("latin", "") for ln in rec.get("lines") or [] if ln.get("latin")]
 
     def found(k: int) -> bool:
-        return any(same_place(n, w) for n in names[:k] + shown[:k] for w in wanted if n)
+        return any(same_place(n, w) for r in rows[:k] for n in result_names(r) for w in wanted) or \
+            any(norm(n) in exact for r in rows[:k] for n in result_names(r))
 
     out: dict[str, Any] = {
         "id": rec["id"], "region": rec.get("region"), "country": rec.get("country"), "kind": rec.get("kind"),
