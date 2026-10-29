@@ -548,23 +548,22 @@ function _renderFindResultsStrip(map, stash) {
 
 function _showSearchAreaPill(map) {
   if (_findResultsState.searchAreaBtn) return; // already on screen
-  // While the pill is on screen it pretty much owns the top-center
-  // band — hide the main search input so the two affordances aren't
-  // crowding each other / drawing the user's eye away from the
-  // result-set-on-map flow they're actively in. Class-based so the
-  // !important rule beats any stray inline display (and so the
-  // hide survives if some other code rewrites style.display).
+  // The pill sits just below the search box (and its chip rail), which
+  // stays: hiding the box while the pill was up left a reader who had
+  // panned after a search (a photo search, 2026-10-29) with no search bar
+  // and no idea how to get it back.
   var searchContainer = document.getElementById('search-container');
-  if (searchContainer) {
-    searchContainer.classList.add('streetzim-hidden');
-    _findResultsState._searchHidden = true;
+  var below = 14;
+  if (searchContainer && getComputedStyle(searchContainer).display !== 'none') {
+    var sr = searchContainer.getBoundingClientRect();
+    if (sr.height > 0) below = Math.round(sr.bottom) + 8;
   }
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
   btn.type = 'button';
   btn.textContent = szT('find.search_this_area', 'Search this area');
   btn.style.cssText = (
-    'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
+    'position:fixed; left:50%; top:' + (below === 14 ? 'calc(14px + var(--top-inset, 0px))' : below + 'px') + '; transform:translateX(-50%);'
     + 'z-index:1600; padding:9px 18px;'
     + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
     + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
@@ -603,14 +602,6 @@ function _hideSearchAreaPill() {
   setTimeout(function() {
     if (btn.parentNode) btn.parentNode.removeChild(btn);
   }, 250);
-  // Restore the main search container.
-  if (_findResultsState._searchHidden) {
-    var searchContainer = document.getElementById('search-container');
-    if (searchContainer) {
-      searchContainer.classList.remove('streetzim-hidden');
-    }
-    _findResultsState._searchHidden = false;
-  }
 }
 
 function _searchAreaApply(map) {
@@ -630,9 +621,8 @@ function _searchAreaApply(map) {
     return;
   }
   if (!_findResultsState.items || !_findResultsState.items.length) return;
-  // What the reader can see, not getBounds() (see _findVisibleRect). The
-  // pill hides the search box and chip rail while it is up; put them back
-  // first, or the rectangle would reach under them.
+  // What the reader can see, not getBounds() (see _findVisibleRect), with
+  // the pill gone first so the rectangle is not cut under it.
   _hideSearchAreaPill();
   var rect = _findVisibleRect(map);
   var filtered = _findResultsState.items.filter(function(r) {

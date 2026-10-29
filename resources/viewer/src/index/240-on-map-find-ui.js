@@ -964,8 +964,14 @@ function _scrollCarouselTo(idx) {
   var track = _findResultsState.track;
   if (!track || idx < 0 || idx >= track.children.length) return;
   var card = track.children[idx];
-  // Use scrollIntoView with center inline so scroll-snap settles cleanly.
-  card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  // Centre the card by scrolling the strip alone (scroll-snap settles it).
+  // scrollIntoView would scroll every ancestor too, the page among them
+  // (overflow:hidden does not stop a script), and on a phone that can push
+  // the search bar off screen with no way back.
+  var tr = track.getBoundingClientRect(), cr = card.getBoundingClientRect();
+  var dx = (cr.left + cr.width / 2) - (tr.left + tr.width / 2);
+  if (typeof track.scrollBy === 'function') track.scrollBy({ left: dx, behavior: 'smooth' });
+  else track.scrollLeft += dx;
 }
 
 function _setActiveResult(map, idx, flyTo) {
@@ -1104,12 +1110,6 @@ function clearFindResults() {
       _findResultsState.searchAreaBtn);
   }
   _findResultsState.searchAreaBtn = null;
-  // Restore the main search if we hid it for the pill.
-  if (_findResultsState._searchHidden) {
-    var sc = document.getElementById('search-container');
-    if (sc) sc.classList.remove('streetzim-hidden');
-    _findResultsState._searchHidden = false;
-  }
   _hidePlaceDetail();
   // Clear any active chip in the on-map find rail.
   if (typeof _findChipPaintActive === 'function') {

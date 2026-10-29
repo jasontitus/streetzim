@@ -5336,16 +5336,17 @@ document.addEventListener('keydown', _findResultsKeydown);
 function _showSearchAreaPill(map) {
 if (_findResultsState.searchAreaBtn) return; // already on screen
 var searchContainer = document.getElementById('search-container');
-if (searchContainer) {
-searchContainer.classList.add('streetzim-hidden');
-_findResultsState._searchHidden = true;
+var below = 14;
+if (searchContainer && getComputedStyle(searchContainer).display !== 'none') {
+var sr = searchContainer.getBoundingClientRect();
+if (sr.height > 0) below = Math.round(sr.bottom) + 8;
 }
 var btn = document.createElement('button');
 btn.id = 'find-search-area-btn';
 btn.type = 'button';
 btn.textContent = szT('find.search_this_area', 'Search this area');
 btn.style.cssText = (
-'position:fixed; left:50%; top:calc(14px + var(--top-inset, 0px)); transform:translateX(-50%);'
+'position:fixed; left:50%; top:' + (below === 14 ? 'calc(14px + var(--top-inset, 0px))' : below + 'px') + '; transform:translateX(-50%);'
 + 'z-index:1600; padding:9px 18px;'
 + 'background:var(--szd-surface-a, rgba(255,255,255,0.92)); color:var(--szd-fg, #222);'
 + 'border:1px solid rgba(0,0,0,0.12); border-radius:999px;'
@@ -5381,13 +5382,6 @@ btn.style.opacity = '0';
 setTimeout(function() {
 if (btn.parentNode) btn.parentNode.removeChild(btn);
 }, 250);
-if (_findResultsState._searchHidden) {
-var searchContainer = document.getElementById('search-container');
-if (searchContainer) {
-searchContainer.classList.remove('streetzim-hidden');
-}
-_findResultsState._searchHidden = false;
-}
 }
 function _searchAreaApply(map) {
 var activeChip = _findResultsState.activeChip;
@@ -6865,7 +6859,10 @@ function _scrollCarouselTo(idx) {
 var track = _findResultsState.track;
 if (!track || idx < 0 || idx >= track.children.length) return;
 var card = track.children[idx];
-card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+var tr = track.getBoundingClientRect(), cr = card.getBoundingClientRect();
+var dx = (cr.left + cr.width / 2) - (tr.left + tr.width / 2);
+if (typeof track.scrollBy === 'function') track.scrollBy({ left: dx, behavior: 'smooth' });
+else track.scrollLeft += dx;
 }
 function _setActiveResult(map, idx, flyTo) {
 if (idx < 0 || !_findResultsState.items
@@ -6976,11 +6973,6 @@ _findResultsState.searchAreaBtn.parentNode.removeChild(
 _findResultsState.searchAreaBtn);
 }
 _findResultsState.searchAreaBtn = null;
-if (_findResultsState._searchHidden) {
-var sc = document.getElementById('search-container');
-if (sc) sc.classList.remove('streetzim-hidden');
-_findResultsState._searchHidden = false;
-}
 _hidePlaceDetail();
 if (typeof _findChipPaintActive === 'function') {
 _findChipPaintActive(null);
@@ -8632,7 +8624,7 @@ b.textContent = L.text;
 b.addEventListener('click', function () {
 input.value = L.text;
 input.dispatchEvent(new Event('input', { bubbles: true }));
-input.focus();
+input.focus({ preventScroll: true });
 });
 linesEl.appendChild(b);
 });

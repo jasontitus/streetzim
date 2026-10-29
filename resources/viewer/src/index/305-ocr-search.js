@@ -371,7 +371,7 @@ function initSignSearch(map, config) {
       b.addEventListener('click', function () {
         input.value = L.text;
         input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.focus();
+        input.focus({ preventScroll: true });
       });
       linesEl.appendChild(b);
     });
