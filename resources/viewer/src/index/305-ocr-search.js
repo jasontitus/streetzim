@@ -420,6 +420,11 @@ function initSignSearch(map, config) {
     }).catch(function (err) {
       dbg('sign reader failed', describeError(err));
       setStatus(szT('search.photo_failed', 'Could not read the photo'), 'failed');
+      // Why, in small print: on a phone there is no console to read it in.
+      var why = document.createElement('small');
+      why.className = 'ocr-why';
+      why.textContent = describeError(err);
+      statusEl.appendChild(why);
     });
   }
 

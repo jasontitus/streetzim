@@ -733,6 +733,7 @@ font-family: var(--ui-font); color: var(--text-primary);
 #ocr-sheet[hidden] { display: none; }
 #ocr-sheet .ocr-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
 #ocr-status { flex: 1; font-size: 13px; color: var(--text-secondary); }
+#ocr-status .ocr-why { display: block; margin-top: 4px; font-size: 11px; opacity: 0.8; overflow-wrap: anywhere; }
 #ocr-close, #ocr-again {
 background: none; border: none; font-size: 18px; line-height: 1; padding: 0 4px;
 color: var(--text-tertiary); cursor: pointer;
@@ -8674,6 +8675,10 @@ sheet.setAttribute('data-sz-ocr', 'searched');
 }).catch(function (err) {
 dbg('sign reader failed', describeError(err));
 setStatus(szT('search.photo_failed', 'Could not read the photo'), 'failed');
+var why = document.createElement('small');
+why.className = 'ocr-why';
+why.textContent = describeError(err);
+statusEl.appendChild(why);
 });
 }
 btn.addEventListener('click', function () {
