@@ -15,6 +15,9 @@ comments the browser only downloads.
 Edit the parts, not index.html, then rebuild, run
 scripts/sync-drive-viewer.sh, and commit all three.
 
+The built file names itself: SZ_VIEWER_BUILD, shown in the About panel,
+is the first 8 hex digits of its SHA-256 (taken before it is written in).
+
 It first runs tools/build_i18n.py, which owns part 005-i18n.html, the
 SZ-I18N block in places.html and resources/viewer/i18n/en.json: the UI
 strings and their translations (docs/i18n.md). And it writes part
@@ -30,6 +33,7 @@ on their own.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -76,9 +80,20 @@ def joined() -> str:
     return "".join(p.read_text(encoding="utf-8") for p in parts())
 
 
+BUILD_STAMP = "var SZ_VIEWER_BUILD = '';"
+
+
 def build() -> bytes:
-    return viewer_compact.compact_build(
+    """The joined, compacted parts, with SZ_VIEWER_BUILD (part 140) set to
+    the first 8 hex digits of their SHA-256 (taken with it empty): the
+    About panel's viewer fingerprint."""
+    data = viewer_compact.compact_build(
         [(p.name, p.read_text(encoding="utf-8")) for p in parts()]).encode("utf-8")
+    stamp = BUILD_STAMP.encode("utf-8")
+    if data.count(stamp) != 1:
+        raise SystemExit(f"{BUILD_STAMP!r} must be in the parts exactly once (part 140)")
+    fp = hashlib.sha256(data).hexdigest()[:8]
+    return data.replace(stamp, BUILD_STAMP.replace("''", f"'{fp}'").encode("utf-8"))
 
 
 def main() -> int:

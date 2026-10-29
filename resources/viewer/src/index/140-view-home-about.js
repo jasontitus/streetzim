@@ -33,7 +33,11 @@
 // The viewer's own release; tests/viewer_ui_js.test.mjs keeps it equal to
 // streetzim/__about__.py. A ZIM's map-config.json names the release that
 // built it (`generator`); the viewer is patched in later, so both are shown.
+// SZ_VIEWER_BUILD tells two viewers of one release apart: tools/build_viewer.py
+// writes the first 8 hex digits of the built file's SHA-256 into it, so a
+// map's About says which viewer it carries (empty in the parts).
 var SZ_VIEWER_VERSION = '1.0.0';
+var SZ_VIEWER_BUILD = '';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 
 function _szStorage() {
@@ -486,7 +490,8 @@ function _szAboutText(config) {
   } else if (config.generator) {
     meta.push(szT('about.built_with', 'Built with {generator}', { generator: config.generator }));
   }
-  meta.push(szT('about.viewer_version', 'viewer: streetzim {version}', { version: SZ_VIEWER_VERSION }));
+  meta.push(szT('about.viewer_version', 'viewer: streetzim {version}',
+    { version: SZ_VIEWER_VERSION + (SZ_VIEWER_BUILD ? ' (' + SZ_VIEWER_BUILD + ')' : '') }));
   var sat = _szSatellite(config);
   return {
     title: config.title || config.name || szT('about.default_title', 'Offline OpenStreetMap'),

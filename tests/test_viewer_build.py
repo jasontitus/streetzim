@@ -22,3 +22,18 @@ def test_every_part_is_used_and_nonempty():
     assert len(parts) >= 20
     assert all(p.stat().st_size > 0 for p in parts)
     assert parts[0].name.startswith("000-") and parts[-1].name.startswith("900-")
+
+
+def test_the_built_viewer_names_itself():
+    """SZ_VIEWER_BUILD (the About panel's fingerprint) is the first 8 hex
+    digits of the built file's SHA-256, taken with it empty; the parts keep
+    it empty."""
+    import hashlib
+    import re
+    data = (ROOT / "resources" / "viewer" / "index.html").read_bytes()
+    m = re.findall(rb"var SZ_VIEWER_BUILD = '([0-9a-f]{8})';", data)
+    assert len(m) == 1, m
+    blank = data.replace(b"var SZ_VIEWER_BUILD = '" + m[0] + b"';", b"var SZ_VIEWER_BUILD = '';")
+    assert hashlib.sha256(blank).hexdigest()[:8] == m[0].decode()
+    about = (ROOT / "resources" / "viewer" / "src" / "index" / "140-view-home-about.js").read_text(encoding="utf-8")
+    assert about.count("var SZ_VIEWER_BUILD = '';") == 1

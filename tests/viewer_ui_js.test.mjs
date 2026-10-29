@@ -79,8 +79,10 @@ function loadView(env = {}) {
       get() { if (env.storage === 'throws') throw new Error('SecurityError'); return env.storage; },
     });
   }
+  // env.build: the fingerprint tools/build_viewer.py writes in (empty in the parts)
+  const src = env.build ? VIEW_SRC.replace("var SZ_VIEWER_BUILD = '';", `var SZ_VIEWER_BUILD = '${env.build}';`) : VIEW_SRC;
   const fn = new Function('window', 'document', 'location', 'setTimeout', 'clearTimeout',
-    VIEW_SRC + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView, _szHashView, _szViewHash,' +
+    src + '\nreturn { SZ_VIEWER_VERSION, _szStorage, _szViewKey, _szHashSetsView, _szHashView, _szViewHash,' +
     ' _szReadView, _szWriteView, _szOpeningCamera, _szMaxBounds, _szClearZoom, initViewMemory, initHomeButton,' +
     ' _szAboutText, _szMonth, initAbout, _szSatellite, _szSatelliteCreditHtml,' +
     ' szLocaleUnit, szReadUnit, szWriteUnit, szUnit, szFormatDistance, initCompassVisibility };');
@@ -567,6 +569,10 @@ await ok('About text from new and old map-config.json', () => {
   assert.strictEqual(full.desc, 'Offline map.');
   assert.strictEqual(full.meta, 'Built September 2026 with streetzim 1.0.0 · viewer: streetzim '
     + v.SZ_VIEWER_VERSION);
+  // A built viewer names itself: two viewers of one release told apart.
+  assert.ok(VIEW_SRC.includes("var SZ_VIEWER_BUILD = '';"));
+  assert.strictEqual(loadView({ build: 'de480cd1' })._szAboutText({ name: 'Monaco' }).meta,
+    'viewer: streetzim ' + v.SZ_VIEWER_VERSION + ' (de480cd1)');
   const old = v._szAboutText({ name: 'Hawaii', buildDate: '2026/04' });
   assert.strictEqual(old.title, 'Hawaii');
   assert.strictEqual(old.desc, '');
