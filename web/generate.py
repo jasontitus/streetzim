@@ -570,6 +570,13 @@ REGIONS = [
         "description": "San Francisco Bay Area &mdash; San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula.",
     },
     {
+        "id": "taipei",
+        "tier": "local",
+        "title": "Taipei",
+        "zim_file": "osm-taipei.zim",
+        "description": "Taipei &mdash; Taipei City and the heart of New Taipei: Ximending, Zhongshan, Xinyi and Taipei 101, Beitou, Tamsui, Banqiao, Xindian and Yangmingshan; search a street sign or shop name with a photo.",
+    },
+    {
         "id": "washington-dc",
         "tier": "local",
         "title": "Washington, D.C.",
