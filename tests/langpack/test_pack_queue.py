@@ -1632,6 +1632,13 @@ def test_the_preview_follows_production_over_the_deploys_generated_files(q: Simp
     assert (recipes / "beta" / "region.json").exists() and (recipes / "gamma" / "region.json").exists()
 
 
+
+def _scheme() -> str:
+    """The queue's recipe scheme (pack_queue.sh SCHEME)."""
+    import re
+    src = (Path(__file__).resolve().parents[2] / "ops" / "langpack" / "pack_queue.sh").read_text(encoding="utf-8")
+    return re.search(r"^SCHEME=(\d+)$", src, re.M).group(1)
+
 def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -> None:
     """The recipes' scheme changed (2: each version's search pack in its own
     language): a map published under an older one (a published.tsv row
@@ -1640,13 +1647,14 @@ def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     done = q.qd / "published.tsv"
     rows = [x.split("\t") for x in done.read_text().splitlines()]
-    assert all(len(r) == 6 and r[5] == "2" for r in rows), rows
+    S = _scheme()
+    assert all(len(r) == 6 and r[5] == S for r in rows), rows
     done.write_text("".join("\t".join(r[:5] if r[0] == "beta" else r) + "\n" for r in rows))     # beta: the old format
     n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
     assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
-    assert "beta: published under an older recipe scheme: shipped again for scheme 2" in log_text(q)
+    assert f"beta: published under an older recipe scheme: shipped again for scheme {S}" in log_text(q)
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1        # once
 
@@ -1661,7 +1669,8 @@ def test_a_run_records_the_scheme_it_was_started_under(q: SimpleNamespace) -> No
     rows = [x.split("\t") for x in done.read_text().splitlines()]
     row = {r[0]: r for r in rows}
     done.write_text("".join("\t".join(r[:5] if r[0] in ("beta", "alpha") else r) + "\n" for r in rows))
-    for rid, (runs, rc) in {"beta": ("", "0"), "alpha": (" 2", "0 2")}.items():   # the old queue's, the new one's
+    S = _scheme()
+    for rid, (runs, rc) in {"beta": ("", "0"), "alpha": (f" {S}", f"0 {S}")}.items():   # the old queue's, the new one's
         r = row[rid]
         (q.qd / "runs" / rid).write_text(f"999999 - {r[3]} {r[1]}/{r[2]}{runs}\n")
         (q.qd / f"rc-{rid}").write_text(rc + "\n")
@@ -1669,8 +1678,8 @@ def test_a_run_records_the_scheme_it_was_started_under(q: SimpleNamespace) -> No
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     after = {rid: [r[5] for r in (x.split("\t") for x in done.read_text().splitlines()) if r[0] == rid and len(r) == 6]
              for rid in n}                                  # (the rows written above have no scheme)
-    assert after["beta"] == ["1", "2"], after          # finished under scheme 1, then shipped again for 2
-    assert after["alpha"] == ["2"], after
+    assert after["beta"] == ["1", S], after            # finished under scheme 1, then shipped again for the current
+    assert after["alpha"] == [S], after
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
     assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
     # the queue writes the scheme into a run's file and its exit code
@@ -1681,10 +1690,10 @@ def test_a_run_records_the_scheme_it_was_started_under(q: SimpleNamespace) -> No
         t0 = time.time()
         while not (q.qd / "runs" / "beta").exists() and time.time() - t0 < 60:
             time.sleep(0.05)
-        assert (q.qd / "runs" / "beta").read_text().split()[4] == "2"
+        assert (q.qd / "runs" / "beta").read_text().split()[4] == S
         while not (q.qd / "rc-beta").exists() and time.time() - t0 < 60:
             time.sleep(0.05)
-        assert (q.qd / "rc-beta").read_text().split() == ["0", "2"]
+        assert (q.qd / "rc-beta").read_text().split() == ["0", S]
         assert p.wait(timeout=120) == 0
     finally:
         if p.poll() is None:

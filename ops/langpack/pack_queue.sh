@@ -203,7 +203,10 @@ RETRY=${QUEUE_RETRY_SECS:-1800}
 MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
 # The recipes' scheme: a map published under an older one ships again (ship_packs.sh redoes
 # only what changed). 2: each version's search pack is indexed in its own language (2026-10-23).
-SCHEME=2
+# 3: each search pack's title index holds the base's pages and redirects (index_pack.py
+# TEXT_VERSION 3, 2026-10-29): versions whose Kiwix search found none of the map's places
+# get new search packs, and those the gates held back for it are published.
+SCHEME=3
 PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
