@@ -163,9 +163,33 @@ ok('a card naming another town is not the address of that town\'s namesake', () 
   // a plate with only its block besides: no town asked
   const b = stack([['366', 100], ['Road 116', 60], ['Block 304', 40]]);
   assert.strictEqual(kinds([addr('366 116')], b, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'address');
-  // a plate photo with a shop's name in it, and an address that names no town: to check
-  const shop = stack([['366', 100], ['Road 116', 60], ['Pharmacy', 40]]);
-  assert.strictEqual(kinds([addr('366 116')], shop, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'similar');
+  // a shop's name, a watermark, a screw read as "a": neutral
+  for (const extra of ['Pharmacy', 'alamy', 'a', 'Kingdom of Bahrain']) {
+    const lines = stack([['366', 100], ['Road 116', 60], [extra, 30]]);
+    assert.strictEqual(kinds([addr('366 116')], lines, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'address', extra);
+  }
+  // an area of the map named on the sign: consistent when it holds the address, a conflict when not
+  const manama = { n: 'Manama', t: 'admin', a: 26.22, o: 50.58, bb: [50.5, 26.15, 50.65, 26.27] };
+  const riffa = { n: 'Riffa', t: 'admin', a: 26.12, o: 50.55, bb: [50.5, 26.05, 50.6, 26.15] };
+  const a116 = addr('366 116', 26.2289, 50.578);
+  const at = (town) => kinds([a116], stack([['366', 100], ['Road 116', 60], [town, 40]]), [a116, road116(26.2288, 50.578), manama, riffa])[0].kind;
+  assert.strictEqual(at('Manama'), 'address');
+  assert.strictEqual(at('Riffa'), 'similar');
+  // Taipei: the city with its district, 臺 for 台; a district of the city; a village name aside
+  const tp = addr('100號 忠孝東路三段, 台北市', 25.04, 121.54);
+  const st = { n: 'Section 3, Zhongxiao East Road', nn: '忠孝東路三段', t: 'street', a: 25.04, o: 121.54 };
+  const daan = { n: 'Da\'an District', nn: '大安區', t: 'admin', a: 25.03, o: 121.54, bb: [121.52, 25.01, 121.56, 25.05] };
+  const tpk = (extra) => kinds([tp], [{ text: '忠孝東路三段', size: 1 }, { text: '100號', size: 2 }, { text: extra, size: 1 }], [tp, st, daan])[0].kind;
+  assert.strictEqual(tpk('臺北市大安區'), 'address');
+  assert.strictEqual(tpk('大安區'), 'address');
+  assert.strictEqual(tpk('信義區'), 'similar');        // a district the map does not show here: reads as a town
+  assert.strictEqual(tpk('區'), 'address');           // a stray character from a sign's edge is nothing to read
+  const village = addr('100號 忠孝東路三段, 民輝里', 25.04, 121.54);
+  assert.strictEqual(kinds([village], [{ text: '忠孝東路三段', size: 1 }, { text: '100號', size: 2 }, { text: '大安區', size: 1 }], [village, st, daan])[0].kind, 'address');
+  // a card whose own postcode line names another town, even with the record's town in a hotel's name
+  assert.strictEqual(kinds([addr('10 Schulweg, Husum')], [{ text: 'Hotel Husum' }, { text: 'Schulweg 10' }, { text: '20095 Hamburg' }])[0].kind, 'similar');
+  // a town of two parts: its first
+  assert.strictEqual(kinds([addr('10 Schulweg, Duderstadt, Stadt')], [{ text: 'Schulweg 10' }, { text: '37115 Duderstadt' }])[0].kind, 'address');
 });
 ok('a number under a long street blade is no house number (a speed roundel)', () => {
   const pole = [{ text: 'North 13th Street', size: 40, box: { x: 0, y: 0, width: 420, height: 40 } },
@@ -174,6 +198,10 @@ ok('a number under a long street blade is no house number (a speed roundel)', ()
   const plaque = [{ text: '1121', size: 90, box: { x: 40, y: 0, width: 240, height: 90 } },
                   { text: 'Abbott Drive', size: 40, box: { x: 0, y: 110, width: 320, height: 40 } }];
   assert.strictEqual(plate(plaque).claim, '1121');
+  // a house number as tall as a long street name is still the house's ("105" is no speed)
+  const taaffe = [{ text: '105', size: 40, box: { x: 150, y: 0, width: 72, height: 40 } },
+                  { text: 'North Taaffe Street', size: 40, box: { x: 0, y: 55, width: 456, height: 40 } }];
+  assert.strictEqual(plate(taaffe).claim, '105');
   // an ordinal street is named, not numbered: "21st Avenue" is not 21 and Street
   const recs = [street('21st Avenue')];
   assert.strictEqual(kinds([addr('500 21st Ave')], stacked('500', '21st Avenue'), recs)[0].kind, 'address');

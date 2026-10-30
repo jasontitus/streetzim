@@ -207,9 +207,12 @@ function _szSignPlate(lines, words) {
     if (!A || !B) return false;
     var over = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
     var gap = Math.max(A.y, B.y) - Math.min(A.y + A.height, B.y + B.height);
-    // Beside a street with no number of its own, the number spans half its
-    // width at least: a speed roundel under a long street blade does not.
-    var span = r.ws.some(_szSignIsNum) ? Math.min(A.width, B.width) : Math.max(A.width, B.width);
+    // A likely speed value (two digits, a multiple of 5, taller than the
+    // street's text) beside a street with no number of its own must span
+    // half the street line: a roundel under a long blade does not; a house
+    // plaque's "105" under "North Taaffe Street" need not.
+    var v = +top.ws[0], speedish = top.ws.length === 1 && /^\d{2}$/.test(top.ws[0]) && v % 5 === 0 && top.size > r.size;
+    var span = !r.ws.some(_szSignIsNum) && speedish ? Math.max(A.width, B.width) : Math.min(A.width, B.width);
     if (!(over >= 0.5 * span && gap < 1.5 * Math.max(A.height, B.height))) return false;
     var lo = Math.min(A.y + A.height, B.y + B.height), hi = Math.max(A.y, B.y);
     return !rows.some(function (o) {          // nothing between them ("SPEED", "LIMIT")
@@ -260,7 +263,7 @@ function _szSignStreetIs(rest, line, plate) {
 //              be the building's (a "30" under "Schulweg"): listed, to check;
 //   'drop'     anything else: not listed.
 // With `streets` null (while the search runs): whether it may be, cheaply.
-function _szSignAddressKind(rec, plate, words, streets) {
+function _szSignAddressKind(rec, plate, words, streets, places) {
   if (!rec || rec.t !== 'addr') return 'drop';
   var p = _szSignAddressParts(rec, plate, words);
   if (!p) return 'drop';
@@ -268,7 +271,7 @@ function _szSignAddressKind(rec, plate, words, streets) {
   var one = named && plate.lines.filter(function (L) {
     return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
   })[0];
-  if (one) return _szSignTownOk(rec, plate, words, [one]) ? 'address' : 'similar';
+  if (one) return _szSignTownOk(rec, plate, words, [one], places) ? 'address' : 'similar';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
@@ -283,30 +286,59 @@ function _szSignAddressKind(rec, plate, words, streets) {
   var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
   if (!plate.claim) return 'similar';
-  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building])) ? 'address' : 'similar';
+  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places) ? 'address' : 'similar';
 }
-// Whether the sign's other lines leave the address's town possible: a card
-// that also says "20095 Hamburg" is not the Schulweg 10 in Husum, nor a key
-// card saying 台中市 the 三和路四段20巷101號 of 新北市. With nothing else on
-// the sign (a house plate; "Block 727" is part of a Bahraini address) the
-// town is not asked; with more, the record's town (after its comma) must be
-// on the sign, and a record that names no town is only to check.
+// Whether the sign's other lines leave the address's town possible. Each
+// line besides the address's own (3 letters or more: not a screw read as
+// "a"; not a block, flat or floor) is
+//   consistent  when it holds the address's town (the first part after its
+//               comma; 臺 and 台 alike, Chinese and Japanese by containment:
+//               "臺北市大安區" holds 台北市), or names an area of the map
+//               (`places`) that contains the address (中山區 in 台北市);
+//   a conflict  when it names an area of the map that does not ("20095
+//               Hamburg" against the Schulweg 10 of Husum), or reads as a
+//               town the map does not have (a postcode line, a name ending
+//               in 市, 區, 縣...: 台中市 on a key card);
+//   neutral     otherwise (a hotel's name, a watermark, "Kingdom of Bahrain").
+// One conflict and the address is only to check.
 var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
-function _szSignTownOk(rec, plate, words, used) {
+var SZ_SIGN_TOWN_END = /[市縣县區区町村郡省鎮镇鄉乡]$/;
+function _szSignTownOk(rec, plate, words, used, places) {
   var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
-  var extra = plate.lines.filter(function (L) {
-    return used.indexOf(L) < 0 && L.some(function (w) {
+  var han = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  var fold = function (t) { return t.replace(/臺/g, '台'); };
+  var n = String(rec.n || ''), parts = n.split(',');
+  var townWs = parts.length > 1 ? words(parts[1]).filter(function (w) { return !_szSignIsNum(w); }) : [];
+  var town = fold(townWs.join(' ')), townC = town.replace(/ /g, '');
+  var inside = function (p) {
+    if (p.bb) return rec.o >= p.bb[0] && rec.o <= p.bb[2] && rec.a >= p.bb[1] && rec.a <= p.bb[3];
+    var dy = (p.a - rec.a) * 111.2, dx = (p.o - rec.o) * 111.2 * Math.cos(rec.a * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy) <= 15;
+  };
+  return !plate.lines.some(function (L) {
+    if (used.indexOf(L) >= 0) return false;
+    var named = L.filter(function (w) {
       return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
     });
+    if (Array.from(named.join('')).length < 3) return false;          // nothing to read in it
+    var txt = fold(named.join(' ')), txtC = txt.replace(/ /g, '');
+    if (town && ((' ' + txt + ' ').indexOf(' ' + town + ' ') >= 0 || han.test(townC) && txtC.indexOf(townC) >= 0)) return false;
+    var area = (places || []).filter(function (p) { return p.keys.indexOf(txt) >= 0 || han.test(txtC) && p.keys.indexOf(txtC) >= 0; });
+    if (area.length) return !area.some(inside);
+    var postcode = L.some(function (w) { return /^\d{4,6}$/.test(w); });
+    return postcode || SZ_SIGN_TOWN_END.test(named[named.length - 1]);
   });
-  if (!extra.length) return true;
-  var n = String(rec.n || ''), comma = n.indexOf(',');
-  var town = comma >= 0 ? words(n.slice(comma + 1)).filter(function (w) { return !_szSignIsNum(w); }) : [];
-  if (!town.length) return false;
-  var key = town.join(' ');
-  return extra.some(function (L) {
-    var ws = L.filter(function (w) { return !_szSignIsNum(w); }).join(' ');
-    return (' ' + ws + ' ').indexOf(' ' + key + ' ') >= 0;
+}
+// The map's areas among the records found, for _szSignTownOk: their names
+// as folded words (臺 as 台) and their box or point.
+function _szSignPlaces(records, words) {
+  return records.filter(function (it) { return it && (it.t === 'place' || it.t === 'admin'); }).map(function (it) {
+    var keys = [];
+    _szSignNames(it).forEach(function (nm) {
+      var k = words(nm).join(' ').replace(/臺/g, '台');
+      keys.push(k, k.replace(/ /g, ''));
+    });
+    return { keys: keys, bb: Array.isArray(it.bb) && it.bb.length === 4 ? it.bb : null, a: it.a, o: it.o };
   });
 }
 // Whether an address may be the sign's, before its words are taken (a big
@@ -397,7 +429,7 @@ function _szSignTooShort(name, words) {
 function _szSignKinds(matches, lines, words, all) {
   var plate = _szSignPlate(lines, words);
   var records = all || matches.map(function (m) { return m.item; });
-  var streets = _szSignStreets(plate, words, records);
+  var streets = _szSignStreets(plate, words, records), places = _szSignPlaces(records, words);
   // A town on a direction sign may carry its distance ("Ely 12", "Ulm 35 km").
   var units = [].concat.apply([], ['km', 'mi', 'm', 'كم', 'км', '公里'].map(words));
   var lineOf = function (it) {
@@ -412,7 +444,7 @@ function _szSignKinds(matches, lines, words, all) {
       });
     });
   };
-  var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets) : ''; });
+  var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets, places) : ''; });
   var found = addrKind.indexOf('address') >= 0;
   var out = matches.map(function (m, i) {
     var t = m.item.t;
@@ -435,7 +467,7 @@ function _szSignKinds(matches, lines, words, all) {
     var topKeys = key(top);
     first.several = records.some(function (it) {
       if (!it || it === top || (it.t === 'addr') !== (top.t === 'addr')) return false;
-      if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets) === 'drop') return false;
+      if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets, places) === 'drop') return false;
       if (!key(it).some(function (k) { return topKeys.indexOf(k) >= 0; })) return false;
       var dlng = it.o - top.o;
       dlng -= 360 * Math.round(dlng / 360);
@@ -810,9 +842,14 @@ function initSignSearch(map, config) {
         return _szSignMayBeAddress(rec, p, words) && _szSignAddressKind(rec, p, words, null) !== 'drop';
       },
       // Addresses that are not the sign's go before the list is cut.
+      // Addresses that are not the sign's go before the list is cut, and the
+      // ones it confirms (its town too) come first.
       prune: function (records, words) {
-        var p = plateOf(words), streets = _szSignStreets(p, words, records);
-        return records.filter(function (r) { return r.t !== 'addr' || _szSignAddressKind(r, p, words, streets) !== 'drop'; });
+        var p = plateOf(words), streets = _szSignStreets(p, words, records), places = _szSignPlaces(records, words);
+        var kind = function (r) { return r.t === 'addr' ? _szSignAddressKind(r, p, words, streets, places) : ''; };
+        var kept = records.map(function (r) { return { r: r, k: kind(r) }; }).filter(function (x) { return x.k !== 'drop'; });
+        return kept.filter(function (x) { return x.k === 'address'; }).concat(kept.filter(function (x) { return x.k !== 'address'; }))
+          .map(function (x) { return x.r; });
       },
       label: function (found, all, words) {
         if (photo !== photoSeq) return false;
