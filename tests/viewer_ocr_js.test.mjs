@@ -169,10 +169,16 @@ ok('Taipei: a 號 plate under its street finds the address', () => {
 });
 ok('part of a line, a glued line or a bare number is only similar, never the sign\'s name', () => {
   assert.deepStrictEqual(kinds([{ n: 'Grand Mosque', t: 'poi', a: 1, o: 1 }], [{ text: 'Al Noor Grand Mosque' }]).map((x) => x.kind), ['similar']);
-  assert.deepStrictEqual(kinds([{ n: '107', t: 'poi', a: 1, o: 1 }], [{ text: '107' }, { text: 'طريق 116' }]).map((x) => x.kind), ['similar']);
+  assert.deepStrictEqual(kinds([{ n: '107', t: 'poi', a: 1, o: 1 }], [{ text: '107' }, { text: 'طريق 116' }]).map((x) => x.kind), ['drop']);   // a bare number, and too short
   assert.deepStrictEqual(kinds([{ n: 'Road 1012', nn: 'طريق 1012', t: 'street', a: 1, o: 1 }],
     [{ text: '2' }, { text: '101 طريق' }]).map((x) => x.kind), ['similar']);
   assert.deepStrictEqual(kinds([{ n: 'Al Noor Mosque', t: 'poi', a: 1, o: 1 }], [{ text: 'Mosque Noor Al Grand' }]).map((x) => x.kind), ['similar']);
+  // a near miss too short to mean anything is not listed; read exactly, it is
+  assert.deepStrictEqual(kinds([{ n: 'IG', t: 'poi', a: 1, o: 1 }, { n: 'Ightham', t: 'place', a: 1, o: 1 },
+    { n: '注意', t: 'poi', a: 1, o: 1 }, { n: 'Broadoak', t: 'place', a: 1, o: 1 }], [{ text: 'IGHTHAM' }, { text: 'BROAD OAK' }]).map((x) => x.kind),
+  ['drop', 'area', 'drop', 'similar']);
+  assert.deepStrictEqual(kinds([{ n: 'MBC', t: 'poi', a: 1, o: 1 }], [{ text: 'MBC' }]).map((x) => x.kind), ['drop']);   // even read exactly
+  assert.deepStrictEqual(kinds([{ n: 'Ely', t: 'place', a: 1, o: 1 }], [{ text: 'ELY' }]).map((x) => x.kind), ['area']);   // a town may be short
 });
 ok('a town is an area; a shop whose name is a line is the name; another language\'s name counts', () => {
   const k = kinds([{ n: 'Bani Jamrah', nn: 'بني جمرة', t: 'place', a: 26.2, o: 50.45 },

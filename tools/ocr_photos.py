@@ -18,6 +18,10 @@ phone's photo picker would. Each photo is scored on:
   "Medical centre", would match any such place by containment). Many set
   photos are of places a map may not have, and until the labels name their
   records this is approximate: read `found` with `expect.in_map` in mind;
+- at@1 / at@3: with `expect.near` (the place's coordinates: a photo of a
+  hotel key or a poster is of a place elsewhere), whether a result among
+  the first one / three is within 150 m of it (a street: 1 km), whatever
+  its name: the right place, not one of its name;
 - negatives (kind "negative"): pass when nothing is found (a negative's
   photo may also hold signs the map has: read its row).
 
@@ -94,6 +98,23 @@ def same_place(name: str, want: str) -> bool:
     return short in long_ and len(short) / len(long_) >= 0.5
 
 
+def km(a: list[float] | tuple[float, float], b: list[float] | tuple[float, float]) -> float:
+    """Great-circle distance in km between two [lat, lon]."""
+    import math
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
+def at_place(rows: list[dict[str, Any]], near: Any, k: int) -> bool | None:
+    """Whether a result among the first `k` is the place at `near` (150 m;
+    a street 1 km); None without `near`."""
+    if not (isinstance(near, (list, tuple)) and len(near) == 2):
+        return None
+    return any(km(near, (r["lat"], r["lon"])) <= (1.0 if r.get("type") == "street" else 0.15)
+               for r in rows[:k] if r.get("lat") is not None and r.get("lon") is not None)
+
+
 def wanted_names(rec: dict[str, Any]) -> list[str]:
     """The labelled place's names: the record's and the query."""
     exp = rec.get("expect") or {}
@@ -138,6 +159,8 @@ def score(rec: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
         "query": any(coverage(q, field) >= READ_MIN and coverage(field, q) >= 0.5
                      for q in queries if norm(q)) if field else False,
         "found1": found(1), "found3": found(3), "in_map": (rec.get("expect") or {}).get("in_map"),
+        "at1": at_place(rows, (rec.get("expect") or {}).get("near"), 1),
+        "at3": at_place(rows, (rec.get("expect") or {}).get("near"), 3),
         "field": field, "top": names[:3], "lines": lines,
     }
     if rec.get("kind") == "negative":
@@ -199,7 +222,7 @@ def overlay_for(arc: Any, records: list[dict[str, Any]], models: Path, dest: Pat
 
 
 def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: Path, out: Path,
-               how: str) -> tuple[list[dict[str, Any]], list[str]]:
+               how: str, at_photo: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
     from libzim.reader import Archive
 
     from cloud.serve_zim_entries import make_handler
@@ -211,8 +234,9 @@ def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: 
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     photos = out / f"photos-{region}.json"
-    photos.write_text(json.dumps([{"id": r["id"], "path": str(set_dir / r["file"])} for r in records]),
-                      encoding="utf-8")
+    photos.write_text(json.dumps([dict({"id": r["id"], "path": str(set_dir / r["file"])},
+                                       **({"at": r["location"]} if at_photo and r.get("location") else {}))
+                                  for r in records]), encoding="utf-8")
     env = dict(os.environ, ZIM_ORIGIN=f"http://127.0.0.1:{srv.server_address[1]}", PHOTOS=str(photos))
     raws: list[dict[str, Any]] = []
 
@@ -272,6 +296,10 @@ def report(records: list[dict[str, Any]], raws: dict[str, dict[str, Any]], notes
         ss = kinds[k]
         md.append(f"| {k} | {len(ss)} | {_pct([(s['read'] or 0) >= 0.5 for s in ss])} | "
                   f"{_pct([s['query'] for s in ss])} | {_pct([s['found3'] for s in ss])} |")
+    placed = [s for s in pos if s.get("at3") is not None]
+    if placed:
+        md += ["", f"With the place's coordinates (`expect.near`), {len(placed)} photos: the place first "
+                   f"{_pct([bool(s['at1']) for s in placed])}, in the first three {_pct([bool(s['at3']) for s in placed])}."]
     neg = [s for s in scores if s["kind"] == "negative" and s["status"] != "not run"]
     if neg:
         md += ["", f"Negatives: {sum(1 for s in neg if s.get('negative_ok'))} of {len(neg)} found nothing "
@@ -294,6 +322,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--regions", help="only these maps (comma-separated)")
     ap.add_argument("--ids", help="only these photos (comma-separated)")
     ap.add_argument("--recognizers", choices=("map", "all"), default="map")
+    ap.add_argument("--at-photo", action="store_true",
+                    help="put the map where each photo was taken (its `location`) first, as a phone with its "
+                         "user's position does; photos with no location as usual")
     ap.add_argument("--score", type=Path, help="score the results saved in this folder again")
     args = ap.parse_args(argv)
     records = [json.loads(x) for x in (args.set / "manifest.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
@@ -332,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{region}: no osm-{region}-<date>.zim in {args.maps}", flush=True)
                     continue
                 print(f"{region}: {len(recs)} photos on {zim.name}", flush=True)
-                got, names = run_region(zim, recs, args.set, models, out, args.recognizers)
+                got, names = run_region(zim, recs, args.set, models, out, args.recognizers, args.at_photo)
                 notes[region] = ", ".join(names)
                 for r in got:
                     fh.write(json.dumps(r, ensure_ascii=False) + "\n")

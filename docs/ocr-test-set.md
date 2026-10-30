@@ -27,6 +27,37 @@ region map) aim for **10-20 photos, at least 5**, mixing these kinds:
 | bilingual | any of the above in two scripts (Arabic + Latin, Chinese + Latin, ...) | either name |
 | hard | far away, at an angle, partly hidden, at night, several signs in one photo, handwritten | as above; tells us the limits |
 
+### Photos of a place elsewhere (the main use)
+
+The reader's main use is not "where am I" (a phone knows that) but "take me
+there": a traveller photographs the name or address of a place they want
+to go to, wherever they are. These photos matter most, and the first set
+(on-street signs) has none of them. Collect **at least 20**, across the
+priority countries, of:
+
+| kind | examples | what the reader must find |
+|---|---|---|
+| key card | a hotel key card, its sleeve or the hotel's card, with the hotel's name (and often its address) | the hotel |
+| poster | a tourist poster, leaflet, brochure or ad naming a site, museum, temple, park | the site |
+| business card | a restaurant's or shop's card, a receipt header, a menu cover | the business |
+| written address | an address on a card, an envelope, a booking confirmation printed or on a screen, a photo of a sign seen elsewhere | the address, or its street |
+| screenshot | a place name in a chat or a web page, photographed or screenshotted | the place |
+
+For each, the ground truth is the **place's** location, not the photo's:
+fill `expect.record` (the name the map's search shows for it) and
+`expect.near` (its coordinates: the hotel, the site, the address), and
+`expect.in_map` (false when the map does not have it: then the right answer
+is nothing, or the street). `location` stays empty or is where the photo
+was taken; it is not the answer. Scoring compares the results with
+`expect.near`: the right place is the record within about 150 m of it (a
+street: within 1 km).
+
+Mix easy and hard: a whole card held flat, a card at an angle or partly
+covered, a poster on a wall across a room, an address in small print. Keep
+personal data out: no guest names, room numbers, booking references or
+phone numbers that identify a person (crop or cover them); a business's own
+published address and phone are fine.
+
 Also a few **negatives**: signs in a script our maps cannot read yet
 (Hebrew, Georgian, Armenian, Khmer, Lao, Burmese, Sinhala, ...) and signs of
 places not on any map, to check the reader says "no text" or finds nothing
@@ -180,6 +211,9 @@ context, and no map carries them. Keep personal data out of the manifest.
 - At least 5 photos for each of the first 11 priority countries, 10 or more
   for Bahrain, Taiwan and Japan, and every kind of sign in the table
   represented somewhere.
+- At least 20 photos of a place elsewhere (key cards, posters, business
+  cards, written addresses, screenshots), each with `expect.record` and
+  `expect.near`; a few of places a map does not have (`in_map` false).
 - Every record has a licence that allows republishing, an attribution,
   `lines` and `kind`; `expect` filled where the answer is known.
 - README.md lists the counts and what is missing.

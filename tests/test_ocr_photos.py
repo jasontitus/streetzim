@@ -90,6 +90,20 @@ def test_a_result_is_found_by_its_own_script_name_and_the_signs_lines() -> None:
     assert not op.score(rec, other)["found3"]
 
 
+def test_the_place_by_its_coordinates_not_its_name() -> None:
+    """A hotel key's hotel is the one at expect.near, not one of its name elsewhere."""
+    rec = _rec(id="kc-1", kind="key card", lines=[{"text": "Hotel Ibis"}],
+               expect={"query": "Hotel Ibis", "record": "Ibis", "near": [26.2285, 50.5860]})
+    raw = {"status": "searched", "lines": ["Hotel Ibis"], "field": "Hotel Ibis",
+           "results": [{"name": "Ibis", "shown": "Ibis", "lat": 26.1, "lon": 50.5, "type": "poi"},
+                       {"name": "Ibis", "shown": "Ibis", "lat": 26.2286, "lon": 50.5861, "type": "poi"}]}
+    s = op.score(rec, raw)
+    assert (s["found1"], s["at1"], s["at3"]) == (True, False, True)
+    assert op.score(_rec(), raw)["at1"] is None          # no coordinates: not scored
+    street = dict(raw, results=[{"name": "Road 116", "lat": 26.2360, "lon": 50.5861, "type": "street"}])
+    assert op.score(rec, street)["at1"] is True          # a street within 1 km
+
+
 def test_a_photo_not_run_scores_nothing_and_a_negative_passes_on_nothing_found() -> None:
     s = op.score(_rec(), {})
     assert (s["status"], s["read"], s["query"], s["found3"]) == ("not run", 0.0, False, False)

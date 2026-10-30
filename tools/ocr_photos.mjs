@@ -6,9 +6,11 @@
 // runs this once per map.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:PORT PHOTOS=photos.json node tools/ocr_photos.mjs
-// PHOTOS: a JSON list of {id, path}. Prints one JSON line per photo:
+// PHOTOS: a JSON list of {id, path, at}: `at` ([lat, lon], optional) puts
+// the map there first, as a phone showing where its user stands does
+// (the search ranks by distance from the map's view). Prints one JSON line per photo:
 // {id, status, lines, field, verdict: {kind, text}, results: [{name, shown,
-// sign: the row's label}], ms, errors}; status
+// sign: the row's label, lat, lon, type}], ms, errors}; status
 // is the reader's (searched, none, failed) or "timeout".
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as tools/langpack/builder_e2e.mjs.
 import fs from 'node:fs';
@@ -49,6 +51,10 @@ try {
     const t0 = Date.now();
     // The last photo let go (its state cleared), then this one picked.
     await pg.evaluate(() => document.getElementById('ocr-close').click());
+    if (ph.at) {
+      await pg.evaluate(([lat, lon]) => window.__szMap.jumpTo({ center: [lon, lat], zoom: 15 }), ph.at);
+      await pg.waitForTimeout(500);
+    }
     await pg.setInputFiles('#search-photo-file', ph.path);
     const done = await pg.waitForFunction(() =>
       /^(searched|none|failed)$/.test(document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') || ''),
@@ -66,7 +72,9 @@ try {
       results: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending])')].slice(0, 5)
         .map((r) => ({ name: r.getAttribute('data-name') || '',
                        shown: ((r.querySelector('.search-result-name') || {}).textContent || '').trim(),
-                       sign: ((r.querySelector('.search-result-sign') || {}).textContent || '').trim() })),
+                       sign: ((r.querySelector('.search-result-sign') || {}).textContent || '').trim(),
+                       lat: +r.getAttribute('data-lat'), lon: +r.getAttribute('data-lon'),
+                       type: r.getAttribute('data-type') || '' })),
     }));
     // The field is the line searched for only after a search (else the last photo's).
     if (got.status !== 'searched') got.field = '';

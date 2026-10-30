@@ -329,6 +329,13 @@ function _szSignStreets(plate, words, records) {
     });
   });
 }
+// A name too short to be a sign's without being read exactly: "IG" in
+// "IGHTHAM", "aa", "10", "注意" (3 letters, 2 for Chinese, Japanese or
+// Korean): a near miss of it is noise, not a place to check.
+function _szSignTooShort(name, words) {
+  var t = words(name).join('');
+  return Array.from(t).length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ? 3 : 4);
+}
 // Each match's kind, for its label:
 //   'address', 'drop', or 'similar' for an address: _szSignAddressKind;
 //   'street'   a street whose name is one line of the sign, in order:
@@ -338,11 +345,15 @@ function _szSignStreets(plate, words, records) {
 //   'area'     likewise a place or an administrative area (a town);
 //   'name'     likewise anything else (a shop, a station);
 //   'similar'  everything else: read inexactly, part of a line, glued from
-//              two lines ("Road 1012" from "Road 101" and "2").
+//              two lines ("Road 1012" from "Road 101" and "2"); 'drop' when
+//              its name is too short to mean anything (_szSignTooShort).
 // `several` on the first, and on every address when the first is one, when
 // another record of its name (`all`, every record found; for an address,
 // the same address before its place) is more than 150 m away, or 2 km for
-// a street: the sign alone does not say which.
+// a street: the sign alone does not say which. No "the only one":
+// a name found once in the map is not the sign's place when the sign's own
+// is missing from the map or the reader misread it (a kebab shop 471 km
+// away, a road one character off), so the verdict says where it is instead.
 function _szSignKinds(matches, lines, words, all) {
   var plate = _szSignPlate(lines, words);
   var records = all || matches.map(function (m) { return m.item; });
@@ -358,12 +369,13 @@ function _szSignKinds(matches, lines, words, all) {
   var out = matches.map(function (m, i) {
     var t = m.item.t;
     if (t === 'addr') return { kind: addrKind[i] };
-    if (!lineOf(m.item)) return { kind: 'similar' };
+    if (!lineOf(m.item)) return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'similar' };
     if (t === 'street') {
       return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
     }
     if (t === 'place' || t === 'admin') return { kind: 'area' };
-    return { kind: 'name' };
+    // A shop or the like of 3 letters or fewer ("Rng") is noise even read exactly.
+    return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'name' };
   });
   var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
   if (first) {
@@ -784,6 +796,11 @@ function initSignSearch(map, config) {
         var main = document.createElement('strong');
         main.textContent = signLabel(kinds[0]);
         verdictEl.appendChild(main);
+        // Where it is: a photo of a hotel key or a poster is of a place
+        // anywhere, and its town tells whether it can be the one.
+        var where = found[0] && found[0].item && found[0].item.l;
+        if (where) verdictEl.appendChild(document.createTextNode(' \u00b7 ' + where));
+
         if (kinds[0].several) {
           verdictEl.appendChild(document.createTextNode(' '));
           var more = document.createElement('span');

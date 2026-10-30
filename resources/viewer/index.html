@@ -4328,7 +4328,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '7e1f0b42';
+var SZ_VIEWER_BUILD = '078b4ef6';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8211,6 +8211,10 @@ return it && it.t === 'street' && _szSignNames(it).some(function (n) { return _s
 });
 });
 }
+function _szSignTooShort(name, words) {
+var t = words(name).join('');
+return Array.from(t).length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ? 3 : 4);
+}
 function _szSignKinds(matches, lines, words, all) {
 var plate = _szSignPlate(lines, words);
 var records = all || matches.map(function (m) { return m.item; });
@@ -8226,12 +8230,12 @@ var found = addrKind.indexOf('address') >= 0;
 var out = matches.map(function (m, i) {
 var t = m.item.t;
 if (t === 'addr') return { kind: addrKind[i] };
-if (!lineOf(m.item)) return { kind: 'similar' };
+if (!lineOf(m.item)) return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'similar' };
 if (t === 'street') {
 return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
 }
 if (t === 'place' || t === 'admin') return { kind: 'area' };
-return { kind: 'name' };
+return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'name' };
 });
 var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
 if (first) {
@@ -8574,6 +8578,8 @@ verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind
 var main = document.createElement('strong');
 main.textContent = signLabel(kinds[0]);
 verdictEl.appendChild(main);
+var where = found[0] && found[0].item && found[0].item.l;
+if (where) verdictEl.appendChild(document.createTextNode(' \u00b7 ' + where));
 if (kinds[0].several) {
 verdictEl.appendChild(document.createTextNode(' '));
 var more = document.createElement('span');
