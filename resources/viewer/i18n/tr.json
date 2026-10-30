@@ -303,6 +303,12 @@
  "search.photo_lines": "Fotoğraftaki metin: aramak için bir satıra dokunun",
  "search.photo_none": "Fotoğrafta metin bulunamadı",
  "search.photo_reading": "Fotoğraf okunuyor…",
+ "search.sign_address": "Tam adres",
+ "search.sign_street_not_building": "Yalnızca sokak: {n} numaralı bina bu haritada yok",
+ "search.sign_area": "Bir bölge, tam bir yer değil",
+ "search.sign_similar": "Benzer bir ad, tam olarak aynısı değil: tabelayla karşılaştırın",
+ "search.sign_same_name": "Tabeladakiyle aynı ad",
+ "search.sign_several": "Bu adı taşıyan başka yerler de var: tabela hangisi olduğunu söylemiyor",
  "search.placeholder": "Yer, sokak, ilgi noktası ara...",
  "search.placeholder_count": {
   "one": "{n} yerde ara...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Nivîsa di wêneyê de: ji bo lêgerînê li rêzekê bitikîne",
  "search.photo_none": "Di wêneyê de nivîs nehat dîtin",
  "search.photo_reading": "Wêne tê xwendin…",
+ "search.sign_address": "Navnîşana rast",
+ "search.sign_street_not_building": "Tenê kolan: avahiya {n} ne li ser vê nexşeyê ye",
+ "search.sign_area": "Herêmek, ne cihekî rast",
+ "search.sign_similar": "Navekî wekhev, ne yê rast: bi tabelayê re berhev bike",
+ "search.sign_same_name": "Heman nav wek li ser tabelayê",
+ "search.sign_several": "Cihên din jî vî navî hene: tabela nabêje kîjan",
  "search.placeholder": "Li cih, kolan û cihên balkêş bigere...",
  "search.placeholder_count": {
   "one": "Di nav {n} cihan de bigere...",

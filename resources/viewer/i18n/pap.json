@@ -303,6 +303,12 @@
  "search.photo_lines": "Teksto den e potrèt: tòka un liña pa buska e",
  "search.photo_none": "No a haña teksto den e potrèt",
  "search.photo_reading": "Lesando e potrèt…",
+ "search.sign_address": "Adrès eksakto",
+ "search.sign_street_not_building": "Djis e kaya: e edifisio {n} no ta riba e mapa aki",
+ "search.sign_area": "Un área, no un lugá eksakto",
+ "search.sign_similar": "Un nòmber parecido, no esun eksakto: kompar'é ku e bòrchi",
+ "search.sign_same_name": "Mesun nòmber ku riba e bòrchi",
+ "search.sign_several": "Otro lugá tambe tin e nòmber aki: e bòrchi no ta bisa kua",
  "search.placeholder": "Buska lugá, kaya, POI...",
  "search.placeholder_count": {
   "one": "Buska den {n} lugá...",

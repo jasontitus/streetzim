@@ -300,6 +300,12 @@
  "search.photo_lines": "Teks ing foto: tutul baris kanggo nggolèki",
  "search.photo_none": "Ora ana teks ing foto",
  "search.photo_reading": "Maca foto…",
+ "search.sign_address": "Alamat persis",
+ "search.sign_street_not_building": "Mung dalané: gedhong {n} ora ana ing peta iki",
+ "search.sign_area": "Sawijining wilayah, dudu panggonan sing persis",
+ "search.sign_similar": "Jeneng sing mèmper, dudu sing persis: bandhingna karo papan jeneng",
+ "search.sign_same_name": "Jeneng sing padha karo ing papan jeneng",
+ "search.sign_several": "Panggonan liya uga duwé jeneng iki: papan jeneng ora nyebutaké sing endi",
  "search.placeholder": "Golèk panggonan, dalan, papan menarik...",
  "search.placeholder_count": {
   "other": "Golèk ing {n} panggonan..."

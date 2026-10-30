@@ -300,6 +300,12 @@
  "search.photo_lines": "Téks dina poto: toél baris pikeun maluruhna",
  "search.photo_none": "Teu aya téks dina poto",
  "search.photo_reading": "Maca poto…",
+ "search.sign_address": "Alamat pasti",
+ "search.sign_street_not_building": "Ngan jalanna: wangunan {n} teu aya dina peta ieu",
+ "search.sign_area": "Hiji wewengkon, lain tempat anu pasti",
+ "search.sign_similar": "Ngaran anu sarupa, lain anu pasti: bandingkeun jeung papan ngaran",
+ "search.sign_same_name": "Ngaran anu sarua jeung dina papan ngaran",
+ "search.sign_several": "Tempat séjén ogé boga ngaran ieu: papan ngaran henteu nyebutkeun anu mana",
  "search.placeholder": "Paluruh tempat, jalan, lokasi narik...",
  "search.placeholder_count": {
   "other": "Paluruh {n} tempat..."

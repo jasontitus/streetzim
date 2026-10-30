@@ -300,6 +300,12 @@
  "search.photo_lines": "Rait long piksa: paitim wanpela lain bilong painim",
  "search.photo_none": "I no gat rait long piksa",
  "search.photo_reading": "Ritim piksa…",
+ "search.sign_address": "Stretpela adres",
+ "search.sign_street_not_building": "Rot tasol: haus {n} i no stap long dispela map",
+ "search.sign_area": "Wanpela eria, i no stretpela ples",
+ "search.sign_similar": "Nem i klostu wankain, i no stretpela nem: skelim wantaim sain",
+ "search.sign_same_name": "Wankain nem olsem long sain",
+ "search.sign_several": "Ol narapela ples tu i gat dispela nem: sain i no tok wanem wanpela",
  "search.placeholder": "Painim ol ples, rot, POI...",
  "search.placeholder_count": {
   "other": "Painim {n} ples..."

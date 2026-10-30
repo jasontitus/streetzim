@@ -303,6 +303,12 @@
  "search.photo_lines": "Barreeffama suuraa keessaa: barbaaduuf sarara tuqi",
  "search.photo_none": "Suuraa keessatti barreeffamni hin argamne",
  "search.photo_reading": "Suuraan dubbifamaa jira…",
+ "search.sign_address": "Teessoo sirrii",
+ "search.sign_street_not_building": "Daandii qofa: gamoon {n} kaartaa kana irra hin jiru",
+ "search.sign_area": "Naannoo, bakka sirrii miti",
+ "search.sign_similar": "Maqaa walfakkaatu, kan sirrii miti: mallattoo waliin walbira qabi",
+ "search.sign_same_name": "Maqaa mallattoo irra jiru wajjin tokko",
+ "search.sign_several": "Bakkeewwan biroos maqaa kana qabu: mallattoon isa kam akka ta'e hin himu",
  "search.placeholder": "Bakkeewwan, daandiiwwan, bakkeewwan beekamoo barbaadi…",
  "search.placeholder_count": {
   "one": "Bakka {n} keessaa barbaadi…",

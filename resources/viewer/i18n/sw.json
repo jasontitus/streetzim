@@ -303,6 +303,12 @@
  "search.photo_lines": "Maandishi kwenye picha: gusa mstari ili kuutafuta",
  "search.photo_none": "Hakuna maandishi yaliyopatikana kwenye picha",
  "search.photo_reading": "Inasoma picha…",
+ "search.sign_address": "Anwani kamili",
+ "search.sign_street_not_building": "Barabara pekee: jengo {n} halimo katika ramani hii",
+ "search.sign_area": "Eneo, si mahali kamili",
+ "search.sign_similar": "Jina linalofanana, si lenyewe hasa: linganisha na bango",
+ "search.sign_same_name": "Jina lilelile kama kwenye bango",
+ "search.sign_several": "Maeneo mengine pia yana jina hili: bango halisemi ni lipi",
  "search.placeholder": "Tafuta maeneo, mitaa, vivutio...",
  "search.placeholder_count": {
   "one": "Tafuta mahali {n}...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Nā huaʻōlelo ma ke kiʻi: kaomi i kekahi laina e huli ai",
  "search.photo_none": "ʻAʻohe huaʻōlelo i loaʻa ma ke kiʻi",
  "search.photo_reading": "Ke heluhelu nei i ke kiʻi…",
+ "search.sign_address": "Helu wahi pololei",
+ "search.sign_street_not_building": "Ke alanui wale nō: ʻaʻole ka hale {n} ma kēia palapala ʻāina",
+ "search.sign_area": "He ʻāpana ʻāina, ʻaʻole he wahi pololei",
+ "search.sign_similar": "He inoa like, ʻaʻole ka inoa pololei: hoʻohālikelike me ka hōʻailona",
+ "search.sign_same_name": "Ka inoa like me ka mea ma ka hōʻailona",
+ "search.sign_several": "Aia nō kēia inoa ma nā wahi ʻē aʻe: ʻaʻole i ʻōlelo ka hōʻailona ʻo ka hea",
  "search.placeholder": "Huli i nā wahi, nā alanui, nā POI...",
  "search.placeholder_count": {
   "one": "Huli i {n} wahi...",

@@ -300,6 +300,12 @@
  "search.photo_lines": "ข้อความในรูปภาพ: แตะบรรทัดเพื่อค้นหา",
  "search.photo_none": "ไม่พบข้อความในรูปภาพ",
  "search.photo_reading": "กำลังอ่านรูปภาพ…",
+ "search.sign_address": "ที่อยู่ตรงกัน",
+ "search.sign_street_not_building": "เฉพาะถนน: ไม่มีอาคาร {n} ในแผนที่นี้",
+ "search.sign_area": "เป็นพื้นที่ ไม่ใช่ตำแหน่งที่แน่นอน",
+ "search.sign_similar": "ชื่อคล้ายกัน ไม่ใช่ชื่อที่ตรงกัน: โปรดเทียบกับป้าย",
+ "search.sign_same_name": "ชื่อเดียวกับบนป้าย",
+ "search.sign_several": "มีสถานที่อื่นที่ใช้ชื่อนี้ด้วย: ป้ายไม่ได้บอกว่าเป็นที่ใด",
  "search.placeholder": "ค้นหาสถานที่ ถนน จุดที่น่าสนใจ…",
  "search.placeholder_count": {
   "other": "ค้นหา {n} สถานที่…"

@@ -303,6 +303,12 @@
  "search.photo_lines": "Текст в снимката: докоснете ред, за да го търсите",
  "search.photo_none": "В снимката не е открит текст",
  "search.photo_reading": "Снимката се разчита…",
+ "search.sign_address": "Точен адрес",
+ "search.sign_street_not_building": "Само улицата: сграда {n} не е на тази карта",
+ "search.sign_area": "Район, а не точно място",
+ "search.sign_similar": "Подобно име, не точното: сравнете с табелата",
+ "search.sign_same_name": "Същото име като на табелата",
+ "search.sign_several": "И други места имат това име: табелата не казва кое",
  "search.placeholder": "Търсене на места, улици, обекти…",
  "search.placeholder_count": {
   "one": "Търсене в {n} място…",

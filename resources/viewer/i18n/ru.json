@@ -309,6 +309,12 @@
  "search.photo_lines": "Текст на фото: нажмите на строку, чтобы найти её",
  "search.photo_none": "На фото не найден текст",
  "search.photo_reading": "Распознаём фото…",
+ "search.sign_address": "Точный адрес",
+ "search.sign_street_not_building": "Только улица: дома {n} нет на этой карте",
+ "search.sign_area": "Район, а не точное место",
+ "search.sign_similar": "Похожее название, не точное: сверьте с табличкой",
+ "search.sign_same_name": "То же название, что на табличке",
+ "search.sign_several": "Это название есть и у других мест: по табличке не понять, у какого",
  "search.placeholder": "Поиск мест, улиц, объектов...",
  "search.placeholder_count": {
   "one": "Поиск среди {n} места...",

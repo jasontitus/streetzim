@@ -303,6 +303,12 @@
  "search.photo_lines": "በፎቶው ውስጥ ያለ ጽሑፍ፦ ለመፈለግ መስመሩን ይንኩ",
  "search.photo_none": "በፎቶው ውስጥ ምንም ጽሑፍ አልተገኘም",
  "search.photo_reading": "ፎቶውን በማንበብ ላይ…",
+ "search.sign_address": "ትክክለኛ አድራሻ",
+ "search.sign_street_not_building": "መንገዱ ብቻ፡ ሕንጻ {n} በዚህ ካርታ ላይ የለም",
+ "search.sign_area": "አካባቢ እንጂ ትክክለኛ ቦታ አይደለም",
+ "search.sign_similar": "ተመሳሳይ ስም እንጂ ትክክለኛው አይደለም፡ ከምልክቱ ጋር ያወዳድሩ",
+ "search.sign_same_name": "በምልክቱ ላይ ያለው ተመሳሳይ ስም",
+ "search.sign_several": "ሌሎች ቦታዎችም ይህ ስም አላቸው፡ ምልክቱ የትኛው እንደሆነ አይናገርም",
  "search.placeholder": "ቦታዎችን፣ መንገዶችን፣ የሚጎበኙ ቦታዎችን ፈልግ…",
  "search.placeholder_count": {
   "one": "{n} ቦታ ፈልግ…",

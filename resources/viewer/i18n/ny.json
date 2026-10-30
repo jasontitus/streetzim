@@ -303,6 +303,12 @@
  "search.photo_lines": "Mawu pa chithunzi: dinani mzere kuti muusake",
  "search.photo_none": "Palibe mawu opezeka pa chithunzi",
  "search.photo_reading": "Tikuwerenga chithunzi…",
+ "search.sign_address": "Adilesi yeniyeni",
+ "search.sign_street_not_building": "Msewu wokha: nyumba {n} palibe pa mapu awa",
+ "search.sign_area": "Dera, osati malo enieni",
+ "search.sign_similar": "Dzina lofanana, osati lenileni: liyerekezeni ndi chikwangwani",
+ "search.sign_same_name": "Dzina lofanana ndi la pa chikwangwani",
+ "search.sign_several": "Malo ena alinso ndi dzina ili: chikwangwani sichikunena kuti ndi ati",
  "search.placeholder": "Sakani malo, misewu, malo osangalatsa…",
  "search.placeholder_count": {
   "one": "Sakani m'malo {n}…",

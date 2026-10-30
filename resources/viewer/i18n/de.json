@@ -302,6 +302,12 @@
  "search.photo_lines": "Text im Foto: Tippen Sie auf eine Zeile, um danach zu suchen",
  "search.photo_none": "Kein Text im Foto gefunden",
  "search.photo_reading": "Foto wird gelesen …",
+ "search.sign_address": "Genaue Adresse",
+ "search.sign_street_not_building": "Nur die Straße: Gebäude {n} ist nicht in dieser Karte",
+ "search.sign_area": "Ein Gebiet, kein genauer Ort",
+ "search.sign_similar": "Ein ähnlicher Name, nicht genau derselbe: bitte mit dem Schild vergleichen",
+ "search.sign_same_name": "Gleicher Name wie auf dem Schild",
+ "search.sign_several": "Auch andere Orte haben diesen Namen: Das Schild sagt nicht, welcher gemeint ist",
  "search.placeholder": "Orte, Straßen, POIs suchen …",
  "search.placeholder_count": {
   "one": "{n} Ort durchsuchen …",

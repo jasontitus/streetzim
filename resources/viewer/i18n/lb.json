@@ -303,6 +303,12 @@
  "search.photo_lines": "Text op der Foto: tippt op eng Zeil fir dono ze sichen",
  "search.photo_none": "Keen Text op der Foto fonnt",
  "search.photo_reading": "Foto gëtt gelies …",
+ "search.sign_address": "Genau Adress",
+ "search.sign_street_not_building": "Nëmmen d'Strooss: d'Gebai {n} ass net op dëser Kaart",
+ "search.sign_area": "E Gebitt, keng genau Plaz",
+ "search.sign_similar": "En ähnlechen Numm, net genee dee selwechten: vergläicht en mam Schëld",
+ "search.sign_same_name": "Selwechten Numm wéi um Schëld",
+ "search.sign_several": "Aner Plazen hunn och dësen Numm: d'Schëld seet net wéi eng",
  "search.placeholder": "Plazen, Stroossen, POIe sichen …",
  "search.placeholder_count": {
   "one": "{n} Plaz duerchsichen …",

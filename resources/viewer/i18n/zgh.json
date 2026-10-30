@@ -303,6 +303,12 @@
  "search.photo_lines": "ⴰⴹⵔⵉⵙ ⴳ ⵜⵡⵍⴰⴼⵜ: ⵙⵙⵏⵜⵍ ⴽⵔⴰ ⵏ ⵓⵣⵔⵉⴳ ⴰⴷ ⵜ ⵜⵔⵣⵓⴷ",
  "search.photo_none": "ⵓⵔ ⵉⵜⵜⵓⴼⴰ ⴽⵔⴰ ⵏ ⵓⴹⵔⵉⵙ ⴳ ⵜⵡⵍⴰⴼⵜ",
  "search.photo_reading": "ⴰⵖⵔⵓ ⵏ ⵜⵡⵍⴰⴼⵜ…",
+ "search.sign_address": "ⴰⵏⵙⴰ ⵉⵚⵃⴰⵏ",
+ "search.sign_street_not_building": "ⴰⴱⵔⵉⴷ ⵖⴰⵙ: ⴰⵙⵖⵔⵉⵙ {n} ⵓⵔ ⵉⵍⵍⵉ ⴳ ⵜⴽⴰⵔⴹⴰ ⴰ",
+ "search.sign_area": "ⵜⴰⵎⵏⴰⴹⵜ, ⵓⵔ ⵉⴳⵉ ⴰⵏⵙⴰ ⵉⵚⵃⴰⵏ",
+ "search.sign_similar": "ⵉⵙⵎ ⵉⵎⵢⴰⵔⴰⵡⵏ, ⵓⵔ ⵉⴳⵉ ⵡⴰ ⵉⵚⵃⴰⵏ: ⵙⵎⵣⴰⵣⴰⵍ ⵜ ⴷ ⵓⵎⴰⵜⴰⵔ",
+ "search.sign_same_name": "ⵢⴰⵏ ⵉⵙⵎ ⴰⴷ ⵉⵍⵍⴰⵏ ⴼ ⵓⵎⴰⵜⴰⵔ",
+ "search.sign_several": "ⵍⵍⴰⵏ ⵢⵉⴷⵙ ⵉⴷⵖⴰⵔⵏ ⵢⴰⴹⵏ ⵖⵓⵔ ⵉⵍⵍⴰ ⵉⵙⵎ ⴰ: ⴰⵎⴰⵜⴰⵔ ⵓⵔ ⵉⵙⵙⴰⵡⴰⵍ ⵎⴰⵏⵡⴰ",
  "search.placeholder": "ⵔⵣⵓ ⵉⴷⵖⴰⵔⵏ, ⵉⵣⵏⵇⵇⴰ, POI...",
  "search.placeholder_count": {
   "one": "ⵔⵣⵓ ⴳ {n} ⵓⴷⵖⴰⵔ...",

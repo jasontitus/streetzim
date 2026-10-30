@@ -306,6 +306,12 @@
  "search.photo_lines": "הטקסט בתמונה: הקישו על שורה כדי לחפש אותה",
  "search.photo_none": "לא נמצא טקסט בתמונה",
  "search.photo_reading": "קוראים את התמונה…",
+ "search.sign_address": "כתובת מדויקת",
+ "search.sign_street_not_building": "הרחוב בלבד: בניין {n} אינו במפה זו",
+ "search.sign_area": "אזור, לא מקום מדויק",
+ "search.sign_similar": "שם דומה, לא השם המדויק: השוו לשלט",
+ "search.sign_same_name": "אותו שם כמו על השלט",
+ "search.sign_several": "גם למקומות אחרים יש את השם הזה: השלט לא אומר איזה",
  "search.placeholder": "חיפוש מקומות, רחובות ואתרים...",
  "search.placeholder_count": {
   "one": "חיפוש במקום אחד...",

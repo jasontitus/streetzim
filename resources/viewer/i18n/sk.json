@@ -309,6 +309,12 @@
  "search.photo_lines": "Text na fotke: ťuknutím na riadok ho vyhľadáte",
  "search.photo_none": "Na fotke sa nenašiel žiadny text",
  "search.photo_reading": "Číta sa fotka…",
+ "search.sign_address": "Presná adresa",
+ "search.sign_street_not_building": "Len ulica: budova {n} na tejto mape nie je",
+ "search.sign_area": "Oblasť, nie presné miesto",
+ "search.sign_similar": "Podobný názov, nie presný: porovnajte s tabuľou",
+ "search.sign_same_name": "Rovnaký názov ako na tabuli",
+ "search.sign_several": "Tento názov majú aj iné miesta: tabuľa nehovorí ktoré",
  "search.placeholder": "Hľadať miesta, ulice, body záujmu…",
  "search.placeholder_count": {
   "few": "Prehľadať {n} miesta…",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Суьрта тӀера йоза: лаха могӀа тӀе таӀа",
  "search.photo_none": "Суьрта тӀехь йоза ца карийна",
  "search.photo_reading": "Суьрт доьшуш…",
+ "search.sign_address": "Нийса адрес",
+ "search.sign_street_not_building": "Урам бен: {n} гӀишло кху картехь дац",
+ "search.sign_area": "Меттиг, нийса меттиг яц",
+ "search.sign_similar": "Тера цӀе, нийса яц: табличкаца дуста е",
+ "search.sign_same_name": "Табличкан тӀехь йолу цӀе",
+ "search.sign_several": "Кхечу меттигийн а ю и цӀе: табличко ца боху муьлха ю",
  "search.placeholder": "Меттигаш, урамаш, POI лаха...",
  "search.placeholder_count": {
   "one": "{n} меттигехь лаха...",

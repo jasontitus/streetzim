@@ -303,6 +303,12 @@
  "search.photo_lines": "Сураталда хъвай: балагьизе мухь бихьизабе",
  "search.photo_none": "Суратда хъвай ратичӀо",
  "search.photo_reading": "Сурат цӀалулеб буго…",
+ "search.sign_address": "Битӏараб адрес",
+ "search.sign_street_not_building": "Нух гурони: {n} рукъ гьаб картаялда гьечӏо",
+ "search.sign_area": "Ракь, битӏараб бакӏ гуро",
+ "search.sign_similar": "Релъараб цӏар, битӏараб гуро: табличкаялда данде ккве",
+ "search.sign_same_name": "Табличкаялда бугеб цӏар",
+ "search.sign_several": "Цогидал бакӏаздаго гьеб цӏар буго: табличкаялъ абулеб гьечӏо щибаб",
  "search.placeholder": "БакӀал, улицаби, POI балагье...",
  "search.placeholder_count": {
   "one": "{n} бакӀалда балагье...",

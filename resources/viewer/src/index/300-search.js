@@ -1289,7 +1289,10 @@ var SEARCH_SHARDS = (function () {
         '<span class="search-result-name">' + escapeHtml(szFirstName(shown[0])) +
         (shown[1] ? ' <span class="search-result-native">' + escapeHtml(szFirstName(shown[1])) + '</span>' : '') +
         '</span>' +
-        '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span></div>';
+        '<span class="search-result-type">' + escapeHtml(label) + loc + distLabel + '</span>' +
+        // A photo's result says what it is (305-ocr-search.js, _szSignKinds).
+        (matches[j].signBadge ? '<span class="search-result-sign" data-kind="' + escapeHtml(matches[j].signBadge.kind) +
+          '">' + escapeHtml(matches[j].signBadge.text) + '</span>' : '') + '</div>';
     }
     resultsEl.innerHTML = html;
     resultsEl.style.display = 'block';
@@ -1577,8 +1580,10 @@ var SEARCH_SHARDS = (function () {
   // another leaf -- and keeps the records _szSignScore finds similar
   // enough, ranked by similarity, type and proximity like a typed search.
   // Shows them in the results list; resolves to the matches, each with
-  // `signLine`, the line of the photo it matched.
-  map._searchSign = function(texts) {
+  // `signLine`, the line of the photo it matched, and `signSim`, how
+  // exactly. `label(matches)`, when given, runs before they are shown: it
+  // gives each its `signBadge` ({kind, text}), the row's label.
+  map._searchSign = function(texts, label) {
     if (!manifest) return Promise.resolve([]);
     var lines = _szSignLines(texts || [], normalizeText, 12);
     if (!lines.length) { renderResults([]); return Promise.resolve([]); }
@@ -1622,7 +1627,12 @@ var SEARCH_SHARDS = (function () {
         return 400 * Math.pow(sc.sim, 10) * sc.weight * (0.4 + 0.6 * sc.cover) +
           (SZ_TYPE_BONUS[item.t] || 0);
       });
-      scored.forEach(function(m) { m.signLine = (scores.get(m.item) || {}).line || ''; });
+      scored.forEach(function(m) {
+        var sc = scores.get(m.item) || {};
+        m.signLine = sc.line || '';
+        m.signSim = sc.sim || 0;
+      });
+      if (typeof label === 'function') label(scored);
       if (seq === searchSeq) renderResults(scored);
       return scored;
     });

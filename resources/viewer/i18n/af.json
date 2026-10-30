@@ -303,6 +303,12 @@
  "search.photo_lines": "Teks in die foto: tik op 'n reël om daarna te soek",
  "search.photo_none": "Geen teks in die foto gevind nie",
  "search.photo_reading": "Lees die foto…",
+ "search.sign_address": "Presiese adres",
+ "search.sign_street_not_building": "Net die straat: gebou {n} is nie op hierdie kaart nie",
+ "search.sign_area": "'n Gebied, nie 'n presiese plek nie",
+ "search.sign_similar": "'n Soortgelyke naam, nie die presiese een nie: vergelyk dit met die bord",
+ "search.sign_same_name": "Dieselfde naam as op die bord",
+ "search.sign_several": "Ander plekke het ook hierdie naam: die bord sê nie watter een nie",
  "search.placeholder": "Soek plekke, strate, besienswaardighede…",
  "search.placeholder_count": {
   "one": "Deursoek {n} plek…",

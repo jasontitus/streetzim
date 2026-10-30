@@ -303,6 +303,12 @@
  "search.photo_lines": "Qoraalka sawirka: taabo sadar si aad u raadiso",
  "search.photo_none": "Qoraal laguma helin sawirka",
  "search.photo_reading": "Sawirka waa la akhrinayaa…",
+ "search.sign_address": "Cinwaan sax ah",
+ "search.sign_street_not_building": "Waddada oo keliya: dhismaha {n} kuma jiro khariidaddan",
+ "search.sign_area": "Aag, ma aha meel sax ah",
+ "search.sign_similar": "Magac la mid ah, ma aha kan saxda ah: la barbar dhig calaamadda",
+ "search.sign_same_name": "Magac la mid ah kan calaamadda ku qoran",
+ "search.sign_several": "Meelo kale ayaa sidoo kale magacan leh: calaamaddu ma sheegayso midka",
  "search.placeholder": "Raadi goobo, waddooyin, meelo xiiso leh…",
  "search.placeholder_count": {
   "one": "Ka raadi {n} goob…",

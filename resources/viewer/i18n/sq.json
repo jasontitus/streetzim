@@ -303,6 +303,12 @@
  "search.photo_lines": "Teksti në foto: prekni një rresht për ta kërkuar",
  "search.photo_none": "Nuk u gjet tekst në foto",
  "search.photo_reading": "Po lexohet fotoja…",
+ "search.sign_address": "Adresë e saktë",
+ "search.sign_street_not_building": "Vetëm rruga: ndërtesa {n} nuk është në këtë hartë",
+ "search.sign_area": "Një zonë, jo një vend i saktë",
+ "search.sign_similar": "Një emër i ngjashëm, jo i sakti: krahasojeni me tabelën",
+ "search.sign_same_name": "I njëjti emër si në tabelë",
+ "search.sign_several": "Edhe vende të tjera e kanë këtë emër: tabela nuk thotë cilin",
  "search.placeholder": "Kërko vende, rrugë, pika interesi...",
  "search.placeholder_count": {
   "one": "Kërko në {n} vend...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Text en la fotografia: tutgai ina lingia per la tschertgar",
  "search.photo_none": "Nagin text chattà en la fotografia",
  "search.photo_reading": "Leger la fotografia…",
+ "search.sign_address": "Adressa exacta",
+ "search.sign_street_not_building": "Mo la via: l'edifizi {n} n'è betg sin questa charta",
+ "search.sign_area": "Ina regiun, betg in lieu exact",
+ "search.sign_similar": "In num sumegliant, betg l'exact: cumparegliai cun la tavla",
+ "search.sign_same_name": "Il medem num sco sin la tavla",
+ "search.sign_several": "Er auters lieus han quest num: la tavla na di betg tgenin",
  "search.placeholder": "Tschertgar lieus, vias, POIs…",
  "search.placeholder_count": {
   "one": "Tschertgar en {n} lieu…",

@@ -304,6 +304,12 @@
  "search.photo_lines": "عکسˇ متن: جستجو وَسی ایتا سطر سر بزن",
  "search.photo_none": "عکسˇ میان متنی پیدا نوبوست",
  "search.photo_reading": "عکسˇ خوندن دره…",
+ "search.sign_address": "نشانی دقیق",
+ "search.sign_street_not_building": "فقط خیابان: ساختمان {n} اَ نقشه میان نیه",
+ "search.sign_area": "یتا منطقه، نه یتا جا دقیق",
+ "search.sign_similar": "یتا نام شبیه، نه دقیقاً هۊ: تابلو اَمرا مقایسه بوکونید",
+ "search.sign_same_name": "هۊ نام کی تابلو سر نیویشته",
+ "search.sign_several": "دیگه جاأنم اَ نامَ دارید: تابلو نگه کویتا",
  "search.placeholder": "مکانان، خیابانان و جاذبه‌ئان جستجو...",
  "search.placeholder_count": {
   "one": "{n} مکان مئن جستجو...",

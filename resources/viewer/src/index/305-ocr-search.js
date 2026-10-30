@@ -127,17 +127,67 @@ function _szSignMerge(fine, coarse, k) {
 // a number (letters and digits: "طريق 2912"), as on a Bahraini address
 // plate: the two as one more line, which an address record of that
 // building names ("Building 460 - مبنى 460 طريق 2912 - Road 2912"), weighed
-// as the street's line. A number matches no record by itself.
+// as the street's line. A number matches no record by itself. The building
+// number goes beside the street's own number, never beside its word: the
+// street as read left to right ("116 طريق") followed by "366" would hold
+// "طريق 366", another road, read exactly.
 function _szSignAddress(lines, tallest) {
   var nums = lines.filter(function (L) { return /^\d+[A-Za-z]?$/.test(L.text); });
   var streets = lines.filter(function (L) { return SZ_SIGN_LETTER.test(L.text) && /\d/.test(L.text); });
   var out = [];
   nums.forEach(function (N) {
     streets.forEach(function (S) {
-      out.push({ text: S.text + ' ' + N.text, weight: 0.5 + 0.5 * S.size / (tallest || S.size) });
+      var text = /^\d/.test(S.text.trim()) ? N.text + ' ' + S.text : S.text + ' ' + N.text;
+      out.push({ text: text, weight: 0.5 + 0.5 * S.size / (tallest || S.size) });
     });
   });
   return out.slice(0, 4);
+}
+
+// What each result of a photo is, said plainly: a street that has the
+// sign's name is not the address on the sign, and a town is not a spot.
+// Someone who cannot read the sign must not be handed one as the other.
+// For map._searchSign's matches (each with its item and signSim, how
+// exactly its name was read) and the photo's lines ({text}), each one's
+//   kind: 'address'  an address read exactly (the search admits only an
+//                    address whose numbers are on the sign);
+//         'street'   a street, with `building` the sign's own number when
+//                    the sign has one and no address of it was found;
+//         'area'     a place or an administrative area: a town, a district;
+//         'similar'  a name not read exactly (an OCR slip, or another name
+//                    close to the sign's): to check against the sign;
+//         'name'     anything else whose name is on the sign exactly;
+// and `several` on the first when another result of its name is more than
+// SZ_SIGN_SAME_NAME_KM away (two Road 116s 13 km apart, a chain's shops):
+// the sign alone does not say which one.
+var SZ_SIGN_SAME_NAME_KM = 2;
+function _szSignKinds(matches, lines) {
+  var nums = [];
+  (lines || []).forEach(function (L) {
+    var t = String(L && typeof L === 'object' ? L.text : L).trim();
+    if (/^\d+[A-Za-z]?$/.test(t) && nums.indexOf(t) < 0) nums.push(t);
+  });
+  var exact = function (m) { return m && m.signSim >= 1; };
+  var anyAddress = matches.some(function (m) { return exact(m) && m.item.t === 'addr'; });
+  var out = matches.map(function (m) {
+    var t = m.item.t;
+    if (!exact(m)) return { kind: 'similar' };
+    if (t === 'addr') return { kind: 'address' };
+    if (t === 'street') return { kind: 'street', building: !anyAddress && nums.length ? nums[0] : '' };
+    if (t === 'place' || t === 'admin') return { kind: 'area' };
+    return { kind: 'name' };
+  });
+  if (out.length) {
+    var top = matches[0].item, name = String(top.n || '').toLowerCase(), rad = Math.PI / 180;
+    out[0].several = matches.slice(1).some(function (m) {
+      var it = m.item;
+      if (String(it.n || '').toLowerCase() !== name) return false;
+      var dy = (it.a - top.a) * 111.2;
+      var dx = (it.o - top.o) * 111.2 * Math.cos((top.a || 0) * rad);
+      return Math.sqrt(dx * dx + dy * dy) > SZ_SIGN_SAME_NAME_KM;
+    });
+  }
+  return out;
 }
 // END sign-lines
 
@@ -207,6 +257,7 @@ function initSignSearch(map, config) {
   var statusEl = document.getElementById('ocr-status');
   var canvas = document.getElementById('ocr-canvas');
   var linesEl = document.getElementById('ocr-lines');
+  var verdictEl = document.getElementById('ocr-verdict');
   var chooseBtn = document.getElementById('ocr-choose');
   var takeBtn = document.getElementById('ocr-take');
   var takeFile = document.getElementById('search-photo-take');
@@ -338,6 +389,7 @@ function initSignSearch(map, config) {
   function discard() {
     sheet.hidden = true;
     linesEl.innerHTML = '';
+    verdictEl.hidden = true;
     forget();
     sheet.setAttribute('data-sz-ocr', '');
   }
@@ -373,7 +425,7 @@ function initSignSearch(map, config) {
     setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
     input.value = last.query;
     document.getElementById('search-clear').style.display = 'block';
-    map._searchSign(last.lines).then(function () { sheet.setAttribute('data-sz-ocr', 'searched'); });
+    map._searchSign(last.lines, labelResults(last.lines)).then(function () { sheet.setAttribute('data-sz-ocr', 'searched'); });
   }
   // A new photo, as _szSignPickMode says: the two tiles (the camera off in
   // Kiwix on iOS), the note to drop or paste in Kiwix on macOS, or the
@@ -469,6 +521,38 @@ function initSignSearch(map, config) {
     lines.forEach(function (L) { ctx.strokeRect(L.box.x, L.box.y, L.box.width, L.box.height); });
   }
 
+  // Each result's kind (_szSignKinds) as its row's label, and the first
+  // one's, with whether other places share its name, above the lines.
+  function signLabel(k) {
+    if (k.kind === 'address') return szT('search.sign_address', 'Exact address');
+    if (k.kind === 'street' && k.building) {
+      return szT('search.sign_street_not_building', 'The street only: building {n} is not in this map', { n: k.building });
+    }
+    if (k.kind === 'area') return szT('search.sign_area', 'An area, not an exact spot');
+    if (k.kind === 'similar') return szT('search.sign_similar', 'A similar name, not the exact one: check it against the sign');
+    return szT('search.sign_same_name', 'Same name as on the sign');
+  }
+  function labelResults(lines) {
+    return function (found) {
+      var kinds = _szSignKinds(found, lines);
+      found.forEach(function (m, i) { m.signBadge = { kind: kinds[i].kind, text: signLabel(kinds[i]) }; });
+      verdictEl.innerHTML = '';
+      verdictEl.hidden = !kinds.length;
+      if (!kinds.length) return;
+      verdictEl.setAttribute('data-kind', kinds[0].kind);
+      var main = document.createElement('strong');
+      main.textContent = signLabel(kinds[0]);
+      verdictEl.appendChild(main);
+      if (kinds[0].several) {
+        verdictEl.appendChild(document.createTextNode(' '));
+        var more = document.createElement('span');
+        more.className = 'ocr-verdict-several';
+        more.textContent = szT('search.sign_several', 'Other places have this name too: the sign does not say which one');
+        verdictEl.appendChild(more);
+      }
+    };
+  }
+
   function showLines(lines) {
     linesEl.innerHTML = '';
     lines.forEach(function (L) {
@@ -493,6 +577,7 @@ function initSignSearch(map, config) {
     pickRow.hidden = true;
     againBtn.hidden = false;
     linesEl.innerHTML = '';
+    verdictEl.hidden = true;
     forget();
     // The last photo's places are not this one's.
     resultsEl.innerHTML = '';
@@ -520,7 +605,7 @@ function initSignSearch(map, config) {
       var biggest = lines.filter(function (L) { return L.size === tallest; })[0].text;
       input.value = biggest;
       document.getElementById('search-clear').style.display = 'block';
-      return map._searchSign(weighted).then(function (found) {
+      return map._searchSign(weighted, labelResults(weighted)).then(function (found) {
         var query = (found[0] && found[0].signLine) || biggest;
         input.value = query;
         keep(weighted, query);

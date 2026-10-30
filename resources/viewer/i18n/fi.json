@@ -303,6 +303,12 @@
  "search.photo_lines": "Kuvan teksti: hae riviä napauttamalla sitä",
  "search.photo_none": "Kuvasta ei löytynyt tekstiä",
  "search.photo_reading": "Luetaan kuvaa…",
+ "search.sign_address": "Tarkka osoite",
+ "search.sign_street_not_building": "Vain katu: rakennusta {n} ei ole tällä kartalla",
+ "search.sign_area": "Alue, ei tarkka paikka",
+ "search.sign_similar": "Samankaltainen nimi, ei täsmälleen sama: vertaa kylttiin",
+ "search.sign_same_name": "Sama nimi kuin kyltissä",
+ "search.sign_several": "Muillakin paikoilla on tämä nimi: kyltti ei kerro, mikä niistä",
  "search.placeholder": "Hae paikkoja, katuja, kohteita...",
  "search.placeholder_count": {
   "one": "Hae {n} paikasta...",

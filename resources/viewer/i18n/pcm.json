@@ -303,6 +303,12 @@
  "search.photo_lines": "Rait fọ di foto: tap wan lain make yu sọch am",
  "search.photo_none": "Wi nọ si ẹni rait fọ di foto",
  "search.photo_reading": "E dé rid di foto…",
+ "search.sign_address": "Di correct address",
+ "search.sign_street_not_building": "Na only di road: building {n} no dey for dis map",
+ "search.sign_area": "Na area, no be di exact place",
+ "search.sign_similar": "Na name wey resemble am, no be di exact one: check am wit di sign",
+ "search.sign_same_name": "Same name as wetin dey for di sign",
+ "search.sign_several": "Oda places get dis name too: di sign no talk which one",
  "search.placeholder": "Sọch ples, strit, POI...",
  "search.placeholder_count": {
   "one": "Sọch {n} ples...",

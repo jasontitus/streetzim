@@ -303,6 +303,12 @@
  "search.photo_lines": "ኣብ ስእሊ ዘሎ ጽሑፍ፦ ንምድላዩ መስመር ጠውቑ",
  "search.photo_none": "ኣብ ስእሊ ጽሑፍ ኣይተረኽበን",
  "search.photo_reading": "ስእሊ ይንበብ ኣሎ…",
+ "search.sign_address": "ልክዕ ኣድራሻ",
+ "search.sign_street_not_building": "ጽርግያ ጥራይ፡ ህንጻ {n} ኣብዚ ካርታ የለን",
+ "search.sign_area": "ከባቢ እምበር ልክዕ ቦታ ኣይኮነን",
+ "search.sign_similar": "ተመሳሳሊ ስም እምበር እቲ ልክዕ ኣይኮነን፡ ምስቲ ምልክት ኣወዳድሩ",
+ "search.sign_same_name": "ከምቲ ኣብ ምልክት ዘሎ ሓደ ስም",
+ "search.sign_several": "ካልኦት ቦታታት እውን እዚ ስም ኣለዎም፡ እቲ ምልክት ኣየናይ ምዃኑ ኣይገልጽን",
  "search.placeholder": "ቦታታት፣ ጎደናታት፣ ፍሉያት ቦታታት ድለ…",
  "search.placeholder_count": {
   "one": "ኣብ {n} ቦታ ድለ…",

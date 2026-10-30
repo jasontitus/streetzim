@@ -303,6 +303,12 @@
  "search.photo_lines": "Umbhalo osemfanekisweni: cofa umgca ukuze uwukhangele",
  "search.photo_none": "Akukho mbhalo ufunyenweyo emfanekisweni",
  "search.photo_reading": "Kufundwa umfanekiso…",
+ "search.sign_address": "Idilesi echanekileyo",
+ "search.sign_street_not_building": "Isitrato kuphela: isakhiwo {n} asikho kule mephu",
+ "search.sign_area": "Ummandla, hayi indawo echanekileyo",
+ "search.sign_similar": "Igama elifanayo, hayi elichanekileyo: lithelekise nophawu",
+ "search.sign_same_name": "Igama elifanayo nelikuphawu",
+ "search.sign_several": "Ezinye iindawo nazo zinaleli gama: uphawu alutsho ukuba yeyiphi",
  "search.placeholder": "Khangela iindawo, izitrato, iindawo ezinomdla…",
  "search.placeholder_count": {
   "one": "Khangela kwindawo ({n})…",

@@ -309,6 +309,12 @@
  "search.photo_lines": "Text na fotce: klepnutím na řádek ho vyhledáte",
  "search.photo_none": "Na fotce nebyl nalezen žádný text",
  "search.photo_reading": "Čtení fotky…",
+ "search.sign_address": "Přesná adresa",
+ "search.sign_street_not_building": "Jen ulice: budova {n} na této mapě není",
+ "search.sign_area": "Oblast, ne přesné místo",
+ "search.sign_similar": "Podobný název, ne přesný: porovnejte s cedulí",
+ "search.sign_same_name": "Stejný název jako na ceduli",
+ "search.sign_several": "Tento název mají i jiná místa: cedule neříká které",
  "search.placeholder": "Hledat místa, ulice, body zájmu…",
  "search.placeholder_count": {
   "few": "Prohledat {n} místa…",

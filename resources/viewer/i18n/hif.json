@@ -303,6 +303,12 @@
  "search.photo_lines": "Photo me likha: khoje khatir ek line ke dabao",
  "search.photo_none": "Photo me koi likha nahi mila",
  "search.photo_reading": "Photo padha jaawe hai…",
+ "search.sign_address": "Sahi address",
+ "search.sign_street_not_building": "Khaali sadak: building {n} ii map me nahi hai",
+ "search.sign_area": "Ek ilaaka, sahi jagah nahi",
+ "search.sign_similar": "Milta-julta naam, bilkul wahi nahi: board se mila ke dekho",
+ "search.sign_same_name": "Board pe likha wahi naam",
+ "search.sign_several": "Dusra jagah ke bhi ii naam hai: board nahi bataawe kaun wala",
  "search.placeholder": "Jagah, sarak, POI khojo...",
  "search.placeholder_count": {
   "one": "{n} jagah me khojo...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Szöveg a fotón: koppintson egy sorra a kereséshez",
  "search.photo_none": "A fotón nem található szöveg",
  "search.photo_reading": "A fotó olvasása…",
+ "search.sign_address": "Pontos cím",
+ "search.sign_street_not_building": "Csak az utca: a(z) {n} épület nincs ezen a térképen",
+ "search.sign_area": "Terület, nem pontos hely",
+ "search.sign_similar": "Hasonló név, nem pontosan ez: vesse össze a táblával",
+ "search.sign_same_name": "Ugyanaz a név, mint a táblán",
+ "search.sign_several": "Más helyeknek is ez a neve: a tábla nem mondja meg, melyiknek",
  "search.placeholder": "Helyek, utcák, érdekes pontok keresése…",
  "search.placeholder_count": {
   "one": "Keresés {n} hely között…",

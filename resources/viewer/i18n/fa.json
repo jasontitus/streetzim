@@ -304,6 +304,12 @@
  "search.photo_lines": "متن عکس: برای جستجو روی یک سطر بزنید",
  "search.photo_none": "متنی در عکس پیدا نشد",
  "search.photo_reading": "در حال خواندن عکس…",
+ "search.sign_address": "نشانی دقیق",
+ "search.sign_street_not_building": "فقط خیابان: ساختمان {n} در این نقشه نیست",
+ "search.sign_area": "یک منطقه، نه یک مکان دقیق",
+ "search.sign_similar": "نامی مشابه، نه دقیقاً همان: با تابلو مقایسه کنید",
+ "search.sign_same_name": "همان نامِ روی تابلو",
+ "search.sign_several": "جاهای دیگری هم این نام را دارند: تابلو نمی‌گوید کدام",
  "search.placeholder": "جستجوی مکان‌ها، خیابان‌ها و جاذبه‌ها...",
  "search.placeholder_count": {
   "one": "جستجو در {n} مکان...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Texti á myndinni: ýttu á línu til að leita að henni",
  "search.photo_none": "Enginn texti fannst á myndinni",
  "search.photo_reading": "Les myndina…",
+ "search.sign_address": "Nákvæmt heimilisfang",
+ "search.sign_street_not_building": "Aðeins gatan: bygging {n} er ekki á þessu korti",
+ "search.sign_area": "Svæði, ekki nákvæmur staður",
+ "search.sign_similar": "Svipað nafn, ekki það nákvæma: berðu saman við skiltið",
+ "search.sign_same_name": "Sama nafn og á skiltinu",
+ "search.sign_several": "Aðrir staðir bera líka þetta nafn: skiltið segir ekki hver",
  "search.placeholder": "Leita að stöðum, götum, kennileitum...",
  "search.placeholder_count": {
   "one": "Leita í {n} stað...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "Foto tekst: puudutage rida, et seda otsida",
  "search.photo_none": "Fotolt ei leitud teksti",
  "search.photo_reading": "Foto lugemine…",
+ "search.sign_address": "Täpne aadress",
+ "search.sign_street_not_building": "Ainult tänav: hoonet {n} sellel kaardil ei ole",
+ "search.sign_area": "Piirkond, mitte täpne koht",
+ "search.sign_similar": "Sarnane nimi, mitte täpselt sama: võrrelge sildiga",
+ "search.sign_same_name": "Sama nimi mis sildil",
+ "search.sign_several": "Ka teistel kohtadel on see nimi: silt ei ütle, milline",
  "search.placeholder": "Otsi kohti, tänavaid, huvipunkte...",
  "search.placeholder_count": {
   "one": "Otsi {n} koha seast...",

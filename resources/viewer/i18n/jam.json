@@ -303,6 +303,12 @@
  "search.photo_lines": "Rait iina di foto: tap a lain fi sorch fi it",
  "search.photo_none": "No rait iina di foto",
  "search.photo_reading": "A riid di foto…",
+ "search.sign_address": "Egzak adres",
+ "search.sign_street_not_building": "Jos di schriit: bildin {n} no de pan dis map",
+ "search.sign_area": "Wahn aeria, no wahn egzak plies",
+ "search.sign_similar": "Wahn niem we luk laik it, no di egzak wan: kompier it wid di sain",
+ "search.sign_same_name": "Siem niem az pan di sain",
+ "search.sign_several": "Ada plies dem av dis niem tu: di sain no se wish wan",
  "search.placeholder": "Sorch plies, chriit, POI...",
  "search.placeholder_count": {
   "one": "Sorch {n} plies...",

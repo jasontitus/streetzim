@@ -300,6 +300,12 @@
  "search.photo_lines": "Ọ̀rọ̀ inú fọ́tò: tẹ ìlà kan láti ṣàwárí rẹ̀",
  "search.photo_none": "A kò rí ọ̀rọ̀ kankan nínú fọ́tò náà",
  "search.photo_reading": "Ń ka fọ́tò náà…",
+ "search.sign_address": "Àdírẹ́sì gangan",
+ "search.sign_street_not_building": "Òpópónà nìkan: ilé {n} kò sí lórí máàpù yìí",
+ "search.sign_area": "Agbègbè kan, kì í ṣe ibi gangan",
+ "search.sign_similar": "Orúkọ tó jọra, kì í ṣe èyí gangan: fi wé àmì náà",
+ "search.sign_same_name": "Orúkọ kan náà bí ti orí àmì náà",
+ "search.sign_several": "Àwọn ibòmíràn náà ní orúkọ yìí: àmì náà kò sọ èwo",
  "search.placeholder": "Ṣàwárí àwọn ibi, òpópónà, ibi pàtàkì...",
  "search.placeholder_count": {
   "other": "Ṣàwárí ibi {n}..."

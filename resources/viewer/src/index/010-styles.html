@@ -425,6 +425,19 @@
   }
   #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
   #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  /* What a photo's result is: green only for an exact address; anything
+     less (the street only, an area, a similar name) in amber, in words. */
+  #ocr-verdict {
+    margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35;
+    background: #fef3c7; color: #78350f; border: 1px solid #f59e0b;
+  }
+  #ocr-verdict[hidden] { display: none; }
+  #ocr-verdict[data-kind="address"] { background: #dcfce7; color: #14532d; border-color: #22c55e; }
+  #ocr-verdict .ocr-verdict-several { display: block; margin-top: 3px; }
+  .search-result-sign {
+    display: block; margin-top: 3px; font-size: 11px; font-weight: 600; color: #92400e;
+  }
+  .search-result-sign[data-kind="address"] { color: #15803d; }
   #ocr-lines .ocr-line {
     padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.10);
     background: rgba(255,255,255,0.96); color: var(--text-primary, #222);
@@ -1170,6 +1183,10 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.45);
   }
   html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
+  html.sz-dark #ocr-verdict { background: #3b2a0a; color: #fde68a; border-color: #b45309; }
+  html.sz-dark #ocr-verdict[data-kind="address"] { background: #0f2e1a; color: #bbf7d0; border-color: #15803d; }
+  html.sz-dark .search-result-sign { color: #fbbf24; }
+  html.sz-dark .search-result-sign[data-kind="address"] { color: #4ade80; }
   html.sz-dark #ocr-lines .ocr-line { background: rgba(35,38,45,0.96); color: #e8eaed; border-color: rgba(255,255,255,0.14); }
   /* --accent (#2563eb) stays for filled buttons (white text, 5.2:1); as
      text on a dark panel it is too dark, so text uses a lighter blue. */

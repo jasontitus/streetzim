@@ -303,6 +303,12 @@
  "search.photo_lines": "Tekst i fotoet: tryk på en linje for at søge efter den",
  "search.photo_none": "Ingen tekst fundet i fotoet",
  "search.photo_reading": "Læser fotoet…",
+ "search.sign_address": "Præcis adresse",
+ "search.sign_street_not_building": "Kun gaden: bygning {n} er ikke på dette kort",
+ "search.sign_area": "Et område, ikke et præcist sted",
+ "search.sign_similar": "Et lignende navn, ikke det præcise: sammenlign med skiltet",
+ "search.sign_same_name": "Samme navn som på skiltet",
+ "search.sign_several": "Andre steder har også dette navn: skiltet siger ikke hvilket",
  "search.placeholder": "Søg efter steder, gader, interessepunkter...",
  "search.placeholder_count": {
   "one": "Søg i {n} sted...",

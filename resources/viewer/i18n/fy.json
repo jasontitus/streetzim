@@ -303,6 +303,12 @@
  "search.photo_lines": "Tekst op de foto: tik op in rigel om derop te sykjen",
  "search.photo_none": "Gjin tekst fûn op de foto",
  "search.photo_reading": "Foto wurdt lêzen…",
+ "search.sign_address": "Krekt adres",
+ "search.sign_street_not_building": "Allinnich de strjitte: gebou {n} stiet net op dizze kaart",
+ "search.sign_area": "In gebiet, gjin krekt plak",
+ "search.sign_similar": "In ferlykbere namme, net de krekte: ferlykje mei it boerd",
+ "search.sign_same_name": "Deselde namme as op it boerd",
+ "search.sign_several": "Oare plakken hawwe dizze namme ek: it boerd seit net hokker",
  "search.placeholder": "Sykje plakken, strjitten, POI's...",
  "search.placeholder_count": {
   "one": "Sykje yn {n} plak...",

@@ -303,6 +303,12 @@
  "search.photo_lines": "ფოტოზე ტექსტი: შეეხეთ ხაზს მის მოსაძებნად",
  "search.photo_none": "ფოტოზე ტექსტი ვერ მოიძებნა",
  "search.photo_reading": "ფოტო იკითხება…",
+ "search.sign_address": "ზუსტი მისამართი",
+ "search.sign_street_not_building": "მხოლოდ ქუჩა: შენობა {n} ამ რუკაზე არ არის",
+ "search.sign_area": "ტერიტორია და არა ზუსტი ადგილი",
+ "search.sign_similar": "მსგავსი სახელი, არა ზუსტი: შეადარეთ აბრას",
+ "search.sign_same_name": "იგივე სახელი, რაც აბრაზე",
+ "search.sign_several": "ეს სახელი სხვა ადგილებსაც აქვს: აბრა არ ამბობს, რომელი",
  "search.placeholder": "ადგილების, ქუჩების, ობიექტების ძიება...",
  "search.placeholder_count": {
   "one": "ძიება {n} ადგილში...",

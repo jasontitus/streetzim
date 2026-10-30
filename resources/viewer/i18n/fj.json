@@ -303,6 +303,12 @@
  "search.photo_lines": "Vosa ena itaba: tabaka e dua na laini me vakasaqarai",
  "search.photo_none": "Sega ni kunei e dua na vosa ena itaba",
  "search.photo_reading": "Wilika tiko na itaba…",
+ "search.sign_address": "Iyatuvanua dodonu",
+ "search.sign_street_not_building": "Na gaunisala ga: e sega na vale {n} ena mape oqo",
+ "search.sign_area": "E dua na yasana, sega ni vanua dodonu",
+ "search.sign_similar": "E dua na yaca e vakataki koya, sega na yaca dodonu: vakatauvatani kei na ivakatakilakila",
+ "search.sign_same_name": "Na yaca vata ga kei na ivakatakilakila",
+ "search.sign_several": "E so tale na vanua era yaca vakaoqo: e sega ni tukuna na ivakatakilakila se o cava",
  "search.placeholder": "Vakasaqara na vanua, gaunisala, POI...",
  "search.placeholder_count": {
   "one": "Vakasaqara e {n} na vanua...",

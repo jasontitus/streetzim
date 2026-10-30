@@ -113,6 +113,27 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    lines and its places, for when the first pick was the wrong one. The
    sheet's own camera button takes another photo; its × lets the photo go.
 
+## What a result is
+
+A photo's results never look surer than they are: someone who cannot read
+the sign cannot check them. Each result row says what it is, and the photo
+sheet says it of the first one (`_szSignKinds`, 305-ocr-search.js):
+
+| label | when |
+|---|---|
+| Exact address (green) | an address record read exactly: its building number and street are the sign's |
+| The street only: building N is not in this map | a street, when the sign has a building number and the map has no address for it (most of Bahrain: a few thousand addresses) |
+| An area, not an exact spot | a town, district or other area |
+| A similar name, not the exact one: check it against the sign | any name read inexactly (an OCR slip, or another name close to the sign's) |
+| Same name as on the sign | anything else whose name is on the sign exactly (a shop, a station, a street sign's street) |
+
+and, on the sheet, "Other places have this name too: the sign does not say
+which one" when another result of the first one's name is more than 2 km
+away (two Road 116s 13 km apart in Bahrain, a chain's shops). The building
+number of an address plate is searched beside the street's own number
+("366 116 طريق"), never beside its word, where it would read as another
+road ("طريق 366").
+
 ## Choosing the models
 
 Measured in headless Chromium with ONNX Runtime Web on one thread. The test

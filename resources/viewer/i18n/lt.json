@@ -309,6 +309,12 @@
  "search.photo_lines": "Tekstas nuotraukoje: bakstelėkite eilutę, kad jos ieškotumėte",
  "search.photo_none": "Nuotraukoje teksto nerasta",
  "search.photo_reading": "Skaitoma nuotrauka…",
+ "search.sign_address": "Tikslus adresas",
+ "search.sign_street_not_building": "Tik gatvė: pastato {n} šiame žemėlapyje nėra",
+ "search.sign_area": "Vietovė, ne tiksli vieta",
+ "search.sign_similar": "Panašus pavadinimas, ne tikslus: palyginkite su ženklu",
+ "search.sign_same_name": "Toks pat pavadinimas kaip ženkle",
+ "search.sign_several": "Šį pavadinimą turi ir kitos vietos: ženklas nesako, kuri",
  "search.placeholder": "Ieškoti vietų, gatvių, objektų...",
  "search.placeholder_count": {
   "few": "Ieškoti tarp {n} vietų...",

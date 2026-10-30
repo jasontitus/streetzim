@@ -303,6 +303,12 @@
  "search.photo_lines": "Текст на фотографијата: допрете ред за да го пребарате",
  "search.photo_none": "Не е пронајден текст на фотографијата",
  "search.photo_reading": "Се чита фотографијата…",
+ "search.sign_address": "Точна адреса",
+ "search.sign_street_not_building": "Само улицата: зградата {n} ја нема на оваа карта",
+ "search.sign_area": "Подрачје, не точно место",
+ "search.sign_similar": "Слично име, не точното: споредете со натписот",
+ "search.sign_same_name": "Исто име како на натписот",
+ "search.sign_several": "И други места го имаат ова име: натписот не кажува кое",
  "search.placeholder": "Пребарај места, улици, објекти...",
  "search.placeholder_count": {
   "one": "Пребарај {n} место...",

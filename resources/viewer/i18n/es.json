@@ -303,6 +303,12 @@
  "search.photo_lines": "Texto de la foto: toca una línea para buscarla",
  "search.photo_none": "No se encontró texto en la foto",
  "search.photo_reading": "Leyendo la foto…",
+ "search.sign_address": "Dirección exacta",
+ "search.sign_street_not_building": "Solo la calle: el edificio {n} no está en este mapa",
+ "search.sign_area": "Una zona, no un lugar exacto",
+ "search.sign_similar": "Un nombre parecido, no el exacto: compárelo con el letrero",
+ "search.sign_same_name": "El mismo nombre que en el letrero",
+ "search.sign_several": "Otros lugares también tienen este nombre: el letrero no dice cuál",
  "search.placeholder": "Buscar lugares y calles...",
  "search.placeholder_count": {
   "one": "Buscar en {n} lugar...",

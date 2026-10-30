@@ -303,6 +303,12 @@
  "search.photo_lines": "Şəkildəki mətn: axtarmaq üçün sətrə toxunun",
  "search.photo_none": "Şəkildə mətn tapılmadı",
  "search.photo_reading": "Şəkil oxunur…",
+ "search.sign_address": "Dəqiq ünvan",
+ "search.sign_street_not_building": "Yalnız küçə: {n} nömrəli bina bu xəritədə yoxdur",
+ "search.sign_area": "Ərazi, dəqiq yer deyil",
+ "search.sign_similar": "Oxşar ad, dəqiq eyni deyil: lövhə ilə müqayisə edin",
+ "search.sign_same_name": "Lövhədəki ilə eyni ad",
+ "search.sign_several": "Bu ad başqa yerlərdə də var: lövhə hansı olduğunu demir",
  "search.placeholder": "Məkan, küçə, maraqlı yer axtar...",
  "search.placeholder_count": {
   "one": "{n} məkan arasında axtar...",

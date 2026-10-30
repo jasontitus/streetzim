@@ -305,6 +305,12 @@
  "search.photo_lines": "عکس متن: جستجو وسه اتا سطر ره بزن",
  "search.photo_none": "عکس دله متنی پیدا نیّه",
  "search.photo_reading": "عکس ره خوندن دره…",
+ "search.sign_address": "نشونی دقیق",
+ "search.sign_street_not_building": "فقط خیابون: ساختمون {n} این نقشه دله دنیّه",
+ "search.sign_area": "اتا منطقه، نا اتا جای دقیق",
+ "search.sign_similar": "اتا اسم شبیه، نا دقیقاً هون: تابلو جا مقایسه هاکنین",
+ "search.sign_same_name": "هون اسم که تابلو سر دره",
+ "search.sign_several": "دیگه جاهان هم این اسم ره دارنه: تابلو نوونه کدوم",
  "search.placeholder": "جائون، خیابونون و دیدنی جائون جستجو...",
  "search.placeholder_count": {
   "one": "{n} جا دله جستجو...",

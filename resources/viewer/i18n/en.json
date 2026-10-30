@@ -308,6 +308,12 @@
   "other": "Search {n} places..."
  },
  "search.searching": "Searching…",
+ "search.sign_address": "Exact address",
+ "search.sign_area": "An area, not an exact spot",
+ "search.sign_same_name": "Same name as on the sign",
+ "search.sign_several": "Other places have this name too: the sign does not say which one",
+ "search.sign_similar": "A similar name, not the exact one: check it against the sign",
+ "search.sign_street_not_building": "The street only: building {n} is not in this map",
  "search.unavailable": "Search unavailable",
  "theme.auto": "Map theme: auto (follows the system)",
  "theme.dark": "Map theme: dark",

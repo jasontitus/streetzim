@@ -303,6 +303,12 @@
  "search.photo_lines": "Rait long foto: tasem wan laen blong lukaot",
  "search.photo_none": "I no gat rait long foto",
  "search.photo_reading": "Stap ridim foto…",
+ "search.sign_address": "Stret adres",
+ "search.sign_street_not_building": "Rod nomo: bilding {n} i no stap long map ia",
+ "search.sign_area": "Wan eria, i no wan stret ples",
+ "search.sign_similar": "Wan nem we i klosap semmak, i no stret nem: jekem wetem saen",
+ "search.sign_same_name": "Sem nem olsem long saen",
+ "search.sign_several": "Ol narafala ples tu oli gat nem ia: saen i no talem wanem wan",
  "search.placeholder": "Lukaot ol ples, rod, POI...",
  "search.placeholder_count": {
   "one": "Lukaot long {n} ples...",

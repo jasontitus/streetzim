@@ -303,6 +303,12 @@
  "search.photo_lines": "Լուսանկարի տեքստը՝ հպեք տողին՝ այն որոնելու համար",
  "search.photo_none": "Լուսանկարում տեքստ չի գտնվել",
  "search.photo_reading": "Լուսանկարը կարդացվում է…",
+ "search.sign_address": "Ճշգրիտ հասցե",
+ "search.sign_street_not_building": "Միայն փողոցը. {n} շենքը այս քարտեզում չկա",
+ "search.sign_area": "Տարածք, ոչ թե ճշգրիտ վայր",
+ "search.sign_similar": "Նման անուն, ոչ ճշգրիտը. համեմատեք ցուցանակի հետ",
+ "search.sign_same_name": "Նույն անունը, ինչ ցուցանակին",
+ "search.sign_several": "Այս անունն ունեն նաև այլ վայրեր. ցուցանակը չի ասում՝ որը",
  "search.placeholder": "Որոնել վայրեր, փողոցներ, հետաքրքիր կետեր...",
  "search.placeholder_count": {
   "one": "Որոնել {n} վայրում...",

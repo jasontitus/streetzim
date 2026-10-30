@@ -306,6 +306,12 @@
  "search.photo_lines": "Tekst na fotografiji: dodirnite redak da ga potražite",
  "search.photo_none": "Na fotografiji nije pronađen tekst",
  "search.photo_reading": "Čitanje fotografije…",
+ "search.sign_address": "Točna adresa",
+ "search.sign_street_not_building": "Samo ulica: zgrade {n} nema na ovoj karti",
+ "search.sign_area": "Područje, a ne točno mjesto",
+ "search.sign_similar": "Slično ime, ne točno: usporedite s natpisom",
+ "search.sign_same_name": "Isto ime kao na natpisu",
+ "search.sign_several": "I druga mjesta imaju ovo ime: natpis ne kaže koje",
  "search.placeholder": "Traži mjesta, ulice, objekte...",
  "search.placeholder_count": {
   "few": "Pretraži {n} mjesta...",

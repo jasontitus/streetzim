@@ -303,6 +303,12 @@
  "search.photo_lines": "Te pāpaʻiraʻa i roto i te hōho'a: pāpaʻi i te hōʻē rēni no te ʻimi",
  "search.photo_none": "ʻAita e pāpaʻiraʻa i roto i te hōho'a",
  "search.photo_reading": "Te taiō nei i te hōho'a…",
+ "search.sign_address": "Vahi tano",
+ "search.sign_street_not_building": "Te purumu ana'e: ʻaita te fare {n} i ni'a i teie hoho'a fenua",
+ "search.sign_area": "Hō'ē vāhi rahi, ʻaita te vahi tano",
+ "search.sign_similar": "Hō'ē i'oa tū, ʻaita te i'oa tano: ʻā fa'aau i te tāpa'o",
+ "search.sign_same_name": "Te i'oa hō'ē ā i ni'a i te tāpa'o",
+ "search.sign_several": "Tē vai ra te tahi atu mau vahi i teie i'oa: ʻaita te tāpa'o e parau ra ē ʻo tei hea",
  "search.placeholder": "ʻImi i te mau vāhi, purumu, POI…",
  "search.placeholder_count": {
   "one": "ʻImi i roto i te {n} vāhi…",

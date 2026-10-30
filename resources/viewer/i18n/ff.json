@@ -303,6 +303,12 @@
  "search.photo_lines": "Binndi e foto: tappu loowdi ngam yiylude",
  "search.photo_none": "Alaa binndi njiytaa e foto",
  "search.photo_reading": "Nana janga foto…",
+ "search.sign_address": "Ñiiɓirde goonga",
+ "search.sign_street_not_building": "Laawol tan: suudu {n} alaa e ndee karte",
+ "search.sign_area": "Diiwaan, wonaa nokku goonga",
+ "search.sign_similar": "Innde nanndunde, wonaa nde goonga: yerondir nde e maande nden",
+ "search.sign_same_name": "Innde gooto e nde woni e maande nden",
+ "search.sign_several": "Nokkuuji goɗɗi kadi ena njogii ndee innde: maande nden wiyaani hol nde",
  "search.placeholder": "Yiylo nokkuuje, mbeddaaje, POI...",
  "search.placeholder_count": {
   "one": "Yiylo e {n} nokku...",

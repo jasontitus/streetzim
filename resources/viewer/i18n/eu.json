@@ -303,6 +303,12 @@
  "search.photo_lines": "Argazkiko testua: sakatu lerro bat hura bilatzeko",
  "search.photo_none": "Ez da testurik aurkitu argazkian",
  "search.photo_reading": "Argazkia irakurtzen…",
+ "search.sign_address": "Helbide zehatza",
+ "search.sign_street_not_building": "Kalea bakarrik: {n} eraikina ez dago mapa honetan",
+ "search.sign_area": "Eremu bat, ez leku zehatz bat",
+ "search.sign_similar": "Antzeko izena, ez zehatza: alderatu seinalearekin",
+ "search.sign_same_name": "Seinalean bezalako izen bera",
+ "search.sign_several": "Beste leku batzuek ere badute izen hau: seinaleak ez du esaten zein",
  "search.placeholder": "Bilatu lekuak, kaleak, interesguneak...",
  "search.placeholder_count": {
   "one": "Bilatu {n} lekutan...",

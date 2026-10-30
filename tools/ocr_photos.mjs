@@ -7,7 +7,8 @@
 //
 //   ZIM_ORIGIN=http://127.0.0.1:PORT PHOTOS=photos.json node tools/ocr_photos.mjs
 // PHOTOS: a JSON list of {id, path}. Prints one JSON line per photo:
-// {id, status, lines, field, results: [{name, shown}], ms, errors}; status
+// {id, status, lines, field, verdict: {kind, text}, results: [{name, shown,
+// sign: the row's label}], ms, errors}; status
 // is the reader's (searched, none, failed) or "timeout".
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as tools/langpack/builder_e2e.mjs.
 import fs from 'node:fs';
@@ -57,9 +58,15 @@ try {
       why: ((document.querySelector('#ocr-sheet .ocr-why') || {}).textContent || ''),
       lines: [...document.querySelectorAll('#ocr-lines .ocr-line')].map((b) => b.textContent),
       field: document.getElementById('search-input').value,
+      // What the reader says the first result is (_szSignKinds), as shown.
+      verdict: (() => {
+        const v = document.getElementById('ocr-verdict');
+        return v && !v.hidden ? { kind: v.getAttribute('data-kind') || '', text: v.textContent.trim() } : null;
+      })(),
       results: [...document.querySelectorAll('#search-results .search-result:not([data-sz-pending])')].slice(0, 5)
         .map((r) => ({ name: r.getAttribute('data-name') || '',
-                       shown: ((r.querySelector('.search-result-name') || {}).textContent || '').trim() })),
+                       shown: ((r.querySelector('.search-result-name') || {}).textContent || '').trim(),
+                       sign: ((r.querySelector('.search-result-sign') || {}).textContent || '').trim() })),
     }));
     // The field is the line searched for only after a search (else the last photo's).
     if (got.status !== 'searched') got.field = '';

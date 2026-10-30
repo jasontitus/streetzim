@@ -300,6 +300,12 @@
  "search.photo_lines": "Teks di foto: ketuk baris untuk menelusurinya",
  "search.photo_none": "Tidak ada teks di foto",
  "search.photo_reading": "Membaca foto…",
+ "search.sign_address": "Alamat persis",
+ "search.sign_street_not_building": "Hanya jalannya: bangunan {n} tidak ada di peta ini",
+ "search.sign_area": "Sebuah area, bukan tempat yang persis",
+ "search.sign_similar": "Nama yang mirip, bukan yang persis: bandingkan dengan papan nama",
+ "search.sign_same_name": "Nama yang sama dengan di papan nama",
+ "search.sign_several": "Tempat lain juga bernama ini: papan nama tidak menyebutkan yang mana",
  "search.placeholder": "Cari tempat, jalan, lokasi menarik...",
  "search.placeholder_count": {
   "other": "Cari di {n} tempat..."

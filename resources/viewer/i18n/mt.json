@@ -312,6 +312,12 @@
  "search.photo_lines": "Test fir-ritratt: agħfas linja biex tfittixha",
  "search.photo_none": "Ma nstab l-ebda test fir-ritratt",
  "search.photo_reading": "Qed jinqara r-ritratt…",
+ "search.sign_address": "Indirizz eżatt",
+ "search.sign_street_not_building": "It-triq biss: il-bini {n} mhuwiex f'din il-mappa",
+ "search.sign_area": "Żona, mhux post eżatt",
+ "search.sign_similar": "Isem simili, mhux l-eżatt: qabbel mat-tabella",
+ "search.sign_same_name": "L-istess isem bħal fuq it-tabella",
+ "search.sign_several": "Postijiet oħra għandhom dan l-isem ukoll: it-tabella ma tgħidx liema",
  "search.placeholder": "Fittex postijiet, toroq, punti ta' interess...",
  "search.placeholder_count": {
   "few": "Fittex fost {n} postijiet...",
