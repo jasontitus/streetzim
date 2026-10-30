@@ -166,7 +166,7 @@ if [ "${QUEUE_FORCE_WORK:-0}" != 1 ]; then
     n=${v%%=*} d=${v#*=}
     [ -z "${!n:-}" ] || same_dir "${!n}" "$d" || refuse "$n=${!n} is not production's $d (QUEUE_FORCE_WORK=1 allows it)"
   done
-  for v in QUEUE_SHIP QUEUE_PUBLISH QUEUE_LIVE_PUBLISH QUEUE_LIVE_BUILD QUEUE_DIR; do   # (QUEUE_DIR: a second queue beside production's)
+  for v in QUEUE_SHIP QUEUE_PUBLISH QUEUE_LIVE_PUBLISH QUEUE_LIVE_BUILD QUEUE_DIR QUEUE_VIEWER_INDEX; do   # (QUEUE_DIR: a second queue beside production's)
     [ -z "${!v:-}" ] || refuse "$v=${!v}: a test's setting (QUEUE_FORCE_WORK=1 allows it)"
   done
   [ -z "${LANGPACK_WORK:-}" ] || same_dir "$LANGPACK_WORK" "$PROD_WORK" \
@@ -206,7 +206,25 @@ MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
 # 3: each search pack's title index holds the base's pages and redirects (index_pack.py
 # TEXT_VERSION 3, 2026-10-29): versions whose Kiwix search found none of the map's places
 # get new search packs, and those the gates held back for it are published.
-SCHEME=3
+# The viewer's code follows it (3-db752f01): every version carries this checkout's viewer
+# (ship_packs.sh, tools/langpack/viewer_base.py), so a viewer change ships each map again,
+# only its recipes redone. Read again for each map: a viewer merged into the checkout
+# reaches the queue without a restart; while index.html cannot be read (a checkout
+# rewriting it), the last code read stands. A run records the code it shipped
+# (ship_packs.sh's packs/<base>/viewer-code); "none" for a base without viewer slots, whose
+# versions keep its own viewer: it is not shipped again for a new one.
+RECIPE_SCHEME=3
+VIEWER_INDEX=${QUEUE_VIEWER_INDEX:-$ROOT/resources/viewer/index.html}
+scheme_now() {
+  local c i
+  for i in 1 2 3; do
+    c=$(grep -o "SZ_VIEWER_BUILD = '[0-9a-f]\{8\}'" "$VIEWER_INDEX" 2> /dev/null | head -n 1 | grep -o "[0-9a-f]\{8\}")
+    [ -n "$c" ] && { echo "$RECIPE_SCHEME-$c"; return 0; }
+    sleep 1
+  done
+  return 1
+}
+SCHEME=$(scheme_now) || { echo "pack_queue: no viewer code (SZ_VIEWER_BUILD) in $VIEWER_INDEX: build the viewer (tools/build_viewer.py)" >&2; exit 3; }
 PARTIAL_MAX=${QUEUE_PARTIAL_RETRIES:-3}
 RETRY_FAILED=${QUEUE_RETRY_FAILED:-0}
 MAXGB=${QUEUE_MAX_BASE_GB:-8}
@@ -518,6 +536,8 @@ live_all() {  # [new]
 eligible() {  # region zim round-status
   local rid=$1 zim=$2 base=$MAPS_DIR/$2 uuid ntile md5 st state retry gb
   KEY=
+  local now
+  if now=$(scheme_now); then SCHEME=$now; else warn "no viewer code in $VIEWER_INDEX just now: $SCHEME stands"; fi
   [ -n "${RUN_PID[$rid]:-}" ] && return 1                     # shipping now
   case "$rid" in *-light|*-light-*|*ultralight*) [ -n "$(state_of "$rid" -)" ] || { set_state "$rid" ineligible-light "$zim" - - "a light map carries no Wikipedia"; say "$rid: a light map: no packs"; }; return 1 ;; esac
   if [ ! -s "$base" ]; then
@@ -541,10 +561,10 @@ eligible() {  # region zim round-status
   KEY=$uuid/$md5
   # published for this base already, under this recipe scheme; under an older one: shipped again
   # (ship_packs.sh redoes only what the scheme changes)
-  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t$SCHEME$" "$DONE" && return 1
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t($SCHEME|$RECIPE_SCHEME-none)$" "$DONE" && return 1
   if grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE"; then
     case "$(state_of "$rid" "$KEY" | cut -f1)" in
-      published*) say "$rid: published under an older recipe scheme: shipped again for scheme $SCHEME (only the entries whose recipes change are redone)" ;;
+      published*) say "$rid: published under an older recipe scheme or viewer: shipped again for $SCHEME (only the entries whose recipes change are redone)" ;;
     esac
   fi
   st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
@@ -620,14 +640,17 @@ stopping() {
 }
 
 start_ship() {  # region zim key
-  local rid=$1 zim=$2 base=$MAPS_DIR/$2 pid
+  local rid=$1 zim=$2 base=$MAPS_DIR/$2 pid vc=$LANGPACK_WORK/packs/${2%.zim}/viewer-code
   set_state "$rid" shipping "$zim" "$3"
-  # an earlier run's mark of its step 2's end is not this run's (pf_tick)
-  rm -f "$Q/rc-$rid" "$LANGPACK_WORK/packs/${zim%.zim}/prefetch.ended"
+  # an earlier run's mark of its step 2's end, or of the viewer it shipped, is not this run's
+  rm -f "$Q/rc-$rid" "$LANGPACK_WORK/packs/${zim%.zim}/prefetch.ended" "$vc"
   say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
   ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
       ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
-    echo "$? $SCHEME" > "$Q/rc-$rid" ) 9>&- &
+    rc=$? c=$(head -c 16 "$vc" 2> /dev/null) s=$SCHEME
+    # the scheme of what it shipped: the viewer ship_packs.sh put in (hours after the start, maybe)
+    if [ "$c" = none ]; then s=$RECIPE_SCHEME-none; elif [[ $c =~ ^[0-9a-f]{8}$ ]]; then s=$RECIPE_SCHEME-$c; fi
+    echo "$rc $s" > "$Q/rc-$rid" ) 9>&- &
   pid=$!
   RUN_PID[$rid]=$pid; RUN_START[$rid]=$(starttime "$pid"); RUN_ZIM[$rid]=$zim; RUN_KEY[$rid]=$3; RUN_SCHEME[$rid]=$SCHEME
   # the recipe scheme the run ships under: a queue restarted with a newer one records this one

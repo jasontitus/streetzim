@@ -47,7 +47,7 @@ MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
      subrequests for the whole file;
    - `L.torrent` (webseed: that URL);
    - `fresh.json`: which file it was made from (name, MD5, ETag), the new
-     file's name (`<map>.v<viewer rev>.zim`), UUID, MD5s and URL.
+     file's name (`<map>.v<code>.zim`, the viewer code its About line shows), UUID, MD5s and URL.
 
    The index's bytes are read once, for the torrent's pieces and two MD5s:
    that of all but the last 16 bytes must equal those 16 bytes, so the

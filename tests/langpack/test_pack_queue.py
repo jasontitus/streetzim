@@ -61,6 +61,10 @@ os.makedirs(os.path.dirname(mark), exist_ok=True)
 if os.environ.get("FAKE_SHIP_MARKS") == "1" and not os.path.exists(mark):
     open(mark, "w").write("de\n" + file_id + "\n")
 open(os.path.join(os.path.dirname(mark), "prefetch.ended"), "w").write(file_id + "\n")
+# FAKE_SHIP_VCODE "region:code;...": the viewer the run put in, as ship_packs.sh records it ("none": no slots)
+vcode = dict(x.split(":", 1) for x in os.environ.get("FAKE_SHIP_VCODE", "").split(";") if x)
+if rid in vcode:
+    open(os.path.join(os.path.dirname(mark), "viewer-code"), "w").write(vcode[rid] + "\n")
 open(log, "a").write(json.dumps({"step2_end": rid, "t": time.time()}) + "\n")
 calls = [json.loads(x) for x in open(log)] if os.path.exists(log) else []
 n = sum(1 for c in calls if c.get("ship") == rid)
@@ -208,7 +212,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
 
 def _env(q: SimpleNamespace, extra: dict[str, str]) -> dict[str, str]:
     env = {**q.env, **extra}
-    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_SLEEP_FOR", "FAKE_SHIP_RETRY", "FAKE_PREFETCH_SLEEP_FOR", "FAKE_PREFETCH_RC", "FAKE_SHIP_MARKS", "FAKE_SHIP_STEP2") if k in env))
+    (q.d / "ship.env").write_text("".join(f"{k}={shlex.quote(env[k])}\n" for k in ("FAKE_LOG", "FAKE_SHIP_RC", "FAKE_SHIP_SLEEP", "FAKE_SHIP_SLEEP_FOR", "FAKE_SHIP_RETRY", "FAKE_PREFETCH_SLEEP_FOR", "FAKE_PREFETCH_RC", "FAKE_SHIP_MARKS", "FAKE_SHIP_STEP2", "FAKE_SHIP_VCODE") if k in env))
     return env
 
 
@@ -1471,7 +1475,7 @@ def test_production_settings_only_unless_forced(q: SimpleNamespace, tmp_path: Pa
     env = dict(q.env)
     env.pop("QUEUE_FORCE_WORK")
     extra = {"WP_CACHE": str(tmp_path / "wpc"), "LANGPACK_WEBSEED": "http://127.0.0.1:8787", "QUEUE_DIR": str(tmp_path / "q2"),
-             "QUEUE_LIVE_PUBLISH": "/x/publish.sh", "QUEUE_LIVE_BUILD": "echo build"}
+             "QUEUE_LIVE_PUBLISH": "/x/publish.sh", "QUEUE_LIVE_BUILD": "echo build", "QUEUE_VIEWER_INDEX": "/x/index.html"}
     r = subprocess.run(["bash", str(QUEUE), "--once"], capture_output=True, text=True, timeout=120, env={**env, **extra})
     assert r.returncode == 3, (r.returncode, r.stderr)
     for want in (f"LANGPACK_WORK={q.work} is not production's /storage/streetzim/langpack-work",
@@ -1482,7 +1486,8 @@ def test_production_settings_only_unless_forced(q: SimpleNamespace, tmp_path: Pa
                  f"PROD_REPO={q.prod} is not production's /storage/streetzim",
                  f"QUEUE_SHIP={q.env['QUEUE_SHIP']}: a test's setting", f"QUEUE_PUBLISH={q.env['QUEUE_PUBLISH']}: a test's setting",
                  f"QUEUE_DIR={tmp_path / 'q2'}: a test's setting",
-                 "QUEUE_LIVE_PUBLISH=/x/publish.sh: a test's setting", "QUEUE_LIVE_BUILD=echo build: a test's setting"):
+                 "QUEUE_LIVE_PUBLISH=/x/publish.sh: a test's setting", "QUEUE_LIVE_BUILD=echo build: a test's setting",
+                 "QUEUE_VIEWER_INDEX=/x/index.html: a test's setting"):
         assert want in r.stderr, (want, r.stderr)
     assert _calls(q, "ship") == [] and not (q.qd / "queue.log").exists() and not (tmp_path / "q2").exists()
 
@@ -1633,11 +1638,15 @@ def test_the_preview_follows_production_over_the_deploys_generated_files(q: Simp
 
 
 
-def _scheme() -> str:
-    """The queue's recipe scheme (pack_queue.sh SCHEME)."""
+def _scheme(index: Path | None = None) -> str:
+    """The queue's recipe scheme (pack_queue.sh RECIPE_SCHEME) and the viewer
+    code of INDEX (default: the checkout's viewer)."""
     import re
-    src = (Path(__file__).resolve().parents[2] / "ops" / "langpack" / "pack_queue.sh").read_text(encoding="utf-8")
-    return re.search(r"^SCHEME=(\d+)$", src, re.M).group(1)
+    root = Path(__file__).resolve().parents[2]
+    src = (root / "ops" / "langpack" / "pack_queue.sh").read_text(encoding="utf-8")
+    code = re.search(r"SZ_VIEWER_BUILD = '([0-9a-f]{8})'",
+                     (index or root / "resources" / "viewer" / "index.html").read_text(encoding="utf-8"))
+    return re.search(r"^RECIPE_SCHEME=(\d+)$", src, re.M).group(1) + (f"-{code.group(1)}" if code else "")
 
 def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -> None:
     """The recipes' scheme changed (2: each version's search pack in its own
@@ -1654,9 +1663,102 @@ def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
     assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
-    assert f"beta: published under an older recipe scheme: shipped again for scheme {S}" in log_text(q)
+    assert f"beta: published under an older recipe scheme or viewer: shipped again for {S}" in log_text(q)
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1        # once
+
+
+def test_a_viewer_change_ships_every_map_again_once(q: SimpleNamespace) -> None:
+    """Every version carries the checkout's viewer: the scheme ends in its
+    code, read again for each map, so a viewer merged while the queue runs
+    ships each published map again, once, without a restart."""
+    idx = q.d / "index.html"
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
+    done = q.qd / "published.tsv"
+    rows = [x.split("\t") for x in done.read_text().splitlines()]
+    assert rows and all(r[5] == _scheme(idx) == _scheme(idx).split("-")[0] + "-0123abcd" for r in rows), rows
+    n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0     # the same viewer: nothing
+    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == n
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
+    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == {k: v + 1 for k, v in n.items()}
+    assert f"beta: published under an older recipe scheme or viewer: shipped again for {_scheme(idx)}" in log_text(q)
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0     # once
+    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == {k: v + 1 for k, v in n.items()}
+
+
+def test_a_viewer_merged_while_the_queue_runs_reaches_it(q: SimpleNamespace) -> None:
+    """The viewer code is read for each map: a running queue (no restart)
+    ships the published maps again once the checkout's viewer changes."""
+    idx = q.d / "index.html"
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
+    done = q.qd / "published.tsv"
+    first = {r.split("\t")[0] for r in done.read_text().splitlines()}
+    n = len(_calls(q, "ship"))
+    assert first and n
+    p = _start(q, (), FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_POLL_SECS="2", QUEUE_VIEWER_INDEX=str(idx))
+    try:
+        _until(lambda: "waiting" in log_text(q) or len(log_text(q).splitlines()) > 0, "the queue going", 30)
+        time.sleep(3)
+        assert len(_calls(q, "ship")) == n                       # the same viewer: nothing ships
+        idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
+        new = lambda: [r.split("\t")[0] for r in done.read_text().splitlines() if r.endswith("\t3-4567cdef")]  # noqa: E731
+        _until(lambda: set(new()) == first, "the maps shipped again for the new viewer", 120)
+        time.sleep(3)
+        (q.qd / "stop").touch()
+        p.wait(timeout=90)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    assert sorted(new()) == sorted(first) and len(_calls(q, "ship")) == n + len(first)     # each once
+    assert _scheme(idx).endswith("-4567cdef")
+
+
+def test_a_run_records_the_viewer_it_shipped_and_no_slots_ships_once(q: SimpleNamespace) -> None:
+    """The scheme recorded is the viewer ship_packs.sh put in (it reads the
+    checkout hours after the start, maybe), not the queue's at the start; a
+    base without viewer slots ("none") keeps its own viewer and is not
+    shipped again when the checkout's changes."""
+    idx = q.d / "index.html"
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx), FAKE_SHIP_VCODE="beta:4567cdef;alpha:none").returncode == 0
+    rows = {r.split("\t")[0]: r.split("\t")[5] for r in (q.qd / "published.tsv").read_text().splitlines()}
+    assert rows["beta"] == "3-4567cdef" and rows["alpha"] == "3-none", rows
+    assert all(v == "3-0123abcd" for k, v in rows.items() if k not in ("beta", "alpha")), rows    # none recorded: the start's
+    n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in rows}
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
+    m = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in rows}
+    assert m["beta"] == n["beta"] and m["alpha"] == n["alpha"], (n, m)     # beta has it already; alpha has no slots
+    assert all(m[k] == n[k] + 1 for k in rows if k not in ("beta", "alpha")), (n, m)
+
+
+def test_an_unreadable_viewer_never_reads_as_an_old_scheme(q: SimpleNamespace) -> None:
+    """No viewer code at the start: the queue refuses to start. Unreadable
+    while it runs (a checkout rewriting index.html): the last code stands,
+    so nothing ships again for it."""
+    idx = q.d / "index.html"
+    idx.write_text("<html>no code here</html>\n")
+    r = _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx))
+    assert r.returncode == 3 and "no viewer code (SZ_VIEWER_BUILD)" in r.stderr and _calls(q, "ship") == []
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
+    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
+    n, starts = len(_calls(q, "ship")), log_text(q).count("== pack_queue at")
+    p = _start(q, (), FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_POLL_SECS="2", QUEUE_VIEWER_INDEX=str(idx))
+    try:
+        _until(lambda: log_text(q).count("== pack_queue at") > starts, "the queue going", 30)
+        idx.write_text("")                                   # mid-rewrite
+        _until(lambda: "no viewer code in" in log_text(q), "the warning", 60)
+        time.sleep(3)
+        (q.qd / "stop").touch()
+        p.wait(timeout=90)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+    assert len(_calls(q, "ship")) == n and "3-0123abcd stands" in log_text(q)
 
 
 def test_a_run_records_the_scheme_it_was_started_under(q: SimpleNamespace) -> None:

@@ -114,6 +114,16 @@ def map_ui_tables(data: bytes, map_config: dict[str, Any] | None) -> bytes:
     return select_ui_tables(data, ui_languages(map_config, available))
 
 
+VIEWER_CODE = re.compile(rb"SZ_VIEWER_BUILD\s*=\s*['\"]([0-9a-f]{8})['\"]")
+
+
+def viewer_code(index_html: bytes) -> str:
+    """The viewer's code as its About line shows it (tools/build_viewer.py
+    stamps it in index.html); "" for a viewer from before the stamp."""
+    m = VIEWER_CODE.search(index_html)
+    return m.group(1).decode() if m else ""
+
+
 def viewer_page(name: str, viewer_dir: Path | str, map_config: dict[str, Any] | None) -> bytes:
     """A viewer file as a ZIM with this map-config carries it."""
     data = (Path(viewer_dir) / name).read_bytes()

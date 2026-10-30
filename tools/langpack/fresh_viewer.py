@@ -14,9 +14,10 @@ the UUID and the trailing MD5:
 
 1. tools/langpack/swap_base_viewer.py makes that file in WORK: a reflink copy
    of ZIM, the slots written, a fresh UUID derived from the old one and the
-   viewer's revision (Kiwix tells books apart by UUID, so it is a new book;
+   viewer's code (Kiwix tells books apart by UUID, so it is a new book;
    a rerun makes the same file), the MD5; every item but the viewer checked
-   byte-identical;
+   byte-identical; the file is named after the viewer code its About line
+   shows (<base>.v<code>.zim), so a download says which viewer it has;
 2. GATES (a command run with the file's path; default
    tools/langpack/fresh_viewer_gates.sh) checks it as Kiwix runs it;
 3. into OUT (on the site: build/recipes/REGION-viewer/, a folder of its own:
@@ -52,7 +53,7 @@ import uuid as uuidlib
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from cloud.viewer_slots import VIEWER_FILES, slot_needle  # noqa: E402
+from cloud.viewer_slots import VIEWER_FILES, slot_needle, viewer_code  # noqa: E402
 from tools.langpack.lang_torrents import (  # noqa: E402
     BLOB_RE, FILE_RE, ITEM_RE, LANG_RE, REGION_RE, auto_piece_size, blob_name, costs, make_torrent, webseed_url,
     write_atomic)
@@ -102,10 +103,11 @@ def check_etag(etag: str, size: int) -> str:
     return etag
 
 
-def fresh_name(zim_file: str, rev: str) -> str:
-    """osm-taipei-2026-10-29.zim + 5590ad0 -> osm-taipei-2026-10-29.v5590ad0.zim"""
+def fresh_name(zim_file: str, code: str) -> str:
+    """osm-taipei-2026-10-29.zim + db752f01 (the viewer code About shows) ->
+    osm-taipei-2026-10-29.vdb752f01.zim"""
     stem = zim_file[:-4] if zim_file.endswith(".zim") else zim_file
-    return f"{stem}.v{rev[:7]}.zim"
+    return f"{stem}.v{code}.zim"
 
 
 def md5_file(path: str) -> str:
@@ -304,12 +306,21 @@ def run(a) -> int:
     rev = a.rev or viewer_rev(a.viewer_root)
     if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
         raise FreshError(f"viewer revision {rev!r} is not a commit hash")
-    name = fresh_name(base_file, rev)
+    with open(os.path.join(a.viewer_root, "resources", "viewer", "index.html"), "rb") as fh:
+        code = viewer_code(fh.read())
+    if not code:
+        raise FreshError(f"{a.viewer_root}/resources/viewer/index.html has no viewer code (SZ_VIEWER_BUILD): "
+                         "build it with tools/build_viewer.py")
+    name = fresh_name(base_file, code)
     work = a.work or os.path.join(os.path.dirname(zim), "fresh-viewer")
-    print(f"fresh_viewer: {a.region}: composing {name} (viewer {rev})", flush=True)
-    path, swap = compose(zim, work, a.viewer_root, rev, name, a.allow_full_copy)
+    print(f"fresh_viewer: {a.region}: composing {name} (viewer {code}, revision {rev})", flush=True)
+    # the new UUID follows the code too: the same viewer bytes are the same book, whatever the commit
+    path, swap = compose(zim, work, a.viewer_root, code, name, a.allow_full_copy)
     published = False
     try:
+        from tools.langpack.recipe2 import zim_viewer_code
+        if zim_viewer_code(path) != code:
+            raise FreshError(f"{name} carries viewer {zim_viewer_code(path) or '(none)'}, not {code}")
         if a.gates != "-":
             print(f"fresh_viewer: {a.region}: gates: {a.gates} {path}", flush=True)
             g = subprocess.run([a.gates, path], text=True)
@@ -337,6 +348,7 @@ def run(a) -> int:
         write_atomic(os.path.join(a.out, f"{lang}.ws.json"), json.dumps(index, indent=1).encode())
         fresh = {
             "format": FORMAT, "region": a.region, "site_region": site_region, "lang": lang, "viewer": rev,
+            "viewer_code": code,
             "base": {"item": a.item, "file": base_file, "size": base_size, "md5": a.md5.lower(),
                      "etag": etag},
             "file": name, "size": base_size, "uuid": uuid, "md5": index["md5"], "file_md5": file_md5,

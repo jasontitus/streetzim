@@ -39,6 +39,12 @@
 #      .timeout-<L>) and still has no pack is listed in
 #      $LANGPACK_WORK/packs/<base>/retry-langs: the run goes on without it and
 #      pack_queue.sh runs the region again later for it (no file: none).
+#      Then tools/langpack/viewer_base.py: a reflink copy of the base with this
+#      checkout's viewer in its slots ($LANGPACK_WORK/viewer-base/<base>/, reused
+#      while the base and the viewer stay the same), which the gates and the
+#      recipes read (the region's base stays BASE): every version carries
+#      that viewer and its file name ends in .v<code>, the code its About shows
+#      (a base without slots keeps its own viewer, with a warning).
 #      Then the NVMe scratch (tools/langpack/nvme.py): when the shared volume
 #      has room beside what the map builds may still write, this run's merged
 #      files, temporary files and search-pack builds go to its own folder in
@@ -108,6 +114,8 @@
 # level (ionice -c2 -n7; CPU at nice 19): the HDD's scheduler (mq-deadline)
 # serves the idle class only when the disk is idle, which a rebuild round's
 # builds never leave it. SHIP_PREFETCH_ONLY=1: steps 1 and 2 only (step 2).
+# SHIP_VIEWER_DIR: the viewer the versions carry (default this checkout's
+# resources/viewer).
 # Tests: SHIP_SKIP_ENV_CHECK=1, SHIP_PREFETCH
 # and SHIP_RUN_GATES (stand-ins for prefetch.py and run_gates.sh), BUILDER
 # (build_packs.sh's), SHIP_IA_FETCH= and SHIP_PROBE_URLS= (site_check.py
@@ -379,9 +387,29 @@ if [ -n "$DEFERRED" ]; then
     && mv -f "$PACKS/retry-langs.tmp" "$PACKS/retry-langs"
 fi
 
-# 3a. the NVMe scratch, when the shared volume has room (tools/langpack/nvme.py)
+# 3a. today's viewer in every version: the gates and the recipes read a copy of
+# the base with this checkout's viewer in its slots (tools/langpack/viewer_base.py:
+# the same name, size and UUID; only the slots and the checksum differ, which a
+# recipe leaves out), so a visitor's file has that viewer and its name says which
+# (packs/<base>/viewer-code: the viewer this run ships, for pack_queue.sh; "none":
+# a base without viewer slots, whose versions keep its own)
+VBASE=$BASE
+if VB=$("${LOW[@]}" "$PY" "$TL/viewer_base.py" "$BASE" "$W/viewer-base/$TAG" ${SHIP_VIEWER_DIR:+--viewer-dir "$SHIP_VIEWER_DIR"} 2>> "$LOG"); then
+  VBASE=$VB
+  VCODE=$("$PY" -c 'import json, sys; print(json.load(open(sys.argv[1]))["code"])' "$VBASE.viewer.json") \
+    || { say "no viewer code in $VBASE.viewer.json"; exit 1; }
+  say "viewer: $VCODE in $VBASE"
+elif [ $? = 3 ]; then
+  VCODE=none
+  say "WARNING: $TAG has no viewer slots: its versions keep the base's viewer"
+else
+  say "viewer_base.py failed (the log says why)"; exit 1
+fi
+printf '%s\n' "$VCODE" > "$PACKS/viewer-code"
+
+# 3b. the NVMe scratch, when the shared volume has room (tools/langpack/nvme.py)
 SCR=${LANGPACK_SCRATCH-/mnt/data/tilemaker/streetzim-packs}
-GJ=1; SJ=1; RUN=; HOLD=; WBASE=$BASE; NV=()
+GJ=1; SJ=1; RUN=; HOLD=; WBASE=$VBASE; NV=()
 release_scratch() {
   [ -n "$HOLD" ] && kill "$HOLD" 2> /dev/null && wait "$HOLD" 2> /dev/null
   HOLD=
@@ -424,20 +452,20 @@ if [ -n "$SCR" ] && mkdir -p "$SCR" 2> /dev/null; then
     "$PY" "$TL/nvme.py" hold --run-dir "$RUN" --need "$(pget need)" --parent $$ >> "$LOG" 2>&1 &
     HOLD=$!
     say "NVMe scratch: $RUN, $(pget gate_jobs) gate and $(pget search_jobs) search jobs ($PLAN)"
-    if WBASE=$("${LOW[@]}" "$PY" "$TL/nvme.py" stage "$BASE" "$RUN/base" 2>> "$LOG"); then
+    if WBASE=$("${LOW[@]}" "$PY" "$TL/nvme.py" stage "$VBASE" "$RUN/base" 2>> "$LOG"); then
       GJ=$(pget gate_jobs); SJ=$(pget search_jobs)
       NV=(LANGPACK_MERGED="$RUN/merged" LANGPACK_TMP="$RUN/tmp" TMPDIR="$RUN/tmp" LANGPACK_DISK_MARGIN_GB="${LANGPACK_NVME_MIN_GB:-100}")
       say "base staged: $WBASE (size and MD5 checked)"
     else
       say "NVMe scratch: the base could not be staged (the log says why): working on $W, one job at a time"
-      WBASE=$BASE; release_scratch
+      WBASE=$VBASE; release_scratch
     fi
   else
     say "NVMe scratch: not used ($(pget why)): working on $W, one job at a time"
   fi
 fi
 
-# 3b. search packs: Kiwix's indexes of the base's pages and each entry's
+# 3c. search packs: Kiwix's indexes of the base's pages and each entry's
 # packs (index_pack.py), one per distinct pack set; the gates require Kiwix
 # to find pack articles
 say "search packs"
@@ -615,7 +643,7 @@ BF=$(basename "$BASE")
 STG=$W/site/.$REGION.tmp
 OUT=$STG/recipes/$REGION
 rm -rf "$STG" && mkdir -p "$OUT"
-"${LOW[@]}" "$PY" "$TL/make_site.py" "$BASE" --packs-dir "$PACKS" --region "$REGION" --region-title "$TITLE" \
+"${LOW[@]}" "$PY" "$TL/make_site.py" "$BASE" --viewer-base "$VBASE" --packs-dir "$PACKS" --region "$REGION" --region-title "$TITLE" \
   --region-langs "$RL" --langs "$PASSED" --titles "$(mget titles)" --language-meta map \
   --url-template "{proxy}/$ITEM/{file}" --recipe-prefix "recipes/$REGION/" \
   --base-download "https://archive.org/download/$BASE_ITEM/$BF" --base-url "{proxy}/$BASE_ITEM/$BF" \

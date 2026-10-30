@@ -113,8 +113,14 @@ def main():
                     help="most bytes of packs one entry may download (LANGPACK_ENTRY_BUDGET; 2 GiB)")
     ap.add_argument("--recipe-budget", type=int, default=RECIPE_BUDGET,
                     help="largest recipe JSON (LANGPACK_RECIPE_BUDGET; 32 MiB)")
+    ap.add_argument("--viewer-base", help="the base with today's viewer (tools/langpack/viewer_base.py): the "
+                    "recipes are built from it, so the versions carry that viewer; the region's base stays BASE")
     ap.add_argument("-o", "--out", required=True)
     a = ap.parse_args()
+    rbase = a.viewer_base or a.base
+    if os.path.basename(os.path.realpath(rbase)) != os.path.basename(os.path.realpath(a.base)) \
+            or os.path.getsize(rbase) != os.path.getsize(a.base):
+        ap.error(f"--viewer-base {rbase} is not a copy of {a.base} (name and size)")
     os.makedirs(a.out, exist_ok=True)
     titles = json.loads(a.titles)
     rl = [x for x in a.region_langs.split(",") if x]
@@ -143,7 +149,7 @@ def main():
     overrides = dict(o.split("=", 1) for o in a.url_override)
     for L in a.langs.split(","):
         packs = menu_packs(rl, base_wiki, L, {k: v.path for k, v in avail.items()})
-        recipe, plan, st = build_recipe(a.base, [avail[x].path for x in packs], L, url_template=a.url_template,
+        recipe, plan, st = build_recipe(rbase, [avail[x].path for x in packs], L, url_template=a.url_template,
                                         url_overrides=overrides,
                                         region=a.region, title=titles.get(L), region_langs=rl,
                                         language_meta=a.language_meta,

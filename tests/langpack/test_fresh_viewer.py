@@ -24,7 +24,8 @@ from tests.langpack.conftest import ROOT  # noqa: E402
 from tools.langpack import fresh_viewer  # noqa: E402
 
 # swap_base_viewer.py takes only a viewer that reads Wikipedia packs (WIKI_PACKS)
-V2 = {"index.html": b"<html><body>map, viewer 2: the search bar stays<script>var WIKI_PACKS=[]</script></body></html>",
+V2 = {"index.html": b"<html><body>map, viewer 2: the search bar stays<script>var WIKI_PACKS=[]; "
+                    b"var SZ_VIEWER_BUILD = '0123abcd';</script></body></html>",
       "places.html": b"<html><body>places, viewer 2</body></html>",
       "routing-worker.js": b"/* routing, viewer 2 */"}
 WS = "https://streetzim-build-proxy.example.workers.dev"
@@ -81,8 +82,8 @@ def test_the_index_is_the_composed_file(fv: SimpleNamespace) -> None:
     fresh = json.loads((fv.out / "fresh.json").read_text())
     index = json.loads((fv.out / "en.ws.json").read_text())
     composed = fv.work / fresh["file"]
-    assert fresh["file"] == f"osm-testland-2026-10-13.v{REV}.zim" == index["file"]
-    assert fresh["lang"] == index["lang"] == "en" and fresh["viewer"] == REV
+    assert fresh["file"] == "osm-testland-2026-10-13.v0123abcd.zim" == index["file"]     # the code About shows
+    assert fresh["lang"] == index["lang"] == "en" and fresh["viewer"] == REV and fresh["viewer_code"] == "0123abcd"
     assert index["region"] == fresh["site_region"] == "testland-viewer" and fresh["region"] == "testland"
     data = materialize(index, fv.out, fv.base)
     assert data == composed.read_bytes()
@@ -155,6 +156,36 @@ def test_bytes_left_out_of_the_index_fail_its_own_checksum(fv: SimpleNamespace, 
     real = fresh_viewer.slot_windows
     monkeypatch.setattr(fresh_viewer, "slot_windows", lambda p: real(p)[1:])
     assert run(fv) == 1 and not fv.out.exists()
+
+
+def test_a_viewer_without_its_code_is_refused(fv: SimpleNamespace, capsys) -> None:
+    """The file is named after the viewer's code (About shows it): a viewer
+    without one is refused before anything is made."""
+    (fv.root / "resources" / "viewer" / "index.html").write_bytes(b"<html><body>map<script>var WIKI_PACKS=[]</script></body></html>")
+    assert run(fv) == 1 and not fv.out.exists() and not (fv.work.exists() and os.listdir(fv.work))
+    assert "no viewer code (SZ_VIEWER_BUILD)" in capsys.readouterr().err
+
+
+def test_the_composed_file_must_carry_the_viewer_it_is_named_after(fv: SimpleNamespace, monkeypatch) -> None:
+    """A composed file with another viewer in it (here the base's own) is not
+    published under the code's name."""
+    def stale(zim, work, repo, viewer, name, full_copy=False):
+        os.makedirs(work, exist_ok=True)
+        out = os.path.join(work, name)
+        shutil.copy(zim, out)
+        return out, {}
+    monkeypatch.setattr(fresh_viewer, "compose", stale)
+    assert run(fv) == 1 and not fv.out.exists()
+
+
+def test_the_uuid_follows_the_viewer_not_the_commit(fv: SimpleNamespace) -> None:
+    """Two commits with the same viewer bytes (a comment in a part, compacted
+    away) are the same book: the same UUID and file."""
+    assert run(fv, rev="abc1234") == 0
+    a = json.loads((fv.out / "fresh.json").read_text())
+    assert run(fv, rev="def5678") == 0
+    b = json.loads((fv.out / "fresh.json").read_text())
+    assert (a["uuid"], a["file"], a["file_md5"]) == (b["uuid"], b["file"], b["file_md5"]) and a["viewer"] != b["viewer"]
 
 
 def test_the_uuid_must_be_the_one_the_swap_wrote(fv: SimpleNamespace, monkeypatch) -> None:

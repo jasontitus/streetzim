@@ -93,6 +93,18 @@ def viewer_slots(base_path: str) -> list[dict]:
     return sorted(out, key=lambda x: x["off"])
 
 
+def zim_viewer_code(path: str) -> str:
+    """The viewer code (its About line) of the ZIM's index.html slot; "" with
+    no slot or no code."""
+    from cloud.viewer_slots import viewer_code
+    for x in viewer_slots(path):
+        if x["name"] == "index.html":
+            with open(path, "rb") as fh:
+                fh.seek(x["off"])
+                return viewer_code(fh.read(x["len"]))
+    return ""
+
+
 def chunk_hashes(path: str, chunk: int = CHUNK, mask: list | None = None) -> list[str]:
     """SHA-256 per chunk of the whole file (with the mask's [off, len] ranges
     zeroed), cached under $LANGPACK_WORK/sha-cache."""
@@ -203,9 +215,12 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
         "format": FORMAT, "merger": MERGER_VERSION,
         "uuid": str(__import__("uuid").UUID(bytes=plan.header.uuid)),
         "name": plan.meta["Name"],
-        # the download's file name: Name + the base's date (builder.js: recipe.file_name || recipe.name)
+        # the download's file name (builder.js: recipe.file_name || recipe.name): Name, the
+        # base's date and the viewer's code as About shows it (ship_packs.sh builds from a
+        # copy of the base with today's viewer: tools/langpack/viewer_base.py)
         "file_name": plan.meta["Name"] + (("_" + _date.group(1)) if (_date := __import__("re").search(
-            r"(\d{4}-\d{2}-\d{2})", os.path.basename(os.path.realpath(base_path)))) else ""),
+            r"(\d{4}-\d{2}-\d{2})", os.path.basename(os.path.realpath(base_path)))) else "")
+        + ((".v" + _code) if (_code := zim_viewer_code(base_path)) else ""),
         "title": plan.meta["Title"], "language": plan.meta["Language"],
         "flavour": plan.meta["Flavour"], "map_language": lang,
         "size": L["total"], "md5": None, "file_md5": None,

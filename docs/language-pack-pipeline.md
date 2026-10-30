@@ -312,6 +312,18 @@ and never reads them from the base. So:
   regenerates, light-gates and re-seals the recipes; until it has, the
   live-MD5 rule keeps the region off `/build/`.
 
+The versions carry **today's viewer** without touching the published base:
+`ship_packs.sh` gates and builds the recipes from
+`tools/langpack/viewer_base.py`'s copy of the base, a reflink copy patched in
+place with this checkout's viewer (`$LANGPACK_WORK/viewer-base/<base>/`, the
+same name, size and UUID). Only masked bytes differ, so the recipes still read
+the live base from archive.org, carry the new slots inline, get a new merged
+UUID (the copy's MD5 differs) and a light gate. A version's file name ends in
+`.v<code>`, the viewer code its About line shows (`recipe2.zim_viewer_code`),
+so a download says which viewer it has before it is opened. `pack_queue.sh`
+ships a region again when the checkout's viewer code differs from the one it
+was published with.
+
 ## The browser holds no pack whole
 
 Before Build the page downloads and checks the first chunk the build needs

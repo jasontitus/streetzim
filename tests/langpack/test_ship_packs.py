@@ -727,11 +727,22 @@ def test_light_maps_get_no_packs(rid: str, refused: bool, ship: SimpleNamespace)
         assert r.returncode == 1
 
 
+def _viewer_dir(d: Path, code: str) -> Path:
+    """A viewer (the three files, index.html stamped with CODE) for SHIP_VIEWER_DIR."""
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "index.html").write_text(f"<html><body>map, viewer {code}<script>var SZ_VIEWER_BUILD = '{code}';</script></body></html>")
+    (d / "places.html").write_text(f"<html><body>places, viewer {code}</body></html>")
+    (d / "routing-worker.js").write_text(f"/* routing, viewer {code} */")
+    return d
+
+
 def test_a_viewer_patch_regenerates_only_the_recipes(ship: SimpleNamespace, tmp_path: Path) -> None:
     """Plan review B2: after cloud/patch_viewer_inplace.py (same file name and
     UUID, new viewer slots), a rerun builds no pack, no search pack and sends
-    nothing, and publishes new recipes: the new base MD5, a new merged UUID,
-    the same masked base hashes."""
+    nothing, and publishes new recipes: the new base MD5, a new merged UUID
+    (with the checkout's new viewer), the same masked base hashes. The
+    versions carry the checkout's viewer whatever the base's: a base patched
+    again with the checkout's viewer unchanged gives the same files."""
     from tests.langpack.test_viewer_slots import V2, patch
     base = tmp_path / "bases-s" / "osm-testland-2026-10-13.zim"
     base.parent.mkdir()
@@ -749,18 +760,21 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     def listed(b: Path) -> None:
         (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
             {"files": [{"name": b.name, "size": str(b.stat().st_size), "md5": _md5(b)}]}))
-    run = lambda: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True,  # noqa: E731
-                                 timeout=900, env={**ship.env, "BUILDER": str(builder)})
+    vd = {c: _viewer_dir(tmp_path / f"viewer-{c}", c) for c in ("aaaa1111", "bbbb2222")}
+    run = lambda code: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True,  # noqa: E731
+                                      text=True, timeout=900,
+                                      env={**ship.env, "BUILDER": str(builder), "SHIP_VIEWER_DIR": str(vd[code])})
     listed(base)
-    assert run().returncode == 0
+    assert run("aaaa1111").returncode == 0
     site = ship.work / "site" / "testland" / "recipes" / "testland"
     r1 = json.loads((site / "de.json").read_text())
     reg1 = json.loads((site / "region.json").read_text())
+    assert r1["file_name"].endswith(".vaaaa1111")
     builds, sends = _lines(ship.logs["build"]), _lines(ship.logs["ia"])
     patch(base, tmp_path / "patched.zim", V2, tmp_path)
     shutil.copy(tmp_path / "patched.zim", base)
     listed(base)                                   # the round re-uploaded the patched base
-    r = run()
+    r = run("bbbb2222")
     assert r.returncode == 0, r.stdout[-3000:]
     assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends   # nothing rebuilt or sent
     log = (ship.work / "logs" / f"ship-testland-{base.name[:-4]}.log").read_text()
@@ -768,8 +782,16 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     r2 = json.loads((site / "de.json").read_text())
     reg2 = json.loads((site / "region.json").read_text())
     assert r2["base"]["sha256"] == r1["base"]["sha256"] and r2["fingerprint"] == r1["fingerprint"]
-    assert r2["uuid"] != r1["uuid"] and r2["md5"] != r1["md5"]
+    assert r2["uuid"] != r1["uuid"] and r2["md5"] != r1["md5"] and r2["file_name"] == r1["file_name"][:-8] + "bbbb2222"
     assert reg2["base"]["md5"] == _md5(base) != reg1["base"]["md5"]
+    from tests.langpack.test_viewer_slots import patch as patch_again
+    patch_again(base, tmp_path / "patched2.zim", lpzims.VIEWER_V1, tmp_path)
+    shutil.copy(tmp_path / "patched2.zim", base)
+    listed(base)                                   # the base's viewer changed, the checkout's did not
+    assert run("bbbb2222").returncode == 0
+    r3 = json.loads((site / "de.json").read_text())
+    assert (r3["uuid"], r3["md5"], r3["file_name"]) == (r2["uuid"], r2["md5"], r2["file_name"])
+    assert _lines(ship.logs["build"]) == builds and _lines(ship.logs["ia"]) == sends
 
 
 @pytest.mark.parametrize("case", ["swapped", "stale-sidecar", "own-packs", "reswapped"])
@@ -944,10 +966,12 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
         (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
             {"files": [{"name": b.name, "size": str(b.stat().st_size), "md5": _md5(b), "mtime": str(mtime)}]}))
     ws = "https://streetzim-build-proxy.example.workers.dev"
-    run = lambda: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True,  # noqa: E731
-                                 timeout=900, env={**ship.env, "BUILDER": str(builder), "LANGPACK_WEBSEED": ws})
+    vd = {c: _viewer_dir(tmp_path / f"viewer-{c}", c) for c in ("aaaa1111", "bbbb2222")}
+    run = lambda code: subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True,  # noqa: E731
+                                      text=True, timeout=900, env={**ship.env, "BUILDER": str(builder),
+                                                                   "LANGPACK_WEBSEED": ws, "SHIP_VIEWER_DIR": str(vd[code])})
     listed(base, 1792287864)
-    r = run()
+    r = run("aaaa1111")
     assert r.returncode == 0, r.stdout[-3000:]
     site = ship.work / "site" / "testland" / "recipes" / "testland"
     ix1 = json.loads((site / "de.ws.json").read_text())
@@ -957,7 +981,7 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     shutil.copy(tmp_path / "patched.zim", base)
     listed(base, 1792287864 + 3600)                # re-uploaded: archive.org's mtime moves on
     time.sleep(0.01)
-    r = run()
+    r = run("bbbb2222")
     assert r.returncode == 0, r.stdout[-3000:]
     ix2 = json.loads((site / "de.ws.json").read_text())
     reg2 = json.loads((site / "region.json").read_text())
@@ -1060,6 +1084,39 @@ def test_the_search_packs_and_gates_work_on_the_nvme(ship: SimpleNamespace) -> N
     # the recipes and the site name the published base, not the copy
     rde = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
     assert rde["base"]["file"] == ship.base.name
+
+
+def test_the_nvme_holds_the_copy_with_todays_viewer(ship: SimpleNamespace, tmp_path: Path) -> None:
+    """A base with viewer slots: the search packs and gates on the NVMe read a
+    staged copy of tools/langpack/viewer_base.py's copy (today's viewer), not
+    of the published base, so the gated recipes are the ones make_site.py
+    publishes; the site still names the published base."""
+    base = tmp_path / "bases-n" / "osm-testland-2026-10-13.zim"
+    base.parent.mkdir()
+    lpzims.write_base(base, slots=lpzims.VIEWER_V1)
+    builder = tmp_path / "builder-n.py"
+    builder.write_text(f"""import argparse, json, os, sys
+sys.path.insert(0, {str(Path(lpzims.__file__).parent)!r})
+import lpzims
+ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
+a, _ = ap.parse_known_args()
+open(os.environ["FAKE_BUILD_LOG"], "a").write(a.lang + "\\n")
+lpzims.write_pack(__import__("pathlib").Path(a.o), a.lang, lpzims.read_uuid(a.base))
+open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check": {{"ok": True, "problems": []}}}}))
+""")
+    (ship.work / "ia-cache" / "ia-streetzim-testland.json").write_text(json.dumps(
+        {"files": [{"name": base.name, "size": str(base.stat().st_size), "md5": _md5(base)}]}))
+    vd = _viewer_dir(tmp_path / "viewer-n", "cccc3333")
+    r = subprocess.run(["bash", str(SHIP), "testland", str(base)], capture_output=True, text=True, timeout=900,
+                       env={**ship.env, **_nvme(ship), "BUILDER": str(builder), "SHIP_VIEWER_DIR": str(vd)})
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    copy = ship.work / "viewer-base" / base.stem / base.name
+    g = json.loads(_lines(ship.logs["gates"])[-1])
+    assert "/run-testland-" in g["base"] and g["base"].endswith("/base/" + base.name), g
+    assert g["base_md5"] == _md5(copy) != _md5(base)
+    rde = json.loads((ship.work / "site" / "testland" / "recipes" / "testland" / "de.json").read_text())
+    assert rde["base"]["file"] == base.name and rde["file_name"].endswith(".vcccc3333")
+    assert (ship.work / "packs" / base.stem / "viewer-code").read_text() == "cccc3333\n"
 
 
 @pytest.mark.parametrize("why", ["kept-free", "runner", "reservation"])
