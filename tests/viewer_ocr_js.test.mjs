@@ -29,7 +29,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignIsAddress, _szSignPlate, _szSignMayBeAddress };')();
+  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -60,6 +60,10 @@ const kinds = (recs, lines, all) => L._szSignKinds(recs.map((item) => ({ item })
 const plate = (lines) => L._szSignPlate(lines, W);
 const road116 = (a, o) => ({ n: 'Road 116', nn: 'طريق 116', t: 'street', a, o });
 const addr = (n, a = 26.2, o = 50.5) => ({ n, t: 'addr', a, o });
+const street = (n, nn) => ({ n, nn, t: 'street', a: 26.2, o: 50.5 });
+// a plate: a number line over a street line, their boxes stacked
+const stacked = (num, st) => [{ text: num, size: 100, box: { x: 100, y: 100, width: 300, height: 100 } },
+                              { text: st, size: 60, box: { x: 90, y: 230, width: 320, height: 60 } }];
 ok('words: folded whole words, numbers apart from letters, Arabic-Indic digits as 0-9', () => {
   assert.deepStrictEqual(W('طريق ١١٦'), W('طریق 116'));    // Arabic and Persian yeh alike, as the matcher
   assert.deepStrictEqual(W('طريق ١١٦').slice(1), ['116']);
@@ -73,42 +77,47 @@ ok('a plate whose building the map lacks: the street only, and which of two the 
 });
 ok('two lines: the plate\'s building number and a street of the map, in order; never another building', () => {
   const lines = [{ text: '702', size: 2 }, { text: 'طريق 105', size: 1 }];
-  const road105 = { n: 'Road 105', nn: 'طريق 105', t: 'street', a: 26.2, o: 50.5 };
+  const road105 = street('Road 105', 'طريق 105');
   const k = (n) => kinds([addr(n)], lines, [road105, addr(n)])[0].kind;
-  assert.strictEqual(k('702 105'), 'address');
+  assert.strictEqual(k('702 105'), 'address');          // a street named by its number alone
   assert.strictEqual(k('702 طريق 105'), 'address');
-  assert.strictEqual(k('702 105 Road'), 'address');
+  assert.strictEqual(k('Bldng 702 Road 105, Riffa'), 'address');   // طريق is Road; filler before the number aside
   assert.strictEqual(k('105 702'), 'drop');            // building 105 on Road 702
   assert.strictEqual(k('702 1050'), 'drop');
   assert.strictEqual(k('702 105 Hamad Town'), 'drop');
+  assert.strictEqual(kinds([addr('Bldng 702 Road 105')], [{ text: '702', size: 2 }, { text: 'Road 105', size: 1 }],
+    [street('Road 105'), addr('Bldng 702 Road 105')])[0].kind, 'address');   // filler before the number aside
   // a block line is no street: 366 727 is building 366 on Road 727
   const b = [{ text: '366', size: 3 }, { text: 'Road 116', size: 2 }, { text: 'Block 727', size: 1 }];
-  assert.deepStrictEqual(kinds([addr('366 727'), addr('366 116'), road116(26.2, 50.5)], b, [addr('366 727'), addr('366 116'), road116(26.2, 50.5)]).map((x) => x.kind),
-    ['drop', 'address', 'street']);
+  const recs = [addr('366 727'), addr('366 116'), road116(26.2, 50.5)];
+  assert.deepStrictEqual(kinds(recs, b, recs).map((x) => x.kind), ['drop', 'address', 'street']);
+  // only the tallest number line is the building: a small "12" sticker is not
+  const s12 = [{ text: '366', size: 3 }, { text: '12', size: 1 }, { text: 'Road 116', size: 2 }];
+  assert.strictEqual(kinds([addr('12 116')], s12, [addr('12 116'), road116(26.2, 50.5)])[0].kind, 'drop');
   // without the street among the records found, no address is confirmed
   assert.strictEqual(kinds([addr('366 116')], [{ text: '366' }, { text: 'Road 116' }], [addr('366 116')])[0].kind, 'drop');
 });
-ok('one line: the street and the number in order, with a name in it', () => {
-  const tp = [{ text: '三和路四段20巷101號' }];
-  assert.strictEqual(kinds([addr('101號 三和路四段20巷')], tp)[0].kind, 'address');
-  assert.strictEqual(kinds([addr('20號 三和路四段101巷')], tp)[0].kind, 'drop');   // house 20 of lane 101
-  assert.strictEqual(kinds([addr('10 Schulweg, Husum')], [{ text: 'Schulweg 10' }])[0].kind, 'address');
-  assert.strictEqual(kinds([addr('12 Schulweg')], [{ text: 'Schulweg 10' }])[0].kind, 'drop');
-  // a line that reads either way, a street sign with its number: no address
-  assert.strictEqual(kinds([addr('1029 1225 Road')], [{ text: '1225 Road 1029' }])[0].kind, 'drop');
-  assert.deepStrictEqual(kinds([addr('2831 Road, Manama'), { n: 'Road 2831', t: 'street', a: 26.2, o: 50.5 }], [{ text: 'Road 2831' }]).map((x) => x.kind),
-    ['drop', 'street']);
+ok('street types count: Abbott Drive is not Abbott Avenue; abbreviations are their word', () => {
+  const lines = stacked('1121', 'Abbott Drive');
+  const recs = [street('Abbott Drive'), street('Abbott Avenue')];
+  assert.strictEqual(kinds([addr('1121 Abbott Ave, Campbell')], lines, recs)[0].kind, 'drop');
+  assert.strictEqual(kinds([addr('1121 Abbott Dr, Campbell')], lines, recs)[0].kind, 'address');
+  assert.strictEqual(kinds([addr('1121 Abbott Drive')], lines, recs)[0].kind, 'address');
+  // Bahrain: a record "7 Road 32" is not on Avenue 32 (شارع 32), nor "7 Avenue 32" on Road 32
+  assert.strictEqual(kinds([addr('7 Road 32')], [{ text: '7', size: 2 }, { text: 'Avenue 32', size: 1 }], [street('Avenue 32'), street('Road 32')])[0].kind, 'drop');
+  assert.strictEqual(kinds([addr('7 Road 32')], [{ text: '7', size: 2 }, { text: 'شارع 32', size: 1 }], [street('Avenue 32', 'شارع 32'), street('Road 32')])[0].kind, 'drop');
+  assert.strictEqual(kinds([addr('7 Avenue 32')], [{ text: '7', size: 2 }, { text: 'طريق 32', size: 1 }], [street('Road 32', 'طريق 32')])[0].kind, 'drop');
 });
-ok('the same address in many towns warns; green only for one', () => {
-  const recs = [addr('10 Schulweg, Husum', 54.48, 9.05), addr('10 Schulweg, Anif', 47.74, 13.07)];
-  const k = kinds(recs, [{ text: 'Schulweg 10' }], recs);
-  assert.deepStrictEqual(k.map((x) => x.kind), ['address', 'address']);
-  assert.strictEqual(k[0].several, true);
-  assert.strictEqual(kinds([recs[0]], [{ text: 'Schulweg 10' }], [recs[0]])[0].several, false);
-});
-ok('a building number may be named only beside a numbered street or with 號', () => {
+ok('a number beside a street name alone may be a speed limit: its address is only to check', () => {
+  const recs = [street('Schulweg'), addr('30 Schulweg, Husum')];
+  // a "30" sign under "Schulweg", apart
+  const apart = [{ text: 'Schulweg', size: 60, box: { x: 0, y: 0, width: 300, height: 60 } },
+                 { text: '30', size: 120, box: { x: 40, y: 400, width: 120, height: 120 } }];
+  assert.strictEqual(plate(apart).claim, '');
+  assert.strictEqual(kinds([addr('30 Schulweg, Husum')], apart, recs)[0].kind, 'similar');
+  // a street with a type word on one plate with its number: the house
+  assert.strictEqual(plate(stacked('1121', 'Abbott Drive')).claim, '1121');
   assert.strictEqual(plate([{ text: '50' }, { text: 'Königstraße' }]).claim, '');
-  assert.strictEqual(plate([{ text: '50' }, { text: 'Open 24h' }, { text: 'Königstraße' }]).claim, '');
   assert.strictEqual(plate([{ text: '366' }, { text: 'Road 116' }]).claim, '366');
   assert.strictEqual(plate([{ text: '23號' }, { text: '忠孝東路三段' }]).claim, '23號');
   const k = kinds([{ n: 'Königstraße', t: 'street', a: 1, o: 1 }], [{ text: '50' }, { text: 'Königstraße' }]);
@@ -116,10 +125,27 @@ ok('a building number may be named only beside a numbered street or with 號', (
   const sign = kinds([{ n: 'Königstraße', t: 'street', a: 1, o: 1 }], [{ text: 'Königstraße' }]);
   assert.deepStrictEqual(sign[0], { kind: 'street', building: '', plate: false, several: false });  // a street sign: the same name
 });
+ok('one line: the street and the number in order, with a name in it', () => {
+  const tp = [{ text: '三和路四段20巷101號' }];
+  assert.strictEqual(kinds([addr('101號 三和路四段20巷')], tp)[0].kind, 'address');
+  assert.strictEqual(kinds([addr('20號 三和路四段101巷')], tp)[0].kind, 'drop');   // house 20 of lane 101
+  assert.strictEqual(kinds([addr('10 Schulweg, Husum')], [{ text: 'Schulweg 10' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 Schulweg')], [{ text: 'Schulweg 10' }])[0].kind, 'drop');
+  assert.strictEqual(kinds([addr('1029 1225 Road')], [{ text: '1225 Road 1029' }])[0].kind, 'drop');
+  assert.deepStrictEqual(kinds([addr('2831 Road, Manama'), { n: 'Road 2831', t: 'street', a: 26.2, o: 50.5 }], [{ text: 'Road 2831' }]).map((x) => x.kind),
+    ['drop', 'street']);
+});
+ok('the same address in many towns: every row and the sheet say so; green only for one', () => {
+  const recs = [addr('10 Schulweg, Husum', 54.48, 9.05), addr('10 Schulweg, Anif', 47.74, 13.07)];
+  const k = kinds(recs, [{ text: 'Schulweg 10' }], recs);
+  assert.deepStrictEqual(k.map((x) => [x.kind, x.several]), [['address', true], ['address', true]]);
+  assert.strictEqual(kinds([recs[0]], [{ text: 'Schulweg 10' }], [recs[0]])[0].several, false);
+});
 ok('Taipei: a 號 plate under its street finds the address', () => {
-  const street = { n: 'Section 3, Zhongxiao East Road', nn: '忠孝東路三段', t: 'street', a: 25.04, o: 121.55 };
+  const st = { n: 'Section 3, Zhongxiao East Road', nn: '忠孝東路三段', t: 'street', a: 25.04, o: 121.55 };
   const lines = [{ text: '忠孝東路三段', size: 1 }, { text: '23號', size: 2 }];
-  const k = kinds([street, addr('23號 忠孝東路三段, 台北市', 25.04, 121.55)], lines, [street, addr('23號 忠孝東路三段, 台北市', 25.04, 121.55)]);
+  const a23 = addr('23號 忠孝東路三段, 台北市', 25.04, 121.55);
+  const k = kinds([st, a23], lines, [st, a23]);
   assert.deepStrictEqual(k.map((x) => x.kind), ['street', 'address']);
   assert.strictEqual(k[0].building, '');                // its address was found
 });
@@ -128,7 +154,6 @@ ok('part of a line, a glued line or a bare number is only similar, never the sig
   assert.deepStrictEqual(kinds([{ n: '107', t: 'poi', a: 1, o: 1 }], [{ text: '107' }, { text: 'طريق 116' }]).map((x) => x.kind), ['similar']);
   assert.deepStrictEqual(kinds([{ n: 'Road 1012', nn: 'طريق 1012', t: 'street', a: 1, o: 1 }],
     [{ text: '2' }, { text: '101 طريق' }]).map((x) => x.kind), ['similar']);
-  // a name whose words are the line's in another order is not the line
   assert.deepStrictEqual(kinds([{ n: 'Al Noor Mosque', t: 'poi', a: 1, o: 1 }], [{ text: 'Mosque Noor Al Grand' }]).map((x) => x.kind), ['similar']);
 });
 ok('a town is an area; a shop whose name is a line is the name; another language\'s name counts', () => {
@@ -148,12 +173,21 @@ ok('the same name elsewhere: 150 m apart for a place, 2 km for a street, by any 
   assert.strictEqual(kinds([shop(0, 179.9998)], [], [shop(0, 179.9998), shop(0, -179.9998)])[0].several, false);  // 44 m, across the antimeridian
   assert.deepStrictEqual(L._szSignKinds([], [{ text: '366' }], W), []);
 });
-ok('an address is weighed only when its first number is on the sign (big maps hold millions)', () => {
-  const p = plate([{ text: '366' }, { text: 'Road 116' }]);
-  assert.strictEqual(L._szSignMayBeAddress({ n: '366 116' }, p, W), true);
-  assert.strictEqual(L._szSignMayBeAddress({ n: '３６６ 116' }, p, W), true);     // full-width digits
-  assert.strictEqual(L._szSignMayBeAddress({ n: '10 Schulweg' }, p, W), false);
-  assert.strictEqual(L._szSignMayBeAddress({ n: 'Schulweg' }, p, W), false);
+ok('while the search runs: an address is weighed only when it shares the sign\'s number and street', () => {
+  const p = plate([{ text: '366', size: 2 }, { text: 'Road 116', size: 1 }]);
+  const may = (n) => L._szSignMayBeAddress({ n }, p, W);
+  assert.strictEqual(may('366 116'), true);
+  assert.strictEqual(may('３６６ 116'), true);           // full-width digits
+  assert.strictEqual(may('366 طريق 116'), true);         // types and filler aside
+  assert.strictEqual(may('366 116 Road'), true);
+  assert.strictEqual(may('366 Schulweg'), false);        // a word not on the sign
+  assert.strictEqual(may('366 727'), false);             // a number not on the sign
+  assert.strictEqual(may('10 Schulweg'), false);
+  const q = plate([{ text: 'Schulweg 10' }]);
+  assert.strictEqual(L._szSignMayBeAddress({ n: '10 Schulweg, Husum' }, q, W), true);
+  assert.strictEqual(L._szSignMayBeAddress({ n: '10 Bahnhofstraße' }, q, W), false);
+  assert.strictEqual(L._szSignAddressKind(addr('366 727'), p, W, null), 'drop');
+  assert.strictEqual(L._szSignAddressKind(addr('366 116'), p, W, null), 'address');
 });
 
 ok('the name read exactly on a cluttered sign matches fully', () => {

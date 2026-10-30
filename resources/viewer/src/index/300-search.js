@@ -1599,10 +1599,12 @@ var SEARCH_SHARDS = (function () {
   // stop "107" is not the plate's building 107): its digits only fetch the
   // leaves. An address is kept only when `opts.admit(rec, words)` says it
   // is the sign's (305-ocr-search.js, _szSignIsAddress), never by a fuzzy
-  // match. `opts.label(matches, records, words)`, run before they are
-  // shown and only for the latest search, gives each its `signBadge`
-  // ({kind, text}), the row's label; `records` is every record found,
-  // before the list is cut to its first 15.
+  // match. `opts.prune(records, words)` may take records out before the
+  // list is cut to its first 15 (addresses that are not the sign's).
+  // `opts.label(matches, records, words)`, run before they are shown and
+  // only for the latest search, gives each its `signBadge` ({kind, text}),
+  // the row's label; `records` is every record found. A label that answers
+  // false (the photo was let go) leaves the list as it is.
   map._searchSign = function(texts, opts) {
     opts = opts || {};
     if (!manifest) return Promise.resolve([]);
@@ -1642,6 +1644,7 @@ var SEARCH_SHARDS = (function () {
       return true;
     }
     return streamFilterChunks(prefixes, '', accept, hasDigits && !!opts.admit).then(function(found) {
+      if (typeof opts.prune === 'function') found = opts.prune(found, words);
       var scored = scoreResults(found, '', function(item) {
         var sc = scores.get(item) || { sim: 0, weight: 0, cover: 0 };
         // Similarity first, steeply: proximity multiplies by up to 10, and
@@ -1659,8 +1662,7 @@ var SEARCH_SHARDS = (function () {
         m.signLine = sc.line || '';
         m.signSim = sc.sim || 0;
       });
-      if (seq === searchSeq) {
-        if (typeof opts.label === 'function') opts.label(scored, found, words);
+      if (seq === searchSeq && (typeof opts.label !== 'function' || opts.label(scored, found, words) !== false)) {
         renderResults(scored);
       }
       return scored;
