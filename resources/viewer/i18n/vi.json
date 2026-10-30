@@ -301,11 +301,12 @@
  "search.photo_none": "Không tìm thấy chữ trong ảnh",
  "search.photo_reading": "Đang đọc ảnh…",
  "search.sign_address": "Địa chỉ chính xác",
- "search.sign_street_not_building": "Chỉ có con đường: tòa nhà {n} không có trong bản đồ này",
- "search.sign_area": "Một khu vực, không phải vị trí chính xác",
- "search.sign_similar": "Tên tương tự, không phải tên chính xác: hãy so với biển",
+ "search.sign_street_no_address": "Chỉ con đường: không tìm thấy địa chỉ {n}",
+ "search.sign_street_only": "Chỉ con đường, không phải địa chỉ",
+ "search.sign_area": "Khu vực, không phải vị trí chính xác",
+ "search.sign_similar": "Không khớp chính xác: hãy xem biển",
  "search.sign_same_name": "Cùng tên như trên biển",
- "search.sign_several": "Những nơi khác cũng có tên này: biển không cho biết là nơi nào",
+ "search.sign_several": "Nơi khác cũng có tên này: biển không nói là nơi nào",
  "search.placeholder": "Tìm địa điểm, đường phố, điểm quan tâm...",
  "search.placeholder_count": {
   "other": "Tìm trong {n} địa điểm..."

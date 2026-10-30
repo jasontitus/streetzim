@@ -96,11 +96,17 @@ def fingerprint(blank_index: bytes) -> str:
     return h.hexdigest()[:8]
 
 
+def shared_blocks() -> frozenset[str]:
+    """The BEGIN/END blocks places.html shares with index.html: copied
+    verbatim (tools/viewer_compact.py); the others are compacted."""
+    return frozenset(re.findall(r"//\s*BEGIN\s+([\w-]+)", (TARGET.parent / "places.html").read_text(encoding="utf-8")))
+
+
 def build() -> bytes:
     """The joined, compacted parts, with SZ_VIEWER_BUILD (part 140) set to
     the viewer's fingerprint: what the About panel shows."""
     data = viewer_compact.compact_build(
-        [(p.name, p.read_text(encoding="utf-8")) for p in parts()]).encode("utf-8")
+        [(p.name, p.read_text(encoding="utf-8")) for p in parts()], shared_blocks()).encode("utf-8")
     stamp = BUILD_STAMP.encode("utf-8")
     if data.count(stamp) != 1:
         raise SystemExit(f"{BUILD_STAMP!r} must be in the parts exactly once (part 140)")

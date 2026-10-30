@@ -19,9 +19,11 @@ tools/lint_viewer.mjs compares every inline script's token stream before
 and after (espree), and tests/test_viewer_compact.py the CSS and HTML.
 
 Kept on purpose:
-- `// BEGIN name` … `// END name` blocks, verbatim: several are shared
-  with places.html, and tests (search-shards, chip-shards, search-fold …)
-  require every copy to be identical;
+- `// BEGIN name` … `// END name` blocks shared with places.html
+  (search-shards, chip-shards, the i18n runtime …), verbatim: tests require
+  every copy to be identical. `keep` names them (tools/build_viewer.py: the
+  blocks places.html has); the others are compacted like any code, their
+  BEGIN and END lines kept;
 - part 000-head.html, untouched: the rollout and driver gates read marker
   phrases that sit in its comments ("Kiwix iOS safe-area shim", "aspect
   instead") back out of shipped ZIMs.
@@ -76,7 +78,9 @@ def _has_tag(line: str) -> bool:
     return bool(re.search(r"</?(script|style)\b", line, re.I))
 
 
-def compact(text: str) -> str:
+def compact(text: str, keep: set[str] | frozenset[str] | None = None) -> str:
+    """`keep`: the names of the BEGIN/END blocks to copy verbatim; None for
+    all of them."""
     lines = text.split("\n")
     out: list[str] = []
     ctx = "html"
@@ -90,7 +94,7 @@ def compact(text: str) -> str:
             ctx = _context_after(line, ctx)
             i += 1
             continue
-        if ctx == "js" and _BEGIN.match(t):
+        if ctx == "js" and _BEGIN.match(t) and (keep is None or _BEGIN.match(t).group(1) in keep):
             # A shared block: copy it as it is, up to its END line.
             name = _BEGIN.match(t).group(1)
             end = next((j for j in range(i + 1, n) if lines[j].strip().startswith("// END " + name)), None)
@@ -141,11 +145,12 @@ def _block_end(lines: list[str], i: int, opener: str, closer: str) -> int | None
     return None
 
 
-def compact_build(parts: list[tuple[str, str]]) -> str:
+def compact_build(parts: list[tuple[str, str]], keep: set[str] | frozenset[str] | None = None) -> str:
     """Join the parts, compacting all but 000-head.html (see above). The
-    context (inside a script or not) carries across parts."""
+    context (inside a script or not) carries across parts. `keep`: as
+    compact()."""
     head = [s for name, s in parts if name.startswith("000-")]
     rest = "".join(s for name, s in parts if not name.startswith("000-"))
     # 000-head ends inside <head> outside any script/style: compact the
     # rest from an HTML context.
-    return "".join(head) + compact(rest)
+    return "".join(head) + compact(rest, keep)

@@ -303,11 +303,12 @@
  "search.photo_none": "照片中未找到文字",
  "search.photo_reading": "正在识别照片…",
  "search.sign_address": "确切地址",
- "search.sign_street_not_building": "仅为街道：本地图中没有 {n} 号建筑",
+ "search.sign_street_no_address": "仅为街道：未找到地址 {n}",
+ "search.sign_street_only": "仅为街道，不是该地址",
  "search.sign_area": "一个区域，而非确切地点",
- "search.sign_similar": "名称相似，但不完全相同：请与标牌核对",
+ "search.sign_similar": "并非完全一致：请核对标牌",
  "search.sign_same_name": "与标牌上的名称相同",
- "search.sign_several": "其他地方也有这个名称：标牌没有说明是哪一个",
+ "search.sign_several": "其他地方也叫这个名字：标牌没有说明是哪一个",
  "search.placeholder": "搜索地点、街道、兴趣点…",
  "search.placeholder_count": {
   "other": "搜索 {n} 个地点…"

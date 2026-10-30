@@ -302,11 +302,12 @@
  "search.photo_none": "사진에서 글자를 찾지 못했습니다",
  "search.photo_reading": "사진을 읽는 중…",
  "search.sign_address": "정확한 주소",
- "search.sign_street_not_building": "도로만 해당: 건물 {n}은(는) 이 지도에 없습니다",
- "search.sign_area": "지역이며 정확한 지점이 아닙니다",
- "search.sign_similar": "비슷한 이름이며 정확히 일치하지 않습니다: 표지판과 비교해 보세요",
+ "search.sign_street_no_address": "도로만: 주소 {n}을(를) 찾지 못했습니다",
+ "search.sign_street_only": "도로만, 주소 아님",
+ "search.sign_area": "지역, 정확한 지점 아님",
+ "search.sign_similar": "정확히 일치하지 않음: 표지판을 확인하세요",
  "search.sign_same_name": "표지판과 같은 이름",
- "search.sign_several": "이 이름을 가진 다른 장소도 있습니다: 표지판만으로는 어느 곳인지 알 수 없습니다",
+ "search.sign_several": "같은 이름의 다른 장소도 있습니다: 표지판으로는 어디인지 알 수 없습니다",
  "search.placeholder": "장소, 도로, 관심 지점 검색...",
  "search.placeholder_count": {
   "other": "장소 {n}곳 검색..."

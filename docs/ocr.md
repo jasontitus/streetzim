@@ -116,23 +116,29 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
 ## What a result is
 
 A photo's results never look surer than they are: someone who cannot read
-the sign cannot check them. Each result row says what it is, and the photo
-sheet says it of the first one (`_szSignKinds`, 305-ocr-search.js):
+the sign cannot check them. The labels compare whole words with the lines
+as read (`_szSignKinds` and `_szSignIsAddress`, 305-ocr-search.js), not the
+search's fuzzy match, which also finds a name that is part of a line or a
+line glued to another. Each result row says what it is, and the photo sheet
+says it of the first one:
 
 | label | when |
 |---|---|
-| Exact address (green) | an address record read exactly: its building number and street are the sign's |
-| The street only: building N is not in this map | a street, when the sign has a building number and the map has no address for it (most of Bahrain: a few thousand addresses) |
-| An area, not an exact spot | a town, district or other area |
-| A similar name, not the exact one: check it against the sign | any name read inexactly (an OCR slip, or another name close to the sign's) |
-| Same name as on the sign | anything else whose name is on the sign exactly (a shop, a station, a street sign's street) |
+| Exact address (green, listed first) | an address record whose building number is the plate's (first, as the build names addresses: "366 116") and whose other words are the plate's street (its numbers exactly, its words or address words such as "Road", "طريق"); or one line of the sign word for word ("Schulweg 10") |
+| Street only: no address N found | a street whose name is one line of the sign, word for word, on an address plate (a number-only line beside a numbered street) whose address was not found. Not found, not "not in the map": the search may miss an address written another way. Most of Bahrain has no building addresses in any open data |
+| Street only, not the address | the same, when the plate's address is among the results |
+| Area, not an exact spot | a town, district or other area whose name is one line of the sign |
+| Same name as on the sign | anything else whose name is one line of the sign (a shop, a station, a street sign's street) |
+| Not an exact match: check the sign | everything else: a name read inexactly, part of a line ("Grand Mosque" on "Al Noor Grand Mosque"), a line glued to another ("Road 1012" from "Road 101" and "2"), an address that is not the plate's ("105 702" for building 702 on Road 105) |
 
-and, on the sheet, "Other places have this name too: the sign does not say
-which one" when another result of the first one's name is more than 2 km
-away (two Road 116s 13 km apart in Bahrain, a chain's shops). The building
-number of an address plate is searched beside the street's own number
-("366 116 طريق"), never beside its word, where it would read as another
-road ("طريق 366").
+and, on the sheet, "Other places have this name: the sign doesn't say
+which" when another record of the first one's name (any of its names) is
+more than 150 m away, or 2 km for a street, among every record found
+(two Road 116s 13 km apart in Bahrain, a chain's shops). A line with no
+letters matches no record by itself, an address is listed only when it is
+the plate's, and a number beside an unnumbered street (a speed limit) is no
+building number. The labels belong to the photo: a line tapped (a typed
+search) or a new photo takes them away.
 
 ## Choosing the models
 

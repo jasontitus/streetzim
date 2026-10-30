@@ -268,6 +268,20 @@ function _szSignText(s, norm) {
   return out.replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
 }
 
+// A name or a line as whole words, folded and with the variants alike as
+// _szSignText does, numbers apart from letters ("10號": 10, 號). The sign
+// reader's labels compare words (305-ocr-search.js, _szSignKinds), never a
+// part of a line that happens to spell another name ("طريق 105 702" holds
+// "105 702", another building, once its spaces are gone).
+function _szSignWords(s, norm) {
+  var t = norm(String(s == null ? '' : s)), out = '';
+  for (var i = 0; i < t.length; i++) {
+    var c = t[i];
+    out += Object.prototype.hasOwnProperty.call(SZ_SIGN_VARIANTS, c) ? SZ_SIGN_VARIANTS[c] : c;
+  }
+  return out.replace(/(\p{Nd}+)/gu, ' $1 ').split(/[^\p{L}\p{M}\p{N}]+/u).filter(function (w) { return w; });
+}
+
 // Fewest edits turning `p` into some part of `t` (free start and end in t).
 function _szEditsWithin(p, t) {
   var prev = new Array(t.length + 1).fill(0), cur = new Array(t.length + 1);
@@ -972,7 +986,7 @@ var SEARCH_SHARDS = (function () {
   // next character of the most common word, not FNV hash) would let
   // "san" target a single sub-chunk instead of all 256.
   // `accept` (optional) replaces the name test: the sign reader's fuzzy one.
-  function streamFilterChunks(prefixes, query, accept) {
+  function streamFilterChunks(prefixes, query, accept, addrs) {
     if (!prefixes || !prefixes.length) return Promise.resolve([]);
     var qNorm = normalizeText(query || '');
     // Skip address records unless the query contains a digit. Each
@@ -983,7 +997,7 @@ var SEARCH_SHARDS = (function () {
     // wants cities/POIs/streets, not "1023 10th Avenue, San Diego" —
     // and once they type a street number ("1023 san jose ave") we
     // re-include addresses.
-    var includeAddrs = /\d/.test(qNorm);
+    var includeAddrs = addrs || /\d/.test(qNorm);
     var matches = [];
     var MAX_CONCURRENT = 6;
     var MAX_RESULTS = 20000;  // soft cap; scorer slices top ~20 anyway
@@ -1581,9 +1595,16 @@ var SEARCH_SHARDS = (function () {
   // enough, ranked by similarity, type and proximity like a typed search.
   // Shows them in the results list; resolves to the matches, each with
   // `signLine`, the line of the photo it matched, and `signSim`, how
-  // exactly. `label(matches)`, when given, runs before they are shown: it
-  // gives each its `signBadge` ({kind, text}), the row's label.
-  map._searchSign = function(texts, label) {
+  // exactly. A line with no letters matches no record by itself (a bus
+  // stop "107" is not the plate's building 107): its digits only fetch the
+  // leaves. An address is kept only when `opts.admit(rec, words)` says it
+  // is the sign's (305-ocr-search.js, _szSignIsAddress), never by a fuzzy
+  // match. `opts.label(matches, records, words)`, run before they are
+  // shown and only for the latest search, gives each its `signBadge`
+  // ({kind, text}), the row's label; `records` is every record found,
+  // before the list is cut to its first 15.
+  map._searchSign = function(texts, opts) {
+    opts = opts || {};
     if (!manifest) return Promise.resolve([]);
     var lines = _szSignLines(texts || [], normalizeText, 12);
     if (!lines.length) { renderResults([]); return Promise.resolve([]); }
@@ -1605,16 +1626,22 @@ var SEARCH_SHARDS = (function () {
       });
     });
     var hasDigits = lines.some(function(l) { return /\d/.test(l.text); });
+    var named = lines.filter(function(l) { return /\p{L}/u.test(l.text); });
+    var words = function(s) { return _szSignWords(s, normalizeText); };
     var seq = ++searchSeq;
     var scores = new Map();
     function accept(rec) {
-      if (rec.t === 'addr' && !hasDigits) return false;
-      var sc = _szSignScore(rec, lines, normalizeText);
+      if (rec.t === 'addr') {
+        if (!(hasDigits && opts.admit && opts.admit(rec, words))) return false;
+        scores.set(rec, { sim: 1, weight: 1, cover: 1, line: rec.n });
+        return true;
+      }
+      var sc = _szSignScore(rec, named, normalizeText);
       if (!sc) return false;
       scores.set(rec, sc);
       return true;
     }
-    return streamFilterChunks(prefixes, '', accept).then(function(found) {
+    return streamFilterChunks(prefixes, '', accept, hasDigits && !!opts.admit).then(function(found) {
       var scored = scoreResults(found, '', function(item) {
         var sc = scores.get(item) || { sim: 0, weight: 0, cover: 0 };
         // Similarity first, steeply: proximity multiplies by up to 10, and
@@ -1632,8 +1659,10 @@ var SEARCH_SHARDS = (function () {
         m.signLine = sc.line || '';
         m.signSim = sc.sim || 0;
       });
-      if (typeof label === 'function') label(scored);
-      if (seq === searchSeq) renderResults(scored);
+      if (seq === searchSeq) {
+        if (typeof opts.label === 'function') opts.label(scored, found, words);
+        renderResults(scored);
+      }
       return scored;
     });
   };

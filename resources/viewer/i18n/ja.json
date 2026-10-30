@@ -302,11 +302,12 @@
  "search.photo_none": "写真に文字が見つかりません",
  "search.photo_reading": "写真を読み取っています…",
  "search.sign_address": "正確な住所",
- "search.sign_street_not_building": "通りのみ：建物 {n} はこの地図にありません",
- "search.sign_area": "地域であり、正確な地点ではありません",
- "search.sign_similar": "似た名前で、完全には一致しません：看板と照らし合わせてください",
+ "search.sign_street_no_address": "通りのみ：住所 {n} は見つかりません",
+ "search.sign_street_only": "通りのみ、住所ではありません",
+ "search.sign_area": "地域、正確な地点ではありません",
+ "search.sign_similar": "完全一致ではありません：看板を確認してください",
  "search.sign_same_name": "看板と同じ名前",
- "search.sign_several": "この名前の場所はほかにもあります：看板からはどれか分かりません",
+ "search.sign_several": "同じ名前の場所がほかにもあります：看板からはどれか分かりません",
  "search.placeholder": "場所、道路、スポットを検索…",
  "search.placeholder_count": {
   "other": "{n} 件の場所を検索…"

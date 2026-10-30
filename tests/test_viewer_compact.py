@@ -111,3 +111,48 @@ def test_only_whole_comment_lines_go() -> None:
 def test_json_and_external_scripts_are_left_alone() -> None:
     src = '<script type="application/json" id="x">\n  // {"a": 1}\n</script>\n<script src="a.js">\n</script>'
     assert viewer_compact.compact(src) == src
+
+
+def test_only_the_blocks_named_to_keep_are_kept_verbatim() -> None:
+    src = "\n".join([
+        "<script>",
+        "  // BEGIN shared",
+        "    // kept: places.html has this block too",
+        "  // END shared",
+        "  // BEGIN mine",
+        "    // dropped: only index.html has it",
+        "    var m = 1;",
+        "  // END mine",
+        "</script>",
+    ])
+    assert viewer_compact.compact(src, {"shared"}).split("\n") == [
+        "<script>",
+        "  // BEGIN shared",
+        "    // kept: places.html has this block too",
+        "  // END shared",
+        "// BEGIN mine",
+        "var m = 1;",
+        "// END mine",
+        "</script>",
+    ]
+
+
+def test_the_blocks_places_html_shares_are_verbatim_in_the_built_viewer() -> None:
+    import re
+    sys.path.insert(0, str(ROOT / "tools"))
+    import build_viewer
+    built = (ROOT / "resources" / "viewer" / "index.html").read_text(encoding="utf-8")
+    places = (ROOT / "resources" / "viewer" / "places.html").read_text(encoding="utf-8")
+    shared = build_viewer.shared_blocks()
+    assert {"search-shards", "chip-shards", "sz-i18n-runtime"} <= shared
+    both = 0
+    for name in shared:                  # (chip-rules is in places.html only)
+        block = re.compile(r"//\s*BEGIN " + re.escape(name) + r"\b.*?//\s*END " + re.escape(name), re.S)
+        mi = block.search(built)
+        if mi:
+            both += 1
+            assert mi.group(0) in places, f"{name} differs between index.html and places.html"
+    assert both >= 3
+    # an index-only block is compacted: no comment lines inside it
+    sl = re.search(r"// BEGIN sign-lines\n(.*?)// END sign-lines", built, re.S)
+    assert sl and not re.search(r"^\s*//(?!\s*(BEGIN|END))", sl.group(1), re.M)
