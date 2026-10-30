@@ -160,6 +160,8 @@ var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', 
                       blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة' };
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
+// Words of a speed sign: a number beside them is a limit, never a building.
+var SZ_SIGN_SPEED = ['speed', 'limit', 'mph', 'kmh', 'km', 'zone', 'tempo', 'سرعة', '限速', '速度'];
 function _szSignIsNum(w) { return /^\d+$/.test(w); }
 function _szSignSame(a, b) { return a.length === b.length && a.join(' ') === b.join(' '); }
 // A line read in either direction (right-to-left text may come in visual order).
@@ -167,10 +169,11 @@ function _szSignSameLine(line, ws) { return _szSignSame(line, ws) || _szSignSame
 // The sign's lines as words (street types as their word); its building
 // number: the tallest line that is a number (with a letter or 號 at most:
 // "366", "12a", "23號"); and `claim`, that number when it belongs with a
-// street: beside a numbered street ("Road 116"), with 號, or on one plate
-// with a street line that has a type word ("1121" over "Abbott Drive",
-// their boxes stacked, as one plate). A number beside a street name alone
-// may be a speed limit ("30" under "Schulweg").
+// street: with 號, or on one plate with a street line that has a type word
+// or a number ("366" over "Road 116", "1121" over "Abbott Drive"): their
+// boxes stacked, no other line between them. A number elsewhere in the
+// photo, or on a sign with "speed", "limit", "km"..., may be a speed limit
+// ("40" beside "Road 1601", "25" under "SPEED LIMIT").
 function _szSignPlate(lines, words) {
   var ls = (lines || []).map(function (L) { return L && typeof L === 'object' ? L : { text: L }; });
   var fold = function (list) { return [].concat.apply([], list.map(words)); };
@@ -190,16 +193,24 @@ function _szSignPlate(lines, words) {
   plate.texts = rows.map(function (r) { return r.text; });
   var top = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; })[0];
   plate.building = top ? top.ws : null;
+  var speed = fold(SZ_SIGN_SPEED);
   var onePlate = function (r) {
     var A = top && top.box, B = r.box;
     if (!A || !B) return false;
     var over = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
     var gap = Math.max(A.y, B.y) - Math.min(A.y + A.height, B.y + B.height);
-    return over >= 0.5 * Math.min(A.width, B.width) && gap < 1.5 * Math.max(A.height, B.height);
+    if (!(over >= 0.5 * Math.min(A.width, B.width) && gap < 1.5 * Math.max(A.height, B.height))) return false;
+    var lo = Math.min(A.y + A.height, B.y + B.height), hi = Math.max(A.y, B.y);
+    return !rows.some(function (o) {          // nothing between them ("SPEED", "LIMIT")
+      var C = o.box;
+      return o !== top && o !== r && C && C.y + C.height / 2 > lo && C.y + C.height / 2 < hi &&
+        Math.min(C.x + C.width, A.x + A.width) - Math.max(C.x, A.x) > 0;
+    });
   };
   var street = function (r) { return r !== top && r.ws.some(plate.isType); };
-  var claims = top && (top.ws.length === 2 && plate.suffix.indexOf(top.ws[1]) >= 0 ||
-    rows.some(function (r) { return street(r) && (r.ws.some(_szSignIsNum) || onePlate(r)); }));
+  var onSpeedSign = rows.some(function (r) { return r.ws.some(function (w) { return speed.indexOf(w) >= 0; }); });
+  var claims = top && !onSpeedSign && (top.ws.length === 2 && plate.suffix.indexOf(top.ws[1]) >= 0 ||
+    rows.some(function (r) { return (street(r) || r !== top && r.ws.some(_szSignIsNum) && r.ws.some(function (w) { return !_szSignIsNum(w); })) && onePlate(r); }));
   plate.claim = claims ? top.text : '';
   return plate;
 }
@@ -211,7 +222,10 @@ function _szSignAddressParts(rec, plate, words) {
   var ws = plate.norm(words(String(rec.n || '').split(',')[0]));
   while (ws.length && plate.filler.indexOf(ws[0]) >= 0) ws = ws.slice(1);
   if (!_szSignIsNum(ws[0] || '')) return null;
-  var n = ws[1] && (/^[a-z]$/.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0) ? 2 : 1;
+  // A letter after the number is the building's ("12a Main St") only when
+  // the rest still names a street ("1018 B St" is on B Street).
+  var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
+  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || /^[a-z]$/.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
   var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
   return rest.length ? { b: ws.slice(0, n), rest: rest } : null;
 }
@@ -244,16 +258,33 @@ function _szSignAddressKind(rec, plate, words, streets) {
     return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
   })) return 'address';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
-  var on = (streets || plate.lines).some(function (S) { return _szSignStreetIs(p.rest, S, plate); });
+  // A street line, or one with the line under it (Taipei's "忠孝東路三段"
+  // over "217巷7弄"), but not the building's line.
+  var cands = [];
+  (streets || plate.lines).forEach(function (S) {
+    cands.push(S);
+    var i = plate.lines.indexOf(S), next = plate.lines[i + 1];
+    if (i >= 0 && next && next !== plate.building && !_szSignSame(next, plate.building)) cands.push(S.concat(next));
+  });
+  var on = cands.some(function (S) { return _szSignStreetIs(p.rest, S, plate); });
   if (!on) return 'drop';
   return plate.claim ? 'address' : 'similar';
 }
 // Whether an address may be the sign's, before its words are taken (a big
-// map's leaves hold millions): its first number is the sign's building
-// number or on a line with a name, and it holds a word of the sign (as
-// read or folded), or only numbers on the sign, street types and filler.
+// map's leaves hold millions, Germany's "10" ones 1.8 million): before its
+// comma, its first number is the sign's building number or on a line with
+// a name, and it holds a word of the sign (as read or folded), or only
+// numbers on the sign, street types and filler.
+function _szSignAsciiDigits(d) {
+  if (/^[0-9]+$/.test(d)) return d;
+  return d.replace(/[０-９٠-٩۰-۹]/g, function (c) {
+    var k = c.charCodeAt(0);
+    return String(k - (k >= 0xFF10 ? 0xFF10 : k >= 0x06F0 ? 0x06F0 : 0x0660));
+  });
+}
 function _szSignMayBeAddress(rec, plate, words) {
-  if (!plate.quick) {
+  var q = plate.quick;
+  if (!q) {
     var nums = [], toks = [], plain = [];
     plate.lines.forEach(function (L, i) {
       var hasName = L.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); });
@@ -265,18 +296,22 @@ function _szSignMayBeAddress(rec, plate, words) {
         if (w.length > 1 && !/^\d+$/.test(w) && !plate.isType(words(w)[0] || '')) toks.push(w);
       });
     });
-    Object.keys(SZ_SIGN_TYPES).concat(SZ_SIGN_FILLER, ['طریق', 'مبنی']).forEach(function (w) { plain.push(w); });
-    plate.quick = { nums: nums, toks: toks, plain: plain };
+    Object.keys(SZ_SIGN_TYPES).concat(SZ_SIGN_FILLER, ['طریق', 'مبنی']).forEach(function (w) {
+      plain.push(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    });
+    var all = [];
+    plate.lines.forEach(function (L) { L.forEach(function (w) { if (_szSignIsNum(w)) all.push(w); }); });
+    q = plate.quick = { nums: nums, toks: toks, all: all,
+                        plain: new RegExp(plain.sort(function (x, y) { return y.length - x.length; }).join('|'), 'g') };
   }
-  var n = String(rec.n || ''), q = plate.quick;
-  var digits = n.match(/[0-9０-９٠-٩۰-۹]+/g);
-  if (!digits || q.nums.indexOf(words(digits[0])[0]) < 0) return false;
-  var low = n.split(',')[0].toLowerCase();
-  if (q.toks.some(function (t) { return low.indexOf(t) >= 0; })) return true;
-  q.plain.forEach(function (w) { low = low.split(w).join(' '); });
-  if (/\p{L}/u.test(low.replace(/(^|\s)[a-z](?=\s|$)/g, ' '))) return false;
-  var all = plate.lines.reduce(function (acc, L) { return acc.concat(L); }, []);
-  return digits.every(function (d) { return all.indexOf(words(d)[0]) >= 0; });
+  var n = String(rec.n || ''), comma = n.indexOf(',');
+  if (comma >= 0) n = n.slice(0, comma);
+  var first = /[0-9０-９٠-٩۰-۹]+/.exec(n);
+  if (!first || q.nums.indexOf(_szSignAsciiDigits(first[0])) < 0) return false;
+  var low = n.toLowerCase();
+  for (var i = 0; i < q.toks.length; i++) if (low.indexOf(q.toks[i]) >= 0) return true;
+  if (/\p{L}/u.test(low.replace(q.plain, ' ').replace(/(^|\s)[a-z](?=\s|$)/g, ' '))) return false;
+  return n.match(/[0-9０-９٠-٩۰-۹]+/g).every(function (d) { return q.all.indexOf(_szSignAsciiDigits(d)) >= 0; });
 }
 // A record's names: its name, its own-script name, its other languages'.
 function _szSignNames(it) {
