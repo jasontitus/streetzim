@@ -148,91 +148,147 @@ function _szSignAddress(lines, tallest) {
 // name is not the address on it, a town is not a spot, and a name that is
 // only part of a line ("Grand Mosque" on "Al Noor Grand Mosque") is not
 // the sign's. Someone who cannot read the sign must not be handed one as
-// the other, so the labels compare whole words (`words`: map._searchSign's
-// _szSignWords) with the lines as read, never the search's fuzzy match:
-//   'address'  _szSignIsAddress: the plate's building number and street;
-//   'street'   a street whose name is one line of the sign, word for word;
-//              `building`, the plate's number, when the sign is an address
-//              plate, and `found`, whether its address is among the results;
-//   'area'     likewise a place or an administrative area (a town);
-//   'name'     likewise anything else (a shop, a station);
-//   'similar'  everything else: a name read inexactly, part of a line, or
-//              a line glued to another ("Road 1012" from "Road 101" and 2);
-// and `several` on the first when another record of its name (`all`, every
-// record found) is more than 150 m away, or 2 km for a street (two Road
-// 116s 13 km apart, a chain's shops): the sign alone does not say which.
-var SZ_SIGN_ADDRESS_WORDS = ['road', 'rd', 'street', 'st', 'avenue', 'ave', 'building', 'bldg', 'block', 'blk',
-                             'no', 'house', 'طريق', 'شارع', 'مبنى', 'مجمع', 'منزل', '號', '号', '番地', '번지'];
+// the other, so the labels compare whole words in order (`words`:
+// map._searchSign's _szSignWords) with the lines as read, never the
+// search's fuzzy match. docs/ocr.md, "What a result is".
+var SZ_SIGN_STREET_WORDS = ['road', 'rd', 'street', 'st', 'avenue', 'ave', 'av', 'lane', 'ln', 'way', 'boulevard',
+                            'blvd', 'drive', 'dr', 'طريق', 'شارع', 'ممر', 'جادة'];
+var SZ_SIGN_FILLER = ['building', 'bldg', 'no', 'house', 'مبنى', 'منزل'];
+var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
 function _szSignIsNum(w) { return /^\d+$/.test(w); }
-function _szSignBag(ws) { return ws.slice().sort().join(' '); }
-// The sign's lines as words, and, on an address plate, its building numbers
-// (number-only lines, the tallest first) and numbered streets (lines of
-// letters and digits), as _szSignAddress pairs them; a number beside an
-// unnumbered street name (a speed limit) is no building.
+function _szSignSame(a, b) { return a.length === b.length && a.join(' ') === b.join(' '); }
+// A line read in either direction (right-to-left text may come in visual order).
+function _szSignSameLine(line, ws) { return _szSignSame(line, ws) || _szSignSame(line.slice().reverse(), ws); }
+// The sign's lines as words; its building numbers (a line that is a number,
+// with a letter or 號 at most: "366", "12a", "23號"), the tallest first; and
+// `claim`, the building number the labels may name: only beside a numbered
+// street ("Road 116") or with 號, not beside a street name alone, where a
+// number may be a speed limit.
 function _szSignPlate(lines, words) {
   var ls = (lines || []).map(function (L) { return L && typeof L === 'object' ? L : { text: L }; });
-  var mixed = function (ws) { return ws.some(_szSignIsNum) && ws.some(function (w) { return !_szSignIsNum(w); }); };
-  var lineWords = ls.map(function (L) { return words(L.text); });
-  var streets = lineWords.filter(mixed);
-  var nums = streets.length ? ls.filter(function (L) { return /^\d+[A-Za-z]?$/.test(String(L.text).trim()); }) : [];
-  nums.sort(function (x, y) { return (y.size || 0) - (x.size || 0); });
-  return { lines: lineWords, streets: streets,
-           nums: nums.map(function (L) { return words(L.text); }),
-           building: nums.length ? String(nums[0].text).trim() : '' };
+  var fold = function (list) { return [].concat.apply([], list.map(words)); };
+  var plate = { streetWords: fold(SZ_SIGN_STREET_WORDS), filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX) };
+  var building = function (ws) {
+    return _szSignIsNum(ws[0] || '') && (ws.length === 1 ||
+      (ws.length === 2 && (/^[a-z]$/.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0)));
+  };
+  var rows = ls.map(function (L) { return { ws: words(L.text), size: L.size || 0, text: String(L.text).trim() }; });
+  plate.lines = rows.map(function (r) { return r.ws; });
+  var b = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; });
+  plate.buildings = b.map(function (r) { return r.ws; });
+  var numbered = rows.some(function (r) {
+    return !building(r.ws) && r.ws.some(_szSignIsNum) && r.ws.some(function (w) { return plate.streetWords.indexOf(w) >= 0; });
+  });
+  var top = b[0];
+  plate.claim = top && (numbered || top.ws.length === 2 && plate.suffix.indexOf(top.ws[1]) >= 0) ? top.text : '';
+  return plate;
 }
-// Whether an address record is the sign's: one line of the sign word for
-// word ("Schulweg 10"), or the plate's building number first (as the build
-// names an address, "366 116") and then the plate's street: its numbers
-// exactly, its other words the street's or address words ("طريق", "Road").
-// "105 702" is not building 702 on Road 105.
-function _szSignIsAddress(rec, plate, words) {
-  if (!rec || rec.t !== 'addr') return false;
+// An address record's words: its building number first (as the build names
+// an address: "366 116", "23號 忠孝東路三段", "10 Schulweg, Husum"; the
+// place after a comma left out) and the rest, without filler words.
+function _szSignAddressParts(rec, plate, words) {
   var ws = words(String(rec.n || '').split(',')[0]);
-  if (!ws.length) return false;
-  var addressWords = plate.addressWords || (plate.addressWords = [].concat.apply([], SZ_SIGN_ADDRESS_WORDS.map(words)));
-  var bag = _szSignBag(ws);
-  if (plate.lines.some(function (l) { return _szSignBag(l) === bag && plate.streets.indexOf(l) >= 0; })) return true;
-  return plate.nums.some(function (N) {
-    if (ws.slice(0, N.length).join(' ') !== N.join(' ')) return false;
-    var rest = ws.slice(N.length);
-    return plate.streets.some(function (S) {
-      if (_szSignBag(rest.filter(_szSignIsNum)) !== _szSignBag(S.filter(_szSignIsNum))) return false;
-      return rest.every(function (w) {
-        return _szSignIsNum(w) || S.indexOf(w) >= 0 || addressWords.indexOf(w) >= 0;
-      });
-    });
+  if (!_szSignIsNum(ws[0] || '')) return null;
+  var n = ws[1] && (/^[a-z]$/.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0) ? 2 : 1;
+  var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
+  return rest.length ? { b: ws.slice(0, n), rest: rest } : null;
+}
+// Whether an address record is the sign's, word for word and in order:
+// - a building number line and a street line (`streets`: the sign's lines
+//   that are a street of the map), the record's rest being that street,
+//   street words ("Road", "طريق") aside: "366 116" for 366 over "Road 116";
+// - or one line holding the street and the number, either way round, when
+//   the street part has a name in it ("Schulweg 10", "三和路四段20巷101號";
+//   not "1225 Road 1029", which reads either way).
+// With `streets` null (while the search runs), whether it may be.
+function _szSignIsAddress(rec, plate, words, streets) {
+  if (!rec || rec.t !== 'addr') return false;
+  var p = _szSignAddressParts(rec, plate, words);
+  if (!p) return false;
+  var core = function (ws) { return ws.filter(function (w) { return plate.streetWords.indexOf(w) < 0; }); };
+  if (plate.buildings.some(function (B) { return _szSignSame(B, p.b); })) {
+    if (!streets) return true;
+    var rc = core(p.rest);
+    if (rc.length && streets.some(function (S) { return _szSignSameLine(core(S), rc); })) return true;
+  }
+  if (!core(p.rest).some(function (w) { return !_szSignIsNum(w); })) return false;
+  return plate.lines.some(function (L) {
+    return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
   });
 }
+// Whether an address may be the sign's, cheaply, before its words are
+// taken: its first number is one on the sign (a big map's leaves hold
+// millions of addresses).
+function _szSignMayBeAddress(rec, plate, words) {
+  if (!plate.numbers) {
+    plate.numbers = [];
+    plate.lines.forEach(function (L) { L.forEach(function (w) { if (_szSignIsNum(w)) plate.numbers.push(w); }); });
+  }
+  var m = /[0-9\uFF10-\uFF19\u0660-\u0669\u06F0-\u06F9]+/.exec(String(rec.n || ''));
+  return !!m && plate.numbers.indexOf(words(m[0])[0]) >= 0;
+}
+// A record's names: its name, its own-script name, its other languages'.
 function _szSignNames(it) {
   var out = [];
-  [it.n, it.nn, it.ln].concat(String(it.n || '').split(';')).forEach(function (n) {
-    if (n && out.indexOf(n) < 0) out.push(n);
-  });
+  [it.n, it.nn].concat(String(it.n || '').split(';'),
+                       (typeof _szLnPairs === 'function' ? _szLnPairs(it) : []).map(function (x) { return x[0]; }))
+    .forEach(function (n) { if (n && out.indexOf(n) < 0) out.push(n); });
   return out;
 }
+// Each match's kind, for its label:
+//   'address'  _szSignIsAddress, given the streets of the sign;
+//   'drop'     any other address: not listed (it is not the plate's);
+//   'street'   a street whose name is one line of the sign, in order:
+//              `building` the plate's number when it may be named and its
+//              address was not found; `plate` when the sign has a building
+//              number at all ("Street only, not the address");
+//   'area'     likewise a place or an administrative area (a town);
+//   'name'     likewise anything else (a shop, a station);
+//   'similar'  everything else: read inexactly, part of a line, glued from
+//              two lines ("Road 1012" from "Road 101" and "2").
+// `several` on the first when another record of its name (`all`, every
+// record found; for an address, the same address before its place) is more
+// than 150 m away, or 2 km for a street: the sign alone does not say which.
 function _szSignKinds(matches, lines, words, all) {
   var plate = _szSignPlate(lines, words);
-  var bags = {};
-  plate.lines.forEach(function (l) { if (l.some(function (w) { return !_szSignIsNum(w); })) bags[_szSignBag(l)] = 1; });
-  var exact = function (it) {
-    return _szSignNames(it).some(function (n) { return bags[_szSignBag(words(n))]; });
+  var records = all || matches.map(function (m) { return m.item; });
+  var lineOf = function (it) {
+    return _szSignNames(it).some(function (n) {
+      var ws = words(n);
+      return plate.lines.some(function (L) { return L.some(function (w) { return !_szSignIsNum(w); }) && _szSignSameLine(L, ws); });
+    });
   };
-  var isAddr = matches.map(function (m) { return _szSignIsAddress(m.item, plate, words); });
+  var streets = plate.lines.filter(function (L) {
+    return records.some(function (it) {
+      return it && it.t === 'street' && _szSignNames(it).some(function (n) { return _szSignSameLine(L, words(n)); });
+    });
+  });
+  var isAddr = matches.map(function (m) { return _szSignIsAddress(m.item, plate, words, streets); });
   var found = isAddr.indexOf(true) >= 0;
   var out = matches.map(function (m, i) {
     var t = m.item.t;
     if (isAddr[i]) return { kind: 'address' };
-    if (t === 'addr' || !exact(m.item)) return { kind: 'similar' };
-    if (t === 'street') return { kind: 'street', building: plate.building, found: found };
+    if (t === 'addr') return { kind: 'drop' };
+    if (!lineOf(m.item)) return { kind: 'similar' };
+    if (t === 'street') {
+      return { kind: 'street', building: found ? '' : plate.claim, plate: plate.buildings.length > 0 };
+    }
     if (t === 'place' || t === 'admin') return { kind: 'area' };
     return { kind: 'name' };
   });
-  if (out.length) {
-    var top = matches[0].item, rad = Math.PI / 180, km = top.t === 'street' ? 2 : 0.15;
-    var topBags = _szSignNames(top).map(function (n) { return _szSignBag(words(n)); });
-    out[0].several = (all || matches.map(function (m) { return m.item; })).some(function (it) {
-      if (!it || it === top) return false;
-      if (!_szSignNames(it).some(function (n) { return topBags.indexOf(_szSignBag(words(n))) >= 0; })) return false;
+  var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
+  if (first) {
+    var top = matches[out.indexOf(first)].item, rad = Math.PI / 180;
+    var km = top.t === 'street' ? 2 : 0.15;
+    var key = function (it) {
+      if (it.t === 'addr') return [words(String(it.n || '').split(',')[0]).join(' ')];
+      return _szSignNames(it).map(function (n) { return words(n).join(' '); });
+    };
+    var topKeys = key(top);
+    first.several = records.some(function (it) {
+      if (!it || it === top || (it.t === 'addr') !== (top.t === 'addr')) return false;
+      if (top.t === 'addr' && !_szSignIsAddress(it, plate, words, streets)) return false;
+      if (!key(it).some(function (k) { return topKeys.indexOf(k) >= 0; })) return false;
       var dlng = it.o - top.o;
       dlng -= 360 * Math.round(dlng / 360);
       var dy = (it.a - top.a) * 111.2, dx = dlng * 111.2 * Math.cos((top.a || 0) * rad);
@@ -582,10 +638,10 @@ function initSignSearch(map, config) {
   var photoSeq = 0;
   function signLabel(k) {
     if (k.kind === 'address') return szT('search.sign_address', 'Exact address');
-    if (k.kind === 'street' && k.building && !k.found) {
+    if (k.kind === 'street' && k.building) {
       return szT('search.sign_street_no_address', 'Street only: no address {n} found', { n: k.building });
     }
-    if (k.kind === 'street' && k.building) return szT('search.sign_street_only', 'Street only, not the address');
+    if (k.kind === 'street' && k.plate) return szT('search.sign_street_only', 'Street only, not the address');
     if (k.kind === 'area') return szT('search.sign_area', 'Area, not an exact spot');
     if (k.kind === 'similar') return szT('search.sign_similar', 'Not an exact match: check the sign');
     return szT('search.sign_same_name', 'Same name as on the sign');
@@ -595,23 +651,28 @@ function initSignSearch(map, config) {
     return {
       admit: function (rec, words) {
         plate = plate || _szSignPlate(lines, words);
-        return _szSignIsAddress(rec, plate, words);
+        return _szSignMayBeAddress(rec, plate, words) && _szSignIsAddress(rec, plate, words, null);
       },
       label: function (found, all, words) {
         if (photo !== photoSeq) return;
+        // Addresses that are not the plate's go; the plate's comes first.
         var kinds = _szSignKinds(found, lines, words, all);
-        if (kinds.length && kinds[0].kind !== 'address' && kinds.some(function (k) { return k.kind === 'address'; })) {
-          var first = found.filter(function (m, i) { return kinds[i].kind === 'address'; });
-          var rest = found.filter(function (m, i) { return kinds[i].kind !== 'address'; });
+        var rank = function (k) { return k.kind === 'address' ? 0 : 1; };
+        var order = found.map(function (m, i) { return i; })
+          .filter(function (i) { return kinds[i].kind !== 'drop'; })
+          .sort(function (x, y) { return rank(kinds[x]) - rank(kinds[y]) || x - y; });
+        if (order.length !== found.length || order.some(function (v, i) { return v !== i; })) {
+          var kept = order.map(function (i) { return found[i]; });
           found.length = 0;
-          Array.prototype.push.apply(found, first.concat(rest));
+          Array.prototype.push.apply(found, kept);
           kinds = _szSignKinds(found, lines, words, all);
         }
         found.forEach(function (m, i) { m.signBadge = { kind: kinds[i].kind, text: signLabel(kinds[i]) }; });
         verdictEl.innerHTML = '';
         verdictEl.hidden = !kinds.length;
         if (!kinds.length) return;
-        verdictEl.setAttribute('data-kind', kinds[0].kind);
+        // Green only for an address that is the only one of its words.
+        verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
         var main = document.createElement('strong');
         main.textContent = signLabel(kinds[0]);
         verdictEl.appendChild(main);
@@ -738,8 +799,9 @@ function initSignSearch(map, config) {
     handle(f);
   });
   document.getElementById('ocr-close').addEventListener('click', discard);
-  // A search typed, or a line tapped: its results are not the photo's.
+  // A search typed, a line tapped or the field cleared: what follows is not the photo's.
   input.addEventListener('input', forgetVerdict);
+  document.getElementById('search-clear').addEventListener('click', forgetVerdict);
   // A picked result flies the map there; the photo stays for the way back.
   resultsEl.addEventListener('click', function (ev) {
     if (!sheet.hidden && ev.target && ev.target.closest && ev.target.closest('.search-result')) hide();

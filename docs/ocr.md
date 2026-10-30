@@ -116,29 +116,30 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
 ## What a result is
 
 A photo's results never look surer than they are: someone who cannot read
-the sign cannot check them. The labels compare whole words with the lines
-as read (`_szSignKinds` and `_szSignIsAddress`, 305-ocr-search.js), not the
-search's fuzzy match, which also finds a name that is part of a line or a
-line glued to another. Each result row says what it is, and the photo sheet
-says it of the first one:
+the sign cannot check them. The labels compare whole words, in order, with
+the lines as read (`_szSignKinds`, `_szSignIsAddress`, 305-ocr-search.js),
+not the search's fuzzy match, which also finds a name that is part of a
+line or a line glued to another. A right-to-left line may also match read
+backwards (a recognizer may give its words in visual order). Each result
+row says what it is, and the photo sheet says it of the first one:
 
 | label | when |
 |---|---|
-| Exact address (green, listed first) | an address record whose building number is the plate's (first, as the build names addresses: "366 116") and whose other words are the plate's street (its numbers exactly, its words or address words such as "Road", "طريق"); or one line of the sign word for word ("Schulweg 10") |
-| Street only: no address N found | a street whose name is one line of the sign, word for word, on an address plate (a number-only line beside a numbered street) whose address was not found. Not found, not "not in the map": the search may miss an address written another way. Most of Bahrain has no building addresses in any open data |
-| Street only, not the address | the same, when the plate's address is among the results |
+| Exact address (green, first) | an address whose building number (first, as the build names addresses: "366 116", "23號 忠孝東路三段", "10 Schulweg, Husum") is a number line of the sign ("366", "12a", "23號") and whose rest is another line that is a street of the map, word for word, street words ("Road", "طريق") aside; or one line holding the street and the number in order, either way round, with a name in the street part ("Schulweg 10", "三和路四段20巷101號"; not "1225 Road 1029", which reads either way). Any other address is not listed |
+| Street only: no address N found | a street whose name is one line of the sign, when the sign has a building number beside a numbered street ("366" over "Road 116") or with 號, and that address was not found. Found, not "in the map": an address written another way may be missed. Most of Bahrain has no building addresses in any open data |
+| Street only, not the address | the same street when its address was found, or when the sign has a number line that may not be a building (a speed limit beside "Königstraße") |
 | Area, not an exact spot | a town, district or other area whose name is one line of the sign |
-| Same name as on the sign | anything else whose name is one line of the sign (a shop, a station, a street sign's street) |
-| Not an exact match: check the sign | everything else: a name read inexactly, part of a line ("Grand Mosque" on "Al Noor Grand Mosque"), a line glued to another ("Road 1012" from "Road 101" and "2"), an address that is not the plate's ("105 702" for building 702 on Road 105) |
+| Same name as on the sign | anything else whose name (or own-script name, or another language's) is one line of the sign, on a sign with no number line (a street sign, a shop, a station) |
+| Not an exact match: check the sign | everything else: a name read inexactly, part of a line ("Grand Mosque" on "Al Noor Grand Mosque"), a line glued to another ("Road 1012" from "Road 101" and "2"), the line's words in another order |
 
-and, on the sheet, "Other places have this name: the sign doesn't say
-which" when another record of the first one's name (any of its names) is
-more than 150 m away, or 2 km for a street, among every record found
-(two Road 116s 13 km apart in Bahrain, a chain's shops). A line with no
-letters matches no record by itself, an address is listed only when it is
-the plate's, and a number beside an unnumbered street (a speed limit) is no
-building number. The labels belong to the photo: a line tapped (a typed
-search) or a new photo takes them away.
+On the sheet, "Other places have this name: the sign doesn't say which"
+when another record of the first one's name is more than 150 m away (2 km
+for a street) among every record found; for an address, the same address
+before its place ("10 Schulweg" in 692 German towns). The sheet is green
+only for an exact address that is the only one. A line with no letters
+matches no record by itself, and an address is weighed only when its first
+number is on the sign. The labels belong to the photo: a line tapped, the
+field cleared, a new photo or a later search takes them away.
 
 ## Choosing the models
 

@@ -325,7 +325,10 @@ ok('the old places.html prefixesFor keys are unchanged for a rule-1 ZIM', () => 
 ok('no viewer splits a query into words except through SEARCH_SHARDS.words', () => {
   for (const f of [...VIEWERS, 'web/drive/viewer/index.html', 'web/drive/viewer/places.html']) {
     const h = html(f);
-    const outside = h.replace(blockOf(f), '');
+    // _szSignWords (the sign reader's labels, 300-search.js) compares a
+    // photo's lines with names word for word, numbers and one-letter words
+    // kept; it makes no index key, so it is not the writer's rule.
+    const outside = h.replace(blockOf(f), '').replace("out.replace(/(\\p{Nd}+)/gu, ' $1 ').split(/[^\\p{L}\\p{M}\\p{N}]+/u)", '');
     assert.ok(!/split\(\/\[\^\\p\{L\}/.test(outside), `${f} splits words outside SEARCH_SHARDS`);
     assert.strictEqual(blockOf(f), BLOCK, `${f}: search-shards block differs`);
   }
