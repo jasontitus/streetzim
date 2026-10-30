@@ -577,6 +577,13 @@ REGIONS = [
         "description": "Taipei &mdash; Taipei City and the heart of New Taipei: Ximending, Zhongshan, Xinyi and Taipei 101, Beitou, Tamsui, Banqiao, Xindian and Yangmingshan; search a street sign or shop name with a photo.",
     },
     {
+        "id": "osaka",
+        "tier": "local",
+        "title": "Osaka",
+        "zim_file": "osm-osaka.zim",
+        "description": "Osaka &mdash; central Osaka: Umeda, Namba and Dotonbori, Shinsaibashi, Tennoji, Osaka Castle, Shin-Osaka and the bay; search a street sign or shop name with a photo.",
+    },
+    {
         "id": "washington-dc",
         "tier": "local",
         "title": "Washington, D.C.",
