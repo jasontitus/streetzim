@@ -136,8 +136,9 @@ On the sheet, "Other places have this name: the sign doesn't say which"
 when another record of the first one's name is more than 150 m away (2 km
 for a street) among every record found; for an address, the same address
 before its place ("10 Schulweg" in 692 German towns). The sheet is green
-only for an exact address that is the only one, and says where its first
-result is (its town or locality), for a photo of a place elsewhere. A line with no letters
+only for an exact address that is the only one, and, on a line of its own,
+where its first result is (its town or locality: 📍 Manama), unless other
+places share its name (each row then says where it is). A line with no letters
 matches no record by itself, and an address is weighed only when its first
 number is on the sign. The labels belong to the photo: a line tapped, the
 field cleared, a new photo or a later search takes them away.

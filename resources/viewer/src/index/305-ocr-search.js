@@ -923,11 +923,19 @@ function initSignSearch(map, config) {
         var main = document.createElement('strong');
         main.textContent = signLabel(kinds[0]);
         verdictEl.appendChild(main);
-        // Where it is: a photo of a hotel key or a poster is of a place
-        // anywhere, and its town tells whether it can be the one.
+        // Where it is, on a line of its own: a photo of a hotel key or a
+        // poster is of a place anywhere, and its town tells whether it can be
+        // the one. Not when other places share the name: each row says where
+        // it is, and one town here would read as the answer.
         var it0 = found[0] && found[0].item, comma = it0 ? String(it0.n || '').indexOf(',') : -1;
         var where = it0 && (it0.l || (it0.t === 'addr' && comma >= 0 ? String(it0.n).slice(comma + 1).trim() : ''));
-        if (where) verdictEl.appendChild(document.createTextNode(' \u00b7 ' + where));
+        if (where && !kinds[0].several) {
+          verdictEl.appendChild(document.createTextNode(' '));
+          var at = document.createElement('span');
+          at.className = 'ocr-verdict-where';
+          at.textContent = '\ud83d\udccd ' + where;
+          verdictEl.appendChild(at);
+        }
 
         if (kinds[0].several) {
           verdictEl.appendChild(document.createTextNode(' '));
