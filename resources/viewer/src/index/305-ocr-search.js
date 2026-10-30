@@ -263,7 +263,7 @@ function _szSignStreetIs(rest, line, plate) {
 //              be the building's (a "30" under "Schulweg"): listed, to check;
 //   'drop'     anything else: not listed.
 // With `streets` null (while the search runs): whether it may be, cheaply.
-function _szSignAddressKind(rec, plate, words, streets, places) {
+function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   if (!rec || rec.t !== 'addr') return 'drop';
   var p = _szSignAddressParts(rec, plate, words);
   if (!p) return 'drop';
@@ -271,7 +271,7 @@ function _szSignAddressKind(rec, plate, words, streets, places) {
   var one = named && plate.lines.filter(function (L) {
     return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
   })[0];
-  if (one) return _szSignTownOk(rec, plate, words, [one], places) ? 'address' : 'similar';
+  if (one) return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
@@ -286,48 +286,76 @@ function _szSignAddressKind(rec, plate, words, streets, places) {
   var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
   if (!plate.claim) return 'similar';
-  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places) ? 'address' : 'similar';
+  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places, pois) ? 'address' : 'similar';
 }
-// Whether the sign's other lines leave the address's town possible. Each
-// line besides the address's own (3 letters or more: not a screw read as
-// "a"; not a block, flat or floor) is
-//   consistent  when it holds the address's town (the first part after its
+// Whether the sign's other lines allow the address's town. Each line
+// besides the address's own (3 letters or more: not a screw read as "a";
+// not a block, flat or floor; not a phone, web or mail line) is
+//   confirming  when it holds the address's town (the first part after its
 //               comma; 臺 and 台 alike, Chinese and Japanese by containment:
 //               "臺北市大安區" holds 台北市), or names an area of the map
-//               (`places`) that contains the address (中山區 in 台北市);
-//   a conflict  when it names an area of the map that does not ("20095
-//               Hamburg" against the Schulweg 10 of Husum), or reads as a
-//               town the map does not have (a postcode line, a name ending
-//               in 市, 區, 縣...: 台中市 on a key card);
-//   neutral     otherwise (a hotel's name, a watermark, "Kingdom of Bahrain").
-// One conflict and the address is only to check.
+//               (`places`, also within the line: "Kingdom of Bahrain") that
+//               holds the address: inside its box, or near
+//               its point for a town without one (1 to 8 km by its size; a
+//               box when it has both);
+//   a conflict  when it names an area of the map that does not ("San Jose"
+//               against Campbell, "20095 Hamburg" against Husum), has a
+//               postcode, or is a short name ending in 市, 區, 縣... (台中市);
+//   neutral     when it names a place of the map (`pois`: a hotel's name);
+//   unknown     otherwise ("Denver", a slogan).
+// A conflict, or unknown lines and none confirming (a card from a city the
+// map does not have, whether or not the address names its town), and the
+// address is only to check.
 var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
 var SZ_SIGN_TOWN_END = /[市縣县區区町村郡省鎮镇鄉乡]$/;
-function _szSignTownOk(rec, plate, words, used, places) {
+var SZ_SIGN_CONTACT = /@|www\.|https?:|\.(com|net|org|co)\b|\b(tel|fax|phone|mobile)\b|☎/i;
+var SZ_SIGN_PLACE_KM = { city: 8, town: 4, village: 2, suburb: 2, hamlet: 1, neighbourhood: 1, quarter: 1 };
+function _szSignTownOk(rec, plate, words, used, places, pois) {
   var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
   var han = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
   var fold = function (t) { return t.replace(/臺/g, '台'); };
   var n = String(rec.n || ''), parts = n.split(',');
   var townWs = parts.length > 1 ? words(parts[1]).filter(function (w) { return !_szSignIsNum(w); }) : [];
   var town = fold(townWs.join(' ')), townC = town.replace(/ /g, '');
-  var inside = function (p) {
+  var holds = function (p) {
     if (p.bb) return rec.o >= p.bb[0] && rec.o <= p.bb[2] && rec.a >= p.bb[1] && rec.a <= p.bb[3];
     var dy = (p.a - rec.a) * 111.2, dx = (p.o - rec.o) * 111.2 * Math.cos(rec.a * Math.PI / 180);
-    return Math.sqrt(dx * dx + dy * dy) <= 15;
+    return Math.sqrt(dx * dx + dy * dy) <= (SZ_SIGN_PLACE_KM[p.s] || 2);
   };
-  return !plate.lines.some(function (L) {
-    if (used.indexOf(L) >= 0) return false;
+  var confirmed = false, unknown = false;
+  var conflict = plate.lines.some(function (L, i) {
+    if (used.indexOf(L) >= 0 || SZ_SIGN_CONTACT.test(String(plate.texts[i] || ''))) return false;
     var named = L.filter(function (w) {
       return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
     });
     if (Array.from(named.join('')).length < 3) return false;          // nothing to read in it
     var txt = fold(named.join(' ')), txtC = txt.replace(/ /g, '');
-    if (town && ((' ' + txt + ' ').indexOf(' ' + town + ' ') >= 0 || han.test(townC) && txtC.indexOf(townC) >= 0)) return false;
-    var area = (places || []).filter(function (p) { return p.keys.indexOf(txt) >= 0 || han.test(txtC) && p.keys.indexOf(txtC) >= 0; });
-    if (area.length) return !area.some(inside);
-    var postcode = L.some(function (w) { return /^\d{4,6}$/.test(w); });
-    return postcode || SZ_SIGN_TOWN_END.test(named[named.length - 1]);
+    if (town && ((' ' + txt + ' ').indexOf(' ' + town + ' ') >= 0 || han.test(townC) && txtC.indexOf(townC) >= 0)) {
+      confirmed = true;
+      return false;
+    }
+    // an area named by the line, or within it ("Kingdom of Bahrain")
+    var area = (places || []).filter(function (p) {
+      return p.keys.some(function (k) {
+        return k && ((' ' + txt + ' ').indexOf(' ' + k + ' ') >= 0 || han.test(k) && txtC.indexOf(k) >= 0);
+      });
+    });
+    if (area.length) {
+      // by its box; else by its point if it is a settlement (a country or a
+      // region known by a point alone is too big to say either way)
+      var boxed = area.filter(function (p) { return p.bb; });
+      var judged = boxed.length ? boxed : area.filter(function (p) { return SZ_SIGN_PLACE_KM[p.s]; });
+      if (!judged.length) return false;
+      if (judged.some(holds)) { confirmed = true; return false; }
+      return true;
+    }
+    if (L.some(function (w) { return /^\d{4,6}$/.test(w); })) return true;              // a postcode line
+    if (SZ_SIGN_TOWN_END.test(txtC) && Array.from(txtC).length <= 3) return true;   // 台中市, 中山區
+    if ((pois || []).some(function (k) { return k === txt || k === txtC; })) return false;
+    unknown = true;
+    return false;
   });
+  return !conflict && (confirmed || !unknown);
 }
 // The map's areas among the records found, for _szSignTownOk: their names
 // as folded words (臺 as 台) and their box or point.
@@ -338,8 +366,21 @@ function _szSignPlaces(records, words) {
       var k = words(nm).join(' ').replace(/臺/g, '台');
       keys.push(k, k.replace(/ /g, ''));
     });
-    return { keys: keys, bb: Array.isArray(it.bb) && it.bb.length === 4 ? it.bb : null, a: it.a, o: it.o };
+    return { keys: keys, bb: Array.isArray(it.bb) && it.bb.length === 4 ? it.bb : null, a: it.a, o: it.o, s: it.s };
   });
+}
+// The map's other places among the records found (a hotel, a shop), their
+// names as folded words: a line naming one is not a town.
+function _szSignPois(records, words) {
+  var keys = [];
+  records.forEach(function (it) {
+    if (!it || it.t !== 'poi') return;
+    _szSignNames(it).forEach(function (nm) {
+      var k = words(nm).join(' ').replace(/臺/g, '台');
+      keys.push(k, k.replace(/ /g, ''));
+    });
+  });
+  return keys;
 }
 // Whether an address may be the sign's, before its words are taken (a big
 // map's leaves hold millions, Germany's "10" ones 1.8 million): before its
@@ -430,6 +471,7 @@ function _szSignKinds(matches, lines, words, all) {
   var plate = _szSignPlate(lines, words);
   var records = all || matches.map(function (m) { return m.item; });
   var streets = _szSignStreets(plate, words, records), places = _szSignPlaces(records, words);
+  var pois = _szSignPois(records, words);
   // A town on a direction sign may carry its distance ("Ely 12", "Ulm 35 km").
   var units = [].concat.apply([], ['km', 'mi', 'm', 'كم', 'км', '公里'].map(words));
   var lineOf = function (it) {
@@ -444,7 +486,7 @@ function _szSignKinds(matches, lines, words, all) {
       });
     });
   };
-  var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets, places) : ''; });
+  var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets, places, pois) : ''; });
   var found = addrKind.indexOf('address') >= 0;
   var out = matches.map(function (m, i) {
     var t = m.item.t;
@@ -467,7 +509,7 @@ function _szSignKinds(matches, lines, words, all) {
     var topKeys = key(top);
     first.several = records.some(function (it) {
       if (!it || it === top || (it.t === 'addr') !== (top.t === 'addr')) return false;
-      if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets, places) === 'drop') return false;
+      if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets, places, pois) === 'drop') return false;
       if (!key(it).some(function (k) { return topKeys.indexOf(k) >= 0; })) return false;
       var dlng = it.o - top.o;
       dlng -= 360 * Math.round(dlng / 360);
@@ -846,7 +888,8 @@ function initSignSearch(map, config) {
       // ones it confirms (its town too) come first.
       prune: function (records, words) {
         var p = plateOf(words), streets = _szSignStreets(p, words, records), places = _szSignPlaces(records, words);
-        var kind = function (r) { return r.t === 'addr' ? _szSignAddressKind(r, p, words, streets, places) : ''; };
+        var pois = _szSignPois(records, words);
+        var kind = function (r) { return r.t === 'addr' ? _szSignAddressKind(r, p, words, streets, places, pois) : ''; };
         var kept = records.map(function (r) { return { r: r, k: kind(r) }; }).filter(function (x) { return x.k !== 'drop'; });
         return kept.filter(function (x) { return x.k === 'address'; }).concat(kept.filter(function (x) { return x.k !== 'address'; }))
           .map(function (x) { return x.r; });

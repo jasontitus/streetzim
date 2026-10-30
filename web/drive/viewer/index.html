@@ -4328,7 +4328,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '6521c35e';
+var SZ_VIEWER_BUILD = 'ea7a573d';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8149,7 +8149,7 @@ if (_szSignSameLine(line, rest)) return true;
 var bare = line.filter(function (w) { return !plate.isType(w); });
 return bare.length > 0 && _szSignSameLine(bare, rest);
 }
-function _szSignAddressKind(rec, plate, words, streets, places) {
+function _szSignAddressKind(rec, plate, words, streets, places, pois) {
 if (!rec || rec.t !== 'addr') return 'drop';
 var p = _szSignAddressParts(rec, plate, words);
 if (!p) return 'drop';
@@ -8157,7 +8157,7 @@ var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(
 var one = named && plate.lines.filter(function (L) {
 return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
 })[0];
-if (one) return _szSignTownOk(rec, plate, words, [one], places) ? 'address' : 'similar';
+if (one) return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
 if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
 var cands = [];
 (streets || plate.lines).forEach(function (S) {
@@ -8170,35 +8170,55 @@ cands.push({ ws: S.concat(next), used: [S, next] });
 var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
 if (!on) return 'drop';
 if (!plate.claim) return 'similar';
-return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places) ? 'address' : 'similar';
+return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places, pois) ? 'address' : 'similar';
 }
 var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
 var SZ_SIGN_TOWN_END = /[市縣县區区町村郡省鎮镇鄉乡]$/;
-function _szSignTownOk(rec, plate, words, used, places) {
+var SZ_SIGN_CONTACT = /@|www\.|https?:|\.(com|net|org|co)\b|\b(tel|fax|phone|mobile)\b|☎/i;
+var SZ_SIGN_PLACE_KM = { city: 8, town: 4, village: 2, suburb: 2, hamlet: 1, neighbourhood: 1, quarter: 1 };
+function _szSignTownOk(rec, plate, words, used, places, pois) {
 var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
 var han = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 var fold = function (t) { return t.replace(/臺/g, '台'); };
 var n = String(rec.n || ''), parts = n.split(',');
 var townWs = parts.length > 1 ? words(parts[1]).filter(function (w) { return !_szSignIsNum(w); }) : [];
 var town = fold(townWs.join(' ')), townC = town.replace(/ /g, '');
-var inside = function (p) {
+var holds = function (p) {
 if (p.bb) return rec.o >= p.bb[0] && rec.o <= p.bb[2] && rec.a >= p.bb[1] && rec.a <= p.bb[3];
 var dy = (p.a - rec.a) * 111.2, dx = (p.o - rec.o) * 111.2 * Math.cos(rec.a * Math.PI / 180);
-return Math.sqrt(dx * dx + dy * dy) <= 15;
+return Math.sqrt(dx * dx + dy * dy) <= (SZ_SIGN_PLACE_KM[p.s] || 2);
 };
-return !plate.lines.some(function (L) {
-if (used.indexOf(L) >= 0) return false;
+var confirmed = false, unknown = false;
+var conflict = plate.lines.some(function (L, i) {
+if (used.indexOf(L) >= 0 || SZ_SIGN_CONTACT.test(String(plate.texts[i] || ''))) return false;
 var named = L.filter(function (w) {
 return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
 });
 if (Array.from(named.join('')).length < 3) return false;          // nothing to read in it
 var txt = fold(named.join(' ')), txtC = txt.replace(/ /g, '');
-if (town && ((' ' + txt + ' ').indexOf(' ' + town + ' ') >= 0 || han.test(townC) && txtC.indexOf(townC) >= 0)) return false;
-var area = (places || []).filter(function (p) { return p.keys.indexOf(txt) >= 0 || han.test(txtC) && p.keys.indexOf(txtC) >= 0; });
-if (area.length) return !area.some(inside);
-var postcode = L.some(function (w) { return /^\d{4,6}$/.test(w); });
-return postcode || SZ_SIGN_TOWN_END.test(named[named.length - 1]);
+if (town && ((' ' + txt + ' ').indexOf(' ' + town + ' ') >= 0 || han.test(townC) && txtC.indexOf(townC) >= 0)) {
+confirmed = true;
+return false;
+}
+var area = (places || []).filter(function (p) {
+return p.keys.some(function (k) {
+return k && ((' ' + txt + ' ').indexOf(' ' + k + ' ') >= 0 || han.test(k) && txtC.indexOf(k) >= 0);
 });
+});
+if (area.length) {
+var boxed = area.filter(function (p) { return p.bb; });
+var judged = boxed.length ? boxed : area.filter(function (p) { return SZ_SIGN_PLACE_KM[p.s]; });
+if (!judged.length) return false;
+if (judged.some(holds)) { confirmed = true; return false; }
+return true;
+}
+if (L.some(function (w) { return /^\d{4,6}$/.test(w); })) return true;              // a postcode line
+if (SZ_SIGN_TOWN_END.test(txtC) && Array.from(txtC).length <= 3) return true;   // 台中市, 中山區
+if ((pois || []).some(function (k) { return k === txt || k === txtC; })) return false;
+unknown = true;
+return false;
+});
+return !conflict && (confirmed || !unknown);
 }
 function _szSignPlaces(records, words) {
 return records.filter(function (it) { return it && (it.t === 'place' || it.t === 'admin'); }).map(function (it) {
@@ -8207,8 +8227,19 @@ _szSignNames(it).forEach(function (nm) {
 var k = words(nm).join(' ').replace(/臺/g, '台');
 keys.push(k, k.replace(/ /g, ''));
 });
-return { keys: keys, bb: Array.isArray(it.bb) && it.bb.length === 4 ? it.bb : null, a: it.a, o: it.o };
+return { keys: keys, bb: Array.isArray(it.bb) && it.bb.length === 4 ? it.bb : null, a: it.a, o: it.o, s: it.s };
 });
+}
+function _szSignPois(records, words) {
+var keys = [];
+records.forEach(function (it) {
+if (!it || it.t !== 'poi') return;
+_szSignNames(it).forEach(function (nm) {
+var k = words(nm).join(' ').replace(/臺/g, '台');
+keys.push(k, k.replace(/ /g, ''));
+});
+});
+return keys;
 }
 function _szSignAsciiDigits(d) {
 if (/^[0-9]+$/.test(d)) return d;
@@ -8270,6 +8301,7 @@ function _szSignKinds(matches, lines, words, all) {
 var plate = _szSignPlate(lines, words);
 var records = all || matches.map(function (m) { return m.item; });
 var streets = _szSignStreets(plate, words, records), places = _szSignPlaces(records, words);
+var pois = _szSignPois(records, words);
 var units = [].concat.apply([], ['km', 'mi', 'm', 'كم', 'км', '公里'].map(words));
 var lineOf = function (it) {
 var area = it.t === 'place' || it.t === 'admin';
@@ -8283,7 +8315,7 @@ return area && bare.length < L.length && _szSignSameLine(bare, ws);
 });
 });
 };
-var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets, places) : ''; });
+var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets, places, pois) : ''; });
 var found = addrKind.indexOf('address') >= 0;
 var out = matches.map(function (m, i) {
 var t = m.item.t;
@@ -8306,7 +8338,7 @@ return _szSignNames(it).map(function (n) { return words(n).join(' '); });
 var topKeys = key(top);
 first.several = records.some(function (it) {
 if (!it || it === top || (it.t === 'addr') !== (top.t === 'addr')) return false;
-if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets, places) === 'drop') return false;
+if (top.t === 'addr' && _szSignAddressKind(it, plate, words, streets, places, pois) === 'drop') return false;
 if (!key(it).some(function (k) { return topKeys.indexOf(k) >= 0; })) return false;
 var dlng = it.o - top.o;
 dlng -= 360 * Math.round(dlng / 360);
@@ -8608,7 +8640,8 @@ return _szSignMayBeAddress(rec, p, words) && _szSignAddressKind(rec, p, words, n
 },
 prune: function (records, words) {
 var p = plateOf(words), streets = _szSignStreets(p, words, records), places = _szSignPlaces(records, words);
-var kind = function (r) { return r.t === 'addr' ? _szSignAddressKind(r, p, words, streets, places) : ''; };
+var pois = _szSignPois(records, words);
+var kind = function (r) { return r.t === 'addr' ? _szSignAddressKind(r, p, words, streets, places, pois) : ''; };
 var kept = records.map(function (r) { return { r: r, k: kind(r) }; }).filter(function (x) { return x.k !== 'drop'; });
 return kept.filter(function (x) { return x.k === 'address'; }).concat(kept.filter(function (x) { return x.k !== 'address'; }))
 .map(function (x) { return x.r; });

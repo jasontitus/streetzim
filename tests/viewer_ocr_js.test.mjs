@@ -163,11 +163,19 @@ ok('a card naming another town is not the address of that town\'s namesake', () 
   // a plate with only its block besides: no town asked
   const b = stack([['366', 100], ['Road 116', 60], ['Block 304', 40]]);
   assert.strictEqual(kinds([addr('366 116')], b, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'address');
-  // a shop's name, a watermark, a screw read as "a": neutral
-  for (const extra of ['Pharmacy', 'alamy', 'a', 'Kingdom of Bahrain']) {
+  // a screw read as "a", a shop of the map: nothing; the country holding it: confirms
+  const bahrain = { n: 'Bahrain', t: 'admin', s: 'country', a: 26.0, o: 50.55, bb: [50.3, 25.5, 50.9, 26.4] };
+  const pharmacy = { n: 'Pharmacy', t: 'poi', a: 26.2, o: 50.5 };
+  for (const extra of ['a', 'Pharmacy', 'Kingdom of Bahrain']) {
     const lines = stack([['366', 100], ['Road 116', 60], [extra, 30]]);
-    assert.strictEqual(kinds([addr('366 116')], lines, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'address', extra);
+    assert.strictEqual(kinds([addr('366 116')], lines, [addr('366 116'), road116(26.2, 50.5), bahrain, pharmacy])[0].kind, 'address', extra);
   }
+  // a country known by its point alone says nothing either way
+  const bahrainPoint = { n: 'Bahrain', t: 'admin', s: 'country', a: 26.0, o: 50.55 };
+  assert.strictEqual(kinds([addr('366 116')], stack([['366', 100], ['Road 116', 60], ['Kingdom of Bahrain', 30]]),
+    [addr('366 116'), road116(26.2, 50.5), bahrainPoint])[0].kind, 'address');
+  // a line the map knows nothing of (a city it does not have, a stock photo's watermark): to check
+  assert.strictEqual(kinds([addr('366 116')], stack([['366', 100], ['Road 116', 60], ['Denver', 30]]), [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'similar');
   // an area of the map named on the sign: consistent when it holds the address, a conflict when not
   const manama = { n: 'Manama', t: 'admin', a: 26.22, o: 50.58, bb: [50.5, 26.15, 50.65, 26.27] };
   const riffa = { n: 'Riffa', t: 'admin', a: 26.12, o: 50.55, bb: [50.5, 26.05, 50.6, 26.15] };
@@ -188,6 +196,25 @@ ok('a card naming another town is not the address of that town\'s namesake', () 
   assert.strictEqual(kinds([village], [{ text: '忠孝東路三段', size: 1 }, { text: '100號', size: 2 }, { text: '大安區', size: 1 }], [village, st, daan])[0].kind, 'address');
   // a card whose own postcode line names another town, even with the record's town in a hotel's name
   assert.strictEqual(kinds([addr('10 Schulweg, Husum')], [{ text: 'Hotel Husum' }, { text: 'Schulweg 10' }, { text: '20095 Hamburg' }])[0].kind, 'similar');
+  // a card from a town the map does not have, or a town near but not it: to check
+  const sv = (extra, recs = []) => kinds([addr('1121 Abbott Ave, Campbell', 37.28, -121.95)],
+    stacked('1121', 'Abbott Avenue').concat([{ text: extra, size: 30, box: { x: 90, y: 300, width: 320, height: 30 } }]),
+    [street('Abbott Avenue'), addr('1121 Abbott Ave, Campbell', 37.28, -121.95), ...recs])[0].kind;
+  const sanJose = { n: 'San Jose', t: 'admin', s: 'city', a: 37.3382, o: -121.8863 };   // a point, 8.6 km away
+  const campbell = { n: 'Campbell', t: 'admin', s: 'city', a: 37.2872, o: -121.9500, bb: [-121.99, 37.26, -121.92, 37.30] };
+  assert.strictEqual(sv('Denver'), 'similar');
+  assert.strictEqual(sv('Denver, Colorado'), 'similar');
+  assert.strictEqual(sv('San Jose', [sanJose]), 'similar');
+  assert.strictEqual(sv('Campbell', [campbell]), 'address');
+  assert.strictEqual(sv('Campbell, CA 95008', [campbell]), 'address');
+  assert.strictEqual(sv('Tel 408 555 0100'), 'address');                       // a phone line says nothing of the town
+  assert.strictEqual(sv('Hotel Abbott', [{ n: 'Hotel Abbott', t: 'poi', a: 37.28, o: -121.95 }]), 'address');   // a place of the map
+  // Bahrain: a town by its point, near or not (its addresses name no town)
+  const isa = { n: 'Isa Town', t: 'place', s: 'town', a: 26.1736, o: 50.5478 };
+  const bh = (lat, lon) => kinds([addr('105 702', lat, lon)], stack([['105', 100], ['Road 702', 60], ['Isa Town', 40]]),
+    [addr('105 702', lat, lon), street('Road 702'), isa])[0].kind;
+  assert.strictEqual(bh(26.1736, 50.6500), 'similar');   // 10 km away
+  assert.strictEqual(bh(26.1750, 50.5500), 'address');   // in Isa Town
   // a town of two parts: its first
   assert.strictEqual(kinds([addr('10 Schulweg, Duderstadt, Stadt')], [{ text: 'Schulweg 10' }, { text: '37115 Duderstadt' }])[0].kind, 'address');
 });
