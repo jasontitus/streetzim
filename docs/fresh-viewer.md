@@ -65,7 +65,8 @@ the same map within 5 s does nothing.
 
 ## Rollout
 
-After a viewer change merges: for each live map, `fresh_viewer.py` with the
+After a viewer change merges: `ops/langpack/fresh_all.py --deploy` (each live map,
+the test-photo regions first with `--regions`): for each live map, `fresh_viewer.py` with the
 local copy (every live map has one on the build host), then one site deploy.
 Per map: the MD5 check, the swap's MD5 and comparison, and the index read
 are about four reads of the file (Taipei: 74 s with the gates; all 75 maps,
