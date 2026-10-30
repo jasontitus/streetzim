@@ -1,7 +1,7 @@
 # Runtime dependencies of the builder (create_osm_zim.py and the `streetzim`
 # command). Tests and lint: requirements-dev.txt. The build host's
 # publishing scripts (ops/): requirements-ops.txt.
-libzim>=3.7
+libzim>=3.7,<4        # 4.0 renamed getResults, dropped _get_entry_by_id, reordered add_illustration
 osmium>=3.6
 rasterio>=1.3
 numpy>=1.24
