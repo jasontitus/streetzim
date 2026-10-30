@@ -49,6 +49,14 @@
   #job .phase { font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; }
   #job progress { display: block; margin: 6px 0 2px; }
   details[open] summary { margin-bottom: 8px; }
+  label + select { width: 100%; padding: 8px; }
+  .file { margin: 16px 0 0; }
+  .file p { margin: 2px 0; }
+  .file p.step { font-weight: 600; margin: 8px 0 4px; }
+  .fname { font: 600 .95rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  details#more > summary, details#whatsIn > summary { font-weight: 600; }
+  details#haveBase { margin: 16px 0; }
+  section.small { padding: 8px 16px; font-size: .85rem; }
 </style>
 </head>
 <body>
@@ -60,17 +68,15 @@
   <p id="notice" role="alert"></p>
 
   <section>
-    <label for="region">Region</label>
+    <label for="region">1. Region</label>
     <select id="region"></select>
-    <h2 id="dlHead">Downloads</h2>
-    <ul id="downloads" class="downloads"></ul>
-  </section>
-
-  <section>
-    <label for="lang">Map language</label>
+    <label for="lang">2. Language</label>
     <select id="lang"></select>
-    <p id="total" class="dim"></p>
-    <ul id="packs" class="dim"></ul>
+    <div class="file">
+      <p class="step">3. Download</p>
+      <p id="fileName" class="fname"></p>
+      <p id="fileMeta" class="dim"></p>
+    </div>
     <p id="goHint" class="ok" hidden>Ready: press Download to start.</p>
     <button id="oneclick" class="big" disabled>Download</button>
     <p id="directWhy" class="dim" role="status" hidden></p>
@@ -89,25 +95,36 @@
     <div id="save" hidden></div>
     <p id="milestone" class="sr-only" aria-live="polite"></p>
     <div id="after" hidden>
-      <p class="dim">Open the new file in Kiwix, or in the <a href="/drive/">StreetZim web app</a>.</p>
+      <p class="dim">Open the new file in Kiwix, or in the <a href="/drive/">StreetZim web app</a>. The map's About shows its viewer code: the same as in the file's name.</p>
     </div>
-  </section>
-
-  <section>
-    <details id="haveBase">
-      <summary id="haveBaseSummary">Already have the map? Use it and download only Wikipedia</summary>
-      <p id="baseInfo" class="dim"></p>
-      <label for="baseFile">Your copy of the map file</label>
-      <input id="baseFile" type="file" accept=".zim">
-      <p id="baseCheck" role="status" aria-live="polite"></p>
-      <p id="baseProgress" class="dim"></p>
-      <button id="go" disabled>Build from my copy and save</button>
+    <details id="whatsIn">
+      <summary>What's in it</summary>
+      <p id="total" class="dim"></p>
+      <ul id="packs" class="dim"></ul>
     </details>
   </section>
 
   <section>
-    <button id="probe" class="secondary">Test my download speed</button>
-    <p id="probeOut" class="dim"></p>
+    <details id="more">
+      <summary>More ways to download</summary>
+      <h2 id="dlHead">Every language</h2>
+      <p class="dim">Each as a direct download, a torrent, or a preview in this browser.</p>
+      <ul id="downloads" class="downloads"></ul>
+      <details id="haveBase">
+        <summary id="haveBaseSummary">Already have the map? Use it and download only Wikipedia</summary>
+        <p id="baseInfo" class="dim"></p>
+        <label for="baseFile">Your copy of the map file</label>
+        <input id="baseFile" type="file" accept=".zim">
+        <p id="baseCheck" role="status" aria-live="polite"></p>
+        <p id="baseProgress" class="dim"></p>
+        <button id="go" disabled>Build from my copy and save</button>
+      </details>
+      <p><button id="probe" class="secondary">Test my download speed</button></p>
+      <p id="probeOut" class="dim"></p>
+    </details>
+  </section>
+
+  <section class="small">
     <p id="trackNote" class="dim"></p>
     <label class="check dim" id="noReportsLabel"><input type="checkbox" id="noReports"> Don't send speed reports</label>
   </section>
@@ -115,6 +132,6 @@
 <script src="/drive/preview-config.js"></script>
 <script src="build-config.js"></script>
 <script src="fetcher.js?v=4"></script>
-<script src="builder.js?v=5"></script>
+<script src="builder.js?v=6"></script>
 </body>
 </html>

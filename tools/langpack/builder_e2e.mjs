@@ -358,6 +358,7 @@ async function runOne(L) {
     });
   };
   if (MODE === 'file') {
+    await pg.evaluate(() => { const m = document.getElementById('more'); if (m) m.open = true; });   // "More ways"
     await pg.click('#haveBaseSummary');      // "Already have the map?" opens the file step
     await pg.setInputFiles('#baseFile', BASE);
     // Build enabled, or the page turned the file (or a pack) down: say so now, not after 30 min
@@ -374,6 +375,7 @@ async function runOne(L) {
     await pg.waitForFunction(() => !document.querySelector('#oneclick').disabled, null, { timeout: 60000 });
     await pg.waitForTimeout(1200);           // the page ignores a key press within 1 s of being ready (not a click; to be safe)
     beforeBuild = snap();
+    if (CLICK === 'list') await pg.evaluate(() => { const m = document.getElementById('more'); if (m) m.open = true; });
     const target = CLICK === 'list' ? `#downloads li > a[href*="lang=${L}&"]` : '#oneclick';
     await pg.click(target);
     if (DOUBLE) { await pg.waitForTimeout(250); await pg.click(target); }

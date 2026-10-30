@@ -347,7 +347,7 @@
     // The language list as a download page: one link per language. A link
     // opens ?region=&lang=&go=1, which starts at once; clicked here it
     // starts in place.
-    $('dlHead').textContent = `${region.title}: downloads`;
+    $('dlHead').textContent = `${region.title}: every language`;
     const dl = $('downloads');
     dl.innerHTML = '';
     for (const m of region.menu) {
@@ -449,6 +449,12 @@
       ? `The same ${region.title} map with its map language set to ${name}.`
       : `The ${region.title} map in ${name}, with Wikipedia in:`;
     $('oneclick').textContent = `Download ${name} ${region.title} (${fmtMB(entry.size)})`;
+    // the file's name says which viewer it carries (recipe2.py: <name>_<date>.v<code>), the
+    // code the map's About shows: what was downloaded can be told apart before it is opened
+    const fname = `${entry.file_name || entry.name}.zim`;
+    const code = (/\.v([0-9a-f]{8})\.zim$/.exec(fname) || [])[1];
+    $('fileName').textContent = fname;
+    $('fileMeta').textContent = `${fmtMB(entry.size)}` + (code ? ` · map viewer ${code} (its About shows the same code)` : '');
     $('directWhy').hidden = true;
     showWay();
     showEstimate();
