@@ -153,6 +153,32 @@ ok('the same address in many towns: every row and the sheet say so; green only f
   assert.deepStrictEqual(k.map((x) => [x.kind, x.several]), [['address', true], ['address', true]]);
   assert.strictEqual(kinds([recs[0]], [{ text: 'Schulweg 10' }], [recs[0]])[0].several, false);
 });
+ok('a card naming another town is not the address of that town\'s namesake', () => {
+  const card = [{ text: 'Hotel Alster' }, { text: 'Schulweg 10' }, { text: '20095 Hamburg' }];
+  assert.strictEqual(kinds([addr('10 Schulweg, Husum')], card)[0].kind, 'similar');
+  assert.strictEqual(kinds([addr('10 Schulweg, Hamburg')], card)[0].kind, 'address');
+  const key = [{ text: '台中市' }, { text: '三和路四段20巷101號' }];
+  assert.strictEqual(kinds([addr('101號 三和路四段20巷, 新北市')], key)[0].kind, 'similar');
+  assert.strictEqual(kinds([addr('101號 三和路四段20巷, 台中市')], key)[0].kind, 'address');
+  // a plate with only its block besides: no town asked
+  const b = stack([['366', 100], ['Road 116', 60], ['Block 304', 40]]);
+  assert.strictEqual(kinds([addr('366 116')], b, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'address');
+  // a plate photo with a shop's name in it, and an address that names no town: to check
+  const shop = stack([['366', 100], ['Road 116', 60], ['Pharmacy', 40]]);
+  assert.strictEqual(kinds([addr('366 116')], shop, [addr('366 116'), road116(26.2, 50.5)])[0].kind, 'similar');
+});
+ok('a number under a long street blade is no house number (a speed roundel)', () => {
+  const pole = [{ text: 'North 13th Street', size: 40, box: { x: 0, y: 0, width: 420, height: 40 } },
+                { text: '30', size: 90, box: { x: 160, y: 75, width: 90, height: 90 } }];
+  assert.strictEqual(plate(pole).claim, '');
+  const plaque = [{ text: '1121', size: 90, box: { x: 40, y: 0, width: 240, height: 90 } },
+                  { text: 'Abbott Drive', size: 40, box: { x: 0, y: 110, width: 320, height: 40 } }];
+  assert.strictEqual(plate(plaque).claim, '1121');
+  // an ordinal street is named, not numbered: "21st Avenue" is not 21 and Street
+  const recs = [street('21st Avenue')];
+  assert.strictEqual(kinds([addr('500 21st Ave')], stacked('500', '21st Avenue'), recs)[0].kind, 'address');
+  assert.strictEqual(kinds([addr('500 21st Street')], stacked('500', '21st Avenue'), recs)[0].kind, 'drop');
+});
 ok('Taipei: the street and its lane on two lines, the 號 under them', () => {
   const st = { n: 'Section 3, Zhongxiao East Road', nn: '忠孝東路三段', t: 'street', a: 25.04, o: 121.55 };
   const a = addr('23號 忠孝東路三段217巷7弄', 25.04, 121.55);
@@ -177,7 +203,10 @@ ok('part of a line, a glued line or a bare number is only similar, never the sig
   assert.deepStrictEqual(kinds([{ n: 'IG', t: 'poi', a: 1, o: 1 }, { n: 'Ightham', t: 'place', a: 1, o: 1 },
     { n: '注意', t: 'poi', a: 1, o: 1 }, { n: 'Broadoak', t: 'place', a: 1, o: 1 }], [{ text: 'IGHTHAM' }, { text: 'BROAD OAK' }]).map((x) => x.kind),
   ['drop', 'area', 'drop', 'similar']);
-  assert.deepStrictEqual(kinds([{ n: 'MBC', t: 'poi', a: 1, o: 1 }], [{ text: 'MBC' }]).map((x) => x.kind), ['drop']);   // even read exactly
+  assert.deepStrictEqual(kinds([{ n: 'KFC', t: 'poi', a: 1, o: 1 }], [{ text: 'KFC' }]).map((x) => x.kind), ['name']);   // read exactly, a shop
+  assert.deepStrictEqual(kinds([{ n: '全家', t: 'poi', a: 1, o: 1 }], [{ text: '全家' }]).map((x) => x.kind), ['name']);
+  // a town with its distance on a direction sign
+  assert.deepStrictEqual(kinds([{ n: 'Ely', t: 'place', a: 1, o: 1 }, { n: 'Ulm', t: 'place', a: 2, o: 2 }], [{ text: 'Ely 12' }, { text: 'Ulm 35 km' }]).map((x) => x.kind), ['area', 'area']);
   assert.deepStrictEqual(kinds([{ n: 'Ely', t: 'place', a: 1, o: 1 }], [{ text: 'ELY' }]).map((x) => x.kind), ['area']);   // a town may be short
 });
 ok('a town is an area; a shop whose name is a line is the name; another language\'s name counts', () => {

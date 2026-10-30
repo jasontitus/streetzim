@@ -180,7 +180,15 @@ function _szSignPlate(lines, words) {
   var types = {};
   Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
   var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX) };
-  plate.norm = function (ws) { return ws.map(function (w) { return types[w] || w; }); };
+  // An ordinal is one word ("13th", "21st": not 21 and a "st" for Street).
+  plate.norm = function (ws) {
+    var out = [];
+    for (var i = 0; i < ws.length; i++) {
+      if (_szSignIsNum(ws[i]) && /^(st|nd|rd|th)$/.test(ws[i + 1] || '')) { out.push(ws[i] + ws[i + 1]); i++; continue; }
+      out.push(types[ws[i]] || ws[i]);
+    }
+    return out;
+  };
   plate.isType = function (w) { return Object.prototype.hasOwnProperty.call(types, w); };
   var building = function (ws) {
     return _szSignIsNum(ws[0] || '') && (ws.length === 1 ||
@@ -199,7 +207,10 @@ function _szSignPlate(lines, words) {
     if (!A || !B) return false;
     var over = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
     var gap = Math.max(A.y, B.y) - Math.min(A.y + A.height, B.y + B.height);
-    if (!(over >= 0.5 * Math.min(A.width, B.width) && gap < 1.5 * Math.max(A.height, B.height))) return false;
+    // Beside a street with no number of its own, the number spans half its
+    // width at least: a speed roundel under a long street blade does not.
+    var span = r.ws.some(_szSignIsNum) ? Math.min(A.width, B.width) : Math.max(A.width, B.width);
+    if (!(over >= 0.5 * span && gap < 1.5 * Math.max(A.height, B.height))) return false;
     var lo = Math.min(A.y + A.height, B.y + B.height), hi = Math.max(A.y, B.y);
     return !rows.some(function (o) {          // nothing between them ("SPEED", "LIMIT")
       var C = o.box;
@@ -254,21 +265,49 @@ function _szSignAddressKind(rec, plate, words, streets) {
   var p = _szSignAddressParts(rec, plate, words);
   if (!p) return 'drop';
   var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); });
-  if (named && plate.lines.some(function (L) {
+  var one = named && plate.lines.filter(function (L) {
     return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
-  })) return 'address';
+  })[0];
+  if (one) return _szSignTownOk(rec, plate, words, [one]) ? 'address' : 'similar';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
   var cands = [];
   (streets || plate.lines).forEach(function (S) {
-    cands.push(S);
+    cands.push({ ws: S, used: [S] });
     var i = plate.lines.indexOf(S), next = plate.lines[i + 1];
-    if (i >= 0 && next && next !== plate.building && !_szSignSame(next, plate.building)) cands.push(S.concat(next));
+    if (i >= 0 && next && next !== plate.building && !_szSignSame(next, plate.building)) {
+      cands.push({ ws: S.concat(next), used: [S, next] });
+    }
   });
-  var on = cands.some(function (S) { return _szSignStreetIs(p.rest, S, plate); });
+  var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
-  return plate.claim ? 'address' : 'similar';
+  if (!plate.claim) return 'similar';
+  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building])) ? 'address' : 'similar';
+}
+// Whether the sign's other lines leave the address's town possible: a card
+// that also says "20095 Hamburg" is not the Schulweg 10 in Husum, nor a key
+// card saying 台中市 the 三和路四段20巷101號 of 新北市. With nothing else on
+// the sign (a house plate; "Block 727" is part of a Bahraini address) the
+// town is not asked; with more, the record's town (after its comma) must be
+// on the sign, and a record that names no town is only to check.
+var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
+function _szSignTownOk(rec, plate, words, used) {
+  var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
+  var extra = plate.lines.filter(function (L) {
+    return used.indexOf(L) < 0 && L.some(function (w) {
+      return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
+    });
+  });
+  if (!extra.length) return true;
+  var n = String(rec.n || ''), comma = n.indexOf(',');
+  var town = comma >= 0 ? words(n.slice(comma + 1)).filter(function (w) { return !_szSignIsNum(w); }) : [];
+  if (!town.length) return false;
+  var key = town.join(' ');
+  return extra.some(function (L) {
+    var ws = L.filter(function (w) { return !_szSignIsNum(w); }).join(' ');
+    return (' ' + ws + ' ').indexOf(' ' + key + ' ') >= 0;
+  });
 }
 // Whether an address may be the sign's, before its words are taken (a big
 // map's leaves hold millions, Germany's "10" ones 1.8 million): before its
@@ -346,7 +385,8 @@ function _szSignTooShort(name, words) {
 //   'name'     likewise anything else (a shop, a station);
 //   'similar'  everything else: read inexactly, part of a line, glued from
 //              two lines ("Road 1012" from "Road 101" and "2"); 'drop' when
-//              its name is too short to mean anything (_szSignTooShort).
+//              its name is too short to mean anything (_szSignTooShort). A
+//              short name read exactly ("KFC", "全家") is the name.
 // `several` on the first, and on every address when the first is one, when
 // another record of its name (`all`, every record found; for an address,
 // the same address before its place) is more than 150 m away, or 2 km for
@@ -358,10 +398,18 @@ function _szSignKinds(matches, lines, words, all) {
   var plate = _szSignPlate(lines, words);
   var records = all || matches.map(function (m) { return m.item; });
   var streets = _szSignStreets(plate, words, records);
+  // A town on a direction sign may carry its distance ("Ely 12", "Ulm 35 km").
+  var units = [].concat.apply([], ['km', 'mi', 'm', 'كم', 'км', '公里'].map(words));
   var lineOf = function (it) {
+    var area = it.t === 'place' || it.t === 'admin';
     return _szSignNames(it).some(function (n) {
       var ws = plate.norm(words(n));
-      return plate.lines.some(function (L) { return L.some(function (w) { return !_szSignIsNum(w); }) && _szSignSameLine(L, ws); });
+      return plate.lines.some(function (L) {
+        if (!L.some(function (w) { return !_szSignIsNum(w); })) return false;
+        if (_szSignSameLine(L, ws)) return true;
+        var bare = L.filter(function (w) { return !_szSignIsNum(w) && units.indexOf(w) < 0; });
+        return area && bare.length < L.length && _szSignSameLine(bare, ws);
+      });
     });
   };
   var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets) : ''; });
@@ -374,8 +422,7 @@ function _szSignKinds(matches, lines, words, all) {
       return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
     }
     if (t === 'place' || t === 'admin') return { kind: 'area' };
-    // A shop or the like of 3 letters or fewer ("Rng") is noise even read exactly.
-    return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'name' };
+    return { kind: 'name' };
   });
   var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
   if (first) {
@@ -798,7 +845,8 @@ function initSignSearch(map, config) {
         verdictEl.appendChild(main);
         // Where it is: a photo of a hotel key or a poster is of a place
         // anywhere, and its town tells whether it can be the one.
-        var where = found[0] && found[0].item && found[0].item.l;
+        var it0 = found[0] && found[0].item, comma = it0 ? String(it0.n || '').indexOf(',') : -1;
+        var where = it0 && (it0.l || (it0.t === 'addr' && comma >= 0 ? String(it0.n).slice(comma + 1).trim() : ''));
         if (where) verdictEl.appendChild(document.createTextNode(' \u00b7 ' + where));
 
         if (kinds[0].several) {

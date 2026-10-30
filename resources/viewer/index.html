@@ -4328,7 +4328,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '078b4ef6';
+var SZ_VIEWER_BUILD = '06727023';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8092,7 +8092,14 @@ var fold = function (list) { return [].concat.apply([], list.map(words)); };
 var types = {};
 Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
 var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX) };
-plate.norm = function (ws) { return ws.map(function (w) { return types[w] || w; }); };
+plate.norm = function (ws) {
+var out = [];
+for (var i = 0; i < ws.length; i++) {
+if (_szSignIsNum(ws[i]) && /^(st|nd|rd|th)$/.test(ws[i + 1] || '')) { out.push(ws[i] + ws[i + 1]); i++; continue; }
+out.push(types[ws[i]] || ws[i]);
+}
+return out;
+};
 plate.isType = function (w) { return Object.prototype.hasOwnProperty.call(types, w); };
 var building = function (ws) {
 return _szSignIsNum(ws[0] || '') && (ws.length === 1 ||
@@ -8111,7 +8118,8 @@ var A = top && top.box, B = r.box;
 if (!A || !B) return false;
 var over = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
 var gap = Math.max(A.y, B.y) - Math.min(A.y + A.height, B.y + B.height);
-if (!(over >= 0.5 * Math.min(A.width, B.width) && gap < 1.5 * Math.max(A.height, B.height))) return false;
+var span = r.ws.some(_szSignIsNum) ? Math.min(A.width, B.width) : Math.max(A.width, B.width);
+if (!(over >= 0.5 * span && gap < 1.5 * Math.max(A.height, B.height))) return false;
 var lo = Math.min(A.y + A.height, B.y + B.height), hi = Math.max(A.y, B.y);
 return !rows.some(function (o) {          // nothing between them ("SPEED", "LIMIT")
 var C = o.box;
@@ -8145,19 +8153,41 @@ if (!rec || rec.t !== 'addr') return 'drop';
 var p = _szSignAddressParts(rec, plate, words);
 if (!p) return 'drop';
 var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); });
-if (named && plate.lines.some(function (L) {
+var one = named && plate.lines.filter(function (L) {
 return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
-})) return 'address';
+})[0];
+if (one) return _szSignTownOk(rec, plate, words, [one]) ? 'address' : 'similar';
 if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
 var cands = [];
 (streets || plate.lines).forEach(function (S) {
-cands.push(S);
+cands.push({ ws: S, used: [S] });
 var i = plate.lines.indexOf(S), next = plate.lines[i + 1];
-if (i >= 0 && next && next !== plate.building && !_szSignSame(next, plate.building)) cands.push(S.concat(next));
+if (i >= 0 && next && next !== plate.building && !_szSignSame(next, plate.building)) {
+cands.push({ ws: S.concat(next), used: [S, next] });
+}
 });
-var on = cands.some(function (S) { return _szSignStreetIs(p.rest, S, plate); });
+var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
 if (!on) return 'drop';
-return plate.claim ? 'address' : 'similar';
+if (!plate.claim) return 'similar';
+return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building])) ? 'address' : 'similar';
+}
+var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
+function _szSignTownOk(rec, plate, words, used) {
+var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
+var extra = plate.lines.filter(function (L) {
+return used.indexOf(L) < 0 && L.some(function (w) {
+return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
+});
+});
+if (!extra.length) return true;
+var n = String(rec.n || ''), comma = n.indexOf(',');
+var town = comma >= 0 ? words(n.slice(comma + 1)).filter(function (w) { return !_szSignIsNum(w); }) : [];
+if (!town.length) return false;
+var key = town.join(' ');
+return extra.some(function (L) {
+var ws = L.filter(function (w) { return !_szSignIsNum(w); }).join(' ');
+return (' ' + ws + ' ').indexOf(' ' + key + ' ') >= 0;
+});
 }
 function _szSignAsciiDigits(d) {
 if (/^[0-9]+$/.test(d)) return d;
@@ -8219,10 +8249,17 @@ function _szSignKinds(matches, lines, words, all) {
 var plate = _szSignPlate(lines, words);
 var records = all || matches.map(function (m) { return m.item; });
 var streets = _szSignStreets(plate, words, records);
+var units = [].concat.apply([], ['km', 'mi', 'm', 'كم', 'км', '公里'].map(words));
 var lineOf = function (it) {
+var area = it.t === 'place' || it.t === 'admin';
 return _szSignNames(it).some(function (n) {
 var ws = plate.norm(words(n));
-return plate.lines.some(function (L) { return L.some(function (w) { return !_szSignIsNum(w); }) && _szSignSameLine(L, ws); });
+return plate.lines.some(function (L) {
+if (!L.some(function (w) { return !_szSignIsNum(w); })) return false;
+if (_szSignSameLine(L, ws)) return true;
+var bare = L.filter(function (w) { return !_szSignIsNum(w) && units.indexOf(w) < 0; });
+return area && bare.length < L.length && _szSignSameLine(bare, ws);
+});
 });
 };
 var addrKind = matches.map(function (m) { return m.item.t === 'addr' ? _szSignAddressKind(m.item, plate, words, streets) : ''; });
@@ -8235,7 +8272,7 @@ if (t === 'street') {
 return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
 }
 if (t === 'place' || t === 'admin') return { kind: 'area' };
-return { kind: _szSignTooShort(m.item.n || '', words) ? 'drop' : 'name' };
+return { kind: 'name' };
 });
 var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
 if (first) {
@@ -8578,7 +8615,8 @@ verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind
 var main = document.createElement('strong');
 main.textContent = signLabel(kinds[0]);
 verdictEl.appendChild(main);
-var where = found[0] && found[0].item && found[0].item.l;
+var it0 = found[0] && found[0].item, comma = it0 ? String(it0.n || '').indexOf(',') : -1;
+var where = it0 && (it0.l || (it0.t === 'addr' && comma >= 0 ? String(it0.n).slice(comma + 1).trim() : ''));
 if (where) verdictEl.appendChild(document.createTextNode(' \u00b7 ' + where));
 if (kinds[0].several) {
 verdictEl.appendChild(document.createTextNode(' '));
