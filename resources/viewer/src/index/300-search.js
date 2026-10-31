@@ -337,8 +337,17 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // weight (its prominence on the sign) times how much of the line the name
 // covers: "Manama Central Market" before "Manama" for that sign. `line` is
 // the line as read.
+// Street types a Russian or Ukrainian sign leaves out or puts on a line of
+// their own ("КРАСИЛИВСЬКА" under "вул."; "БАСОВСКАЯ" over "УЛИЦА"): a name
+// is also looked for without one. (Only the search: the labels, whole
+// words, say whether the sign names the type.)
+var SZ_SIGN_DROP_TYPE = /(^|\s)(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проїзд|тупик|спуск|узвіз|аллея|алея)(?=\s|$)/giu;
 function _szSignScore(rec, lines, norm) {
-  var forms = _szSearchForms(rec, norm);
+  var forms = _szSearchForms(rec, norm).slice();
+  forms.slice().forEach(function (f) {
+    var t = String(f).replace(SZ_SIGN_DROP_TYPE, ' ').replace(/\s+/g, ' ').trim();
+    if (t && t !== f && Array.from(t).length >= 4 && forms.indexOf(t) < 0) forms.push(t);
+  });
   var best = null, bestValue = 0;
   for (var f = 0; f < forms.length; f++) {
     var name = _szSignText(forms[f], function (x) { return x; });

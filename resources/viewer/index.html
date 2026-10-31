@@ -4347,7 +4347,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '3d20ea11';
+var SZ_VIEWER_BUILD = '52162681';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -6990,8 +6990,13 @@ var d = _szEditsWithin(name, line);
 if (name.length <= 3 && d > 0) return 0;
 return Math.max(0, 1 - d / name.length);
 }
+var SZ_SIGN_DROP_TYPE = /(^|\s)(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проїзд|тупик|спуск|узвіз|аллея|алея)(?=\s|$)/giu;
 function _szSignScore(rec, lines, norm) {
-var forms = _szSearchForms(rec, norm);
+var forms = _szSearchForms(rec, norm).slice();
+forms.slice().forEach(function (f) {
+var t = String(f).replace(SZ_SIGN_DROP_TYPE, ' ').replace(/\s+/g, ' ').trim();
+if (t && t !== f && Array.from(t).length >= 4 && forms.indexOf(t) < 0) forms.push(t);
+});
 var best = null, bestValue = 0;
 for (var f = 0; f < forms.length; f++) {
 var name = _szSignText(forms[f], function (x) { return x; });
@@ -8060,8 +8065,12 @@ var b = it.box, line = null, vertical = _szSignVertical(it);
 for (var i = 0; i < lines.length && !line && !vertical; i++) {
 var L = lines[i];
 if (L.vertical || b.height < 0.4 * L.tallest || L.tallest < 0.4 * b.height) continue;
-var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
-if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
+var lettered = L.items.filter(function (o) { return SZ_SIGN_LETTER.test(o.text); });
+var beside = (lettered.length ? lettered : L.items).some(function (o) {
+var overlap = Math.min(o.box.y + o.box.height, b.y + b.height) - Math.max(o.box.y, b.y);
+return overlap >= 0.5 * Math.min(o.box.height, b.height);
+});
+if (beside) line = L;
 }
 if (!line) {
 line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical, tallest: b.height };
@@ -8128,6 +8137,7 @@ var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
 var SZ_SIGN_SPEED = ['speed', 'limit', 'mph', 'kmh', 'km', 'zone', 'tempo', 'سرعة', '限速', '速度'];
 function _szSignIsNum(w) { return /^\d+$/.test(w); }
 var SZ_SIGN_HOUSE_LETTER = /^[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]$/u;
+function _szSignCyr(w) { return /\p{Script=Cyrillic}/u.test(Array.isArray(w) ? w.join(' ') : w); }
 function _szSignOneEdit(a, b) {
 a = Array.from(a); b = Array.from(b);
 if (Math.abs(a.length - b.length) > 1) return false;
@@ -8141,7 +8151,7 @@ return edits + (a.length - i) + (b.length - j) <= 1;
 }
 function _szSignBare(ws, plate) {
 var t = ws.filter(function (w) { return plate.isType(w); });
-if (t.length !== 1 || plate.signTypes.indexOf(plate.types[t[0]]) < 0) return null;
+if (t.length !== 1 || !_szSignCyr(t[0]) || plate.signTypes.indexOf(plate.types[t[0]]) < 0) return null;
 var bare = ws.filter(function (w) { return !plate.isType(w); });
 return bare.length ? bare : null;
 }
@@ -8158,11 +8168,24 @@ var fold = function (list) { return [].concat.apply([], list.map(words)); };
 var types = {};
 Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
 var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX), marks: fold(SZ_SIGN_MARKS) };
+var canon = Object.keys(types).map(function (k) { return types[k]; })
+.filter(function (c, i, a) { return a.indexOf(c) === i && Array.from(c).length >= 5 && _szSignCyr(c); });
+var near = {};
+var typeOf = function (w) {
+if (Object.prototype.hasOwnProperty.call(types, w)) return types[w];
+if (Object.prototype.hasOwnProperty.call(near, w)) return near[w];
+var t = null;
+if (Array.from(w).length >= 5 && /^\p{L}+$/u.test(w)) {
+var c = canon.filter(function (x) { return _szSignOneEdit(x, w); });
+if (c.length === 1) t = c[0];
+}
+return (near[w] = t);
+};
 plate.norm = function (ws) {
 var out = [];
 for (var i = 0; i < ws.length; i++) {
 if (_szSignIsNum(ws[i]) && /^(st|nd|rd|th)$/.test(ws[i + 1] || '')) { out.push(ws[i] + ws[i + 1]); i++; continue; }
-out.push(types[ws[i]] || ws[i]);
+out.push(typeOf(ws[i]) || ws[i]);
 }
 return out;
 };
@@ -8177,21 +8200,9 @@ return { ws: plate.norm(words(L.text)), size: L.size || 0, box: L.box, text: Str
 plate.lines = rows.map(function (r) { return r.ws; });
 plate.texts = rows.map(function (r) { return r.text; });
 plate.sizes = rows.map(function (r) { return r.size; });
-var canon = Object.keys(types).map(function (k) { return types[k]; })
-.filter(function (c, i, a) { return a.indexOf(c) === i; });
 plate.signTypes = [];
-plate.typeLines = [];
 rows.forEach(function (r) {
 r.ws.forEach(function (w) { if (plate.isType(w) && plate.signTypes.indexOf(types[w]) < 0) plate.signTypes.push(types[w]); });
-if (r.ws.length !== 1) return;
-var t = plate.isType(r.ws[0]) ? types[r.ws[0]] : null;
-if (!t && Array.from(r.ws[0]).length >= 5) {
-var near = canon.filter(function (c) { return Array.from(c).length >= 5 && _szSignOneEdit(c, r.ws[0]); });
-if (near.length === 1) t = near[0];
-}
-if (!t) return;
-if (plate.signTypes.indexOf(t) < 0) plate.signTypes.push(t);
-plate.typeLines.push(r.ws);
 });
 var top = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; })[0];
 plate.building = top ? top.ws : null;
@@ -8242,7 +8253,7 @@ var onLine = function (rest) {
 return plate.lines.filter(function (L) {
 if (_szSignSameLine(L, rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(rest))) return true;
 var lt = L.filter(plate.isType), rt = rest.filter(plate.isType);
-if (!lt.length || lt.join(' ') !== rt.join(' ')) return false;
+if (!lt.length || lt.join(' ') !== rt.join(' ') || !_szSignCyr(lt)) return false;
 var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
 return _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
 })[0];
@@ -8250,12 +8261,11 @@ return _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb)
 var bare = _szSignBare(p.rest, plate);
 var one = named && (onLine(p.rest) || (bare && onLine(bare)));
 if (one) {
-var used = [one].concat(plate.typeLines);
-if (_szSignOtherBuilding(plate, p, used, plate.sizes[plate.lines.indexOf(one)])) return 'similar';
-return _szSignTownOk(rec, plate, words, used, places, pois) ? 'address' : 'similar';
+if (_szSignOtherBuilding(plate, p, [one], plate.sizes[plate.lines.indexOf(one)])) return 'similar';
+return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
 }
 var untyped = p.rest.filter(function (w) { return !plate.isType(w); });
-if (named && !plate.signTypes.length && untyped.length < p.rest.length && onLine(untyped)) return 'similar';
+if (named && _szSignCyr(p.rest) && !plate.signTypes.length && untyped.length < p.rest.length && onLine(untyped)) return 'similar';
 if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
 var cands = [];
 (streets || plate.lines).forEach(function (S) {
@@ -8268,7 +8278,7 @@ cands.push({ ws: S.concat(next), used: [S, next] });
 var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
 if (!on) return 'drop';
 if (!plate.claim) return 'similar';
-var usedP = on.used.concat([plate.building], plate.typeLines);
+var usedP = on.used.concat([plate.building]);
 if (streets && _szSignOtherBuilding(plate, p, usedP, plate.buildingSize)) return 'similar';
 return !streets || _szSignTownOk(rec, plate, words, usedP, places, pois) ? 'address' : 'similar';
 }
@@ -8280,7 +8290,7 @@ var markChars = plate.suffix.concat(plate.marks).map(function (w) { return w.nor
 .filter(function (c) { return Array.from(c).length === 1; });
 return plate.lines.some(function (L, i) {
 if (!L || skip.indexOf(L) >= 0) return false;
-if (size > 0 && (plate.sizes || [])[i] > 0 && plate.sizes[i] < 0.6 * size) return false;
+if (size > 0 && _szSignCyr(p.rest) && (plate.sizes || [])[i] > 0 && plate.sizes[i] < 0.6 * size) return false;
 var raw = String(plate.texts[i] || '').normalize('NFKC');
 if (SZ_SIGN_CONTACT.test(raw) || /[#©]/.test(raw)) return false;
 var ws = L.filter(function (w) {

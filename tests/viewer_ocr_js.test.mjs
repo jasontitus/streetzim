@@ -172,7 +172,7 @@ ok('another building number on the sign leaves an address to check', () => {
   const drive = [addr('1121 Abbott Drive', 37.3, -121.9), { n: 'Abbott Drive', t: 'street', a: 37.3, o: -121.9 }];
   assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60]]), drive)[0].kind, 'address');
   assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 110]]), drive)[0].kind, 'similar');
-  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 50]]), drive)[0].kind, 'address');   // small print: a neighbour's
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 50]]), drive)[0].kind, 'similar');   // small print too: only a Cyrillic street's neighbours are told apart by size
   assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['Tel 408 555 1212', 30]]), drive)[0].kind, 'address');
 });
 ok('a name of 2 letters or 1 Chinese, Japanese or Korean character read exactly is only to check', () => {
@@ -681,6 +681,47 @@ ok('Russian and Ukrainian address plates: the type alone on a line, misread or m
   // a house's Cyrillic letter: "12-А", not house 12
   assert.strictEqual(kinds([addr('12-А Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12-А' }])[0].kind, 'address');
   assert.strictEqual(kinds([addr('12-А Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12' }])[0].kind, 'drop');
+});
+ok('a Moscow plate: a tall number by the name does not glue its two rows; a misread type in a row; the name without its type found', () => {
+  const box = (text, x, y, w, h) => ({ text, box: { x, y, width: w, height: h }, confidence: 0.9 });
+  // "2" (two rows tall) | "КОСЫГИНА" over "18 ◂ УЛИЦА"
+  const items = [box('2', 0, 0, 60, 80), box('КОСЫГИНА', 70, 0, 300, 38), box('18', 70, 42, 40, 36), box('УЛУЦА', 140, 42, 120, 36)];
+  const lines = L._szSignLineGroups(items).map((x) => x.text);
+  assert.deepStrictEqual(lines, ['2 КОСЫГИНА', '18 УЛУЦА']);
+  // rows a little over each other (a tilted photo) stay apart; side by side, a word joins
+  const tilt = [box('КОСЫГИНА', 70, 0, 300, 40), box('18', 70, 30, 40, 36)];
+  assert.deepStrictEqual(L._szSignLineGroups(tilt).map((x) => x.text), ['КОСЫГИНА', '18']);
+  assert.deepStrictEqual(L._szSignLineGroups([box('КОСЫГИНА', 70, 0, 300, 40), box('18', 380, 18, 40, 36)]).map((x) => x.text), ['КОСЫГИНА 18']);
+  const ru = (n) => addr(n, 55.70, 37.56);
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: '2 КОСЫГИНА' }, { text: '18 УЛУЦА' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: '2 КОСЫГИНА' }, { text: '18 ПЕРЕУЛОК' }])[0].kind, 'drop');
+  // the search finds a street whose sign leaves its type out
+  const rec = { n: 'Krasylivska Street', nn: 'Красилівська вулиця', t: 'street' };
+  assert.ok(score(rec, ['КРАСИЛИВСЬКА']) >= M.SZ_SIGN_MIN, String(score(rec, ['КРАСИЛИВСЬКА'])));
+  assert.ok(score({ n: 'Басовская улица', t: 'street' }, ['БАСОВСКАЯ 2']) >= M.SZ_SIGN_MIN);
+  // a name left too short without its type is not looked for alone ("2-я" of "2-я улица")
+  assert.ok(score({ n: '2-я улица', t: 'street' }, ['2-Я']) < M.SZ_SIGN_MIN, String(score({ n: '2-я улица', t: 'street' }, ['2-Я'])));
+  // an ordinary line of words still joins up: a number and a word side by side
+  assert.deepStrictEqual(L._szSignLineGroups([box('Road', 0, 0, 120, 40), box('116', 130, 2, 80, 40)]).map((x) => x.text), ['Road 116']);
+  assert.deepStrictEqual(L._szSignLineGroups([box('116', 130, 2, 80, 40), box('Road', 0, 0, 120, 40)]).map((x) => x.text), ['Road 116']);
+});
+ok('the Russian and Ukrainian rules leave other scripts alone', () => {
+  const plate = L._szSignPlate([], W);
+  // one letter from a type: only a Cyrillic word, only a Cyrillic type ("Driver" is no "Drive")
+  assert.deepStrictEqual(plate.norm(['улуца', 'нереулок']), ['улица', 'переулок']);
+  assert.deepStrictEqual(plate.norm(['driver', 'stret', 'avenues', 'بیابان']), ['driver', 'stret', 'avenues', 'بیابان']);
+  const en = (n) => addr(n, 37.77, -122.42), eg = (n) => addr(n, 30.04, 31.24);
+  // a type alone on another line, or missing: a Cyrillic street's case only
+  assert.strictEqual(kinds([en('12 Main Street')], [{ text: 'MAIN 12' }, { text: 'STREET' }])[0].kind, 'drop');
+  assert.strictEqual(kinds([en('18 Main Street')], [{ text: '18 MAIN' }])[0].kind, 'drop');
+  assert.strictEqual(kinds([eg('12 شارع التحرير')], [{ text: 'التحرير 12' }])[0].kind, 'drop');
+  // the type elsewhere in the line
+  assert.strictEqual(kinds([en('12 Main Street')], [{ text: 'MAIN 12 STREET' }])[0].kind, 'drop');
+  // a number in small print beside it is still another building's
+  const sized = (rows) => rows.map(([text, size]) => ({ text, size }));
+  assert.strictEqual(kinds([en('28 Main Street')], sized([['28 MAIN STREET', 100], ['32', 40]]))[0].kind, 'similar');
+  // the search drops only Russian and Ukrainian types
+  assert.ok(score({ n: 'Main Street', t: 'street' }, ['MAIN']) < score({ n: 'Main', t: 'street' }, ['MAIN']));
 });
 ok('Russian and Ukrainian street signs: abbreviated types, the type on its own line, Ukrainian letters', () => {
   const st = (n, nn) => ({ n, nn, t: 'street', a: 50.39, o: 30.51 });

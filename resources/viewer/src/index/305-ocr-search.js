@@ -96,8 +96,15 @@ function _szSignLineGroups(items) {
     for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
       if (L.vertical || b.height < 0.4 * L.tallest || L.tallest < 0.4 * b.height) continue;
-      var overlap = Math.min(L.y + L.height, b.y + b.height) - Math.max(L.y, b.y);
-      if (overlap >= 0.5 * Math.min(L.height, b.height)) line = L;
+      // beside a word of the line with letters (any of its words, on a line
+      // of numbers alone): a number spanning a plate's two rows (Moscow's
+      // "2" by "КОСЫГИНА" over "18 ◂ УЛИЦА") does not glue the rows together
+      var lettered = L.items.filter(function (o) { return SZ_SIGN_LETTER.test(o.text); });
+      var beside = (lettered.length ? lettered : L.items).some(function (o) {
+        var overlap = Math.min(o.box.y + o.box.height, b.y + b.height) - Math.max(o.box.y, b.y);
+        return overlap >= 0.5 * Math.min(o.box.height, b.height);
+      });
+      if (beside) line = L;
     }
     if (!line) {
       line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical, tallest: b.height };
@@ -195,6 +202,11 @@ function _szSignIsNum(w) { return /^\d+$/.test(w); }
 // A house's letter after its number ("12a", "12-А", "8Β"): one letter of an alphabet, not a Chinese
 // character ("23 巷" is a lane).
 var SZ_SIGN_HOUSE_LETTER = /^[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]$/u;
+// Cyrillic words: the rules for Russian and Ukrainian plates below (a type
+// on a line of its own or anywhere in the line, one letter of a type
+// misread, the neighbours' numbers in small print) apply to Cyrillic
+// streets only, never to an address in another script.
+function _szSignCyr(w) { return /\p{Script=Cyrillic}/u.test(Array.isArray(w) ? w.join(' ') : w); }
 // Whether a and b are one edit apart (a letter changed, added or dropped).
 function _szSignOneEdit(a, b) {
   a = Array.from(a); b = Array.from(b);
@@ -207,11 +219,11 @@ function _szSignOneEdit(a, b) {
   }
   return edits + (a.length - i) + (b.length - j) <= 1;
 }
-// A street name's words without its type, when the sign carries that type
-// elsewhere ("Басовская улица" as "БАСОВСКАЯ" over "УЛИЦА"): null otherwise.
+// A Cyrillic street name's words without its type, when the sign carries
+// that type elsewhere ("Басовская улица" as "БАСОВСКАЯ" over "УЛИЦА"): null otherwise.
 function _szSignBare(ws, plate) {
   var t = ws.filter(function (w) { return plate.isType(w); });
-  if (t.length !== 1 || plate.signTypes.indexOf(plate.types[t[0]]) < 0) return null;
+  if (t.length !== 1 || !_szSignCyr(t[0]) || plate.signTypes.indexOf(plate.types[t[0]]) < 0) return null;
   var bare = ws.filter(function (w) { return !plate.isType(w); });
   return bare.length ? bare : null;
 }
@@ -240,11 +252,27 @@ function _szSignPlate(lines, words) {
   Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
   var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX), marks: fold(SZ_SIGN_MARKS) };
   // An ordinal is one word ("13th", "21st": not 21 and a "st" for Street).
+  // A Cyrillic word one letter from a Cyrillic type of five letters or more
+  // is read as that type ("УЛУЦА", "нереулок": a letter misread), on the
+  // sign and in names alike.
+  var canon = Object.keys(types).map(function (k) { return types[k]; })
+    .filter(function (c, i, a) { return a.indexOf(c) === i && Array.from(c).length >= 5 && _szSignCyr(c); });
+  var near = {};
+  var typeOf = function (w) {
+    if (Object.prototype.hasOwnProperty.call(types, w)) return types[w];
+    if (Object.prototype.hasOwnProperty.call(near, w)) return near[w];
+    var t = null;
+    if (Array.from(w).length >= 5 && /^\p{L}+$/u.test(w)) {
+      var c = canon.filter(function (x) { return _szSignOneEdit(x, w); });
+      if (c.length === 1) t = c[0];
+    }
+    return (near[w] = t);
+  };
   plate.norm = function (ws) {
     var out = [];
     for (var i = 0; i < ws.length; i++) {
       if (_szSignIsNum(ws[i]) && /^(st|nd|rd|th)$/.test(ws[i + 1] || '')) { out.push(ws[i] + ws[i + 1]); i++; continue; }
-      out.push(types[ws[i]] || ws[i]);
+      out.push(typeOf(ws[i]) || ws[i]);
     }
     return out;
   };
@@ -259,24 +287,11 @@ function _szSignPlate(lines, words) {
   plate.lines = rows.map(function (r) { return r.ws; });
   plate.texts = rows.map(function (r) { return r.text; });
   plate.sizes = rows.map(function (r) { return r.size; });
-  // The street types the sign carries: in any line, or alone on a line
-  // (a Russian plate's "УЛИЦА" under its name; one letter misread, "УЛУЦА",
-  // in a type of five letters or more); `typeLines`, those alone.
-  var canon = Object.keys(types).map(function (k) { return types[k]; })
-    .filter(function (c, i, a) { return a.indexOf(c) === i; });
+  // The street types the sign carries, in any line (a Russian plate's
+  // "УЛИЦА" under its name).
   plate.signTypes = [];
-  plate.typeLines = [];
   rows.forEach(function (r) {
     r.ws.forEach(function (w) { if (plate.isType(w) && plate.signTypes.indexOf(types[w]) < 0) plate.signTypes.push(types[w]); });
-    if (r.ws.length !== 1) return;
-    var t = plate.isType(r.ws[0]) ? types[r.ws[0]] : null;
-    if (!t && Array.from(r.ws[0]).length >= 5) {
-      var near = canon.filter(function (c) { return Array.from(c).length >= 5 && _szSignOneEdit(c, r.ws[0]); });
-      if (near.length === 1) t = near[0];
-    }
-    if (!t) return;
-    if (plate.signTypes.indexOf(t) < 0) plate.signTypes.push(t);
-    plate.typeLines.push(r.ws);
   });
   var top = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; })[0];
   plate.building = top ? top.ws : null;
@@ -354,10 +369,10 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var onLine = function (rest) {
     return plate.lines.filter(function (L) {
       if (_szSignSameLine(L, rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(rest))) return true;
-      // the same type word elsewhere in the line ("ВУЛИЦЯ СЕРПОВА 12-А" for
-      // "12-А Серпова вулиця"; "УЛИЦА КОСЫГИНА 2" for "2 улица Косыгина")
+      // the same Cyrillic type word elsewhere in the line ("ВУЛИЦЯ СЕРПОВА
+      // 12-А" for "12-А Серпова вулиця"; "УЛИЦА КОСЫГИНА 2" for "2 улица Косыгина")
       var lt = L.filter(plate.isType), rt = rest.filter(plate.isType);
-      if (!lt.length || lt.join(' ') !== rt.join(' ')) return false;
+      if (!lt.length || lt.join(' ') !== rt.join(' ') || !_szSignCyr(lt)) return false;
       var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
       return _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
     })[0];
@@ -365,15 +380,14 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var bare = _szSignBare(p.rest, plate);
   var one = named && (onLine(p.rest) || (bare && onLine(bare)));
   if (one) {
-    var used = [one].concat(plate.typeLines);
-    if (_szSignOtherBuilding(plate, p, used, plate.sizes[plate.lines.indexOf(one)])) return 'similar';
-    return _szSignTownOk(rec, plate, words, used, places, pois) ? 'address' : 'similar';
+    if (_szSignOtherBuilding(plate, p, [one], plate.sizes[plate.lines.indexOf(one)])) return 'similar';
+    return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
   }
-  // the street without its type, and no type anywhere on the sign ("18
-  // СЕРПОВА" for "18 Серпова вулиця"): which street of that name it is, the
-  // sign does not say (a sign that says "ПЕРЕУЛОК" says it is not this one)
+  // a Cyrillic street without its type, and no type anywhere on the sign
+  // ("18 СЕРПОВА" for "18 Серпова вулиця"): which street of that name it is,
+  // the sign does not say (a sign that says "ПЕРЕУЛОК" says it is not this one)
   var untyped = p.rest.filter(function (w) { return !plate.isType(w); });
-  if (named && !plate.signTypes.length && untyped.length < p.rest.length && onLine(untyped)) return 'similar';
+  if (named && _szSignCyr(p.rest) && !plate.signTypes.length && untyped.length < p.rest.length && onLine(untyped)) return 'similar';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
@@ -388,7 +402,7 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
   if (!plate.claim) return 'similar';
-  var usedP = on.used.concat([plate.building], plate.typeLines);
+  var usedP = on.used.concat([plate.building]);
   if (streets && _szSignOtherBuilding(plate, p, usedP, plate.buildingSize)) return 'similar';
   return !streets || _szSignTownOk(rec, plate, words, usedP, places, pois) ? 'address' : 'similar';
 }
@@ -400,9 +414,10 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
 // the hours ("3F", "B1", "24H"), a unit ("#200"), a postcode or a phone
 // (5 digits or more), a year after ©, a contact line, nor the street's own
 // number. A stray "4" glued to "中山北路一段" while the plate's "133" was
-// read apart would otherwise make an exact address of house 4. Nor a number in
-// print under 60% of the address's number's (`size`, when the lines have
-// sizes): a Moscow plate's "◂ 80" and "12 ▸", its neighbours' numbers.
+// read apart would otherwise make an exact address of house 4. Nor, for a
+// Cyrillic street, a number in print under 60% of the address's number's
+// (`size`, when the lines have sizes): a Moscow plate's "◂ 80" and "12 ▸",
+// its neighbours' numbers.
 var SZ_SIGN_MARKS = ['no', 'nr', 'num', 'number', '門牌', '门牌', 'رقم', '之', 'の', '-', '호'];
 function _szSignOtherBuilding(plate, p, skip, size) {
   var mine = p.b.join('');
@@ -411,7 +426,7 @@ function _szSignOtherBuilding(plate, p, skip, size) {
     .filter(function (c) { return Array.from(c).length === 1; });
   return plate.lines.some(function (L, i) {
     if (!L || skip.indexOf(L) >= 0) return false;
-    if (size > 0 && (plate.sizes || [])[i] > 0 && plate.sizes[i] < 0.6 * size) return false;
+    if (size > 0 && _szSignCyr(p.rest) && (plate.sizes || [])[i] > 0 && plate.sizes[i] < 0.6 * size) return false;
     var raw = String(plate.texts[i] || '').normalize('NFKC');
     if (SZ_SIGN_CONTACT.test(raw) || /[#©]/.test(raw)) return false;
     var ws = L.filter(function (w) {
