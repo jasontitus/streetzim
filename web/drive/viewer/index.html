@@ -4328,7 +4328,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'db752f01';
+var SZ_VIEWER_BUILD = 'ddbb9c22';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8091,7 +8091,7 @@ var ls = (lines || []).map(function (L) { return L && typeof L === 'object' ? L 
 var fold = function (list) { return [].concat.apply([], list.map(words)); };
 var types = {};
 Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
-var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX) };
+var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX), marks: fold(SZ_SIGN_MARKS) };
 plate.norm = function (ws) {
 var out = [];
 for (var i = 0; i < ws.length; i++) {
@@ -8157,7 +8157,10 @@ var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(
 var one = named && plate.lines.filter(function (L) {
 return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
 })[0];
-if (one) return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+if (one) {
+if (_szSignOtherBuilding(plate, p, [one])) return 'similar';
+return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+}
 if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
 var cands = [];
 (streets || plate.lines).forEach(function (S) {
@@ -8170,7 +8173,36 @@ cands.push({ ws: S.concat(next), used: [S, next] });
 var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
 if (!on) return 'drop';
 if (!plate.claim) return 'similar';
+if (streets && _szSignOtherBuilding(plate, p, on.used.concat([plate.building]))) return 'similar';
 return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places, pois) ? 'address' : 'similar';
+}
+var SZ_SIGN_MARKS = ['no', 'nr', 'num', 'number', '門牌', '门牌', 'رقم', '之', 'の', '-', '호'];
+function _szSignOtherBuilding(plate, p, skip) {
+var mine = p.b.join('');
+var chars = function (w) { return Array.from(w.normalize('NFC')).length; };
+var markChars = plate.suffix.concat(plate.marks).map(function (w) { return w.normalize('NFC'); })
+.filter(function (c) { return Array.from(c).length === 1; });
+return plate.lines.some(function (L, i) {
+if (!L || skip.indexOf(L) >= 0) return false;
+var raw = String(plate.texts[i] || '').normalize('NFKC');
+if (SZ_SIGN_CONTACT.test(raw) || /[#©]/.test(raw)) return false;
+var ws = L.filter(function (w) {
+return plate.filler.indexOf(w) < 0 && plate.suffix.indexOf(w) < 0 && plate.marks.indexOf(w) < 0 &&
+!Array.from(w.normalize('NFC')).every(function (c) { return markChars.indexOf(c) >= 0; });   // "號之"
+});
+for (var k = 0; k < ws.length; k++) {
+if (_szSignIsNum(ws[k]) && /^(f|fl|h)$/.test(ws[k + 1] || '')) { ws.splice(k, 2); k--; }
+else if (ws[k] === 'b' && _szSignIsNum(ws[k + 1] || '')) { ws.splice(k, 2); k--; }
+}
+if (!ws.length || ws.length > 4) return false;
+var nums = ws.filter(_szSignIsNum);
+if (nums.length < 1 || nums.length > 2 || nums.some(function (n) { return n.length >= 5; })) return false;
+var at = _szSignIsNum(ws[0]) ? 0 : (_szSignIsNum(ws[1] || '') ? 1 : -1);     // a stray mark before it: one character (below)
+if (at < 0) return false;
+if (!ws.every(function (w, j) { return j === at || _szSignIsNum(w) || chars(w) <= 1; })) return false;
+var b = ws[at] + (/^[a-z]$/.test(ws[at + 1] || '') ? ws[at + 1] : '');
+return b !== mine && p.rest.indexOf(ws[at]) < 0;
+});
 }
 var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
 var SZ_SIGN_TOWN_END = /[市縣县區区町村郡省鎮镇鄉乡]$/;
@@ -8293,9 +8325,10 @@ return it && it.t === 'street' && _szSignNames(it).some(function (n) { return _s
 });
 });
 }
-function _szSignTooShort(name, words) {
+function _szSignTooShort(name, words, exact) {
 var t = words(name).join('');
-return Array.from(t).length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ? 3 : 4);
+var cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t);
+return Array.from(t.normalize('NFC')).length < (exact ? (cjk ? 2 : 3) : (cjk ? 3 : 4));
 }
 function _szSignKinds(matches, lines, words, all) {
 var plate = _szSignPlate(lines, words);
@@ -8325,7 +8358,7 @@ if (t === 'street') {
 return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
 }
 if (t === 'place' || t === 'admin') return { kind: 'area' };
-return { kind: 'name' };
+return { kind: _szSignTooShort(m.item.n || '', words, true) ? 'similar' : 'name' };
 });
 var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
 if (first) {

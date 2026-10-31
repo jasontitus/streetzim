@@ -147,6 +147,40 @@ ok('one line: the street and the number in order, with a name in it', () => {
   assert.deepStrictEqual(kinds([addr('2831 Road, Manama'), { n: 'Road 2831', t: 'street', a: 26.2, o: 50.5 }], [{ text: 'Road 2831' }]).map((x) => x.kind),
     ['drop', 'street']);
 });
+ok('another building number on the sign leaves an address to check', () => {
+  // a Taipei plate: the reader glued a stray "4" to the street and read the plate's "133" apart
+  const tp = (x) => [{ text: '高言' }, { text: 'SINCE 19' }, { text: '4 中山北路一段' }, { text: x }, { text: '中山區' }];
+  const a4 = [addr('4 中山北路一段, 中山區')];
+  assert.strictEqual(kinds(a4, tp('中山區'))[0].kind, 'address');          // nothing else: the town confirms
+  for (const x of ['福 133', '133', 'No. 133', 'No.133', '133番地', '門牌 133', '133之1', '133號之1', '133-1', '22-4', '22/4',
+                   '133 號 1F', '133호', '１３３', '١٣٣'])
+    assert.strictEqual(kinds(a4, tp(x))[0].kind, 'similar', x);
+  // not a building's number: a floor, the hours, a unit, a postcode or phone, a year, a contact line, the same number
+  for (const x of ['3F', 'B1', '24H', '#200', '0912345678', '© 2024', 'Tel 0912345678', '4', '4號', 'OPEN 24H', '☎ 133', '02 2345 6789', 'Room 133'])
+    assert.strictEqual(kinds(a4, tp(x))[0].kind, 'address', x);
+  const sw = (x) => [{ text: 'Schulweg 10' }, { text: x }];
+  assert.strictEqual(kinds([addr('10 Schulweg, Husum')], sw('12a'))[0].kind, 'similar');
+  assert.strictEqual(kinds([addr('12a Schulweg')], [{ text: 'Schulweg 12a' }, { text: '12b' }])[0].kind, 'similar');
+  assert.strictEqual(kinds([addr('12a Schulweg')], [{ text: 'Schulweg 12a' }, { text: '12a' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('10 Schulweg, Duderstadt, Stadt')], sw('37115 Duderstadt'))[0].kind, 'address');
+  assert.strictEqual(kinds([addr('101號 三和路四段20巷')], [{ text: '三和路四段20巷101號' }, { text: '20' }])[0].kind, 'address');  // the lane's own number
+  // a plate: the tallest number with its street, and another number line on the sign
+  const stack = (rows) => rows.map(([text, h], k) => ({ text, size: h, box: { x: 0, y: k * 130, width: 400, height: h } }));
+  const drive = [addr('1121 Abbott Drive', 37.3, -121.9), { n: 'Abbott Drive', t: 'street', a: 37.3, o: -121.9 }];
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60]]), drive)[0].kind, 'address');
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 50]]), drive)[0].kind, 'similar');
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['Tel 408 555 1212', 30]]), drive)[0].kind, 'address');
+});
+ok('a name of 2 letters or 1 Chinese, Japanese or Korean character read exactly is only to check', () => {
+  const at = (n) => ({ n, t: 'poi', a: 1, o: 1 });
+  assert.strictEqual(kinds([at('MT')], [{ text: 'MT' }])[0].kind, 'similar');            // a logo read as letters
+  assert.strictEqual(kinds([at('日')], [{ text: '日' }])[0].kind, 'similar');
+  assert.strictEqual(kinds([at('역')], [{ text: '역' }])[0].kind, 'similar');            // one Hangul syllable, several letters folded
+  assert.strictEqual(kinds([at('KFC')], [{ text: 'KFC' }])[0].kind, 'name');             // 3 letters: a name
+  assert.strictEqual(kinds([at('全家')], [{ text: '全家' }])[0].kind, 'name');
+  assert.strictEqual(kinds([at('서울')], [{ text: '서울' }])[0].kind, 'name');
+  assert.strictEqual(kinds([at('역')], [{ text: '역앞' }])[0].kind, 'drop');            // a near miss of one syllable: noise
+});
 ok('the same address in many towns: every row and the sheet say so; green only for one', () => {
   const recs = [addr('10 Schulweg, Husum', 54.48, 9.05), addr('10 Schulweg, Anif', 47.74, 13.07)];
   const k = kinds(recs, [{ text: 'Schulweg 10' }], recs);

@@ -179,7 +179,7 @@ function _szSignPlate(lines, words) {
   var fold = function (list) { return [].concat.apply([], list.map(words)); };
   var types = {};
   Object.keys(SZ_SIGN_TYPES).forEach(function (k) { types[words(k)[0]] = words(SZ_SIGN_TYPES[k])[0]; });
-  var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX) };
+  var plate = { types: types, filler: fold(SZ_SIGN_FILLER), suffix: fold(SZ_SIGN_SUFFIX), marks: fold(SZ_SIGN_MARKS) };
   // An ordinal is one word ("13th", "21st": not 21 and a "st" for Street).
   plate.norm = function (ws) {
     var out = [];
@@ -258,7 +258,9 @@ function _szSignStreetIs(rest, line, plate) {
 //              may be named (`plate.claim`), and its street is one of
 //              `streets`; or one line holds its street and number, either
 //              way round, with a name in the street part ("Schulweg 10",
-//              "三和路四段20巷101號"; not "1225 Road 1029");
+//              "三和路四段20巷101號"; not "1225 Road 1029"); either way
+//              unless another line looks like a building's number and is
+//              another one (_szSignOtherBuilding: 'similar');
 //   'similar'  its number and street are on the sign but the number may not
 //              be the building's (a "30" under "Schulweg"): listed, to check;
 //   'drop'     anything else: not listed.
@@ -271,7 +273,10 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var one = named && plate.lines.filter(function (L) {
     return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
   })[0];
-  if (one) return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+  if (one) {
+    if (_szSignOtherBuilding(plate, p, [one])) return 'similar';
+    return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+  }
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
@@ -286,7 +291,46 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
   if (!plate.claim) return 'similar';
+  if (streets && _szSignOtherBuilding(plate, p, on.used.concat([plate.building]))) return 'similar';
   return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places, pois) ? 'address' : 'similar';
+}
+// Whether another line of the sign (besides `skip`, the address's own)
+// looks like a building's number and is not the address's (`p`): a number
+// alone, or with "No.", 號, 番地, 호, 門牌 or one stray mark ("133",
+// "No. 133", "133番地", "福 133"), a second number after it ("133之1",
+// "22-4": the first is the building's), a letter ("12b"). Not a floor or
+// the hours ("3F", "B1", "24H"), a unit ("#200"), a postcode or a phone
+// (5 digits or more), a year after ©, a contact line, nor the street's own
+// number. A stray "4" glued to "中山北路一段" while the plate's "133" was
+// read apart would otherwise make an exact address of house 4.
+var SZ_SIGN_MARKS = ['no', 'nr', 'num', 'number', '門牌', '门牌', 'رقم', '之', 'の', '-', '호'];
+function _szSignOtherBuilding(plate, p, skip) {
+  var mine = p.b.join('');
+  var chars = function (w) { return Array.from(w.normalize('NFC')).length; };
+  var markChars = plate.suffix.concat(plate.marks).map(function (w) { return w.normalize('NFC'); })
+    .filter(function (c) { return Array.from(c).length === 1; });
+  return plate.lines.some(function (L, i) {
+    if (!L || skip.indexOf(L) >= 0) return false;
+    var raw = String(plate.texts[i] || '').normalize('NFKC');
+    if (SZ_SIGN_CONTACT.test(raw) || /[#©]/.test(raw)) return false;
+    var ws = L.filter(function (w) {
+      return plate.filler.indexOf(w) < 0 && plate.suffix.indexOf(w) < 0 && plate.marks.indexOf(w) < 0 &&
+        !Array.from(w.normalize('NFC')).every(function (c) { return markChars.indexOf(c) >= 0; });   // "號之"
+    });
+    // a floor, a basement, the hours: that number is no building's ("1F" after "133號")
+    for (var k = 0; k < ws.length; k++) {
+      if (_szSignIsNum(ws[k]) && /^(f|fl|h)$/.test(ws[k + 1] || '')) { ws.splice(k, 2); k--; }
+      else if (ws[k] === 'b' && _szSignIsNum(ws[k + 1] || '')) { ws.splice(k, 2); k--; }
+    }
+    if (!ws.length || ws.length > 4) return false;
+    var nums = ws.filter(_szSignIsNum);
+    if (nums.length < 1 || nums.length > 2 || nums.some(function (n) { return n.length >= 5; })) return false;
+    var at = _szSignIsNum(ws[0]) ? 0 : (_szSignIsNum(ws[1] || '') ? 1 : -1);     // a stray mark before it: one character (below)
+    if (at < 0) return false;
+    if (!ws.every(function (w, j) { return j === at || _szSignIsNum(w) || chars(w) <= 1; })) return false;
+    var b = ws[at] + (/^[a-z]$/.test(ws[at + 1] || '') ? ws[at + 1] : '');
+    return b !== mine && p.rest.indexOf(ws[at]) < 0;
+  });
 }
 // Whether the sign's other lines allow the address's town. Each line
 // besides the address's own (3 letters or more: not a screw read as "a";
@@ -443,10 +487,14 @@ function _szSignStreets(plate, words, records) {
 }
 // A name too short to be a sign's without being read exactly: "IG" in
 // "IGHTHAM", "aa", "10", "注意" (3 letters, 2 for Chinese, Japanese or
-// Korean): a near miss of it is noise, not a place to check.
-function _szSignTooShort(name, words) {
+// Korean): a near miss of it is noise, not a place to check. Read exactly
+// (`exact`), a line of 2 letters or 1 Chinese character ("MT" from a
+// logo, "日") is still too short to name a place: only to check.
+function _szSignTooShort(name, words, exact) {
   var t = words(name).join('');
-  return Array.from(t).length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t) ? 3 : 4);
+  var cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(t);
+  // characters as written: the folded words split a Hangul syllable into its letters
+  return Array.from(t.normalize('NFC')).length < (exact ? (cjk ? 2 : 3) : (cjk ? 3 : 4));
 }
 // Each match's kind, for its label:
 //   'address', 'drop', or 'similar' for an address: _szSignAddressKind;
@@ -455,7 +503,8 @@ function _szSignTooShort(name, words) {
 //              address was not found; `plate` when the sign has a number
 //              line at all ("Street only, not the address");
 //   'area'     likewise a place or an administrative area (a town);
-//   'name'     likewise anything else (a shop, a station);
+//   'name'     likewise anything else (a shop, a station); 'similar' when
+//              its name is too short even read exactly ("MT");
 //   'similar'  everything else: read inexactly, part of a line, glued from
 //              two lines ("Road 1012" from "Road 101" and "2"); 'drop' when
 //              its name is too short to mean anything (_szSignTooShort). A
@@ -496,7 +545,7 @@ function _szSignKinds(matches, lines, words, all) {
       return { kind: 'street', building: found ? '' : plate.claim, plate: !!plate.building };
     }
     if (t === 'place' || t === 'admin') return { kind: 'area' };
-    return { kind: 'name' };
+    return { kind: _szSignTooShort(m.item.n || '', words, true) ? 'similar' : 'name' };
   });
   var first = out.filter(function (k) { return k.kind !== 'drop'; })[0];
   if (first) {

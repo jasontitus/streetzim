@@ -1598,7 +1598,7 @@ var SEARCH_SHARDS = (function () {
   // exactly. A line with no letters matches no record by itself (a bus
   // stop "107" is not the plate's building 107): its digits only fetch the
   // leaves. An address is kept only when `opts.admit(rec, words)` says it
-  // is the sign's (305-ocr-search.js, _szSignIsAddress), never by a fuzzy
+  // is the sign's (305-ocr-search.js, _szSignMayBeAddress), never by a fuzzy
   // match. `opts.prune(records, words)` may take records out before the
   // list is cut to its first 15 (addresses that are not the sign's).
   // `opts.label(matches, records, words)`, run before they are shown and
