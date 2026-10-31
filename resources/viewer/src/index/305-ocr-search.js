@@ -1286,7 +1286,7 @@ function initSignSearch(map, config) {
   // as its row in the list would.
   function pickFirst() {
     var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
-    if (row) row.click();
+    if (row) { row.click(); btn.focus({ preventScroll: true }); }
   }
   verdictEl.setAttribute('role', 'button');
   verdictEl.tabIndex = 0;
@@ -1428,6 +1428,7 @@ function initSignSearch(map, config) {
         nameEl.dir = 'auto';
         nameEl.textContent = big;
         verdictEl.appendChild(nameEl);
+        verdictEl.setAttribute('aria-label', big + ' \u00b7 ' + signLabel(kinds[0]));
         var other = [r0.n, r0.nl].filter(function (n) { return n && n !== big; })[0];
         if (other) {
           var otherEl = document.createElement('span');

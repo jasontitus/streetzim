@@ -18,8 +18,8 @@
 //   rail    nothing covers the chip rail, and a horizontal swipe scrolls it
 //   pan     a drag in the middle of the map moves it
 //   view    the map is where the article left it (#map=)
-//   pinned  the article's place is marked (#pin=: a marker on the map) and
-//           in view
+//   pinned  the article's place is marked: a pin on screen with its name,
+//           and the URL no longer carries it (#pin= is shown once)
 //   errors  no page errors
 //
 // A map whose map-config.json says hasWikiArticles: false is skipped, and
@@ -135,17 +135,17 @@ async function scenario(name) {
       });
       const m = (location.hash.match(/map=([\d.]+)\/(-?[\d.]+)\/(-?[\d.]+)/) || []).slice(1).map(Number);
       const c = window.__szMap.getCenter();
-      const pm = location.hash.match(/pin=(-?[\d.]+),(-?[\d.]+)/);
-      const pin = pm ? [Number(pm[2]), Number(pm[1])] : null;
-      const inView = !!pin && window.__szMap.getBounds().contains(pin);
-      const markers = document.querySelectorAll('.maplibregl-marker').length;
-      return { cached, pin, inView, markers, shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
+      const mk = [...document.querySelectorAll('.maplibregl-marker')].map((e) => e.getBoundingClientRect())
+        .filter((b) => b.width > 0 && b.left >= 0 && b.top >= 0 && b.right <= innerWidth && b.bottom <= innerHeight);
+      const popup = (document.querySelector('.maplibregl-popup') || {}).textContent || '';
+      const stale = /(^|[#&])pin=/.test(location.hash);
+      return { cached, markers: mk.length, popup: popup.trim().slice(0, 60), stale, shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
                hash: location.hash, center: [c.lng, c.lat], zoom: window.__szMap.getZoom(), hashView: m };
     });
     run.info.pageshow = st.shows;
     run.info.railHits = st.hits;
     run.checks.cache = { pass: st.cached, handedBack: st.cached };
-    run.checks.pinned = { pass: !!st.pin && st.inView && st.markers > 0, pin: st.pin, inView: st.inView, markers: st.markers };
+    run.checks.pinned = { pass: st.markers > 0 && st.popup.length > 0 && !st.stale, markers: st.markers, popup: st.popup, urlKeepsPin: st.stale };
     run.checks.fresh = { pass: st.shows.length === 1 && st.shows[0] === false, persisted: st.shows };
     // view: the camera stamped into #map= when the article was opened
     const dz = st.hashView.length ? Math.abs(st.zoom - st.hashView[0]) : 99;

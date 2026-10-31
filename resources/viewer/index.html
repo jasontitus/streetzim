@@ -782,7 +782,7 @@ background: #fef3c7; color: #78350f; border: 1px solid #f59e0b;
 #ocr-verdict[hidden] { display: none; }
 #ocr-verdict { position: relative; padding-inline-end: 30px; cursor: pointer; }
 #ocr-verdict::after { content: '\203A'; position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); font-size: 24px; opacity: 0.55; }
-#ocr-verdict:dir(rtl)::after { content: '\2039'; }
+html[dir="rtl"] #ocr-verdict::after { content: '\2039'; }
 #ocr-verdict[data-kind="address"] { background: #dcfce7; color: #14532d; border-color: #22c55e; }
 #ocr-verdict .ocr-verdict-several, #ocr-verdict .ocr-verdict-where { display: block; margin-top: 3px; }
 #ocr-verdict .ocr-verdict-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
@@ -3068,6 +3068,11 @@ catch (e) { label = labelMatch[1]; }
 if (pinMatch) {
 var pinLat = parseFloat(pinMatch[1]), pinLon = parseFloat(pinMatch[2]);
 if (validLatLon(pinLat, pinLon)) placeSearchPin(map, pinLat, pinLon, label || '');
+if (!destMatch && window.history && history.replaceState) {
+var rest = (window.location.hash || '').replace(/^#/, '').split('&')
+.filter(function(kv) { return !/^(pin|label)=/.test(kv); }).join('&');
+history.replaceState(history.state, '', location.pathname + (location.search || '') + (rest ? '#' + rest : ''));
+}
 }
 if (destMatch && !validLatLon(parseFloat(destMatch[1]), parseFloat(destMatch[2]))) destMatch = null;
 if (origMatch && !validLatLon(parseFloat(origMatch[1]), parseFloat(origMatch[2]))) origMatch = null;
@@ -4373,7 +4378,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '0e3b7595';
+var SZ_VIEWER_BUILD = '415dd492';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -9002,7 +9007,7 @@ wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readP
 showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
 function pickFirst() {
 var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
-if (row) row.click();
+if (row) { row.click(); btn.focus({ preventScroll: true }); }
 }
 verdictEl.setAttribute('role', 'button');
 verdictEl.tabIndex = 0;
@@ -9118,6 +9123,7 @@ nameEl.className = 'ocr-verdict-name';
 nameEl.dir = 'auto';
 nameEl.textContent = big;
 verdictEl.appendChild(nameEl);
+verdictEl.setAttribute('aria-label', big + ' \u00b7 ' + signLabel(kinds[0]));
 var other = [r0.n, r0.nl].filter(function (n) { return n && n !== big; })[0];
 if (other) {
 var otherEl = document.createElement('span');

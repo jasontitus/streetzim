@@ -599,6 +599,14 @@ if (!window.__szUnsupported) fetchConfig(1)
       if (pinMatch) {
         var pinLat = parseFloat(pinMatch[1]), pinLon = parseFloat(pinMatch[2]);
         if (validLatLon(pinLat, pinLon)) placeSearchPin(map, pinLat, pinLon, label || '');
+        // Shown once: the URL drops it (the view writer keeps the rest of
+        // the fragment), so a reload or a later Back does not bring an old
+        // pin back over what the reader has done since.
+        if (!destMatch && window.history && history.replaceState) {
+          var rest = (window.location.hash || '').replace(/^#/, '').split('&')
+            .filter(function(kv) { return !/^(pin|label)=/.test(kv); }).join('&');
+          history.replaceState(history.state, '', location.pathname + (location.search || '') + (rest ? '#' + rest : ''));
+        }
       }
       if (destMatch && !validLatLon(parseFloat(destMatch[1]), parseFloat(destMatch[2]))) destMatch = null;
       if (origMatch && !validLatLon(parseFloat(origMatch[1]), parseFloat(origMatch[2]))) origMatch = null;
