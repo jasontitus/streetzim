@@ -86,16 +86,20 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    confident reading is kept. The page groups the boxes into lines in
    reading order (right to left for Arabic; no space between Chinese,
    Japanese or Thai words): a box joins a line when its height is
-   comparable with the line's tallest box and it overlaps one of the
-   line's words with letters by half the smaller height (any of its words,
-   on a line of numbers alone), so a house number two rows tall beside a
-   Moscow plate's name does not glue the row under the name to it; a box
-   of two letters or more at least 1.5 times as tall as wide is a vertical
-   line of its own. A Cyrillic recognizer may give Latin or Greek letters
-   that look the same ("BYЛИЦЯ", "КОСbIГИНА"): in a Cyrillic word, or a
-   word of such look-alikes on a line that is otherwise Cyrillic, they are
-   read as the Cyrillic ones. The worker is stopped a minute after the
-   last photo, which gives its memory back.
+   comparable with the line's tallest box and it overlaps the line's
+   outline by half the smaller height, which keeps a tilted line with a
+   number between its words whole ("خیابان ۱۵ خرداد", "Via 4 Novembre"). On
+   a line most of whose words with letters are Cyrillic it must overlap one
+   of those words instead, so a house number two rows tall beside a Moscow
+   plate's name does not glue the row under the name to it. A box of two
+   letters or more at least 1.5 times as tall as wide is a vertical line of
+   its own. A Cyrillic recognizer may give Latin or Greek letters that look
+   the same ("BYЛИЦЯ", "КОСbIГИНА"): in a word with Cyrillic letters, or a
+   word of such look-alikes alone on a line most of whose words are
+   Cyrillic, they are read as the Cyrillic ones; the search also looks for
+   such a line as read, so a Latin brand on a Russian sign ("OBI", "IKEA")
+   is still found. The worker is stopped a minute after the last photo,
+   which gives its memory back.
 3. **Searching.** `map._searchSign` (300-search.js) reads the search
    index leaves for each line word's first two letters, so an OCR slip
    later in a word still finds the leaf. It keeps the records one of whose
@@ -106,12 +110,14 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    "Road 719"). Names and lines are compared folded as the search folds
    them (accents and other combining marks off),
    with letters that only differ by code point made alike (Arabic and
-   Persian yeh and kaf, Ukrainian і, є, ґ and Russian и, е, г, ɓ/ɗ/ƙ and
-   b/d/k, ...). A Russian or Ukrainian street's name is also looked for
-   without its type, four letters or more left, on a line it is 60% of or
-   more: "КРАСИЛИВСЬКА" finds Красилівська вулиця, but "Тверской" of
-   "Тверской бульвар" does not outrank "1-й Тверской-Ямской переулок" on a
-   sign reading "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК". Right-to-left lines are also
+   Persian yeh and kaf, Ukrainian and Belarusian і, є, ґ, ў and Russian и,
+   е, г, у, ɓ/ɗ/ƙ and b/d/k, ...). A Russian or Ukrainian street's name is
+   also looked for without its type, four letters or more left, on a line
+   it is 60% of or more once the line's numbers and street types (ул.,
+   вул., пер. ...) are set aside: "КРАСИЛИВСЬКА" and "ВУЛ. МИРУ" find their
+   streets, but "Тверской" of "Тверской бульвар" does not outrank "1-й
+   Тверской-Ямской переулок" on a sign reading "1-й ТВЕРСКОЙ-ЯМСК
+   ПЕРЕУЛОК". Right-to-left lines are also
    tried with their words reversed. On a line of several words, a name of
    five letters or fewer must be one of them ("Mace" is not on a sign
    reading "Manama Central Market", though "mana-mace-ntral" holds it).
@@ -128,8 +134,9 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    the part shown, enlarged up to twice (1600 px at most on its longest
    side), and searches it as a photo of its own: a plate among other text,
    or lettering too small in the whole photo, is read by itself. **Whole
-   photo** goes back to the whole photo. Tapping a box's outline searches
-   its line, after a moment, so that a double tap zooms instead. The two
+   photo** goes back to the whole photo. Tapping a box (or a few pixels
+   from it) searches its line, after a moment, so that a double tap zooms
+   instead. The two
    buttons keep their room while the photo shows, so the photo does not
    move under the fingers as they come and go.
 5. **Going back.** Picking a result hides the sheet but keeps the photo:
@@ -168,9 +175,9 @@ number is on the sign. The labels belong to the photo: a line tapped, the
 field cleared, a new photo or a later search takes them away.
 
 Russian and Ukrainian plates follow their own conventions, and these rules
-apply to Cyrillic streets only (an address in any other script reads as
-above; `tests/viewer_ocr_js.test.mjs` checks that its answers there are
-production's):
+apply to Cyrillic streets only: an address in any other script reads as
+above (`tests/viewer_ocr_js.test.mjs` keeps English, Arabic and Persian
+cases of each, with the answers they had before these rules):
 
 - street types and their abbreviations are one word each: ул., вул. and
   вулиця are улица; пер. and провулок переулок; просп. проспект; пл. and
@@ -187,7 +194,9 @@ production's):
   and "12 ▸", its neighbours' numbers) are not another building's.
 
 A house's letter after its number may be a letter of any of the three
-alphabets ("12a", "12-А", "8Β"), not a Chinese character ("23 巷" is a lane).
+alphabets ("12a", "12-А", "8Β"), not a Chinese character ("23 巷" is a lane),
+nor a letter with a full stop after it, an initial or an abbreviation ("12 N.
+Main Street", "12 Λ. Κηφισίας", Λεωφόρος).
 
 ## Choosing the models
 

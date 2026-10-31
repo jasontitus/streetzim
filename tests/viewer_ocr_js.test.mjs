@@ -25,11 +25,11 @@ function slice(src, from, to) {
 const M = new Function(
   slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   slice(HTML, '// BEGIN sign-match', '// END sign-match') +
-  '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN };')();
+  '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic };')();
+  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignHit, _szSignSubPart, _szSignIsWhole };')();
@@ -732,6 +732,43 @@ ok('the Russian and Ukrainian rules leave other scripts alone', () => {
   assert.strictEqual(kinds([en('28 Main Street')], sized([['28 MAIN STREET', 100], ['32', 40]]))[0].kind, 'similar');
   // the search drops only Russian and Ukrainian types
   assert.ok(score({ n: 'Main Street', t: 'street' }, ['MAIN']) < score({ n: 'Main', t: 'street' }, ['MAIN']));
+});
+ok('a tilted line with a number between its words stays whole in every script but a Cyrillic one', () => {
+  const box = (text, x, y, w, h, script) => ({ text, box: { x, y, width: w, height: h }, confidence: 0.9, script });
+  // each word lower than the last, as on a photo taken at an angle
+  const fa = [box('خیابان', 200, 0, 120, 40, 'Arab'), box('۱۵', 150, 15, 40, 40, 'Arab'), box('خرداد', 30, 26, 110, 40, 'Arab')];
+  assert.deepStrictEqual(L._szSignLineGroups(fa).map((x) => x.text), ['خیابان 15 خرداد']);
+  const it = [box('Via', 0, 0, 60, 40), box('4', 70, 15, 20, 40), box('Novembre', 100, 26, 200, 40)];
+  assert.deepStrictEqual(L._szSignLineGroups(it).map((x) => x.text), ['Via 4 Novembre']);
+  // a Cyrillic word or two on a line mostly in another script does not make it a Cyrillic line
+  const mixed = [box('Улица', -100, -15, 90, 40), ...it];
+  assert.deepStrictEqual(L._szSignLineGroups(mixed).map((x) => x.text), ['Улица Via 4 Novembre']);
+  const ar = [box('شارع', 200, 0, 90, 40, 'Arab'), box('٢٦', 150, 15, 40, 40, 'Arab'), box('يوليو', 30, 26, 110, 40, 'Arab')];
+  assert.deepStrictEqual(L._szSignLineGroups(ar).map((x) => x.text), ['شارع 26 يوليو']);
+});
+ok('a Latin brand on a Russian sign is searched as read too; an initial is no house letter; short Ukrainian names without their type', () => {
+  const box = (text, x, y, w, h) => ({ text, box: { x, y, width: w, height: h }, confidence: 0.9 });
+  const lines = L._szSignLineGroups([box('СТРОИТЕЛЬНЫЙ', 0, 0, 300, 40), box('ГИПЕРМАРКЕТ', 310, 0, 280, 40), box('OBI', 600, 0, 80, 40)]);
+  assert.deepStrictEqual(lines.map((x) => x.text), ['СТРОИТЕЛЬНЫЙ ГИПЕРМАРКЕТ ОВІ']);
+  const weighted = L._szSignWeighted(lines, 40);
+  assert.deepStrictEqual(weighted.map((x) => x.text), ['СТРОИТЕЛЬНЫЙ ГИПЕРМАРКЕТ ОВІ', 'СТРОИТЕЛЬНЫЙ ГИПЕРМАРКЕТ OBI']);
+  assert.ok(score({ n: 'OBI', t: 'poi' }, weighted.map((x) => x.text)) >= M.SZ_SIGN_MIN);
+  // a Cyrillic word's look-alikes are Cyrillic either way: no second line
+  assert.deepStrictEqual(L._szSignWeighted(L._szSignLineGroups([box('KOCЫГИНА', 0, 0, 300, 40)]), 40).map((x) => x.text), ['КОСЫГИНА']);
+  // "12 Λ. Κηφισίας" (Λεωφόρος), "12 N. Main Street": an abbreviation or an initial, not house 12Λ or 12N
+  assert.strictEqual(kinds([addr('12 Λ. Κηφισίας', 38.0, 23.8)], [{ text: 'Λ. ΚΗΦΙΣΙΑΣ 12' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 N. Main Street', 37.77, -122.42)], [{ text: 'N. MAIN STREET 12' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12a Main Street', 37.77, -122.42)], [{ text: 'MAIN STREET 12a' }])[0].kind, 'address');
+  // the line's numbers and types aside, a short name is most of it
+  for (const [n, line] of [['вулиця Миру', 'ВУЛ. МИРУ'], ['вулиця Миру', 'МИРУ 125'], ['провулок Тихий', 'ПРОВ. ТИХИЙ'], ['переулок Мира', 'ПЕР. МИРА'], ['проїзд Тихий', 'ТИХИЙ']])
+    assert.ok(score({ n, t: 'street' }, [line]) >= M.SZ_SIGN_MIN, `${n} / ${line}: ${score({ n, t: 'street' }, [line])}`);
+});
+ok('the Russian and Ukrainian types are written as the search folds them', () => {
+  for (const re of [M.SZ_SIGN_DROP_TYPE, M.SZ_SIGN_LINE_TYPE]) {
+    const ws = re.source.match(/\(([^()]+)\)\(\?=/)[1].split('|');
+    assert.ok(ws.length > 10);
+    for (const w of ws) assert.strictEqual(norm(w), w, w);
+  }
 });
 ok('Russian and Ukrainian street signs: abbreviated types, the type on its own line, Ukrainian letters', () => {
   const st = (n, nn) => ({ n, nn, t: 'street', a: 50.39, o: 30.51 });

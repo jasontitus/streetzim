@@ -340,10 +340,13 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // Street types a Russian or Ukrainian sign leaves out or puts on a line of
 // their own ("КРАСИЛИВСЬКА" under "вул."; "БАСОВСКАЯ" over "УЛИЦА"): a
 // street's name is also looked for without one, four letters or more left,
-// on a line it is most of (60%): "Тверской" of "Тверской бульвар" is not
-// what "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" says. (Only the search: the labels,
-// whole words, say whether the sign names the type.)
-var SZ_SIGN_DROP_TYPE = /(^|\s)(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проїзд|тупик|спуск|узвіз|аллея|алея)(?=\s|$)/giu;
+// on a line it is most of (60%) once the line's numbers and types are set
+// aside (`core`): "МИРУ 125" and "ВУЛ. МИРУ" are Миру's, but "Тверской" of
+// "Тверской бульвар" is not what "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" says. (Only the
+// search: the labels, whole words, say whether the sign names the type.)
+// As the search folds them (й as и, ї as і: "проізд").
+var SZ_SIGN_DROP_TYPE = /(^|\s)(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проізд|тупик|спуск|узвіз|аллея|алея)(?=\s|$)/giu;
+var SZ_SIGN_LINE_TYPE = /(^|[\s.])(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проізд|тупик|спуск|узвіз|аллея|алея|ул|вул|пер|пров|просп|бульв|пл|наб)(?=[\s.]|$)/giu;
 function _szSignScore(rec, lines, norm) {
   var forms = _szSearchForms(rec, norm).slice(), own = forms.length;
   if (rec.t === 'street') forms.slice().forEach(function (f) {
@@ -356,7 +359,7 @@ function _szSignScore(rec, lines, norm) {
     for (var l = 0; l < lines.length; l++) {
       var L = lines[l];
       if (name.length <= 5 && L.words && L.words.length > 1 && L.words.indexOf(name) < 0) continue;
-      if (f >= own && name.length < 0.6 * L.text.length) continue;
+      if (f >= own && name.length < 0.6 * (L.core != null ? L.core : L.text.length)) continue;
       var s = _szSignSimilarity(name, L.text, L.bigrams);
       if (s < SZ_SIGN_MIN) continue;
       var w = L.weight || 1, cover = Math.min(1, name.length / L.text.length);
@@ -378,7 +381,8 @@ function _szSignLines(texts, norm, max) {
     seen[t] = 1;
     var words = String(raw).split(/\s+/).map(function (x) { return _szSignText(x, norm); })
       .filter(function (x) { return x; });
-    out.push({ raw: String(raw), text: t, words: words, bigrams: _szBigrams(t), weight: weight });
+    var core = _szSignText(norm(String(raw)).replace(SZ_SIGN_LINE_TYPE, ' ').replace(/\p{Nd}+/gu, ' '), function (x) { return x; }).length;
+    out.push({ raw: String(raw), text: t, words: words, bigrams: _szBigrams(t), weight: weight, core: core });
   }
   for (var i = 0; i < texts.length; i++) {
     var raw = texts[i] && typeof texts[i] === 'object' ? texts[i].text : texts[i];

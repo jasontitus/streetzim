@@ -66,14 +66,14 @@ var SZ_SIGN_CYR = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К
                     Y: 'У', a: 'а', c: 'с', e: 'е', i: 'і', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к',
                     'Α': 'А', 'Β': 'В', 'Ε': 'Е', 'Η': 'Н', 'Ι': 'І', 'Κ': 'К', 'Μ': 'М', 'Ο': 'О', 'Ρ': 'Р',
                     'Τ': 'Т', 'Χ': 'Х', 'Υ': 'У', 'Λ': 'Л', 'Π': 'П', 'Φ': 'Ф', 'Γ': 'Г', 'Δ': 'Д' };
-function _szSignCyrillic(text) {
+function _szSignCyrillic(text, wordsOnly) {
   var tokens = String(text).split(/(\s+)/);
   var cyr = function (w) { return /\p{Script=Cyrillic}/u.test(w); };
   var lookalike = function (w) { return /\p{L}/u.test(w) && Array.from(w).every(function (c) { return !/\p{L}/u.test(c) || SZ_SIGN_CYR[c]; }); };
   var words = tokens.filter(function (w) { return /\p{L}/u.test(w); });
   var mostly = words.filter(cyr).length * 2 > words.length;
   return tokens.map(function (w) {
-    if (!(cyr(w) || (mostly && lookalike(w)))) return w;
+    if (!(cyr(w) || (mostly && !wordsOnly && lookalike(w)))) return w;
     w = w.replace(/[bЬь][Il1|]/g, function (m) { return m.charAt(0) === 'ь' ? 'ы' : 'Ы'; });
     return Array.from(w).map(function (c) { return SZ_SIGN_CYR[c] || c; }).join('');
   }).join('');
@@ -96,11 +96,14 @@ function _szSignLineGroups(items) {
     for (var i = 0; i < lines.length && !line && !vertical; i++) {
       var L = lines[i];
       if (L.vertical || b.height < 0.4 * L.tallest || L.tallest < 0.4 * b.height) continue;
-      // beside a word of the line with letters (any of its words, on a line
-      // of numbers alone): a number spanning a plate's two rows (Moscow's
-      // "2" by "КОСЫГИНА" over "18 ◂ УЛИЦА") does not glue the rows together
+      // On a line of mostly Cyrillic words, beside one of its words with
+      // letters: a house number spanning a Moscow plate's two rows ("2" by
+      // "КОСЫГИНА" over "18 ◂ УЛИЦА") does not glue the rows together.
+      // Elsewhere beside the line's outline, which keeps a tilted line with
+      // a number between its words whole ("خیابان ۱۵ خرداد", "Via 4 Novembre").
       var lettered = L.items.filter(function (o) { return SZ_SIGN_LETTER.test(o.text); });
-      var beside = (lettered.length ? lettered : L.items).some(function (o) {
+      var cyr = lettered.filter(function (o) { return /\p{Script=Cyrillic}/u.test(o.text); }).length * 2 > lettered.length;
+      var beside = (cyr ? lettered : [{ box: L }]).some(function (o) {
         var overlap = Math.min(o.box.y + o.box.height, b.y + b.height) - Math.max(o.box.y, b.y);
         return overlap >= 0.5 * Math.min(o.box.height, b.height);
       });
@@ -125,9 +128,23 @@ function _szSignLineGroups(items) {
       if (i && !(SZ_SIGN_NOSPACE.test(text.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0)))) text += ' ';
       text += t;
     });
-    return { text: _szSignCyrillic(text), box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
-             size: L.vertical ? L.width : L.height };
+    var cyrText = _szSignCyrillic(text), asRead = _szSignCyrillic(text, true);
+    return { text: cyrText, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
+             size: L.vertical ? L.width : L.height, asRead: asRead !== cyrText ? asRead : '' };
   });
+}
+// The lines the search looks for, each weighing as tall as its letters
+// against the sign's biggest; a line whose words of look-alike letters alone
+// were read as Cyrillic ("OBI" on "СТРОИТЕЛЬНЫЙ ГИПЕРМАРКЕТ OBI": "ОВІ") also
+// as read, so a Latin brand on a Russian sign is still found.
+function _szSignWeighted(lines, tallest) {
+  var out = [];
+  lines.forEach(function (L) {
+    var w = 0.5 + 0.5 * L.size / tallest;
+    out.push({ text: L.text, weight: w });
+    if (L.asRead) out.push({ text: L.asRead, weight: w });
+  });
+  return out;
 }
 
 // The boxes of the photo's second, coarse reading (readBoth) that add to
@@ -328,13 +345,17 @@ function _szSignPlate(lines, words) {
 // address ("366 116", "23號 忠孝東路三段", "10 Schulweg, Husum"; the place
 // after a comma left out), and the rest, street types as their word.
 function _szSignAddressParts(rec, plate, words) {
-  var ws = plate.norm(words(String(rec.n || '').split(',')[0]));
+  var raw = String(rec.n || '').split(',')[0];
+  var ws = plate.norm(words(raw));
   while (ws.length && plate.filler.indexOf(ws[0]) >= 0) ws = ws.slice(1);
   if (!_szSignIsNum(ws[0] || '')) return null;
-  // A letter after the number is the building's ("12a Main St") only when
-  // the rest still names a street ("1018 B St" is on B Street).
+  // A letter after the number is the building's ("12a Main St", "12-А") only
+  // when the rest still names a street ("1018 B St" is on B Street), and
+  // not with a full stop after it: an initial or an abbreviation ("12 N.
+  // Main Street", "12 Λ. Κηφισίας", Λεωφόρος).
   var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
-  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
+  var initial = /^\D*?\d+\s+\p{L}\./u.test(raw);
+  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || !initial && SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
   var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
   return rest.length ? { b: ws.slice(0, n), rest: rest } : null;
 }
@@ -1421,9 +1442,7 @@ function initSignSearch(map, config) {
       showLines(lines);
       // Each line weighs as tall as its letters, against the sign's biggest.
       var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
-      var weighted = lines.map(function (L) {
-        return { text: L.text, weight: 0.5 + 0.5 * L.size / tallest };
-      }).concat(_szSignAddress(lines, tallest));
+      var weighted = _szSignWeighted(lines, tallest).concat(_szSignAddress(lines, tallest));
       // In the field: the sign's biggest line now, the line the first place
       // matched once found -- what was searched for, to edit and search as
       // typed, not everything the photo holds (a status bar, a watermark).
