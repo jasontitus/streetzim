@@ -338,15 +338,17 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // covers: "Manama Central Market" before "Manama" for that sign. `line` is
 // the line as read.
 // Street types a Russian or Ukrainian sign leaves out or puts on a line of
-// their own ("КРАСИЛИВСЬКА" under "вул."; "БАСОВСКАЯ" over "УЛИЦА"): a name
-// is also looked for without one. (Only the search: the labels, whole
-// words, say whether the sign names the type.)
+// their own ("КРАСИЛИВСЬКА" under "вул."; "БАСОВСКАЯ" over "УЛИЦА"): a
+// street's name is also looked for without one, four letters or more left,
+// on a line it is most of (60%): "Тверской" of "Тверской бульвар" is not
+// what "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" says. (Only the search: the labels,
+// whole words, say whether the sign names the type.)
 var SZ_SIGN_DROP_TYPE = /(^|\s)(улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проїзд|тупик|спуск|узвіз|аллея|алея)(?=\s|$)/giu;
 function _szSignScore(rec, lines, norm) {
-  var forms = _szSearchForms(rec, norm).slice();
-  forms.slice().forEach(function (f) {
+  var forms = _szSearchForms(rec, norm).slice(), own = forms.length;
+  if (rec.t === 'street') forms.slice().forEach(function (f) {
     var t = String(f).replace(SZ_SIGN_DROP_TYPE, ' ').replace(/\s+/g, ' ').trim();
-    if (t && t !== f && Array.from(t).length >= 4 && forms.indexOf(t) < 0) forms.push(t);
+    if (t !== f && (t.match(/\p{L}/gu) || []).length >= 4 && forms.indexOf(t) < 0) forms.push(t);
   });
   var best = null, bestValue = 0;
   for (var f = 0; f < forms.length; f++) {
@@ -354,6 +356,7 @@ function _szSignScore(rec, lines, norm) {
     for (var l = 0; l < lines.length; l++) {
       var L = lines[l];
       if (name.length <= 5 && L.words && L.words.length > 1 && L.words.indexOf(name) < 0) continue;
+      if (f >= own && name.length < 0.6 * L.text.length) continue;
       var s = _szSignSimilarity(name, L.text, L.bigrams);
       if (s < SZ_SIGN_MIN) continue;
       var w = L.weight || 1, cover = Math.min(1, name.length / L.text.length);

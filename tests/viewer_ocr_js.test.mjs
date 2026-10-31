@@ -699,6 +699,16 @@ ok('a Moscow plate: a tall number by the name does not glue its two rows; a misr
   const rec = { n: 'Krasylivska Street', nn: 'Красилівська вулиця', t: 'street' };
   assert.ok(score(rec, ['КРАСИЛИВСЬКА']) >= M.SZ_SIGN_MIN, String(score(rec, ['КРАСИЛИВСЬКА'])));
   assert.ok(score({ n: 'Басовская улица', t: 'street' }, ['БАСОВСКАЯ 2']) >= M.SZ_SIGN_MIN);
+  assert.ok(score(rec, ['BYN. КРАСИЛИВСЬКА']) >= M.SZ_SIGN_MIN);
+  // only a street, and only where the name without its type is most of the line:
+  // "Тверской" of "Тверской бульвар" is no match for a lane's long name
+  const line5 = ['1-й ТВЕРСКОЙ-ЯМСК нереулок'];
+  assert.strictEqual(score({ n: 'Тверской бульвар', t: 'street' }, line5), 0);
+  assert.ok(score({ n: '1-й Тверской-Ямской переулок', t: 'street' }, line5) >= M.SZ_SIGN_MIN);
+  assert.strictEqual(score({ n: 'Красилівська вулиця', t: 'poi' }, ['КРАСИЛИВСЬКА 8']), 0);
+  assert.ok(score({ n: 'Красилівська вулиця', t: 'street' }, ['КРАСИЛИВСЬКА 8']) >= M.SZ_SIGN_MIN);
+  assert.strictEqual(score({ n: 'Вул. Набережна', t: 'street' }, ['ВУЛИЦЯ']), 0);     // "Вул." left: three letters
+  assert.strictEqual(score({ n: 'улица Бор', t: 'street' }, ['БОР']), 0);
   // a name left too short without its type is not looked for alone ("2-я" of "2-я улица")
   assert.ok(score({ n: '2-я улица', t: 'street' }, ['2-Я']) < M.SZ_SIGN_MIN, String(score({ n: '2-я улица', t: 'street' }, ['2-Я'])));
   // an ordinary line of words still joins up: a number and a word side by side
