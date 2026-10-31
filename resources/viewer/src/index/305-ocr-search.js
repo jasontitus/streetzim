@@ -58,6 +58,26 @@ function _szSignCompose(it) {
   }
   return { text: text, script: it.script };
 }
+// A Cyrillic reader gives Latin or Greek letters that look the same in a
+// Cyrillic word ("BYЛИЦЯ", "KPACИЛИBCЬKA", "YΛИЦА", "КОСbIГИНА"): in a word
+// with Cyrillic letters, or one made only of such look-alikes on a line
+// that is otherwise Cyrillic, they are read as the Cyrillic ones.
+var SZ_SIGN_CYR = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х',
+                    Y: 'У', a: 'а', c: 'с', e: 'е', i: 'і', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к',
+                    'Α': 'А', 'Β': 'В', 'Ε': 'Е', 'Η': 'Н', 'Ι': 'І', 'Κ': 'К', 'Μ': 'М', 'Ο': 'О', 'Ρ': 'Р',
+                    'Τ': 'Т', 'Χ': 'Х', 'Υ': 'У', 'Λ': 'Л', 'Π': 'П', 'Φ': 'Ф', 'Γ': 'Г', 'Δ': 'Д' };
+function _szSignCyrillic(text) {
+  var tokens = String(text).split(/(\s+)/);
+  var cyr = function (w) { return /\p{Script=Cyrillic}/u.test(w); };
+  var lookalike = function (w) { return /\p{L}/u.test(w) && Array.from(w).every(function (c) { return !/\p{L}/u.test(c) || SZ_SIGN_CYR[c]; }); };
+  var words = tokens.filter(function (w) { return /\p{L}/u.test(w); });
+  var mostly = words.filter(cyr).length * 2 > words.length;
+  return tokens.map(function (w) {
+    if (!(cyr(w) || (mostly && lookalike(w)))) return w;
+    w = w.replace(/[bЬь][Il1|]/g, function (m) { return m.charAt(0) === 'ь' ? 'ы' : 'Ы'; });
+    return Array.from(w).map(function (c) { return SZ_SIGN_CYR[c] || c; }).join('');
+  }).join('');
+}
 function _szSignVertical(it) {
   return it.box.height >= 1.5 * it.box.width && Array.from(String(it.text).trim()).length >= 2;
 }
@@ -98,7 +118,7 @@ function _szSignLineGroups(items) {
       if (i && !(SZ_SIGN_NOSPACE.test(text.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0)))) text += ' ';
       text += t;
     });
-    return { text: text, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
+    return { text: _szSignCyrillic(text), box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
              size: L.vertical ? L.width : L.height };
   });
 }
@@ -154,15 +174,54 @@ function _szSignAddress(lines, tallest) {
 // Street types, abbreviations and translations as one word: "Abbott Dr" is
 // "Abbott Drive", never "Abbott Avenue"; "طريق 105" is "Road 105" and
 // "ممر 366" "Lane 366" (Bahrain's bilingual names). شارع stays itself: it is
-// Bahrain's "Avenue" and elsewhere a street.
+// Bahrain's "Avenue" and elsewhere a street. Russian and Ukrainian types as
+// one word each ("ул." and "вулиця" are "улица"; "узвіз" is "спуск", as old
+// Kyiv signs say it).
 var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', avenue: 'avenue', ave: 'avenue',
                       av: 'avenue', lane: 'lane', ln: 'lane', drive: 'drive', dr: 'drive', boulevard: 'boulevard',
-                      blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة' };
+                      blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة',
+                      'улица': 'улица', 'ул': 'улица', 'вулиця': 'улица', 'вул': 'улица',
+                      'переулок': 'переулок', 'пер': 'переулок', 'провулок': 'переулок', 'пров': 'переулок',
+                      'проспект': 'проспект', 'просп': 'проспект', 'бульвар': 'бульвар', 'бульв': 'бульвар',
+                      'площадь': 'площадь', 'площа': 'площадь', 'пл': 'площадь', 'шоссе': 'шоссе', 'шосе': 'шоссе',
+                      'набережная': 'набережная', 'набережна': 'набережная', 'наб': 'набережная',
+                      'проезд': 'проезд', 'проїзд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
+                      'аллея': 'аллея', 'алея': 'аллея' };
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
 // Words of a speed sign: a number beside them is a limit, never a building.
 var SZ_SIGN_SPEED = ['speed', 'limit', 'mph', 'kmh', 'km', 'zone', 'tempo', 'سرعة', '限速', '速度'];
 function _szSignIsNum(w) { return /^\d+$/.test(w); }
+// A house's letter after its number ("12a", "12-А", "8Β"): one letter of an alphabet, not a Chinese
+// character ("23 巷" is a lane).
+var SZ_SIGN_HOUSE_LETTER = /^[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]$/u;
+// Whether a and b are one edit apart (a letter changed, added or dropped).
+function _szSignOneEdit(a, b) {
+  a = Array.from(a); b = Array.from(b);
+  if (Math.abs(a.length - b.length) > 1) return false;
+  var i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+// A street name's words without its type, when the sign carries that type
+// elsewhere ("Басовская улица" as "БАСОВСКАЯ" over "УЛИЦА"): null otherwise.
+function _szSignBare(ws, plate) {
+  var t = ws.filter(function (w) { return plate.isType(w); });
+  if (t.length !== 1 || plate.signTypes.indexOf(plate.types[t[0]]) < 0) return null;
+  var bare = ws.filter(function (w) { return !plate.isType(w); });
+  return bare.length ? bare : null;
+}
+// A name of the map and a line of the sign: the same words in order, or
+// the name's words but its type when the type is elsewhere on the sign.
+function _szSignNameLine(L, ws, plate) {
+  if (_szSignSameLine(L, ws)) return true;
+  var bare = _szSignBare(ws, plate);
+  return !!bare && _szSignSameLine(L, bare);
+}
 function _szSignSame(a, b) { return a.length === b.length && a.join(' ') === b.join(' '); }
 // A line read in either direction (right-to-left text may come in visual order).
 function _szSignSameLine(line, ws) { return _szSignSame(line, ws) || _szSignSame(line.slice().reverse(), ws); }
@@ -192,13 +251,33 @@ function _szSignPlate(lines, words) {
   plate.isType = function (w) { return Object.prototype.hasOwnProperty.call(types, w); };
   var building = function (ws) {
     return _szSignIsNum(ws[0] || '') && (ws.length === 1 ||
-      (ws.length === 2 && (/^[a-z]$/.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0)));
+      (ws.length === 2 && (SZ_SIGN_HOUSE_LETTER.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0)));
   };
   var rows = ls.map(function (L) {
     return { ws: plate.norm(words(L.text)), size: L.size || 0, box: L.box, text: String(L.text).trim() };
   });
   plate.lines = rows.map(function (r) { return r.ws; });
   plate.texts = rows.map(function (r) { return r.text; });
+  plate.sizes = rows.map(function (r) { return r.size; });
+  // The street types the sign carries: in any line, or alone on a line
+  // (a Russian plate's "УЛИЦА" under its name; one letter misread, "УЛУЦА",
+  // in a type of five letters or more); `typeLines`, those alone.
+  var canon = Object.keys(types).map(function (k) { return types[k]; })
+    .filter(function (c, i, a) { return a.indexOf(c) === i; });
+  plate.signTypes = [];
+  plate.typeLines = [];
+  rows.forEach(function (r) {
+    r.ws.forEach(function (w) { if (plate.isType(w) && plate.signTypes.indexOf(types[w]) < 0) plate.signTypes.push(types[w]); });
+    if (r.ws.length !== 1) return;
+    var t = plate.isType(r.ws[0]) ? types[r.ws[0]] : null;
+    if (!t && Array.from(r.ws[0]).length >= 5) {
+      var near = canon.filter(function (c) { return Array.from(c).length >= 5 && _szSignOneEdit(c, r.ws[0]); });
+      if (near.length === 1) t = near[0];
+    }
+    if (!t) return;
+    if (plate.signTypes.indexOf(t) < 0) plate.signTypes.push(t);
+    plate.typeLines.push(r.ws);
+  });
   var top = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; })[0];
   plate.building = top ? top.ws : null;
   var speed = fold(SZ_SIGN_SPEED);
@@ -223,6 +302,7 @@ function _szSignPlate(lines, words) {
   };
   var street = function (r) { return r !== top && r.ws.some(plate.isType); };
   var onSpeedSign = rows.some(function (r) { return r.ws.some(function (w) { return speed.indexOf(w) >= 0; }); });
+  plate.buildingSize = top ? top.size : 0;
   var claims = top && !onSpeedSign && (top.ws.length === 2 && plate.suffix.indexOf(top.ws[1]) >= 0 ||
     rows.some(function (r) { return (street(r) || r !== top && r.ws.some(_szSignIsNum) && r.ws.some(function (w) { return !_szSignIsNum(w); })) && onePlate(r); }));
   plate.claim = claims ? top.text : '';
@@ -239,16 +319,17 @@ function _szSignAddressParts(rec, plate, words) {
   // A letter after the number is the building's ("12a Main St") only when
   // the rest still names a street ("1018 B St" is on B Street).
   var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
-  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || /^[a-z]$/.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
+  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
   var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
   return rest.length ? { b: ws.slice(0, n), rest: rest } : null;
 }
 // The record's street (`rest`) and a street line of the sign, word for word:
 // the same words and types; a record naming the street without a type
 // ("366 116") matches the line without its type word ("Road 116"). A
-// record with a type word never matches a line stripped of its own.
+// record with a type word matches a line without it only when the sign
+// carries that type elsewhere (_szSignBare).
 function _szSignStreetIs(rest, line, plate) {
-  if (_szSignSameLine(line, rest)) return true;
+  if (_szSignNameLine(line, rest, plate)) return true;
   var bare = line.filter(function (w) { return !plate.isType(w); });
   return bare.length > 0 && _szSignSameLine(bare, rest);
 }
@@ -270,13 +351,29 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var p = _szSignAddressParts(rec, plate, words);
   if (!p) return 'drop';
   var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); });
-  var one = named && plate.lines.filter(function (L) {
-    return _szSignSameLine(L, p.rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(p.rest));
-  })[0];
+  var onLine = function (rest) {
+    return plate.lines.filter(function (L) {
+      if (_szSignSameLine(L, rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(rest))) return true;
+      // the same type word elsewhere in the line ("ВУЛИЦЯ СЕРПОВА 12-А" for
+      // "12-А Серпова вулиця"; "УЛИЦА КОСЫГИНА 2" for "2 улица Косыгина")
+      var lt = L.filter(plate.isType), rt = rest.filter(plate.isType);
+      if (!lt.length || lt.join(' ') !== rt.join(' ')) return false;
+      var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
+      return _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
+    })[0];
+  };
+  var bare = _szSignBare(p.rest, plate);
+  var one = named && (onLine(p.rest) || (bare && onLine(bare)));
   if (one) {
-    if (_szSignOtherBuilding(plate, p, [one])) return 'similar';
-    return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+    var used = [one].concat(plate.typeLines);
+    if (_szSignOtherBuilding(plate, p, used, plate.sizes[plate.lines.indexOf(one)])) return 'similar';
+    return _szSignTownOk(rec, plate, words, used, places, pois) ? 'address' : 'similar';
   }
+  // the street without its type, and no type anywhere on the sign ("18
+  // СЕРПОВА" for "18 Серпова вулиця"): which street of that name it is, the
+  // sign does not say (a sign that says "ПЕРЕУЛОК" says it is not this one)
+  var untyped = p.rest.filter(function (w) { return !plate.isType(w); });
+  if (named && !plate.signTypes.length && untyped.length < p.rest.length && onLine(untyped)) return 'similar';
   if (!plate.building || !_szSignSame(plate.building, p.b)) return 'drop';
   // A street line, or one with the line under it (Taipei's "忠孝東路三段"
   // over "217巷7弄"), but not the building's line.
@@ -291,8 +388,9 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var on = cands.filter(function (c) { return _szSignStreetIs(p.rest, c.ws, plate); })[0];
   if (!on) return 'drop';
   if (!plate.claim) return 'similar';
-  if (streets && _szSignOtherBuilding(plate, p, on.used.concat([plate.building]))) return 'similar';
-  return !streets || _szSignTownOk(rec, plate, words, on.used.concat([plate.building]), places, pois) ? 'address' : 'similar';
+  var usedP = on.used.concat([plate.building], plate.typeLines);
+  if (streets && _szSignOtherBuilding(plate, p, usedP, plate.buildingSize)) return 'similar';
+  return !streets || _szSignTownOk(rec, plate, words, usedP, places, pois) ? 'address' : 'similar';
 }
 // Whether another line of the sign (besides `skip`, the address's own)
 // looks like a building's number and is not the address's (`p`): a number
@@ -302,15 +400,18 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
 // the hours ("3F", "B1", "24H"), a unit ("#200"), a postcode or a phone
 // (5 digits or more), a year after ©, a contact line, nor the street's own
 // number. A stray "4" glued to "中山北路一段" while the plate's "133" was
-// read apart would otherwise make an exact address of house 4.
+// read apart would otherwise make an exact address of house 4. Nor a number in
+// print under 60% of the address's number's (`size`, when the lines have
+// sizes): a Moscow plate's "◂ 80" and "12 ▸", its neighbours' numbers.
 var SZ_SIGN_MARKS = ['no', 'nr', 'num', 'number', '門牌', '门牌', 'رقم', '之', 'の', '-', '호'];
-function _szSignOtherBuilding(plate, p, skip) {
+function _szSignOtherBuilding(plate, p, skip, size) {
   var mine = p.b.join('');
   var chars = function (w) { return Array.from(w.normalize('NFC')).length; };
   var markChars = plate.suffix.concat(plate.marks).map(function (w) { return w.normalize('NFC'); })
     .filter(function (c) { return Array.from(c).length === 1; });
   return plate.lines.some(function (L, i) {
     if (!L || skip.indexOf(L) >= 0) return false;
+    if (size > 0 && (plate.sizes || [])[i] > 0 && plate.sizes[i] < 0.6 * size) return false;
     var raw = String(plate.texts[i] || '').normalize('NFKC');
     if (SZ_SIGN_CONTACT.test(raw) || /[#©]/.test(raw)) return false;
     var ws = L.filter(function (w) {
@@ -328,7 +429,7 @@ function _szSignOtherBuilding(plate, p, skip) {
     var at = _szSignIsNum(ws[0]) ? 0 : (_szSignIsNum(ws[1] || '') ? 1 : -1);     // a stray mark before it: one character (below)
     if (at < 0) return false;
     if (!ws.every(function (w, j) { return j === at || _szSignIsNum(w) || chars(w) <= 1; })) return false;
-    var b = ws[at] + (/^[a-z]$/.test(ws[at + 1] || '') ? ws[at + 1] : '');
+    var b = ws[at] + (SZ_SIGN_HOUSE_LETTER.test(ws[at + 1] || '') ? ws[at + 1] : '');
     return b !== mine && p.rest.indexOf(ws[at]) < 0;
   });
 }
@@ -481,7 +582,7 @@ function _szSignNames(it) {
 function _szSignStreets(plate, words, records) {
   return plate.lines.filter(function (L) {
     return records.some(function (it) {
-      return it && it.t === 'street' && _szSignNames(it).some(function (n) { return _szSignSameLine(L, plate.norm(words(n))); });
+      return it && it.t === 'street' && _szSignNames(it).some(function (n) { return _szSignNameLine(L, plate.norm(words(n)), plate); });
     });
   });
 }
@@ -529,7 +630,7 @@ function _szSignKinds(matches, lines, words, all) {
       var ws = plate.norm(words(n));
       return plate.lines.some(function (L) {
         if (!L.some(function (w) { return !_szSignIsNum(w); })) return false;
-        if (_szSignSameLine(L, ws)) return true;
+        if (_szSignNameLine(L, ws, plate)) return true;
         var bare = L.filter(function (w) { return !_szSignIsNum(w) && units.indexOf(w) < 0; });
         return area && bare.length < L.length && _szSignSameLine(bare, ws);
       });

@@ -29,7 +29,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress };')();
+  '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignHit, _szSignSubPart, _szSignIsWhole };')();
@@ -171,7 +171,8 @@ ok('another building number on the sign leaves an address to check', () => {
   const stack = (rows) => rows.map(([text, h], k) => ({ text, size: h, box: { x: 0, y: k * 130, width: 400, height: h } }));
   const drive = [addr('1121 Abbott Drive', 37.3, -121.9), { n: 'Abbott Drive', t: 'street', a: 37.3, o: -121.9 }];
   assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60]]), drive)[0].kind, 'address');
-  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 50]]), drive)[0].kind, 'similar');
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 110]]), drive)[0].kind, 'similar');
+  assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['1123', 50]]), drive)[0].kind, 'address');   // small print: a neighbour's
   assert.strictEqual(kinds(drive, stack([['1121', 120], ['Abbott Drive', 60], ['Tel 408 555 1212', 30]]), drive)[0].kind, 'address');
 });
 ok('a name of 2 letters or 1 Chinese, Japanese or Korean character read exactly is only to check', () => {
@@ -610,4 +611,54 @@ ok('a tap on the photo picks the line whose box it is in, the smallest of nested
   assert.strictEqual(V._szSignHit([], 1, 1, 6), null);
 });
 
+ok('a Cyrillic word read with Latin or Greek look-alikes is read as Cyrillic', () => {
+  assert.strictEqual(L._szSignCyrillic('BYЛИЦЯ'), 'ВУЛИЦЯ');
+  assert.strictEqual(L._szSignCyrillic('KPACИЛИBCЬKA'), 'КРАСИЛІВСЬКА'.replace('І', 'И'));
+  assert.strictEqual(L._szSignCyrillic('YΛИЦА'), 'УЛИЦА');
+  assert.strictEqual(L._szSignCyrillic('2 КОСbIГИНА 18'), '2 КОСЫГИНА 18');
+  assert.strictEqual(L._szSignCyrillic('BYЛ. KPACИЛИBCЬKA'), 'ВУЛ. КРАСИЛИВСЬКА');
+  assert.strictEqual(L._szSignCyrillic('TAXI ТАКСИ HOP'), 'TAXI ТАКСИ HOP');   // a third Cyrillic: Latin words stay Latin
+  assert.strictEqual(L._szSignCyrillic('КАФЕ ТАКСИ HOP'), 'КАФЕ ТАКСИ НОР');   // look-alikes only, on a Cyrillic line
+  assert.strictEqual(L._szSignCyrillic('Road 116'), 'Road 116');              // no Cyrillic: as read
+  assert.strictEqual(L._szSignCyrillic('SOHAIL JEWELLERY مشير'), 'SOHAIL JEWELLERY مشير');
+  assert.strictEqual(L._szSignCyrillic('NPOB. ДЕСЯТИННИЙ').startsWith('NPOB.'), true);   // N is no look-alike: left as read
+});
+ok('Ukrainian і, є, ґ compare as и, е, г', () => {
+  assert.strictEqual(M._szSignText('Красилівська', norm), M._szSignText('КРАСИЛИВСЬКА', norm));
+  assert.strictEqual(M._szSignText('Подільський узвіз', norm), M._szSignText('ПОДИЛЬСЬКИЙ УЗВИЗ', norm));
+  assert.strictEqual(M._szSignText('Європейська', norm), M._szSignText('ЕВРОПЕЙСЬКА', norm));
+});
+ok('Russian and Ukrainian address plates: the type alone on a line, misread or missing; neighbours in small print', () => {
+  const ru = (n) => addr(n, 55.74, 37.74);
+  // a Moscow plate: the name with the number, "УЛИЦА" under it (read "УЛУЦА" too)
+  assert.strictEqual(kinds([ru('2 Басовская улица')], [{ text: 'БАСОВСКАЯ 2' }, { text: 'УЛИЦА' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 Басовская улица')], [{ text: 'БАСОВСКАЯ 2' }, { text: 'УЛУЦА' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: 'КОСЫГИНА 2' }, { text: 'УЛИЦА' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('28 Донская улица')], [{ text: 'ДОНСКАЯ УЛИЦА 28' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: 'УЛИЦА КОСЫГИНА 2' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: 'УЛ. КОСЫГИНА 2' }])[0].kind, 'address');
+  assert.strictEqual(kinds([ru('2 улица Косыгина')], [{ text: 'ПЕР. КОСЫГИНА 2' }])[0].kind, 'drop');   // a lane of that name is not the street
+  // another type on the sign is not this street's: "ПЕРЕУЛОК" is no "улица"
+  assert.strictEqual(kinds([ru('2 Басовская улица')], [{ text: 'БАСОВСКАЯ 2' }, { text: 'ПЕРЕУЛОК' }])[0].kind, 'drop');
+  // no type anywhere: which street of that name, the sign does not say
+  assert.strictEqual(kinds([addr('18 Серпова вулиця', 50.46, 30.37)], [{ text: '18 СЕРПОВА' }])[0].kind, 'similar');
+  // its neighbours' numbers in small print beside it (a Moscow plate's "◂ 32", "4 ▸") change nothing...
+  const sized = (rows) => rows.map(([text, size]) => ({ text, size }));
+  assert.strictEqual(kinds([ru('28 Донская улица')], sized([['ДОНСКАЯ УЛИЦА 28', 100], ['32', 40], ['4', 40]]))[0].kind, 'address');
+  // ...another number as big as the address's is another building
+  assert.strictEqual(kinds([ru('28 Донская улица')], sized([['ДОНСКАЯ УЛИЦА 28', 100], ['32', 90]]))[0].kind, 'similar');
+  assert.strictEqual(kinds([ru('28 Донская улица')], [{ text: 'ДОНСКАЯ УЛИЦА 28' }, { text: '32' }])[0].kind, 'similar');   // sizes unknown
+  // a house's Cyrillic letter: "12-А", not house 12
+  assert.strictEqual(kinds([addr('12-А Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12-А' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12-А Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12' }])[0].kind, 'drop');
+});
+ok('Russian and Ukrainian street signs: abbreviated types, the type on its own line, Ukrainian letters', () => {
+  const st = (n, nn) => ({ n, nn, t: 'street', a: 50.39, o: 30.51 });
+  assert.strictEqual(kinds([st('Krasylivska Street', 'Красилівська вулиця')], [{ text: 'ВУЛ. КРАСИЛИВСЬКА' }])[0].kind, 'street');
+  assert.strictEqual(kinds([st('Desiatynnyi Lane', 'Десятинний провулок')], [{ text: 'ПРОВ. ДЕСЯТИННИЙ' }])[0].kind, 'street');
+  assert.strictEqual(kinds([st('Kudriavskyi Descent', 'Кудрявський узвіз')], [{ text: 'КУДРЯВСЬКИЙ СПУСК' }])[0].kind, 'street');
+  assert.strictEqual(kinds([{ n: 'Басовская улица', t: 'street', a: 55.74, o: 37.74 }], [{ text: 'БАСОВСКАЯ' }, { text: 'УЛИЦА' }])[0].kind, 'street');
+  // a lane is not a street of the same name
+  assert.strictEqual(kinds([st('Desiatynna Street', 'Десятинна вулиця')], [{ text: 'ПРОВ. ДЕСЯТИННА' }])[0].kind, 'similar');
+});
 console.log(`${pass} passed`);
