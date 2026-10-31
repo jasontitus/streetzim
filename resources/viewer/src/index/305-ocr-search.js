@@ -1014,14 +1014,14 @@ function initSignSearch(map, config) {
   // file picker at once on a desktop.
   function pick() {
     forgetVerdict();
-    readSeq++;
     var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     var mode = _szSignPickMode(kiwixApp(), coarse);
     if (mode === 'picker') {
       file.value = '';
       file.click();
-      return;
+      return;     // a read under way goes on: the picker may be cancelled
     }
+    readSeq++; loadSeq++;     // the tiles replace the sheet: no reading or photo of before shows under them
     sheet.hidden = false;
     frame.hidden = zoomHint.hidden = zoombar.hidden = true;
     linesEl.innerHTML = '';
@@ -1116,18 +1116,19 @@ function initSignSearch(map, config) {
     frame.classList.toggle('zoomed', view.s > 1.01);
     showZoomBar();
   }
-  // The hint (on a touch screen) and the bar keep their room while the
-  // photo shows, shown or not, so the photo does not move under the fingers.
+  // The hint (on a touch screen) and the bar's two buttons keep their room
+  // while the photo shows, shown or not (two rows where the buttons wrap),
+  // so the photo does not move under the fingers.
   var touch = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   function showZoomBar() {
     var off = frame.hidden || sheet.hidden;
     var reading = sheet.getAttribute('data-sz-ocr') === 'reading';
     var r = !off && fit ? _szSignVisible(view, frameSize().w, frameSize().h, fit, canvas.width, canvas.height) : null;
-    partBtn.hidden = off || reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
-    wholeBtn.hidden = off || reading || _szSignIsWhole(curPart);
+    var noPart = off || reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
+    partBtn.style.visibility = noPart ? 'hidden' : '';
+    wholeBtn.style.visibility = off || reading || _szSignIsWhole(curPart) ? 'hidden' : '';
     zoombar.hidden = zoomHint.hidden = off;
-    zoombar.style.visibility = partBtn.hidden && wholeBtn.hidden ? 'hidden' : '';
-    zoomHint.style.visibility = !touch || reading || !partBtn.hidden ? 'hidden' : '';
+    zoomHint.style.visibility = !touch || reading || !noPart ? 'hidden' : '';
     zoomHint.hidden = off || !touch;
   }
   function searchLine(text) {
@@ -1147,6 +1148,7 @@ function initSignSearch(map, config) {
   }
   frame.addEventListener('pointerdown', function (e) {
     if (!fit) return;
+    clearTimeout(tapTimer);     // a box tapped, then a pinch: no search
     try { frame.setPointerCapture(e.pointerId); } catch (x) {}
     ptrs[e.pointerId] = framePoint(e);
     startGesture(Object.keys(ptrs).length === 1 ? false : true);
