@@ -351,10 +351,11 @@ function _szSignAddressParts(rec, plate, words) {
   if (!_szSignIsNum(ws[0] || '')) return null;
   // A letter after the number is the building's ("12a Main St", "12-А") only
   // when the rest still names a street ("1018 B St" is on B Street), and
-  // not a capital with a full stop after it: an initial or an abbreviation
-  // ("12 N. Main Street", "12 Λ. Κηφισίας", Λεωφόρος; "12 a." is a house's).
+  // not a letter with a full stop after it, an initial or an abbreviation
+  // ("12 N. Main Street", "12 Λ. Κηφισίας", Λεωφόρος, "12 ø."), unless a
+  // small a-z or Cyrillic one ("12 a.", "12 а.": the house's).
   var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
-  var initial = /^\D*?\d+\s+\p{Lu}\./u.test(raw);
+  var initial = /^\D*?\d+\s+(?![a-zа-яёіїєґ]\.)\p{L}\./u.test(raw);
   var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || !initial && SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
   var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
   return rest.length ? { b: ws.slice(0, n), rest: rest } : null;

@@ -112,7 +112,7 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    with letters that only differ by code point made alike (Arabic and
    Persian yeh and kaf, Ukrainian and Belarusian і, є, ґ, ў and Russian и,
    е, г, у, ɓ/ɗ/ƙ and b/d/k, ...). A Russian or Ukrainian street's name is
-   also looked for without its type, four letters or more left, on a line
+   also looked for without its type, four Cyrillic letters or more left, on a line
    it is 60% of or more once the line's numbers and street types (ул.,
    вул., пер. ...) are set aside, and that names no other type:
    "КРАСИЛИВСЬКА" and "ВУЛ. МИРУ" find their streets, but "Тверской" of
@@ -196,8 +196,9 @@ each, with the answers they had before these rules):
 
 A house's letter after its number may be a letter of any of the three
 alphabets ("12a", "12-А", "8Β"), not a Chinese character ("23 巷" is a lane),
-nor a capital with a full stop after it, an initial or an abbreviation
-("12 N. Main Street", "12 Λ. Κηφισίας", Λεωφόρος; "12 a." is a house's letter).
+nor a letter with a full stop after it, an initial or an abbreviation ("12 N.
+Main Street", "12 Λ. Κηφισίας", Λεωφόρος), unless a small a–z or Cyrillic one
+("12 a." is a house's letter).
 
 ## Choosing the models
 

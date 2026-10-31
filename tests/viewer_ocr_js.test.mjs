@@ -769,6 +769,14 @@ ok('a Latin brand on a Russian sign is searched as read too; an initial is no ho
   assert.ok(score({ n: 'Тверской переулок', t: 'street' }, ['ТВЕРСКОЙ ПЕР.']) >= M.SZ_SIGN_MIN);
   // "12 a." is a house's letter, a capital with a full stop an initial
   assert.strictEqual(kinds([addr('12 a. Main Street', 37.77, -122.42)], [{ text: 'MAIN STREET 12A' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 ø. Farimagsgade', 55.68, 12.57)], [{ text: 'Ø. FARIMAGSGADE 12' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 а. Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12 А' }])[0].kind, 'address');
+  // only a Cyrillic name is looked for without its type
+  assert.strictEqual(score({ n: 'Hauptstraße', nn: 'Hauptstraße улица', t: 'street' }, ['HAUPTSTRASSE']), score({ n: 'Hauptstraße', t: 'street' }, ['HAUPTSTRASSE']));
+  assert.strictEqual(score({ n: 'Hauptplatz', nn: 'Hauptplatz улица', t: 'street' }, ['HAUPTPLATZ 2']), score({ n: 'Hauptplatz', t: 'street' }, ['HAUPTPLATZ 2']));
+  assert.strictEqual(score({ n: 'Main Road', nn: 'Hauptring улица', t: 'street' }, ['HAUPTRING']), 0);
+  // and only a Russian or Ukrainian type is left out
+  assert.strictEqual(score({ n: 'Main Road', nn: 'Тверская Street', t: 'street' }, ['ТВЕРСКАЯ']), 0);
   // the line as read does not take the place of the sign's twelfth line
   const twelve = Array.from({ length: 12 }, (_, i) => ({ text: i === 11 ? 'ЛЕНИНГРАДСКИЙ ПРОСПЕКТ' : `СТРОКА НОМЕР ${i} ТЕКСТ`, weight: 1 - i * 0.04 }));
   const withAlt = [twelve[0], { text: 'СТРОКА НОМЕР 0 TEKCT', weight: 1, extra: true }, ...twelve.slice(1)];

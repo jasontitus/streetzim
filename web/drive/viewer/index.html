@@ -4346,7 +4346,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'b2acc75b';
+var SZ_VIEWER_BUILD = '463e142d';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -7002,7 +7002,7 @@ if (rec.t === 'street') forms.slice().forEach(function (f) {
 var gone = [];
 var t = String(f).replace(SZ_SIGN_DROP_TYPE, function (m, sp, w) { gone.push(_szSignTypeOf(w)); return ' '; })
 .replace(/\s+/g, ' ').trim();
-if (t !== f && (t.match(/\p{L}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
+if (t !== f && (t.match(/\p{Script=Cyrillic}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
 });
 var best = null, bestValue = 0;
 for (var f = 0; f < forms.length; f++) {
@@ -8263,7 +8263,7 @@ var ws = plate.norm(words(raw));
 while (ws.length && plate.filler.indexOf(ws[0]) >= 0) ws = ws.slice(1);
 if (!_szSignIsNum(ws[0] || '')) return null;
 var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
-var initial = /^\D*?\d+\s+\p{Lu}\./u.test(raw);
+var initial = /^\D*?\d+\s+(?![a-zа-яёіїєґ]\.)\p{L}\./u.test(raw);
 var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || !initial && SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
 var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
 return rest.length ? { b: ws.slice(0, n), rest: rest } : null;

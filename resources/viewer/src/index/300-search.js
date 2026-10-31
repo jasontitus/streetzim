@@ -339,7 +339,7 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // the line as read.
 // Street types a Russian or Ukrainian sign leaves out or puts on a line of
 // their own ("КРАСИЛИВСЬКА" under "вул."; "БАСОВСКАЯ" over "УЛИЦА"): a
-// street's name is also looked for without one, four letters or more left,
+// street's name is also looked for without one, four Cyrillic letters or more left,
 // on a line it is most of (60%) once the line's numbers and types are set
 // aside (`core`), and that names no other type (`types`): "МИРУ 125" and
 // "ВУЛ. МИРУ" are Миру's, but "Тверской" of "Тверской бульвар" is not what
@@ -360,7 +360,7 @@ function _szSignScore(rec, lines, norm) {
     var gone = [];
     var t = String(f).replace(SZ_SIGN_DROP_TYPE, function (m, sp, w) { gone.push(_szSignTypeOf(w)); return ' '; })
       .replace(/\s+/g, ' ').trim();
-    if (t !== f && (t.match(/\p{L}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
+    if (t !== f && (t.match(/\p{Script=Cyrillic}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
   });
   var best = null, bestValue = 0;
   for (var f = 0; f < forms.length; f++) {
