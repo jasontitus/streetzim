@@ -11,15 +11,20 @@
 //   panel: Wiki panel -> first entry -> "Read full article" -> page.goBack()
 //
 // After each Back:
-//   fresh   the page was loaded again (pageshow persisted=false in the
-//           newest document), not resumed from the cache
+//   cache   the browser did hand the page back from its cache (a pageshow
+//           with persisted=true happened): else the check tested nothing
+//   fresh   the page was then loaded again (pageshow persisted=false in the
+//           newest document), not left resumed
 //   rail    nothing covers the chip rail, and a horizontal swipe scrolls it
 //   pan     a drag in the middle of the map moves it
 //   view    the map is where it was when the article was opened (#map=)
 //   errors  no page errors
 //
-// A map without bundled articles (or none near its opening view, for the
-// panel; no Museums result with one, for the sheet) is skipped, and passes.
+// A map whose map-config.json says hasWikiArticles: false is skipped, and
+// passes; one with articles whose index never loads fails. A scenario with
+// nothing to open (no article near the opening view for the panel; no
+// Museums chip, or no Museums result with an article, for the sheet) is
+// skipped.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8931 MODE=mobile|desktop node cloud/wiki_back_check.mjs
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS as cloud/viewer_scroll_check.mjs.
@@ -48,7 +53,10 @@ async function scenario(name) {
     : { viewport: { width: 1280, height: 800 } });
   await ctx.addInitScript(() => {
     window.__szShows = [];
-    addEventListener('pageshow', (e) => window.__szShows.push(e.persisted));
+    addEventListener('pageshow', (e) => {
+      window.__szShows.push(e.persisted);
+      if (e.persisted) try { sessionStorage.setItem('szBfcache', '1'); } catch (x) {}
+    });
   });
   const pg = await ctx.newPage();
   const errors = [];
@@ -68,9 +76,10 @@ async function scenario(name) {
   try {
     await pg.goto(ORIGIN + '/index.html');
     await pg.waitForFunction(() => window.__szMap && window.__szMap.loaded(), null, { timeout: 120000 });
-    const articles = await pg.waitForFunction(() => typeof WIKI_GEO_INDEX !== 'undefined' && WIKI_GEO_INDEX, null, { timeout: 20000 })
-      .then(() => true, () => false);
-    if (!articles) throw new Error('SKIP: the map has no bundled articles');
+    const cfg = await pg.evaluate(() => fetch('map-config.json').then((r) => r.json()).catch(() => ({})));
+    if (cfg.hasWikiArticles === false) throw new Error('SKIP: the map has no bundled articles (hasWikiArticles: false)');
+    await pg.waitForFunction(() => typeof WIKI_GEO_INDEX !== 'undefined' && WIKI_GEO_INDEX, null, { timeout: 120000 });
+    await pg.waitForSelector('#find-chips [data-chip]', { timeout: 60000 });
     await sleep(2000);
     let btn;
     if (name === 'sheet') {
@@ -114,6 +123,8 @@ async function scenario(name) {
     await sleep(2500);
 
     const st = await pg.evaluate(() => {
+      let cached = false;
+      try { cached = sessionStorage.getItem('szBfcache') === '1'; } catch (x) {}
       const rail = document.getElementById('find-chips');
       const r = rail.getBoundingClientRect();
       const hits = [0.2, 0.5, 0.8].map((f) => {
@@ -122,11 +133,12 @@ async function scenario(name) {
       });
       const m = (location.hash.match(/map=([\d.]+)\/(-?[\d.]+)\/(-?[\d.]+)/) || []).slice(1).map(Number);
       const c = window.__szMap.getCenter();
-      return { shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
+      return { cached, shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
                hash: location.hash, center: [c.lng, c.lat], zoom: window.__szMap.getZoom(), hashView: m };
     });
     run.info.pageshow = st.shows;
     run.info.railHits = st.hits;
+    run.checks.cache = { pass: st.cached, handedBack: st.cached };
     run.checks.fresh = { pass: st.shows.length === 1 && st.shows[0] === false, persisted: st.shows };
     // view: the camera stamped into #map= when the article was opened
     const dz = st.hashView.length ? Math.abs(st.zoom - st.hashView[0]) : 99;
