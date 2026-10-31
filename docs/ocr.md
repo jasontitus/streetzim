@@ -72,7 +72,9 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    anywhere on the page or pasted (an image pasted into a text field with
    text alongside stays text). The photo is scaled to at most
    1600 px on its longest side and drawn on the sheet that opens over the
-   map.
+   map, in a frame of its own: a pinch, a double tap, the mouse wheel, or
+   + and − and the arrow keys zoom in and move the photo (the page does not
+   zoom under the fingers).
 2. **Reading.** At the first photo the page fetches the worker, the engine,
    the runtime and the models named by the manifest (through the zimtile
    retry helper, as Kiwix drops requests under load) and starts the worker
@@ -83,8 +85,17 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    to 960 px at most); each box is read by every recognizer and the most
    confident reading is kept. The page groups the boxes into lines in
    reading order (right to left for Arabic; no space between Chinese,
-   Japanese or Thai words). The worker is stopped a minute after the last
-   photo, which gives its memory back.
+   Japanese or Thai words): a box joins a line when its height is
+   comparable with the line's tallest box and it overlaps one of the
+   line's words with letters by half the smaller height (any of its words,
+   on a line of numbers alone), so a house number two rows tall beside a
+   Moscow plate's name does not glue the row under the name to it; a box
+   of two letters or more at least 1.5 times as tall as wide is a vertical
+   line of its own. A Cyrillic recognizer may give Latin or Greek letters
+   that look the same ("BYЛИЦЯ", "КОСbIГИНА"): in a Cyrillic word, or a
+   word of such look-alikes on a line that is otherwise Cyrillic, they are
+   read as the Cyrillic ones. The worker is stopped a minute after the
+   last photo, which gives its memory back.
 3. **Searching.** `map._searchSign` (300-search.js) reads the search
    index leaves for each line word's first two letters, so an OCR slip
    later in a word still finds the leaf. It keeps the records one of whose
@@ -95,7 +106,12 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    "Road 719"). Names and lines are compared folded as the search folds
    them (accents and other combining marks off),
    with letters that only differ by code point made alike (Arabic and
-   Persian yeh and kaf, ɓ/ɗ/ƙ and b/d/k, ...). Right-to-left lines are also
+   Persian yeh and kaf, Ukrainian і, є, ґ and Russian и, е, г, ɓ/ɗ/ƙ and
+   b/d/k, ...). A Russian or Ukrainian street's name is also looked for
+   without its type, four letters or more left, on a line it is 60% of or
+   more: "КРАСИЛИВСЬКА" finds Красилівська вулиця, but "Тверской" of
+   "Тверской бульвар" does not outrank "1-й Тверской-Ямской переулок" on a
+   sign reading "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК". Right-to-left lines are also
    tried with their words reversed. On a line of several words, a name of
    five letters or fewer must be one of them ("Mace" is not on a sign
    reading "Manama Central Market", though "mana-mace-ntral" holds it).
@@ -108,7 +124,15 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    the search list, and the search field holds the line the first one
    matched, as read: not the photo's other text (a status bar, a
    watermark). Tapping a line in the sheet runs an ordinary search for it.
-4. **Going back.** Picking a result hides the sheet but keeps the photo:
+4. **Part of the photo.** Zoomed in, **Search this part** reads only
+   the part shown, enlarged up to twice (1600 px at most on its longest
+   side), and searches it as a photo of its own: a plate among other text,
+   or lettering too small in the whole photo, is read by itself. **Whole
+   photo** goes back to the whole photo. Tapping a box's outline searches
+   its line, after a moment, so that a double tap zooms instead. The two
+   buttons keep their room while the photo shows, so the photo does not
+   move under the fingers as they come and go.
+5. **Going back.** Picking a result hides the sheet but keeps the photo:
    the camera button shows it, and tapping it brings back the photo, its
    lines and its places, for when the first pick was the wrong one. The
    sheet's own camera button takes another photo; its × lets the photo go.
@@ -142,6 +166,28 @@ places share its name (each row then says where it is). A line with no letters
 matches no record by itself, and an address is weighed only when its first
 number is on the sign. The labels belong to the photo: a line tapped, the
 field cleared, a new photo or a later search takes them away.
+
+Russian and Ukrainian plates follow their own conventions, and these rules
+apply to Cyrillic streets only (an address in any other script reads as
+above; `tests/viewer_ocr_js.test.mjs` checks that its answers there are
+production's):
+
+- street types and their abbreviations are one word each: ул., вул. and
+  вулиця are улица; пер. and провулок переулок; просп. проспект; пл. and
+  площа площадь; наб. набережная; узвіз спуск, as old Kyiv signs say it. A
+  Cyrillic word one letter from a type of five letters or more is that
+  type ("УЛУЦА", "нереулок");
+- the type may stand on another line of the sign (a Moscow plate's
+  "УЛИЦА" under "БАСОВСКАЯ 2") or anywhere in the address's line
+  ("ВУЛИЦЯ СЕРПОВА 12-А" for 12-А Серпова вулиця); another type is
+  another street ("ПЕРЕУЛОК" is not this улица); with no type anywhere on
+  the sign the address is only to check (the sign does not say which
+  street of that name);
+- numbers in print under 60% of the address's (a Moscow plate's "◂ 80"
+  and "12 ▸", its neighbours' numbers) are not another building's.
+
+A house's letter after its number may be a letter of any of the three
+alphabets ("12a", "12-А", "8Β"), not a Chinese character ("23 巷" is a lane).
 
 ## Choosing the models
 
@@ -226,8 +272,12 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
 
 - `tests/test_ocr.py`: script counting, model choice, the entries and
   manifest, map-config, the lock, and the flag's way to `create_zim`.
-- `tests/viewer_ocr_js.test.mjs`: line grouping and the fuzzy match, as
-  they ship.
+- `tests/viewer_ocr_js.test.mjs`: line grouping, the fuzzy match, the
+  labels and the photo frame's geometry (fit, zoom, taps, parts), as they
+  ship.
+- `tools/ocr_photos.py`: the labelled photo set (docs/ocr-test-set.md) read
+  by each photo's own map with today's viewer; a record's `part` reads only
+  that part, as Search this part does.
 - `tools/ocr_scripts_check.mjs` (CI): every recognizer reads its script.
   Real place names in each (Chinese, Japanese, Korean, Thai, Arabic,
   Persian, Cyrillic, Greek, Devanagari, Tamil, Telugu, Latin) are drawn as

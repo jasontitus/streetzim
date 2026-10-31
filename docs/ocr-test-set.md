@@ -186,6 +186,9 @@ Fields:
   (exif, commons, mapillary, manual).
 - `difficulty`: easy, medium or hard. `notes`: anything else, such as the
   address format or a watermark that was cropped.
+- `part` (optional): `[x0, y0, x1, y1]`, fractions of the photo: the
+  scorer then also reads only that part, as the photo sheet's Search this
+  part does once the reader has zoomed in on it.
 
 To find `record` and `near`, search the map in the viewer
 (https://streetzim.web.app/drive/ opens any map from archive.org) or ask the
