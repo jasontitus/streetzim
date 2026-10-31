@@ -780,6 +780,9 @@ margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-he
 background: #fef3c7; color: #78350f; border: 1px solid #f59e0b;
 }
 #ocr-verdict[hidden] { display: none; }
+#ocr-verdict { position: relative; padding-inline-end: 30px; cursor: pointer; }
+#ocr-verdict::after { content: '\203A'; position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); font-size: 24px; opacity: 0.55; }
+#ocr-verdict:dir(rtl)::after { content: '\2039'; }
 #ocr-verdict[data-kind="address"] { background: #dcfce7; color: #14532d; border-color: #22c55e; }
 #ocr-verdict .ocr-verdict-several, #ocr-verdict .ocr-verdict-where { display: block; margin-top: 3px; }
 #ocr-verdict .ocr-verdict-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
@@ -2474,16 +2477,26 @@ onChange(!!box.checked);
 return row;
 }
 // END wiki-yours
-function openWikiArticle(path, prefix) {
+function _wikiArticlePoint(title, prefix) {
+var src = _wikiSources().filter(function(s) { return s.prefix === (prefix || ''); })[0];
+var e = src && src.index && Object.prototype.hasOwnProperty.call(src.index, title) ? src.index[title] : null;
+return e && isFinite(e[0]) && isFinite(e[1]) ? { lat: +e[0], lon: +e[1] } : null;
+}
+function openWikiArticle(path, prefix, at) {
 if (!path) return;
 var url = baseUrl + _wikiArticleHref(path, prefix);
 try {
 var mp = window.__szMap;
 if (mp) {
-var c = mp.getCenter();
-var z = Math.round(mp.getZoom() * 100) / 100;
+var pt = at && isFinite(at.lat) && isFinite(at.lon) ? at : _wikiArticlePoint(path, prefix);
+var c = pt ? { lat: pt.lat, lng: pt.lon } : mp.getCenter();
+var z = Math.round((pt ? Math.max(mp.getZoom(), 15) : mp.getZoom()) * 100) / 100;
 var h = '#map=' + z + '/' + (Math.round(c.lat * 1e5) / 1e5)
 + '/' + (Math.round(c.lng * 1e5) / 1e5);
+if (pt) {
+h += '&pin=' + (Math.round(pt.lat * 1e6) / 1e6) + ',' + (Math.round(pt.lon * 1e6) / 1e6)
++ '&label=' + encodeURIComponent((at && at.label) || String(path).replace(/_/g, ' '));
+}
 if (history && history.replaceState) {
 history.replaceState(null, '', location.pathname + location.search + h);
 } else {
@@ -4360,7 +4373,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '06dd2eb5';
+var SZ_VIEWER_BUILD = '0e3b7595';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -5402,7 +5415,7 @@ var _detailArt = _detailLinks[0];
 if (_detailArt) {
 actions.appendChild(_detailActionBtn(
 _wikiSheetLabel(_detailArt), '📖', false,
-function() { openWikiArticle(_detailArt.title, _detailArt.prefix); }));
+function() { openWikiArticle(_detailArt.title, _detailArt.prefix, { lat: r.a, lon: r.o, label: szFirstName(r.n) }); }));
 }
 panel.appendChild(actions);
 var _detailAlso = _wikiAlsoIn(_detailLinks);
@@ -8987,6 +9000,14 @@ readPart(_szSignPartOf(_szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.
 });
 wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readPart(WHOLE); } });
 showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
+function pickFirst() {
+var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
+if (row) row.click();
+}
+verdictEl.setAttribute('role', 'button');
+verdictEl.tabIndex = 0;
+verdictEl.addEventListener('click', pickFirst);
+verdictEl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFirst(); } });
 input.addEventListener('focus', function () { if (!sheet.hidden) { if (last) hide(); else input.blur(); } });
 function otherModal() {
 return [].some.call(document.querySelectorAll('[aria-modal="true"]'), function (d) {

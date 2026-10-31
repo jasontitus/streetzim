@@ -1282,6 +1282,16 @@ function initSignSearch(map, config) {
   // The results, and the photo put away: the camera button brings it back
   // as the reader left it. While the photo shows, no results cover it.
   showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
+  // The answer under the photo is the first result: a tap on it goes there,
+  // as its row in the list would.
+  function pickFirst() {
+    var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
+    if (row) row.click();
+  }
+  verdictEl.setAttribute('role', 'button');
+  verdictEl.tabIndex = 0;
+  verdictEl.addEventListener('click', pickFirst);
+  verdictEl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFirst(); } });
   // the field reached behind the sheet (Tab): its results, or, while the
   // photo is still read, not typed into unseen
   input.addEventListener('focus', function () { if (!sheet.hidden) { if (last) hide(); else input.blur(); } });

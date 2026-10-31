@@ -17,7 +17,9 @@
 //           newest document), not left resumed
 //   rail    nothing covers the chip rail, and a horizontal swipe scrolls it
 //   pan     a drag in the middle of the map moves it
-//   view    the map is where it was when the article was opened (#map=)
+//   view    the map is where the article left it (#map=)
+//   pinned  the article's place is marked (#pin=: a marker on the map) and
+//           in view
 //   errors  no page errors
 //
 // A map whose map-config.json says hasWikiArticles: false is skipped, and
@@ -133,12 +135,17 @@ async function scenario(name) {
       });
       const m = (location.hash.match(/map=([\d.]+)\/(-?[\d.]+)\/(-?[\d.]+)/) || []).slice(1).map(Number);
       const c = window.__szMap.getCenter();
-      return { cached, shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
+      const pm = location.hash.match(/pin=(-?[\d.]+),(-?[\d.]+)/);
+      const pin = pm ? [Number(pm[2]), Number(pm[1])] : null;
+      const inView = !!pin && window.__szMap.getBounds().contains(pin);
+      const markers = document.querySelectorAll('.maplibregl-marker').length;
+      return { cached, pin, inView, markers, shows: window.__szShows.slice(), hits, railBox: [r.left, r.top, r.width, r.height],
                hash: location.hash, center: [c.lng, c.lat], zoom: window.__szMap.getZoom(), hashView: m };
     });
     run.info.pageshow = st.shows;
     run.info.railHits = st.hits;
     run.checks.cache = { pass: st.cached, handedBack: st.cached };
+    run.checks.pinned = { pass: !!st.pin && st.inView && st.markers > 0, pin: st.pin, inView: st.inView, markers: st.markers };
     run.checks.fresh = { pass: st.shows.length === 1 && st.shows[0] === false, persisted: st.shows };
     // view: the camera stamped into #map= when the article was opened
     const dz = st.hashView.length ? Math.abs(st.zoom - st.hashView[0]) : 99;
@@ -154,8 +161,14 @@ async function scenario(name) {
     // pan: a drag in the middle of the map
     const c0 = await pg.evaluate(() => window.__szMap.getCenter().toArray());
     const vw = mobile ? 390 : 1280, vh = mobile ? 844 : 800;
-    const x0 = Math.round(vw / 2), y0 = Math.round(vh * 0.4);
-    const under = await pg.evaluate(([x, y]) => { const h = document.elementFromPoint(x, y); return h ? (h.className || h.id || h.tagName) : 'none'; }, [x0, y0]);
+    // from the first of these points where the map itself is on top: the
+    // article's pin and its label sit in the middle now
+    const [x0, y0, under] = await pg.evaluate(([w, h]) => {
+      const pts = [[0.5, 0.8], [0.25, 0.65], [0.75, 0.65], [0.5, 0.4]].map(([fx, fy]) => [Math.round(w * fx), Math.round(h * fy)]);
+      const on = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.className || e.id || e.tagName) : 'none'; };
+      const p = pts.find(([x, y]) => /maplibregl-canvas/.test(String(on(x, y)))) || pts[0];
+      return [p[0], p[1], on(p[0], p[1])];
+    }, [vw, vh]);
     if (mobile) await touchDrag(x0, y0, x0 - 80, y0 - 80);
     else { await pg.mouse.move(x0, y0); await pg.mouse.down(); await pg.mouse.move(x0 - 80, y0 - 80, { steps: 10 }); await pg.mouse.up(); await sleep(700); }
     const px = await pg.evaluate((c0) => { const m = window.__szMap; const a = m.project(c0), b = m.project(m.getCenter()); return Math.hypot(a.x - b.x, a.y - b.y); }, c0);

@@ -110,7 +110,7 @@ function _showPlaceDetail(map, r, idx) {
     // An article in another language than the map's says which (100).
     actions.appendChild(_detailActionBtn(
       _wikiSheetLabel(_detailArt), '📖', false,
-      function() { openWikiArticle(_detailArt.title, _detailArt.prefix); }));
+      function() { openWikiArticle(_detailArt.title, _detailArt.prefix, { lat: r.a, lon: r.o, label: szFirstName(r.n) }); }));
   }
   panel.appendChild(actions);
   var _detailAlso = _wikiAlsoIn(_detailLinks);

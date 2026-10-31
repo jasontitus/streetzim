@@ -49,9 +49,9 @@ function fakeDocument() {
   return { createElement: el, createTextNode: (t) => ({ textContent: t, text: () => t }) };
 }
 
-function loadWiki() {
+function loadWiki(map) {
   const nav = { href: null, replaced: null };
-  const window = { location: { set href(v) { nav.href = v; }, get href() { return nav.href; } } };
+  const window = { location: { set href(v) { nav.href = v; }, get href() { return nav.href; } }, __szMap: map };
   const history = { replaceState: (a, b, u) => { nav.replaced = u; } };
   const fn = new Function('window', 'document', 'history', 'location', 'baseUrl',
     'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC +
@@ -90,8 +90,8 @@ const TH = {
 const MERGED = { language: 'th', baseLanguage: 'en', hasWikiArticles: true,
   wikiPacks: [{ lang: 'de', prefix: '~w/de/', articles: 3 }, { lang: 'th', prefix: '~w/th/', articles: 2 }] };
 
-function merged(config = MERGED, idx = { de: DE, th: TH }) {
-  const W = loadWiki();
+function merged(config = MERGED, idx = { de: DE, th: TH }, map = undefined) {
+  const W = loadWiki(map);
   W.set(BASE);
   W.wikiPacksInit(config);
   for (const p of W.packs()) if (idx[p.lang]) assert.ok(W.wikiPackSetIndex(p, idx[p.lang]));
@@ -249,6 +249,26 @@ await ok('article links: <prefix>wiki-article/<Title>, slashes kept', () => {
   assert.strictEqual(W.nav.href, 'http://kiwix/content/osm_th_liechtenstein/~w/de/wiki-article/Schloss_Vaduz');
   W.openWikiArticle('Vaduz');
   assert.strictEqual(W.nav.href, 'http://kiwix/content/osm_th_liechtenstein/wiki-article/Vaduz');
+});
+
+await ok('an article opened: Back comes back to its place, centred, street level at least, and pinned with its name', () => {
+  let zoom = 11;
+  const map = { getCenter: () => ({ lat: 47.05, lng: 9.4 }), getZoom: () => zoom };
+  const W = merged(MERGED, { de: DE, th: TH }, map);
+  W.openWikiArticle('Vaduz');                                    // the base's entry: [47.141, 9.521, ...]
+  assert.strictEqual(W.nav.replaced, '/C/index.html#map=15/47.141/9.521&pin=47.141,9.521&label=Vaduz');
+  W.openWikiArticle('Vaduz', '~w/de/');                          // a pack's entry
+  assert.strictEqual(W.nav.replaced, '/C/index.html#map=15/47.141/9.521&pin=47.141,9.521&label=Vaduz');
+  // a place's sheet passes its own place and name
+  W.openWikiArticle('Schloss_Vaduz', '~w/de/', { lat: 47.13944, lon: 9.52401, label: 'Schloss Vaduz' });
+  assert.strictEqual(W.nav.replaced, '/C/index.html#map=15/47.13944/9.52401&pin=47.13944,9.52401&label=Schloss%20Vaduz');
+  // closer than street level already: the zoom kept
+  zoom = 17.25;
+  W.openWikiArticle('Vaduz');
+  assert.ok(W.nav.replaced.startsWith('/C/index.html#map=17.25/47.141/9.521&pin='), W.nav.replaced);
+  // no entry and no place: the view as it was, unpinned
+  W.openWikiArticle('Not_In_Any_Index');
+  assert.strictEqual(W.nav.replaced, '/C/index.html#map=17.25/47.05/9.4');
 });
 
 await ok('"Also in": one link per other language, named in its own language', () => {

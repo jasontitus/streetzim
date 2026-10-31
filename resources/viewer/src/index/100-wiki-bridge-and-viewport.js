@@ -568,7 +568,16 @@ function _wikiOnlyYoursRow(checked, storage, onChange) {
 // the back bar is TOP-anchored, so it renders in the Kiwix WebView. Internal
 // article links stay inside the iframe; the bar always returns to the map.
 // `prefix` is a Wikipedia pack's (~w/<xx>/), '' or absent for the base's.
-function openWikiArticle(path, prefix) {
+// Where an article's place is ({lat, lon}): its entry in its Wikipedia's
+// index ([lat, lon, ...]), or null.
+function _wikiArticlePoint(title, prefix) {
+  var src = _wikiSources().filter(function(s) { return s.prefix === (prefix || ''); })[0];
+  var e = src && src.index && Object.prototype.hasOwnProperty.call(src.index, title) ? src.index[title] : null;
+  return e && isFinite(e[0]) && isFinite(e[1]) ? { lat: +e[0], lon: +e[1] } : null;
+}
+// `at` ({lat, lon, label}): the place the article was opened for (a place's
+// sheet passes its own), else the article's entry gives it.
+function openWikiArticle(path, prefix, at) {
   if (!path) return;
   var url = baseUrl + _wikiArticleHref(path, prefix);
   // Navigate the whole view to the article as a native ZIM page. We do NOT use
@@ -576,15 +585,22 @@ function openWikiArticle(path, prefix) {
   // its full content height and escapes any scroll container, so the article —
   // and its chrome — could be scrolled off-screen. A native page navigation
   // gives proper native scrolling and the app's own Back button. First stamp
-  // the current map view into the URL hash so Back returns to the same place
-  // (applyHash restores `#map=z/lat/lon` on the way back).
+  // the view into the URL hash so Back returns to it (applyHash): the
+  // article's place centred, at street level at least, and pinned with its
+  // name (#pin=, #label=), so the reader sees which place it was; with no
+  // place known, the map's view as it was.
   try {
     var mp = window.__szMap;
     if (mp) {
-      var c = mp.getCenter();
-      var z = Math.round(mp.getZoom() * 100) / 100;
+      var pt = at && isFinite(at.lat) && isFinite(at.lon) ? at : _wikiArticlePoint(path, prefix);
+      var c = pt ? { lat: pt.lat, lng: pt.lon } : mp.getCenter();
+      var z = Math.round((pt ? Math.max(mp.getZoom(), 15) : mp.getZoom()) * 100) / 100;
       var h = '#map=' + z + '/' + (Math.round(c.lat * 1e5) / 1e5)
             + '/' + (Math.round(c.lng * 1e5) / 1e5);
+      if (pt) {
+        h += '&pin=' + (Math.round(pt.lat * 1e6) / 1e6) + ',' + (Math.round(pt.lon * 1e6) / 1e6)
+          + '&label=' + encodeURIComponent((at && at.label) || String(path).replace(/_/g, ' '));
+      }
       if (history && history.replaceState) {
         history.replaceState(null, '', location.pathname + location.search + h);
       } else {
