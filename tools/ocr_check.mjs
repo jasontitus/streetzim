@@ -78,7 +78,7 @@ try {
       const r = { open: !sheet.hidden, state: sheet.getAttribute('data-sz-ocr'),
                   take: shown(take) ? (take.disabled ? 'off' : take.classList.contains('primary') ? 'first' : 'on') : 'none',
                   choose: shown(choose) ? (choose.classList.contains('primary') ? 'first' : 'on') : 'none',
-                  photo: !document.getElementById('ocr-canvas').hidden,
+                  photo: !document.getElementById('ocr-canvas').closest('[hidden]'),   // the photo's frame hides it
                   again: !document.getElementById('ocr-again').hidden, opened: [] };
       // Which input each tile opens (the picker itself cannot open here).
       const click = HTMLInputElement.prototype.click;
