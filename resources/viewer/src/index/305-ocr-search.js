@@ -900,7 +900,8 @@ function initSignSearch(map, config) {
   }
   // A reading; the worker goes a minute after the last one ends, never
   // while one is under way (a photo read just before the minute was up,
-  // after a long search on a big map, was stopped).
+  // after a long search on a big map, was stopped), and at once when a
+  // reading has had no answer for three minutes (a worker that hangs).
   function read(image) {
     busy++;
     clearTimeout(idleTimer);
@@ -910,6 +911,7 @@ function initSignSearch(map, config) {
       return new Promise(function (resolve, reject) {
         waiting[id] = { resolve: resolve, reject: reject };
         w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
+        setTimeout(function () { if (waiting[id]) release(); }, 3 * IDLE_MS);
       });
     }).then(function (items) { done(); return items; }, function (err) { done(); throw err; });
   }

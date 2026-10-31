@@ -818,9 +818,11 @@ await (async () => {
     '\nreturn { read, release, waiting: function () { return waiting; } };')(set, clear, () => Promise.resolve(worker), 60000);
   const image = { data: { buffer: null } };
   const flush = () => new Promise((r) => setImmediate(r));
+  // the worker's answer, as worker.onmessage gives it
+  const answer = (id, v) => { const w = K.waiting()[id]; delete K.waiting()[id]; w.resolve(v); };
   // a photo read: the minute starts when it ends
   const a = K.read(image); await flush();
-  K.waiting()[1].resolve(['A']); assert.deepStrictEqual(await a, ['A']);
+  answer(1, ['A']); assert.deepStrictEqual(await a, ['A']);
   // the next photo is read just before the minute is up, and its reading outlasts it
   tick(59000);
   const b = K.read(image); await flush();
@@ -829,16 +831,22 @@ await (async () => {
   assert.strictEqual(terminated, 0);
   // two readings at once: the first to end does not start the minute
   const c = K.read(image); await flush();
-  K.waiting()[2].resolve(['B']); assert.deepStrictEqual(await b, ['B']);
-  tick(400000);
+  answer(2, ['B']); assert.deepStrictEqual(await b, ['B']);
+  tick(370000);     // a minute after the first ended, under the second's three
   assert.ok(K.waiting()[3]);
-  K.waiting()[3].resolve(['C']); await c;
+  answer(3, ['C']); await c;
   // once none is under way, the worker goes a minute later; a failed reading counts as ended
-  tick(459000); assert.strictEqual(terminated, 0);
-  tick(461000); assert.strictEqual(terminated, 0);   // no worker held by this fake start
+  assert.ok(timers.some((t) => t && t.at === 430000));
   const d = K.read(image); await flush();
-  K.waiting()[4].reject(new Error('bad photo')); await assert.rejects(d);
+  const w4 = K.waiting()[4]; delete K.waiting()[4]; w4.reject(new Error('bad photo')); await assert.rejects(d);
   assert.ok(timers.some((t) => t && t.at === now + 60000), 'a failed reading leaves no timer');
+  // a reading the worker never answers fails after three minutes, and the worker goes
+  const e = K.read(image); await flush();
+  tick(now + 179000); assert.ok(K.waiting()[5]);
+  tick(now + 2000);
+  await Promise.race([assert.rejects(e, /stopped/),
+    new Promise((_, no) => setTimeout(() => no(new Error('a reading with no answer still waits')), 2000))]);
+  assert.deepStrictEqual(Object.keys(K.waiting()), []);
     console.log('ok   ', name); pass++;
   } catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
 })();
