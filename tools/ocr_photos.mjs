@@ -6,9 +6,12 @@
 // runs this once per map.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:PORT PHOTOS=photos.json node tools/ocr_photos.mjs
-// PHOTOS: a JSON list of {id, path, at}: `at` ([lat, lon], optional) puts
+// PHOTOS: a JSON list of {id, path, at, part}: `at` ([lat, lon], optional) puts
 // the map there first, as a phone showing where its user stands does
-// (the search ranks by distance from the map's view). Prints one JSON line per photo:
+// (the search ranks by distance from the map's view); `part` ([x0, y0, x1,
+// y1], fractions of the photo, optional) then reads only that part, as the
+// photo sheet's "Search this part" does once the reader has framed it, and
+// what is printed is that reading (`whole`: the first one's lines). Prints one JSON line per photo:
 // {id, status, lines, field, verdict: {kind, text}, results: [{name, shown,
 // sign: the row's label, lat, lon, type}], ms, errors}; status
 // is the reader's (searched, none, failed) or "timeout".
@@ -56,9 +59,16 @@ try {
       await pg.waitForTimeout(500);
     }
     await pg.setInputFiles('#search-photo-file', ph.path);
-    const done = await pg.waitForFunction(() =>
+    const settled = () => pg.waitForFunction(() =>
       /^(searched|none|failed)$/.test(document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') || ''),
     null, { timeout: PHOTO_MS, polling: 250 }).then(() => true, () => false);
+    let done = await settled();
+    let whole = null;
+    if (done && Array.isArray(ph.part)) {
+      whole = await pg.evaluate(() => [...document.querySelectorAll('#ocr-lines .ocr-line')].map((b) => b.textContent));
+      const started = await pg.evaluate((part) => !!window.__szSignReadPart && !!window.__szSignReadPart(part), ph.part);
+      done = started && await settled();
+    }
     const got = await pg.evaluate(() => ({
       status: document.getElementById('ocr-sheet').getAttribute('data-sz-ocr'),
       why: ((document.querySelector('#ocr-sheet .ocr-why') || {}).textContent || ''),
@@ -78,7 +88,7 @@ try {
     }));
     // The field is the line searched for only after a search (else the last photo's).
     if (got.status !== 'searched') got.field = '';
-    const out = { id: ph.id, ...got, status: done ? got.status : 'timeout', ms: Date.now() - t0,
+    const out = { id: ph.id, ...got, ...(whole ? { whole, part: ph.part } : {}), status: done ? got.status : 'timeout', ms: Date.now() - t0,
                   errors: errors.filter((m) => !/ResizeObserver/.test(m)).slice(0, 3) };
     console.log(JSON.stringify(out));
     // A photo still being read would answer for the next one: stop here.

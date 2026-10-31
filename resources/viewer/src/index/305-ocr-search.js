@@ -621,6 +621,64 @@ function _szInTurn(jobs) {
 }
 // END sign-load
 
+// BEGIN sign-view
+// The photo in its frame (#ocr-frame): fitted whole at first, zoomed and
+// moved by a pinch, a drag, a double tap or the wheel. A view is {s, tx,
+// ty}: the photo fitted (`fit`: k CSS px per canvas pixel, its size w x h
+// and offsets ox, oy), then scaled by s from the frame's top left and moved
+// by tx, ty (CSS px). A part of the photo is [x0, y0, x1, y1], fractions of
+// it: [0, 0, 1, 1] the whole.
+function _szSignFit(fw, fh, cw, ch) {
+  var k = Math.min(fw / cw, fh / ch);
+  return { k: k, w: cw * k, h: ch * k, ox: (fw - cw * k) / 2, oy: (fh - ch * k) / 2 };
+}
+// The view kept in bounds: the photo covers the frame along a side where it
+// is bigger than the frame, and is centred along one where it is smaller.
+function _szSignClamp(v, fw, fh, fit) {
+  var w = fit.w * v.s, h = fit.h * v.s;
+  return { s: v.s, tx: w <= fw ? (fw - w) / 2 : Math.min(0, Math.max(fw - w, v.tx)),
+           ty: h <= fh ? (fh - h) / 2 : Math.min(0, Math.max(fh - h, v.ty)) };
+}
+// The canvas pixels the frame shows: {x, y, width, height}.
+function _szSignVisible(v, fw, fh, fit, cw, ch) {
+  var kk = fit.k * v.s;
+  var x0 = Math.max(0, -v.tx / kk), y0 = Math.max(0, -v.ty / kk);
+  var x1 = Math.min(cw, (fw - v.tx) / kk), y1 = Math.min(ch, (fh - v.ty) / kk);
+  return { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) };
+}
+// A point of the frame (CSS px) as a canvas pixel.
+function _szSignAt(v, fit, px, py) {
+  var kk = fit.k * v.s;
+  return { x: (px - v.tx) / kk, y: (py - v.ty) / kk };
+}
+// The view scaled to s, the frame's point (px, py) staying where it is.
+function _szSignZoomAt(v, s, px, py) {
+  return { s: s, tx: px - (px - v.tx) * s / v.s, ty: py - (py - v.ty) * s / v.s };
+}
+// The line whose box holds the canvas pixel (x, y), within `tol` pixels;
+// the smallest such box when they nest. Null when none does.
+function _szSignHit(lines, x, y, tol) {
+  var best = null, area = Infinity;
+  (lines || []).forEach(function (L) {
+    var b = L && L.box;
+    if (!b || x < b.x - tol || x > b.x + b.width + tol || y < b.y - tol || y > b.y + b.height + tol) return;
+    var a = b.width * b.height;
+    if (a < area) { best = L; area = a; }
+  });
+  return best;
+}
+// The part of the photo a rectangle of the canvas (canvas pixels) shows,
+// when the canvas shows `part` of it.
+function _szSignSubPart(part, r, cw, ch) {
+  var w = part[2] - part[0], h = part[3] - part[1];
+  return [part[0] + r.x / cw * w, part[1] + r.y / ch * h,
+          part[0] + (r.x + r.width) / cw * w, part[1] + (r.y + r.height) / ch * h];
+}
+function _szSignIsWhole(part) {
+  return !part || (part[0] <= 0 && part[1] <= 0 && part[2] >= 1 && part[3] >= 1);
+}
+// END sign-view
+
 function initSignSearch(map, config) {
   var path = config && config.ocr;
   var btn = document.getElementById('search-photo');
@@ -636,6 +694,11 @@ function initSignSearch(map, config) {
   var resultsEl = document.getElementById('search-results');
   var statusEl = document.getElementById('ocr-status');
   var canvas = document.getElementById('ocr-canvas');
+  var frame = document.getElementById('ocr-frame');
+  var zoomHint = document.getElementById('ocr-zoom');
+  var zoombar = document.getElementById('ocr-zoombar');
+  var partBtn = document.getElementById('ocr-part');
+  var wholeBtn = document.getElementById('ocr-whole');
   var linesEl = document.getElementById('ocr-lines');
   var verdictEl = document.getElementById('ocr-verdict');
   var chooseBtn = document.getElementById('ocr-choose');
@@ -650,6 +713,14 @@ function initSignSearch(map, config) {
   // 2026-10-29): a second reading of the photo shrunk to COARSE_SIDE, where
   // such letters are the size it finds, and the lines of both are kept.
   var COARSE_SIDE = 384;
+  // A part the reader frames is drawn from the photo itself, up to twice its
+  // size there: small letters a whole photo shrinks away are read sharp.
+  var PART_UP = 2;
+  var MAX_ZOOM = 8;
+  var WHOLE = [0, 0, 1, 1];
+  // The photo ({img, url, w, h}: its own pixels), the part the canvas shows,
+  // the lines read there, and the frame's view of it (sign-view).
+  var photo = null, curPart = WHOLE, curLines = [], view = { s: 1, tx: 0, ty: 0 }, fit = null, loadSeq = 0;
   var IDLE_MS = 60000;
   var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
   // window.__szSignKiwixApp forces it, for tools/ocr_check.mjs (no zim: there).
@@ -798,7 +869,8 @@ function initSignSearch(map, config) {
   // Back to the photo: its sheet, its lines and its places again.
   function reopen() {
     sheet.hidden = false;
-    canvas.hidden = false;
+    frame.hidden = false;
+    resetView();
     pickRow.hidden = true;
     againBtn.hidden = false;
     // The tiles, opened since, emptied them: the lines read again, not the
@@ -826,7 +898,7 @@ function initSignSearch(map, config) {
       return;
     }
     sheet.hidden = false;
-    canvas.hidden = true;
+    frame.hidden = zoomHint.hidden = zoombar.hidden = true;
     linesEl.innerHTML = '';
     pickRow.hidden = mode === 'drop';
     againBtn.hidden = true;
@@ -857,25 +929,140 @@ function initSignSearch(map, config) {
     return false;
   }
 
-  // The photo, scaled to MAX_SIDE, drawn on the sheet's canvas; its pixels.
+  // The photo, decoded and kept (its own pixels: a part is drawn from them).
   function loadPhoto(f) {
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(f);
       var img = new Image();
       img.onload = function () {
-        URL.revokeObjectURL(url);
-        var s = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
-        canvas.width = Math.max(1, Math.round(img.naturalWidth * s));
-        canvas.height = Math.max(1, Math.round(img.naturalHeight * s));
-        var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        var d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        resolve({ width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) });
+        if (photo && photo.url) URL.revokeObjectURL(photo.url);
+        photo = { img: img, url: url, w: img.naturalWidth, h: img.naturalHeight };
+        resolve();
       };
       img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('not an image')); };
       img.src = url;
     });
   }
+  // `part` of the photo drawn on the sheet's canvas: the whole scaled to
+  // MAX_SIDE at most, a part up to PART_UP times its own size; its pixels.
+  function drawPart(part) {
+    var sw = (part[2] - part[0]) * photo.w, sh = (part[3] - part[1]) * photo.h;
+    var s = Math.min(_szSignIsWhole(part) ? 1 : PART_UP, MAX_SIDE / Math.max(sw, sh));
+    canvas.width = Math.max(1, Math.round(sw * s));
+    canvas.height = Math.max(1, Math.round(sh * s));
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(photo.img, part[0] * photo.w, part[1] * photo.h, sw, sh, 0, 0, canvas.width, canvas.height);
+    var d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) };
+  }
+
+  // The frame's view (sign-view): fitted whole, then pinched, dragged,
+  // double-tapped or wheeled; "Search this part" once it shows less than
+  // nearly all of the canvas, "Whole photo" while the canvas shows a part.
+  function frameSize() { return { w: frame.clientWidth || 1, h: frame.clientHeight || 1 }; }
+  function resetView() {
+    if (frame.hidden) return;
+    var f = frameSize();
+    fit = _szSignFit(f.w, f.h, canvas.width, canvas.height);
+    canvas.style.width = fit.w + 'px';
+    canvas.style.height = fit.h + 'px';
+    view = _szSignClamp({ s: 1, tx: fit.ox, ty: fit.oy }, f.w, f.h, fit);
+    applyView();
+  }
+  function applyView() {
+    canvas.style.transform = 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.s + ')';
+    frame.classList.toggle('zoomed', view.s > 1.01);
+    showZoomBar();
+  }
+  function showZoomBar() {
+    var reading = sheet.getAttribute('data-sz-ocr') === 'reading';
+    var r = fit ? _szSignVisible(view, frameSize().w, frameSize().h, fit, canvas.width, canvas.height) : null;
+    partBtn.hidden = reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
+    wholeBtn.hidden = reading || _szSignIsWhole(curPart);
+    zoombar.hidden = partBtn.hidden && wholeBtn.hidden;
+    zoomHint.hidden = reading || frame.hidden || !partBtn.hidden;
+  }
+  function searchLine(text) {
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus({ preventScroll: true });
+  }
+  var ptrs = {}, gesture = null, lastTap = null;
+  function framePoint(e) {
+    var r = frame.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function setView(v) {
+    var f = frameSize();
+    view = _szSignClamp(v, f.w, f.h, fit);
+    applyView();
+  }
+  frame.addEventListener('pointerdown', function (e) {
+    if (!fit) return;
+    try { frame.setPointerCapture(e.pointerId); } catch (x) {}
+    ptrs[e.pointerId] = framePoint(e);
+    var ids = Object.keys(ptrs);
+    if (ids.length === 1) {
+      gesture = { kind: 'pan', start: ptrs[ids[0]], v0: view, moved: false };
+    } else if (ids.length === 2) {
+      var a = ptrs[ids[0]], b = ptrs[ids[1]];
+      gesture = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+                  m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: view, moved: true };
+    }
+  });
+  frame.addEventListener('pointermove', function (e) {
+    if (!gesture || !ptrs[e.pointerId]) return;
+    ptrs[e.pointerId] = framePoint(e);
+    var ids = Object.keys(ptrs);
+    if (gesture.kind === 'pinch' && ids.length >= 2) {
+      var a = ptrs[ids[0]], b = ptrs[ids[1]];
+      var d = Math.hypot(a.x - b.x, a.y - b.y) || 1, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      var v = _szSignZoomAt(gesture.v0, Math.max(1, Math.min(MAX_ZOOM, gesture.v0.s * d / gesture.d0)), gesture.m0.x, gesture.m0.y);
+      setView({ s: v.s, tx: v.tx + m.x - gesture.m0.x, ty: v.ty + m.y - gesture.m0.y });
+    } else if (gesture.kind === 'pan') {
+      var p = ptrs[e.pointerId], dx = p.x - gesture.start.x, dy = p.y - gesture.start.y;
+      if (Math.abs(dx) + Math.abs(dy) > 8) gesture.moved = true;
+      if (gesture.moved) setView({ s: gesture.v0.s, tx: gesture.v0.tx + dx, ty: gesture.v0.ty + dy });
+    }
+  });
+  function pointerUp(e) {
+    var p = ptrs[e.pointerId];
+    if (!p) return;
+    delete ptrs[e.pointerId];
+    var ids = Object.keys(ptrs);
+    if (gesture && gesture.kind === 'pan' && !gesture.moved && !ids.length && e.type === 'pointerup') tapAt(p);
+    if (!ids.length) gesture = null;
+    else gesture = { kind: 'pan', start: ptrs[ids[0]], v0: view, moved: true };   // one finger left: it drags on
+  }
+  frame.addEventListener('pointerup', pointerUp);
+  frame.addEventListener('pointercancel', pointerUp);
+  frame.addEventListener('wheel', function (e) {
+    if (!fit) return;
+    e.preventDefault();
+    var p = framePoint(e);
+    setView(_szSignZoomAt(view, Math.max(1, Math.min(MAX_ZOOM, view.s * Math.exp(-e.deltaY / 300))), p.x, p.y));
+  }, { passive: false });
+  // A tap on a box searches its line; a double tap elsewhere zooms in there
+  // (or back out to the whole frame).
+  function tapAt(p) {
+    var now = Date.now();
+    var c = _szSignAt(view, fit, p.x, p.y);
+    var hit = sheet.getAttribute('data-sz-ocr') !== 'reading' && _szSignHit(curLines, c.x, c.y, 6 / (fit.k * view.s));
+    if (hit) { lastTap = null; searchLine(hit.text); return; }
+    if (lastTap && now - lastTap.t < 350 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
+      lastTap = null;
+      setView(view.s > 1.01 ? { s: 1, tx: fit.ox, ty: fit.oy } : _szSignZoomAt(view, 2.5, p.x, p.y));
+      return;
+    }
+    lastTap = { t: now, x: p.x, y: p.y };
+  }
+  partBtn.addEventListener('click', function () {
+    var f = frameSize();
+    readPart(_szSignSubPart(curPart, _szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.height),
+                            canvas.width, canvas.height));
+  });
+  wholeBtn.addEventListener('click', function () { readPart(WHOLE); });
+  window.addEventListener('resize', function () { if (!sheet.hidden && !frame.hidden) resetView(); });
 
   // The photo on the sheet's canvas at COARSE_SIDE ({k, image}: k its scale),
   // or null when it is not much bigger than that (one reading finds it all).
@@ -1010,11 +1197,7 @@ function initSignSearch(map, config) {
       b.className = 'ocr-line';
       b.dir = 'auto';
       b.textContent = L.text;
-      b.addEventListener('click', function () {
-        input.value = L.text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.focus({ preventScroll: true });
-      });
+      b.addEventListener('click', function () { searchLine(L.text); });
       linesEl.appendChild(b);
     });
   }
@@ -1022,9 +1205,19 @@ function initSignSearch(map, config) {
   function handle(f) {
     if (!f) return;
     sheet.hidden = false;
-    canvas.hidden = false;
     pickRow.hidden = true;
     againBtn.hidden = false;
+    linesEl.innerHTML = '';
+    forgetVerdict();
+    forget();
+    setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
+    var seq = ++loadSeq;
+    loadPhoto(f).then(function () { if (seq === loadSeq) readPart(WHOLE); }, failed);
+  }
+  // Reads `part` of the photo (WHOLE, or what the frame showed: "Search this
+  // part") and searches its lines, as a photo of that part alone would be.
+  function readPart(part) {
+    frame.hidden = false;
     linesEl.innerHTML = '';
     forgetVerdict();
     forget();
@@ -1033,15 +1226,22 @@ function initSignSearch(map, config) {
     resultsEl.style.display = 'none';
     setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
     var t0 = Date.now();
-    loadPhoto(f).then(readBoth).then(function (items) {
+    curPart = part;
+    curLines = [];
+    var image = drawPart(part);
+    resetView();
+    return readBoth(image).then(function (items) {
       var lines = _szSignLineGroups(items);
+      curLines = lines;
       dbg('sign reader: ' + lines.length + ' lines in ' + (Date.now() - t0) + ' ms');
       outline(lines);
       if (!lines.length) {
         setStatus(szT('search.photo_none', 'No text found in the photo'), 'none');
+        showZoomBar();
         return;
       }
       setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+      showZoomBar();
       showLines(lines);
       // Each line weighs as tall as its letters, against the sign's biggest.
       var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
@@ -1062,16 +1262,20 @@ function initSignSearch(map, config) {
         keep(weighted, query, lines);
         sheet.setAttribute('data-sz-ocr', 'searched');
       });
-    }).catch(function (err) {
-      dbg('sign reader failed', describeError(err));
-      setStatus(szT('search.photo_failed', 'Could not read the photo'), 'failed');
-      // Why, in small print: on a phone there is no console to read it in.
-      var why = document.createElement('small');
-      why.className = 'ocr-why';
-      why.textContent = describeError(err);
-      statusEl.appendChild(why);
-    });
+    }).catch(failed);
   }
+  function failed(err) {
+    dbg('sign reader failed', describeError(err));
+    setStatus(szT('search.photo_failed', 'Could not read the photo'), 'failed');
+    showZoomBar();
+    // Why, in small print: on a phone there is no console to read it in.
+    var why = document.createElement('small');
+    why.className = 'ocr-why';
+    why.textContent = describeError(err);
+    statusEl.appendChild(why);
+  }
+  // tools/ocr_photos.mjs: a part of the photo read as "Search this part" would.
+  window.__szSignReadPart = function (part) { return photo ? readPart(part) : null; };
 
   // The camera: back to the last photo while there is one, else a new one.
   btn.addEventListener('click', function () {

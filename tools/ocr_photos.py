@@ -235,7 +235,8 @@ def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: 
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     photos = out / f"photos-{region}.json"
     photos.write_text(json.dumps([dict({"id": r["id"], "path": str(set_dir / r["file"])},
-                                       **({"at": r["location"]} if at_photo and r.get("location") else {}))
+                                       **({"at": r["location"]} if at_photo and r.get("location") else {}),
+                                       **({"part": r["part"]} if isinstance(r.get("part"), list) and len(r["part"]) == 4 else {}))
                                   for r in records]), encoding="utf-8")
     env = dict(os.environ, ZIM_ORIGIN=f"http://127.0.0.1:{srv.server_address[1]}", PHOTOS=str(photos))
     raws: list[dict[str, Any]] = []

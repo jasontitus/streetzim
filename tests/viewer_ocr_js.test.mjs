@@ -30,6 +30,9 @@ const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n'
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
   '\nreturn { _szSignLineGroups, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress };')();
+// The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
+const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
+  '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignHit, _szSignSubPart, _szSignIsWhole };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -569,4 +572,42 @@ ok('the camera button offers the camera and the library on a phone, the library 
   assert.strictEqual(P._szSignPickMode('mac', false), 'drop');    // no picker opens in Kiwix for macOS
   assert.strictEqual(P._szSignPickMode('mac', true), 'drop');
 });
+ok('the photo frame: fitted whole, zoomed about a point, kept in bounds, its view a part of the photo', () => {
+  // a 1600 x 1200 photo in a 320 x 300 frame: fitted to the width, centred down the frame
+  const fit = V._szSignFit(320, 300, 1600, 1200);
+  assert.deepStrictEqual([fit.k, fit.w, fit.h, fit.ox, fit.oy], [0.2, 320, 240, 0, 30]);
+  const whole = V._szSignClamp({ s: 1, tx: fit.ox, ty: fit.oy }, 320, 300, fit);
+  assert.deepStrictEqual(whole, { s: 1, tx: 0, ty: 30 });
+  const all = V._szSignVisible(whole, 320, 300, fit, 1600, 1200);
+  assert.deepStrictEqual([all.x, all.y, all.width, all.height], [0, 0, 1600, 1200]);
+  // twice as big about the frame's centre: the middle half of the photo shows
+  const z = V._szSignClamp(V._szSignZoomAt(whole, 2, 160, 150), 320, 300, fit);
+  assert.strictEqual(z.s, 2);
+  const mid = V._szSignVisible(z, 320, 300, fit, 1600, 1200);
+  assert.deepStrictEqual([Math.round(mid.x), Math.round(mid.width)], [400, 800]);
+  assert.ok(Math.abs(mid.y - 225) < 1e-9 && Math.abs(mid.height - 750) < 1e-9, JSON.stringify(mid));
+  // the point under the fingers stays there
+  const at = V._szSignAt(whole, fit, 160, 150), at2 = V._szSignAt(V._szSignZoomAt(whole, 3, 160, 150), fit, 160, 150);
+  assert.ok(Math.abs(at.x - at2.x) < 1e-9 && Math.abs(at.y - at2.y) < 1e-9);
+  // dragged past an edge: the photo still covers the frame where it is bigger
+  const far = V._szSignClamp({ s: 2, tx: 500, ty: -900 }, 320, 300, fit);
+  assert.deepStrictEqual(far, { s: 2, tx: 0, ty: 300 - 480 });
+  // the canvas shows a part: the frame's view is a part of that part
+  const part = V._szSignSubPart([0.5, 0.5, 1, 1], { x: 400, y: 300, width: 800, height: 600 }, 1600, 1200);
+  assert.deepStrictEqual(part, [0.625, 0.625, 0.875, 0.875]);
+  assert.strictEqual(V._szSignIsWhole([0, 0, 1, 1]), true);
+  assert.strictEqual(V._szSignIsWhole(part), false);
+});
+ok('a tap on the photo picks the line whose box it is in, the smallest of nested boxes', () => {
+  const lines = [{ text: 'SIGN', box: { x: 100, y: 100, width: 400, height: 200 } },
+                 { text: '366', box: { x: 150, y: 120, width: 60, height: 40 } },
+                 { text: 'Road 116', box: { x: 150, y: 220, width: 300, height: 50 } }];
+  assert.strictEqual(V._szSignHit(lines, 170, 130, 0).text, '366');
+  assert.strictEqual(V._szSignHit(lines, 300, 240, 0).text, 'Road 116');
+  assert.strictEqual(V._szSignHit(lines, 480, 110, 0).text, 'SIGN');
+  assert.strictEqual(V._szSignHit(lines, 50, 50, 0), null);
+  assert.strictEqual(V._szSignHit(lines, 95, 95, 6).text, 'SIGN');      // a finger's width outside the box
+  assert.strictEqual(V._szSignHit([], 1, 1, 6), null);
+});
+
 console.log(`${pass} passed`);

@@ -383,7 +383,7 @@
   #ocr-sheet {
     position: absolute; left: 50%; transform: translateX(-50%);
     bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 3;
-    width: 340px; max-width: calc(100% - 24px); max-height: 50vh; overflow-y: auto;
+    width: 340px; max-width: calc(100% - 24px); max-height: 75vh; overflow-y: auto;
     box-sizing: border-box; padding: 10px 12px 12px;
     background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--panel-shadow);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -406,7 +406,8 @@
   #search-photo.has-last svg { visibility: hidden; }
   /* Take a photo / Choose a photo, side by side; the one to use is blue. */
   #ocr-pick { display: flex; gap: 10px; margin: 2px 0; }
-  #ocr-pick[hidden], #ocr-canvas[hidden] { display: none; }
+  #ocr-pick[hidden], #ocr-frame[hidden], #ocr-zoom[hidden], #ocr-zoombar[hidden],
+  #ocr-zoombar button[hidden] { display: none; }
   .ocr-tile {
     flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
     padding: 14px 8px; border: 1px solid var(--border); border-radius: 12px;
@@ -423,7 +424,22 @@
     #ocr-pick .ocr-tile { flex-direction: row; justify-content: center; min-height: 44px; padding: 8px; }
     #ocr-pick .ocr-tile svg { width: 22px; height: 22px; flex: none; }
   }
-  #ocr-canvas { display: block; width: 100%; height: auto; max-height: 24vh; object-fit: contain; border-radius: 6px; }
+  /* The photo in a frame of its own: the page does not zoom under a pinch
+     (touch-action), the photo does; its canvas is placed and scaled by
+     305-ocr-search.js (transform from its top left). */
+  #ocr-frame {
+    position: relative; overflow: hidden; height: min(36vh, 360px); border-radius: 6px;
+    background: var(--hover-bg); touch-action: none; cursor: zoom-in; user-select: none; -webkit-user-select: none;
+  }
+  #ocr-frame.zoomed { cursor: grab; }
+  #ocr-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: block; }
+  #ocr-zoom { margin: 6px 0 0; font-size: 12px; line-height: 1.35; color: var(--text-tertiary); }
+  #ocr-zoombar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  #ocr-zoombar button {
+    flex: 1 1 auto; min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--hover-bg); color: var(--text-primary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #ocr-zoombar #ocr-part { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
   #ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   /* What a photo's result is: green only for an exact address; anything
      less (the street only, an area, a similar name) in amber, in words. */

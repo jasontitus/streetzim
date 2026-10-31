@@ -285,7 +285,15 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
     <button id="ocr-take" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg><span data-i18n="search.photo_take">Take a photo</span></button>
     <button id="ocr-choose" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-5.5-7.5-3 3.9-2-2.4L5.5 17h13l-5-6.5zM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3z"/></svg><span data-i18n="search.photo_choose">Choose a photo</span></button>
   </div>
-  <canvas id="ocr-canvas" width="1" height="1"></canvas>
+  <!-- The photo: pinch, drag or double-tap to zoom; a tap on a box
+       searches its line; "Search this part" reads only what the frame shows
+       (305-ocr-search.js, sign-view). -->
+  <div id="ocr-frame" hidden><canvas id="ocr-canvas" width="1" height="1"></canvas></div>
+  <p id="ocr-zoom" hidden data-i18n="search.photo_zoom">Pinch to zoom in on the text you want, or tap a box to search it</p>
+  <div id="ocr-zoombar" hidden>
+    <button id="ocr-part" type="button" hidden data-i18n="search.photo_part">Search this part</button>
+    <button id="ocr-whole" type="button" hidden data-i18n="search.photo_whole">Whole photo</button>
+  </div>
   <div id="ocr-lines"></div>
 </div>
 <div id="search-container">
