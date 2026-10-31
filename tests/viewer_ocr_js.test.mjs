@@ -762,6 +762,18 @@ ok('a Latin brand on a Russian sign is searched as read too; an initial is no ho
   // the line's numbers and types aside, a short name is most of it
   for (const [n, line] of [['вулиця Миру', 'ВУЛ. МИРУ'], ['вулиця Миру', 'МИРУ 125'], ['провулок Тихий', 'ПРОВ. ТИХИЙ'], ['переулок Мира', 'ПЕР. МИРА'], ['проїзд Тихий', 'ТИХИЙ']])
     assert.ok(score({ n, t: 'street' }, [line]) >= M.SZ_SIGN_MIN, `${n} / ${line}: ${score({ n, t: 'street' }, [line])}`);
+  // a line naming another type is not this street's, its type left out or not
+  for (const line of ['1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК', 'ТВЕРСКОЙ ПЕР.', 'ТВЕРСКОЙ ПЕРЕУЛОК'])
+    assert.strictEqual(score({ n: 'Тверской бульвар', t: 'street' }, [line]), 0, line);
+  assert.ok(score({ n: '1-й Тверской-Ямской переулок', t: 'street' }, ['1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК']) >= M.SZ_SIGN_MIN);
+  assert.ok(score({ n: 'Тверской переулок', t: 'street' }, ['ТВЕРСКОЙ ПЕР.']) >= M.SZ_SIGN_MIN);
+  // "12 a." is a house's letter, a capital with a full stop an initial
+  assert.strictEqual(kinds([addr('12 a. Main Street', 37.77, -122.42)], [{ text: 'MAIN STREET 12A' }])[0].kind, 'address');
+  // the line as read does not take the place of the sign's twelfth line
+  const twelve = Array.from({ length: 12 }, (_, i) => ({ text: i === 11 ? 'ЛЕНИНГРАДСКИЙ ПРОСПЕКТ' : `СТРОКА НОМЕР ${i} ТЕКСТ`, weight: 1 - i * 0.04 }));
+  const withAlt = [twelve[0], { text: 'СТРОКА НОМЕР 0 TEKCT', weight: 1, extra: true }, ...twelve.slice(1)];
+  assert.strictEqual(M._szSignLines(withAlt, norm, 12).length, 13);
+  assert.ok(score({ n: 'Ленинградский проспект', t: 'street' }, withAlt) >= M.SZ_SIGN_MIN);
 });
 ok('the Russian and Ukrainian types are written as the search folds them', () => {
   for (const re of [M.SZ_SIGN_DROP_TYPE, M.SZ_SIGN_LINE_TYPE]) {

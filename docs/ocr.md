@@ -114,10 +114,11 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    е, г, у, ɓ/ɗ/ƙ and b/d/k, ...). A Russian or Ukrainian street's name is
    also looked for without its type, four letters or more left, on a line
    it is 60% of or more once the line's numbers and street types (ул.,
-   вул., пер. ...) are set aside: "КРАСИЛИВСЬКА" and "ВУЛ. МИРУ" find their
-   streets, but "Тверской" of "Тверской бульвар" does not outrank "1-й
-   Тверской-Ямской переулок" on a sign reading "1-й ТВЕРСКОЙ-ЯМСК
-   ПЕРЕУЛОК". Right-to-left lines are also
+   вул., пер. ...) are set aside, and that names no other type:
+   "КРАСИЛИВСЬКА" and "ВУЛ. МИРУ" find their streets, but "Тверской" of
+   "Тверской бульвар" does not outrank "1-й Тверской-Ямской переулок" on a
+   sign reading "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" or "...нереулок". Right-to-left
+   lines are also
    tried with their words reversed. On a line of several words, a name of
    five letters or fewer must be one of them ("Mace" is not on a sign
    reading "Manama Central Market", though "mana-mace-ntral" holds it).
@@ -176,8 +177,8 @@ field cleared, a new photo or a later search takes them away.
 
 Russian and Ukrainian plates follow their own conventions, and these rules
 apply to Cyrillic streets only: an address in any other script reads as
-above (`tests/viewer_ocr_js.test.mjs` keeps English, Arabic and Persian
-cases of each, with the answers they had before these rules):
+above (`tests/viewer_ocr_js.test.mjs` keeps English or Arabic cases of
+each, with the answers they had before these rules):
 
 - street types and their abbreviations are one word each: ул., вул. and
   вулиця are улица; пер. and провулок переулок; просп. проспект; пл. and
@@ -195,8 +196,8 @@ cases of each, with the answers they had before these rules):
 
 A house's letter after its number may be a letter of any of the three
 alphabets ("12a", "12-А", "8Β"), not a Chinese character ("23 巷" is a lane),
-nor a letter with a full stop after it, an initial or an abbreviation ("12 N.
-Main Street", "12 Λ. Κηφισίας", Λεωφόρος).
+nor a capital with a full stop after it, an initial or an abbreviation
+("12 N. Main Street", "12 Λ. Κηφισίας", Λεωφόρος; "12 a." is a house's letter).
 
 ## Choosing the models
 
