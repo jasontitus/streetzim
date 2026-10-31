@@ -822,6 +822,10 @@ function initSignSearch(map, config) {
   // The photo ({img, url, w, h}: its own pixels), the part the canvas shows,
   // the lines read there, and the frame's view of it (sign-view).
   var photo = null, curPart = WHOLE, curLines = [], view = { s: 1, tx: 0, ty: 0 }, fit = null, loadSeq = 0;
+  // Each reading's turn: a photo or part read, then another one started, a
+  // new photo picked or the photo let go, and the first one's answer is
+  // dropped (its lines, boxes, search and state are not the sheet's now).
+  var readSeq = 0;
   var IDLE_MS = 60000;
   var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
   // window.__szSignKiwixApp forces it, for tools/ocr_check.mjs (no zim: there).
@@ -943,6 +947,10 @@ function initSignSearch(map, config) {
     linesEl.innerHTML = '';
     forgetVerdict();
     forget();
+    readSeq++; loadSeq++;
+    if (photo && photo.url) URL.revokeObjectURL(photo.url);
+    photo = null;
+    curLines = [];
     sheet.setAttribute('data-sz-ocr', '');
   }
   function forget() {
@@ -991,6 +999,7 @@ function initSignSearch(map, config) {
   // file picker at once on a desktop.
   function pick() {
     forgetVerdict();
+    readSeq++;
     var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     var mode = _szSignPickMode(kiwixApp(), coarse);
     if (mode === 'picker') {
@@ -1031,14 +1040,16 @@ function initSignSearch(map, config) {
   }
 
   // The photo, decoded and kept (its own pixels: a part is drawn from them).
-  function loadPhoto(f) {
+  // A photo decoded after a later one was picked is not kept: false.
+  function loadPhoto(f, seq) {
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(f);
       var img = new Image();
       img.onload = function () {
+        if (seq !== loadSeq) { URL.revokeObjectURL(url); resolve(false); return; }
         if (photo && photo.url) URL.revokeObjectURL(photo.url);
         photo = { img: img, url: url, w: img.naturalWidth, h: img.naturalHeight };
-        resolve();
+        resolve(true);
       };
       img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('not an image')); };
       img.src = url;
@@ -1068,27 +1079,48 @@ function initSignSearch(map, config) {
     canvas.style.width = fit.w + 'px';
     canvas.style.height = fit.h + 'px';
     view = _szSignClamp({ s: 1, tx: fit.ox, ty: fit.oy }, f.w, f.h, fit);
+    frameW = f.w; frameH = f.h;
     applyView();
+  }
+  // The frame resized (a scroll bar came, the phone turned): fitted again,
+  // the same zoom about the same point of the photo.
+  var frameW = 0, frameH = 0;
+  function refit() {
+    if (frame.hidden || !fit) return;
+    var f = frameSize();
+    if (f.w === frameW && f.h === frameH) return;
+    var c = _szSignAt(view, fit, frameW / 2, frameH / 2), s = view.s;
+    fit = _szSignFit(f.w, f.h, canvas.width, canvas.height);
+    canvas.style.width = fit.w + 'px';
+    canvas.style.height = fit.h + 'px';
+    frameW = f.w; frameH = f.h;
+    setView({ s: s, tx: f.w / 2 - c.x * fit.k * s, ty: f.h / 2 - c.y * fit.k * s });
   }
   function applyView() {
     canvas.style.transform = 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.s + ')';
     frame.classList.toggle('zoomed', view.s > 1.01);
     showZoomBar();
   }
+  // The hint (on a touch screen) and the bar keep their room while the
+  // photo shows, shown or not, so the photo does not move under the fingers.
+  var touch = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   function showZoomBar() {
+    var off = frame.hidden || sheet.hidden;
     var reading = sheet.getAttribute('data-sz-ocr') === 'reading';
-    var r = fit ? _szSignVisible(view, frameSize().w, frameSize().h, fit, canvas.width, canvas.height) : null;
-    partBtn.hidden = reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
-    wholeBtn.hidden = reading || _szSignIsWhole(curPart);
-    zoombar.hidden = partBtn.hidden && wholeBtn.hidden;
-    zoomHint.hidden = reading || frame.hidden || !partBtn.hidden;
+    var r = !off && fit ? _szSignVisible(view, frameSize().w, frameSize().h, fit, canvas.width, canvas.height) : null;
+    partBtn.hidden = off || reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
+    wholeBtn.hidden = off || reading || _szSignIsWhole(curPart);
+    zoombar.hidden = zoomHint.hidden = off;
+    zoombar.style.visibility = partBtn.hidden && wholeBtn.hidden ? 'hidden' : '';
+    zoomHint.style.visibility = !touch || reading || !partBtn.hidden ? 'hidden' : '';
+    zoomHint.hidden = off || !touch;
   }
   function searchLine(text) {
     input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.focus({ preventScroll: true });
   }
-  var ptrs = {}, gesture = null, lastTap = null;
+  var ptrs = {}, gesture = null, lastTap = null, tapTimer = null;
   function framePoint(e) {
     var r = frame.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -1102,25 +1134,32 @@ function initSignSearch(map, config) {
     if (!fit) return;
     try { frame.setPointerCapture(e.pointerId); } catch (x) {}
     ptrs[e.pointerId] = framePoint(e);
+    startGesture(Object.keys(ptrs).length === 1 ? false : true);
+  });
+  // A pan of the one finger down, or a pinch of the first two (moved: no
+  // tap when it ends); started again whenever a finger comes or goes.
+  function startGesture(moved) {
     var ids = Object.keys(ptrs);
     if (ids.length === 1) {
-      gesture = { kind: 'pan', start: ptrs[ids[0]], v0: view, moved: false };
-    } else if (ids.length === 2) {
+      gesture = { kind: 'pan', id: ids[0], start: ptrs[ids[0]], v0: view, moved: moved };
+    } else if (ids.length >= 2) {
       var a = ptrs[ids[0]], b = ptrs[ids[1]];
-      gesture = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      gesture = { kind: 'pinch', ids: [ids[0], ids[1]], d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
                   m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: view, moved: true };
+    } else {
+      gesture = null;
     }
-  });
+  }
   frame.addEventListener('pointermove', function (e) {
     if (!gesture || !ptrs[e.pointerId]) return;
     ptrs[e.pointerId] = framePoint(e);
-    var ids = Object.keys(ptrs);
-    if (gesture.kind === 'pinch' && ids.length >= 2) {
-      var a = ptrs[ids[0]], b = ptrs[ids[1]];
+    if (gesture.kind === 'pinch') {
+      var a = ptrs[gesture.ids[0]], b = ptrs[gesture.ids[1]];
+      if (!a || !b) return;
       var d = Math.hypot(a.x - b.x, a.y - b.y) || 1, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       var v = _szSignZoomAt(gesture.v0, Math.max(1, Math.min(MAX_ZOOM, gesture.v0.s * d / gesture.d0)), gesture.m0.x, gesture.m0.y);
       setView({ s: v.s, tx: v.tx + m.x - gesture.m0.x, ty: v.ty + m.y - gesture.m0.y });
-    } else if (gesture.kind === 'pan') {
+    } else if (gesture.kind === 'pan' && String(e.pointerId) === gesture.id) {
       var p = ptrs[e.pointerId], dx = p.x - gesture.start.x, dy = p.y - gesture.start.y;
       if (Math.abs(dx) + Math.abs(dy) > 8) gesture.moved = true;
       if (gesture.moved) setView({ s: gesture.v0.s, tx: gesture.v0.tx + dx, ty: gesture.v0.ty + dy });
@@ -1132,38 +1171,55 @@ function initSignSearch(map, config) {
     delete ptrs[e.pointerId];
     var ids = Object.keys(ptrs);
     if (gesture && gesture.kind === 'pan' && !gesture.moved && !ids.length && e.type === 'pointerup') tapAt(p);
-    if (!ids.length) gesture = null;
-    else gesture = { kind: 'pan', start: ptrs[ids[0]], v0: view, moved: true };   // one finger left: it drags on
+    startGesture(true);   // the fingers left drag or pinch on from where they are
   }
   frame.addEventListener('pointerup', pointerUp);
   frame.addEventListener('pointercancel', pointerUp);
   frame.addEventListener('wheel', function (e) {
-    if (!fit) return;
+    if (!fit || (e.deltaY > 0 && view.s <= 1.001)) return;   // out at the whole photo: the sheet scrolls
     e.preventDefault();
     var p = framePoint(e);
     setView(_szSignZoomAt(view, Math.max(1, Math.min(MAX_ZOOM, view.s * Math.exp(-e.deltaY / 300))), p.x, p.y));
   }, { passive: false });
   // A tap on a box searches its line; a double tap elsewhere zooms in there
   // (or back out to the whole frame).
+  // (A box's search waits a moment for a second tap: a double tap zooms
+  // there too, and does not open the keyboard first.)
   function tapAt(p) {
     var now = Date.now();
-    var c = _szSignAt(view, fit, p.x, p.y);
-    var hit = sheet.getAttribute('data-sz-ocr') !== 'reading' && _szSignHit(curLines, c.x, c.y, 6 / (fit.k * view.s));
-    if (hit) { lastTap = null; searchLine(hit.text); return; }
+    clearTimeout(tapTimer);
     if (lastTap && now - lastTap.t < 350 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
       lastTap = null;
       setView(view.s > 1.01 ? { s: 1, tx: fit.ox, ty: fit.oy } : _szSignZoomAt(view, 2.5, p.x, p.y));
       return;
     }
     lastTap = { t: now, x: p.x, y: p.y };
+    var c = _szSignAt(view, fit, p.x, p.y), seq = readSeq;
+    var hit = sheet.getAttribute('data-sz-ocr') !== 'reading' && _szSignHit(curLines, c.x, c.y, 6 / (fit.k * view.s));
+    if (hit) tapTimer = setTimeout(function () { if (seq === readSeq) searchLine(hit.text); }, 360);
   }
+  // The keyboard: + and - zoom about the middle, the arrows move the photo.
+  frame.addEventListener('keydown', function (e) {
+    if (!fit) return;
+    var f = frameSize(), step = 0.15 * Math.min(f.w, f.h), k = e.key;
+    if (k === '+' || k === '=') setView(_szSignZoomAt(view, Math.min(MAX_ZOOM, view.s * 1.5), f.w / 2, f.h / 2));
+    else if (k === '-' || k === '_') setView(_szSignZoomAt(view, Math.max(1, view.s / 1.5), f.w / 2, f.h / 2));
+    else if (k === 'ArrowLeft') setView({ s: view.s, tx: view.tx + step, ty: view.ty });
+    else if (k === 'ArrowRight') setView({ s: view.s, tx: view.tx - step, ty: view.ty });
+    else if (k === 'ArrowUp') setView({ s: view.s, tx: view.tx, ty: view.ty + step });
+    else if (k === 'ArrowDown') setView({ s: view.s, tx: view.tx, ty: view.ty - step });
+    else return;
+    e.preventDefault();
+  });
   partBtn.addEventListener('click', function () {
+    if (frame.hidden || !fit || !photo) return;
     var f = frameSize();
     readPart(_szSignSubPart(curPart, _szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.height),
                             canvas.width, canvas.height));
   });
-  wholeBtn.addEventListener('click', function () { readPart(WHOLE); });
-  window.addEventListener('resize', function () { if (!sheet.hidden && !frame.hidden) resetView(); });
+  wholeBtn.addEventListener('click', function () { if (photo) readPart(WHOLE); });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(frame);
+  else window.addEventListener('resize', refit);
 
   // The photo on the sheet's canvas at COARSE_SIDE ({k, image}: k its scale),
   // or null when it is not much bigger than that (one reading finds it all).
@@ -1312,8 +1368,9 @@ function initSignSearch(map, config) {
     forgetVerdict();
     forget();
     setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
-    var seq = ++loadSeq;
-    loadPhoto(f).then(function () { if (seq === loadSeq) readPart(WHOLE); }, failed);
+    var seq = ++loadSeq, rs = ++readSeq;
+    loadPhoto(f, seq).then(function (kept) { if (kept && seq === loadSeq) readPart(WHOLE); },
+                           function (err) { if (seq === loadSeq) failed(err, rs); });
   }
   // Reads `part` of the photo (WHOLE, or what the frame showed: "Search this
   // part") and searches its lines, as a photo of that part alone would be.
@@ -1326,12 +1383,13 @@ function initSignSearch(map, config) {
     resultsEl.innerHTML = '';
     resultsEl.style.display = 'none';
     setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
-    var t0 = Date.now();
+    var t0 = Date.now(), rs = ++readSeq;
     curPart = part;
     curLines = [];
     var image = drawPart(part);
     resetView();
     return readBoth(image).then(function (items) {
+      if (rs !== readSeq) return;   // another photo or part since: not this sheet's
       var lines = _szSignLineGroups(items);
       curLines = lines;
       dbg('sign reader: ' + lines.length + ' lines in ' + (Date.now() - t0) + ' ms');
@@ -1357,15 +1415,16 @@ function initSignSearch(map, config) {
       document.getElementById('search-clear').style.display = 'block';
       var opts = signOpts(lines);
       return map._searchSign(weighted, opts).then(function (found) {
-        if (opts.photo !== photoSeq) return;   // let go meanwhile: its answer is not shown
+        if (opts.photo !== photoSeq || rs !== readSeq) return;   // let go meanwhile: its answer is not shown
         var query = (found[0] && found[0].signLine) || biggest;
         input.value = query;
         keep(weighted, query, lines);
         sheet.setAttribute('data-sz-ocr', 'searched');
       });
-    }).catch(failed);
+    }).catch(function (err) { failed(err, rs); });
   }
-  function failed(err) {
+  function failed(err, rs) {
+    if (rs !== readSeq) return;
     dbg('sign reader failed', describeError(err));
     setStatus(szT('search.photo_failed', 'Could not read the photo'), 'failed');
     showZoomBar();

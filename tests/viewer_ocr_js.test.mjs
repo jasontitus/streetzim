@@ -599,6 +599,32 @@ ok('the photo frame: fitted whole, zoomed about a point, kept in bounds, its vie
   assert.strictEqual(V._szSignIsWhole([0, 0, 1, 1]), true);
   assert.strictEqual(V._szSignIsWhole(part), false);
 });
+ok('the photo frame, asymmetric: x and y kept apart, a tall photo in a wide frame, parts at the corner', () => {
+  // a tall 600 x 1200 photo in a 400 x 300 frame: fitted to the height, centred across
+  const fit = V._szSignFit(400, 300, 600, 1200);
+  assert.deepStrictEqual([fit.k, fit.w, fit.h, fit.ox, fit.oy], [0.25, 150, 300, 125, 0]);
+  const v1 = V._szSignClamp({ s: 1, tx: 0, ty: 0 }, 400, 300, fit);
+  assert.deepStrictEqual(v1, { s: 1, tx: 125, ty: 0 });                       // centred: the pillarbox stays
+  const all = V._szSignVisible(v1, 400, 300, fit, 600, 1200);
+  assert.deepStrictEqual([all.x, all.y, all.width, all.height], [0, 0, 600, 1200]);   // x1 clamped to the canvas
+  // a frame point as a canvas pixel: values, not just invariance
+  assert.deepStrictEqual(V._szSignAt(v1, fit, 125, 0), { x: 0, y: 0 });
+  assert.deepStrictEqual(V._szSignAt(v1, fit, 275, 300), { x: 600, y: 1200 });
+  assert.deepStrictEqual(V._szSignAt({ s: 2, tx: -100, ty: -50 }, fit, 0, 10), { x: 200, y: 120 });
+  // zoomed 3x into the top left: 400 x 300 CSS px of a 450 x 900 photo-in-frame
+  const z = V._szSignClamp({ s: 3, tx: 0, ty: 0 }, 400, 300, fit);
+  assert.deepStrictEqual(z, { s: 3, tx: 0, ty: 0 });
+  const r = V._szSignVisible(z, 400, 300, fit, 600, 1200);
+  assert.deepStrictEqual([r.x, r.y, Math.round(r.width), Math.round(r.height)], [0, 0, 533, 400]);
+  // a part of a part, asymmetric: the canvas shows [0.1, 0.2, 0.5, 0.9] of the photo (cw 400, ch 700)
+  const sub = V._szSignSubPart([0.1, 0.2, 0.5, 0.9], { x: 100, y: 70, width: 200, height: 350 }, 400, 700);
+  assert.deepStrictEqual(sub.map((x) => +x.toFixed(6)), [0.2, 0.27, 0.4, 0.62]);
+  const corner = V._szSignSubPart([0, 0, 1, 1], { x: 0, y: 0, width: 300, height: 100 }, 1200, 800);
+  assert.deepStrictEqual(corner, [0, 0, 0.25, 0.125]);
+  for (const part of [[0.1, 0, 1, 1], [0, 0.1, 1, 1], [0, 0, 0.9, 1], [0, 0, 1, 0.9]])
+    assert.strictEqual(V._szSignIsWhole(part), false, JSON.stringify(part));
+  assert.strictEqual(V._szSignIsWhole(null), true);
+});
 ok('a tap on the photo picks the line whose box it is in, the smallest of nested boxes', () => {
   const lines = [{ text: 'SIGN', box: { x: 100, y: 100, width: 400, height: 200 } },
                  { text: '366', box: { x: 150, y: 120, width: 60, height: 40 } },
@@ -608,6 +634,10 @@ ok('a tap on the photo picks the line whose box it is in, the smallest of nested
   assert.strictEqual(V._szSignHit(lines, 480, 110, 0).text, 'SIGN');
   assert.strictEqual(V._szSignHit(lines, 50, 50, 0), null);
   assert.strictEqual(V._szSignHit(lines, 95, 95, 6).text, 'SIGN');      // a finger's width outside the box
+  for (const [x, y] of [[95, 200], [505, 200], [300, 95], [300, 305]])           // just outside each side
+    assert.strictEqual(V._szSignHit(lines, x, y, 6).text, 'SIGN', `${x},${y}`);
+  for (const [x, y] of [[93, 200], [507, 200], [300, 93], [300, 307]])           // beyond the tolerance
+    assert.strictEqual(V._szSignHit(lines, x, y, 6), null, `${x},${y}`);
   assert.strictEqual(V._szSignHit([], 1, 1, 6), null);
 });
 

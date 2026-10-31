@@ -288,7 +288,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
   <!-- The photo: pinch, drag or double-tap to zoom; a tap on a box
        searches its line; "Search this part" reads only what the frame shows
        (305-ocr-search.js, sign-view). -->
-  <div id="ocr-frame" hidden><canvas id="ocr-canvas" width="1" height="1"></canvas></div>
+  <div id="ocr-frame" hidden tabindex="0" role="img" aria-label="Search with a photo" data-i18n-aria-label="search.photo"><canvas id="ocr-canvas" width="1" height="1"></canvas></div>
   <p id="ocr-zoom" hidden data-i18n="search.photo_zoom">Pinch to zoom in on the text you want, or tap a box to search it</p>
   <div id="ocr-zoombar" hidden>
     <button id="ocr-part" type="button" hidden data-i18n="search.photo_part">Search this part</button>
