@@ -305,7 +305,7 @@
  "search.photo_none": "متنی در عکس پیدا نشد",
  "search.photo_part": "جستجو در این بخش",
  "search.photo_whole": "کل عکس",
- "search.photo_zoom": "برای بزرگ‌نمایی متن دلخواه دو انگشت را باز کنید، یا برای جستجو روی یک کادر ضربه بزنید",
+ "search.photo_zoom": "برای بزرگ‌نمایی متن دلخواه دو انگشت را باز کنید",
  "search.photo_reading": "در حال خواندن عکس…",
  "search.sign_address": "نشانی دقیق",
  "search.sign_street_no_address": "فقط خیابان: نشانی {n} پیدا نشد",

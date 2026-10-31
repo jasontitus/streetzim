@@ -307,7 +307,7 @@
  "search.photo_none": "Fotoattēlā nav atrasts teksts",
  "search.photo_part": "Meklēt šajā daļā",
  "search.photo_whole": "Viss foto",
- "search.photo_zoom": "Savelciet pirkstus, lai pietuvinātu vajadzīgo tekstu, vai pieskarieties rāmītim, lai to meklētu",
+ "search.photo_zoom": "Savelciet pirkstus, lai pietuvinātu vajadzīgo tekstu",
  "search.photo_reading": "Nolasa fotoattēlu…",
  "search.sign_address": "Precīza adrese",
  "search.sign_street_no_address": "Tikai iela: adrese {n} nav atrasta",

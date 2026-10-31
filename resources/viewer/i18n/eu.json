@@ -304,7 +304,7 @@
  "search.photo_none": "Ez da testurik aurkitu argazkian",
  "search.photo_part": "Bilatu zati hau",
  "search.photo_whole": "Argazki osoa",
- "search.photo_zoom": "Hatz biekin zabaldu nahi duzun testua handitzeko, edo ukitu lauki bat bilatzeko",
+ "search.photo_zoom": "Hatz biekin zabaldu nahi duzun testua handitzeko",
  "search.photo_reading": "Argazkia irakurtzen…",
  "search.sign_address": "Helbide zehatza",
  "search.sign_street_no_address": "Kalea bakarrik: ez da {n} helbidea aurkitu",

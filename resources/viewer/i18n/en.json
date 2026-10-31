@@ -304,7 +304,7 @@
  "search.photo_reading": "Reading the photo…",
  "search.photo_take": "Take a photo",
  "search.photo_whole": "Whole photo",
- "search.photo_zoom": "Pinch to zoom in on the text you want, or tap a box to search it",
+ "search.photo_zoom": "Pinch to zoom in on the text you want",
  "search.placeholder": "Search places, streets, POIs...",
  "search.placeholder_count": {
   "one": "Search {n} places...",

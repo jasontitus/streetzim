@@ -310,7 +310,7 @@
  "search.photo_none": "На фото не знайдено тексту",
  "search.photo_part": "Шукати в цій частині",
  "search.photo_whole": "Усе фото",
- "search.photo_zoom": "Розведіть пальці, щоб збільшити потрібний текст, або торкніться рамки, щоб шукати його",
+ "search.photo_zoom": "Розведіть пальці, щоб збільшити потрібний текст",
  "search.photo_reading": "Розпізнаємо фото…",
  "search.sign_address": "Точна адреса",
  "search.sign_street_no_address": "Лише вулиця: адресу {n} не знайдено",

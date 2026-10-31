@@ -69,11 +69,19 @@ def test_gate_markers_survive() -> None:
         assert marker in BUILT, marker
 
 
-def test_only_whole_comment_lines_go() -> None:
+def test_comments_go_whole_or_where_certain() -> None:
     src = "\n".join([
         "<script>",
         "  // a comment line",
         "  var a = 1; // trailing comment stays",
+        "  var d = 4;  // two spaces before it: goes",
+        "  var e = x / 2;   // after a division: goes",
+        "  var s = 'a  // b', t = \"c  // d\";  // after strings holding //: goes",
+        "  var q = 'it\\'s  // x';  // an escaped quote: goes",
+        "  var r = /a\\/\\/b/;  // a regex on the line: stays",
+        "  var m = `x`;  // a template on the line: stays",
+        "  var n = 'open  // still a string",
+        "  //   a comment line after spaces",
         "  var u = 'http://x//y';",
         "  /* one-line block */",
         "  /* a block",
@@ -94,6 +102,13 @@ def test_only_whole_comment_lines_go() -> None:
     assert viewer_compact.compact(src).split("\n") == [
         "<script>",
         "var a = 1; // trailing comment stays",
+        "var d = 4;",
+        "var e = x / 2;",
+        "var s = 'a  // b', t = \"c  // d\";",
+        "var q = 'it\\'s  // x';",
+        "var r = /a\\/\\/b/;  // a regex on the line: stays",
+        "var m = `x`;  // a template on the line: stays",
+        "var n = 'open  // still a string",
         "var u = 'http://x//y';",
         "var b = 2; /* trailing block */",
         "/* not whole */ var c = 3;",

@@ -310,7 +310,7 @@
  "search.photo_none": "Na fotke sa nenašiel žiadny text",
  "search.photo_part": "Hľadať v tejto časti",
  "search.photo_whole": "Celá fotka",
- "search.photo_zoom": "Roztiahnutím prstov priblížte požadovaný text alebo ťuknite na rámik a vyhľadajte ho",
+ "search.photo_zoom": "Roztiahnutím prstov priblížte požadovaný text",
  "search.photo_reading": "Číta sa fotka…",
  "search.sign_address": "Presná adresa",
  "search.sign_street_no_address": "Len ulica: adresa {n} sa nenašla",

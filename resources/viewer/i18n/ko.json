@@ -302,7 +302,7 @@
  "search.photo_none": "사진에서 글자를 찾지 못했습니다",
  "search.photo_part": "이 부분 검색",
  "search.photo_whole": "사진 전체",
- "search.photo_zoom": "원하는 글자를 두 손가락으로 확대하거나, 상자를 눌러 검색하세요",
+ "search.photo_zoom": "원하는 글자를 두 손가락으로 확대하세요",
  "search.photo_reading": "사진을 읽는 중…",
  "search.sign_address": "정확한 주소",
  "search.sign_street_no_address": "도로만: 주소 {n}을(를) 찾지 못했습니다",

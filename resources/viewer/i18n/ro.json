@@ -307,7 +307,7 @@
  "search.photo_none": "Nu s-a găsit text în fotografie",
  "search.photo_part": "Caută în această parte",
  "search.photo_whole": "Toată fotografia",
- "search.photo_zoom": "Depărtați degetele pentru a mări textul dorit sau atingeți un chenar pentru a-l căuta",
+ "search.photo_zoom": "Depărtați degetele pentru a mări textul dorit",
  "search.photo_reading": "Se citește fotografia…",
  "search.sign_address": "Adresă exactă",
  "search.sign_street_no_address": "Doar strada: adresa {n} nu a fost găsită",

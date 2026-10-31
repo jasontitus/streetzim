@@ -33,7 +33,7 @@ const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-line
   '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
-  '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignHit, _szSignSubPart, _szSignIsWhole };')();
+  '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
 // The viewer's normalizeText (300-search.js): SEARCH_SHARDS.fold.
 const norm = new Function(slice(HTML, '// BEGIN search-shards', '// END search-shards') +
   '\nreturn SEARCH_SHARDS.fold;')();
@@ -594,9 +594,9 @@ ok('the photo frame: fitted whole, zoomed about a point, kept in bounds, its vie
   // dragged past an edge: the photo still covers the frame where it is bigger
   const far = V._szSignClamp({ s: 2, tx: 500, ty: -900 }, 320, 300, fit);
   assert.deepStrictEqual(far, { s: 2, tx: 0, ty: 300 - 480 });
-  // the canvas shows a part: the frame's view is a part of that part
-  const part = V._szSignSubPart([0.5, 0.5, 1, 1], { x: 400, y: 300, width: 800, height: 600 }, 1600, 1200);
-  assert.deepStrictEqual(part, [0.625, 0.625, 0.875, 0.875]);
+  // what the frame shows, as a part of the photo (the canvas always shows the whole)
+  const part = V._szSignPartOf(mid, 1600, 1200);
+  assert.deepStrictEqual(part.map((x) => +x.toFixed(6)), [0.25, 0.1875, 0.75, 0.8125]);
   assert.strictEqual(V._szSignIsWhole([0, 0, 1, 1]), true);
   assert.strictEqual(V._szSignIsWhole(part), false);
 });
@@ -617,29 +617,23 @@ ok('the photo frame, asymmetric: x and y kept apart, a tall photo in a wide fram
   assert.deepStrictEqual(z, { s: 3, tx: 0, ty: 0 });
   const r = V._szSignVisible(z, 400, 300, fit, 600, 1200);
   assert.deepStrictEqual([r.x, r.y, Math.round(r.width), Math.round(r.height)], [0, 0, 533, 400]);
-  // a part of a part, asymmetric: the canvas shows [0.1, 0.2, 0.5, 0.9] of the photo (cw 400, ch 700)
-  const sub = V._szSignSubPart([0.1, 0.2, 0.5, 0.9], { x: 100, y: 70, width: 200, height: 350 }, 400, 700);
-  assert.deepStrictEqual(sub.map((x) => +x.toFixed(6)), [0.2, 0.27, 0.4, 0.62]);
-  const corner = V._szSignSubPart([0, 0, 1, 1], { x: 0, y: 0, width: 300, height: 100 }, 1200, 800);
-  assert.deepStrictEqual(corner, [0, 0, 0.25, 0.125]);
+  // the part shown, asymmetric (x and y kept apart)
+  assert.deepStrictEqual(V._szSignPartOf({ x: 100, y: 70, width: 200, height: 350 }, 400, 700).map((x) => +x.toFixed(6)), [0.25, 0.1, 0.75, 0.6]);
+  assert.deepStrictEqual(V._szSignPartOf(r, 600, 1200).map((x) => +x.toFixed(4)), [0, 0, 0.8889, 0.3333]);
   for (const part of [[0.1, 0, 1, 1], [0, 0.1, 1, 1], [0, 0, 0.9, 1], [0, 0, 1, 0.9]])
     assert.strictEqual(V._szSignIsWhole(part), false, JSON.stringify(part));
   assert.strictEqual(V._szSignIsWhole(null), true);
 });
-ok('a tap on the photo picks the line whose box it is in, the smallest of nested boxes', () => {
-  const lines = [{ text: 'SIGN', box: { x: 100, y: 100, width: 400, height: 200 } },
-                 { text: '366', box: { x: 150, y: 120, width: 60, height: 40 } },
-                 { text: 'Road 116', box: { x: 150, y: 220, width: 300, height: 50 } }];
-  assert.strictEqual(V._szSignHit(lines, 170, 130, 0).text, '366');
-  assert.strictEqual(V._szSignHit(lines, 300, 240, 0).text, 'Road 116');
-  assert.strictEqual(V._szSignHit(lines, 480, 110, 0).text, 'SIGN');
-  assert.strictEqual(V._szSignHit(lines, 50, 50, 0), null);
-  assert.strictEqual(V._szSignHit(lines, 95, 95, 6).text, 'SIGN');      // a finger's width outside the box
-  for (const [x, y] of [[95, 200], [505, 200], [300, 95], [300, 305]])           // just outside each side
-    assert.strictEqual(V._szSignHit(lines, x, y, 6).text, 'SIGN', `${x},${y}`);
-  for (const [x, y] of [[93, 200], [507, 200], [300, 93], [300, 307]])           // beyond the tolerance
-    assert.strictEqual(V._szSignHit(lines, x, y, 6), null, `${x},${y}`);
-  assert.strictEqual(V._szSignHit([], 1, 1, 6), null);
+ok('a box of a part\'s reading drawn on the whole photo', () => {
+  // a 4000 x 3000 photo; its part [0.25, 0.5, 0.75, 1] read at 0.8 (1600 x 1200); the photo shown at 0.4 (1600 x 1200)
+  const b = V._szSignOnPhoto({ x: 160, y: 80, width: 400, height: 120 }, [0.25, 0.5, 0.75, 1], 4000, 3000, 0.8, 0.4);
+  assert.deepStrictEqual(b, { x: (1000 + 200) * 0.4, y: (1500 + 100) * 0.4, width: 200, height: 60 });
+  // the whole read at the scale shown: boxes stay where they are
+  assert.deepStrictEqual(V._szSignOnPhoto({ x: 10, y: 20, width: 30, height: 40 }, [0, 0, 1, 1], 1600, 1200, 1, 1),
+                         { x: 10, y: 20, width: 30, height: 40 });
+  // x and y kept apart
+  const c = V._szSignOnPhoto({ x: 0, y: 0, width: 10, height: 10 }, [0.5, 0.1, 1, 0.3], 1000, 2000, 2, 0.5);
+  assert.deepStrictEqual(c, { x: 250, y: 100, width: 2.5, height: 2.5 });
 });
 
 ok('a Cyrillic word read with Latin or Greek look-alikes is read as Cyrillic', () => {

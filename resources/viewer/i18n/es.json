@@ -304,7 +304,7 @@
  "search.photo_none": "No se encontró texto en la foto",
  "search.photo_part": "Buscar esta parte",
  "search.photo_whole": "Foto completa",
- "search.photo_zoom": "Pellizca para ampliar el texto que quieres o toca un recuadro para buscarlo",
+ "search.photo_zoom": "Pellizca para ampliar el texto que quieres",
  "search.photo_reading": "Leyendo la foto…",
  "search.sign_address": "Dirección exacta",
  "search.sign_street_no_address": "Solo la calle: no se encontró la dirección {n}",

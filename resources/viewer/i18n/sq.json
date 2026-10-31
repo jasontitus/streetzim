@@ -304,7 +304,7 @@
  "search.photo_none": "Nuk u gjet tekst në foto",
  "search.photo_part": "Kërko në këtë pjesë",
  "search.photo_whole": "E gjithë fotoja",
- "search.photo_zoom": "Hapni gishtat për të zmadhuar tekstin që doni, ose prekni një kornizë për ta kërkuar",
+ "search.photo_zoom": "Hapni gishtat për të zmadhuar tekstin që doni",
  "search.photo_reading": "Po lexohet fotoja…",
  "search.sign_address": "Adresë e saktë",
  "search.sign_street_no_address": "Vetëm rruga: adresa {n} nuk u gjet",

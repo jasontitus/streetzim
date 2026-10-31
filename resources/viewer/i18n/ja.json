@@ -302,7 +302,7 @@
  "search.photo_none": "写真に文字が見つかりません",
  "search.photo_part": "この部分を検索",
  "search.photo_whole": "写真全体",
- "search.photo_zoom": "目的の文字をピンチで拡大するか、枠をタップして検索します",
+ "search.photo_zoom": "目的の文字をピンチで拡大します",
  "search.photo_reading": "写真を読み取っています…",
  "search.sign_address": "正確な住所",
  "search.sign_street_no_address": "通りのみ：住所 {n} は見つかりません",

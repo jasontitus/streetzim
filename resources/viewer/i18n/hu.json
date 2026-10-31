@@ -304,7 +304,7 @@
  "search.photo_none": "A fotón nem található szöveg",
  "search.photo_part": "Keresés ebben a részben",
  "search.photo_whole": "Teljes fotó",
- "search.photo_zoom": "Csippentéssel nagyítson a kívánt szövegre, vagy koppintson egy keretre a kereséshez",
+ "search.photo_zoom": "Csippentéssel nagyítson a kívánt szövegre",
  "search.photo_reading": "A fotó olvasása…",
  "search.sign_address": "Pontos cím",
  "search.sign_street_no_address": "Csak az utca: a(z) {n} cím nem található",

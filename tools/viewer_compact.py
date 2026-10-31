@@ -6,14 +6,17 @@ which the reader's browser only downloads and skips. compact() removes, in
 the built file only (the parts keep them):
 
 - inside inline <script> (JavaScript): whole lines that are a `//` comment,
-  and `/* … */` blocks that start and end a line of their own;
+  `/* … */` blocks that start and end a line of their own, and a `//`
+  comment after code when that is certain (_trailing_comment_at: two
+  spaces or more before it, outside any string, on a line with no regex
+  literal or template);
 - inside <style>: those `/* … */` blocks;
 - in both: blank lines and leading indentation;
 - in the HTML: `<!-- … -->` comments that start and end lines of their own.
 
-Only WHOLE lines go. A comment after code, a `//` inside a string, regex
-or template literal on a code line, and any line holding a tag are left as
-they are. A line inside a multi-line template literal could look like a
+Otherwise only WHOLE lines go: a comment after code that is not certain
+to be one (a single space before it, a regex or template on its line), a
+`/* … */` after code, and any line holding a tag are left as they are. A line inside a multi-line template literal could look like a
 comment line, so the result is checked rather than trusted:
 tools/lint_viewer.mjs compares every inline script's token stream before
 and after (espree), and tests/test_viewer_compact.py the CSS and HTML.
@@ -78,6 +81,35 @@ def _has_tag(line: str) -> bool:
     return bool(re.search(r"</?(script|style)\b", line, re.I))
 
 
+def _trailing_comment_at(code: str) -> int | None:
+    """Where a `//` comment after code starts on a JavaScript line (the
+    first of the spaces before it), when that is certain: after two spaces
+    or more, outside any string, on a line with no backtick and no `/` but
+    the division ` / ` (a regex literal could hold `//`). None otherwise."""
+    q = None
+    i = 0
+    while i < len(code):
+        c = code[i]
+        if q:
+            if c == "\\":
+                i += 2
+                continue
+            if c == q:
+                q = None
+        elif c in "'\"":
+            q = c
+        elif c == "`":
+            return None
+        elif c == "/":
+            if code.startswith("//", i):
+                k = len(code[:i].rstrip())
+                return k if i - k >= 2 and k > 0 else None
+            if not (code[i - 1:i] == " " and code[i + 1:i + 2] == " "):
+                return None
+        i += 1
+    return None
+
+
 def compact(text: str, keep: set[str] | frozenset[str] | None = None) -> str:
     """`keep`: the names of the BEGIN/END blocks to copy verbatim; None for
     all of them."""
@@ -114,7 +146,9 @@ def compact(text: str, keep: set[str] | frozenset[str] | None = None) -> str:
                 if j is not None:
                     i = j + 1
                     continue
-            out.append(line.lstrip())
+            code = line.lstrip()
+            k = _trailing_comment_at(code) if ctx == "js" else None
+            out.append(code if k is None else code[:k])
             i += 1
             continue
         if ctx == "html" and t.startswith("<!--"):

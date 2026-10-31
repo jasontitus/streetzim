@@ -304,7 +304,7 @@
  "search.photo_none": "Fant ingen tekst i bildet",
  "search.photo_part": "Søk i denne delen",
  "search.photo_whole": "Hele bildet",
- "search.photo_zoom": "Klyp for å zoome inn på teksten du vil ha, eller trykk på en boks for å søke etter den",
+ "search.photo_zoom": "Klyp for å zoome inn på teksten du vil ha",
  "search.photo_reading": "Leser bildet…",
  "search.sign_address": "Nøyaktig adresse",
  "search.sign_street_no_address": "Bare gaten: ingen adresse {n} funnet",

@@ -70,11 +70,12 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    (the same input without `capture`: the library or files). On a desktop
    it opens the file picker at once. A photo can also be dropped
    anywhere on the page or pasted (an image pasted into a text field with
-   text alongside stays text). The photo is scaled to at most
-   1600 px on its longest side and drawn on the sheet that opens over the
-   map, in a frame of its own: a pinch, a double tap, the mouse wheel, or
-   + and − and the arrow keys zoom in and move the photo (the page does not
-   zoom under the fingers).
+   text alongside stays text). The photo search takes the whole screen:
+   the photo, scaled to at most 1600 px on its longest side, big in a frame
+   of its own at a fixed height (what comes below it never moves it); a
+   pinch, a double tap, the mouse wheel, or + and − and the arrow keys zoom
+   in and move it (the page does not zoom under the fingers). Nothing done
+   on the photo searches.
 2. **Reading.** At the first photo the page fetches the worker, the engine,
    the runtime and the models named by the manifest (through the zimtile
    retry helper, as Kiwix drops requests under load) and starts the worker
@@ -127,23 +128,30 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    prominence (its letters' height against the sign's tallest: the street
    name before the town in small print), times how much of the line the
    name covers ("Manama Central Market" before "Manama"), plus a type
-   bonus, then by proximity, as typed searches are. The results show in
-   the search list, and the search field holds the line the first one
-   matched, as read: not the photo's other text (a status bar, a
-   watermark). Tapping a line in the sheet runs an ordinary search for it.
+   bonus, then by proximity, as typed searches are. The photo screen names
+   the first result: its name as written, big, to hold against the sign by
+   eye (for someone who cannot read the script), its other name (Latin,
+   English) under it, and what it is (below); the lines it was found in
+   are outlined on the photo, green for an exact address, amber else.
+   **Results**, in the head, opens the list from its top, the photo put
+   away: while the photo shows, no results or chips cover it. The search
+   field holds the line the first one matched, as read: not the photo's
+   other text (a status bar, a watermark). Tapping a line under the photo
+   runs an ordinary search for it, the photo put away.
 4. **Part of the photo.** Zoomed in, **Search this part** reads only
    the part shown, enlarged up to twice (1600 px at most on its longest
-   side), and searches it as a photo of its own: a plate among other text,
-   or lettering too small in the whole photo, is read by itself. **Whole
-   photo** goes back to the whole photo. Tapping a box (or a few pixels
-   from it) searches its line, after a moment, so that a double tap zooms
-   instead. The two
-   buttons keep their room while the photo shows, so the photo does not
-   move under the fingers as they come and go.
-5. **Going back.** Picking a result hides the sheet but keeps the photo:
-   the camera button shows it, and tapping it brings back the photo, its
-   lines and its places, for when the first pick was the wrong one. The
-   sheet's own camera button takes another photo; its × lets the photo go.
+   side), from a canvas of its own, and searches it as a photo of that part
+   alone: a plate among other text, or lettering too small in the whole
+   photo, is read by itself. The photo stays as the reader left it: the
+   part read is framed on it (dashed) and its lines outlined. **Whole
+   photo** zooms back out and reads the whole photo again. The two buttons
+   keep their room while the photo shows, so the photo does not move under
+   the fingers as they come and go.
+5. **Going back.** Results, or a result picked, put the photo away: the
+   camera button shows it, and tapping it brings back the photo as it was
+   left (its zoom, its lines, its answer), for when the first pick was the
+   wrong one. The sheet's own camera button opens the tiles for another
+   photo; its × goes back to the photo from the tiles, or lets the photo go.
 
 ## What a result is
 
@@ -284,8 +292,8 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
 - `tests/test_ocr.py`: script counting, model choice, the entries and
   manifest, map-config, the lock, and the flag's way to `create_zim`.
 - `tests/viewer_ocr_js.test.mjs`: line grouping, the fuzzy match, the
-  labels and the photo frame's geometry (fit, zoom, taps, parts), as they
-  ship.
+  labels and the photo frame's geometry (fit, zoom, the part shown, a
+  part's boxes on the whole photo), as they ship.
 - `tools/ocr_photos.py`: the labelled photo set (docs/ocr-test-set.md) read
   by each photo's own map with today's viewer; a record's `part` reads only
   that part, as Search this part does.
@@ -303,9 +311,11 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
   draws photos of signs of the map's own streets and shops (tilted, noisy,
   with other text and the town in small print), gives them to the file
   input and checks the place comes out first and the search field holds
-  its line; then that picking it hides the sheet, moves the map and leaves
-  the photo on the camera button, which brings the photo and its places
-  back, with its lines, after the sheet's camera opened the tiles; that
+  its line; then that no results cover the photo, that the × over the
+  tiles the sheet's camera opened goes back to the photo, that Results
+  shows the list and picking the place moves the map and leaves the photo
+  on the camera button, which brings the photo and its places back, with
+  its lines; that
   photos given by Take a photo's camera input (while the tiles are open,
   which must give way), by Choose a photo's input, dropped on the map and
   pasted are all read, in turn; and that the camera's choice is right on a

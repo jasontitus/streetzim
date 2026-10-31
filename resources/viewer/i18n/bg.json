@@ -304,7 +304,7 @@
  "search.photo_none": "В снимката не е открит текст",
  "search.photo_part": "Търси в тази част",
  "search.photo_whole": "Цялата снимка",
- "search.photo_zoom": "Разтворете с два пръста, за да увеличите текста, или докоснете рамка, за да го търсите",
+ "search.photo_zoom": "Разтворете с два пръста, за да увеличите текста",
  "search.photo_reading": "Снимката се разчита…",
  "search.sign_address": "Точен адрес",
  "search.sign_street_no_address": "Само улицата: адрес {n} не е намерен",

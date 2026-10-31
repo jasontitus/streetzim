@@ -793,24 +793,14 @@ function _szSignAt(v, fit, px, py) {
 function _szSignZoomAt(v, s, px, py) {
   return { s: s, tx: px - (px - v.tx) * s / v.s, ty: py - (py - v.ty) * s / v.s };
 }
-// The line whose box holds the canvas pixel (x, y), within `tol` pixels;
-// the smallest such box when they nest. Null when none does.
-function _szSignHit(lines, x, y, tol) {
-  var best = null, area = Infinity;
-  (lines || []).forEach(function (L) {
-    var b = L && L.box;
-    if (!b || x < b.x - tol || x > b.x + b.width + tol || y < b.y - tol || y > b.y + b.height + tol) return;
-    var a = b.width * b.height;
-    if (a < area) { best = L; area = a; }
-  });
-  return best;
+// The part of the photo (fractions) a rectangle of its canvas shows.
+function _szSignPartOf(r, cw, ch) {
+  return [r.x / cw, r.y / ch, (r.x + r.width) / cw, (r.y + r.height) / ch];
 }
-// The part of the photo a rectangle of the canvas (canvas pixels) shows,
-// when the canvas shows `part` of it.
-function _szSignSubPart(part, r, cw, ch) {
-  var w = part[2] - part[0], h = part[3] - part[1];
-  return [part[0] + r.x / cw * w, part[1] + r.y / ch * h,
-          part[0] + (r.x + r.width) / cw * w, part[1] + (r.y + r.height) / ch * h];
+// A box of a part's reading (r of its pixels a pixel of the photo, w x h)
+// on the photo's canvas (d of its pixels a pixel of the photo).
+function _szSignOnPhoto(b, part, w, h, r, d) {
+  return { x: (part[0] * w + b.x / r) * d, y: (part[1] * h + b.y / r) * d, width: b.width / r * d, height: b.height / r * d };
 }
 function _szSignIsWhole(part) {
   return !part || (part[0] <= 0 && part[1] <= 0 && part[2] >= 1 && part[3] >= 1);
@@ -837,6 +827,7 @@ function initSignSearch(map, config) {
   var zoombar = document.getElementById('ocr-zoombar');
   var partBtn = document.getElementById('ocr-part');
   var wholeBtn = document.getElementById('ocr-whole');
+  var showBtn = document.getElementById('ocr-show');
   var linesEl = document.getElementById('ocr-lines');
   var verdictEl = document.getElementById('ocr-verdict');
   var chooseBtn = document.getElementById('ocr-choose');
@@ -858,7 +849,11 @@ function initSignSearch(map, config) {
   var WHOLE = [0, 0, 1, 1];
   // The photo ({img, url, w, h}: its own pixels), the part the canvas shows,
   // the lines read there, and the frame's view of it (sign-view).
-  var photo = null, curPart = WHOLE, curLines = [], view = { s: 1, tx: 0, ty: 0 }, fit = null, loadSeq = 0;
+  // The sheet's canvas shows the whole photo, as the reader left it zoomed;
+  // a part is read from a canvas of its own (`readCanvas`: readK of its
+  // pixels a pixel of the photo), its boxes drawn back on the whole.
+  var photo = null, curPart = WHOLE, view = { s: 1, tx: 0, ty: 0 }, fit = null, loadSeq = 0;
+  var readCanvas = document.createElement('canvas'), readK = 1;
   // Each reading's turn: a photo or part read, then another one started, a
   // new photo picked or the photo let go, and the first one's answer is
   // dropped (its lines, boxes, search and state are not the sheet's now).
@@ -993,7 +988,6 @@ function initSignSearch(map, config) {
     readSeq++; loadSeq++;
     if (photo && photo.url) URL.revokeObjectURL(photo.url);
     photo = null;
-    curLines = [];
     sheet.setAttribute('data-sz-ocr', '');
   }
   function forget() {
@@ -1022,7 +1016,7 @@ function initSignSearch(map, config) {
   function reopen() {
     sheet.hidden = false;
     frame.hidden = false;
-    resetView();
+    if (!fit) resetView();     // else as the reader left it
     pickRow.hidden = true;
     againBtn.hidden = false;
     // The tiles, opened since, emptied them: the lines read again, not the
@@ -1051,7 +1045,7 @@ function initSignSearch(map, config) {
     }
     readSeq++; loadSeq++;     // the tiles replace the sheet: no reading or photo of before shows under them
     sheet.hidden = false;
-    frame.hidden = zoomHint.hidden = zoombar.hidden = true;
+    frame.hidden = zoomHint.hidden = zoombar.hidden = showBtn.hidden = true;
     linesEl.innerHTML = '';
     pickRow.hidden = mode === 'drop';
     againBtn.hidden = true;
@@ -1098,17 +1092,40 @@ function initSignSearch(map, config) {
       img.src = url;
     });
   }
-  // `part` of the photo drawn on the sheet's canvas: the whole scaled to
+  // `part` of the photo drawn on the reading's canvas: the whole scaled to
   // MAX_SIDE at most, a part up to PART_UP times its own size; its pixels.
-  function drawPart(part) {
+  function drawPart(part, c) {
     var sw = (part[2] - part[0]) * photo.w, sh = (part[3] - part[1]) * photo.h;
     var s = Math.min(_szSignIsWhole(part) ? 1 : PART_UP, MAX_SIDE / Math.max(sw, sh));
-    canvas.width = Math.max(1, Math.round(sw * s));
-    canvas.height = Math.max(1, Math.round(sh * s));
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(photo.img, part[0] * photo.w, part[1] * photo.h, sw, sh, 0, 0, canvas.width, canvas.height);
-    var d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) };
+    c.width = Math.max(1, Math.round(sw * s));
+    c.height = Math.max(1, Math.round(sh * s));
+    var ctx = c.getContext('2d');
+    ctx.drawImage(photo.img, part[0] * photo.w, part[1] * photo.h, sw, sh, 0, 0, c.width, c.height);
+    var d = ctx.getImageData(0, 0, c.width, c.height);
+    return { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer), k: s };
+  }
+  // The whole photo on the sheet's canvas, the part read framed (dashed),
+  // the lines read outlined; `hit`, the lines the first result was found
+  // in, thick: green for an exact address, amber else. What was searched,
+  // and where its answer is, can be seen without reading the script.
+  function paint(lines, hit, kind) {
+    if (!photo) return;
+    drawPart(WHOLE, canvas);
+    var ctx = canvas.getContext('2d'), d = canvas.width / photo.w, lw = Math.max(2, canvas.width / 300);
+    if (!_szSignIsWhole(curPart)) {
+      ctx.setLineDash([3 * lw, 2 * lw]);
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = '#fff';
+      ctx.strokeRect(curPart[0] * canvas.width, curPart[1] * canvas.height,
+                     (curPart[2] - curPart[0]) * canvas.width, (curPart[3] - curPart[1]) * canvas.height);
+      ctx.setLineDash([]);
+    }
+    (lines || []).forEach(function (L) {
+      var b = _szSignOnPhoto(L.box, curPart, photo.w, photo.h, readK, d), on = hit && hit.indexOf(L) >= 0;
+      ctx.lineWidth = on ? 2.5 * lw : lw;
+      ctx.strokeStyle = on ? (kind === 'address' ? '#16a34a' : '#d97706') : '#1a73e8';
+      ctx.strokeRect(b.x, b.y, b.width, b.height);
+    });
   }
 
   // The frame's view (sign-view): fitted whole, then pinched, dragged,
@@ -1154,17 +1171,18 @@ function initSignSearch(map, config) {
     var r = !off && fit ? _szSignVisible(view, frameSize().w, frameSize().h, fit, canvas.width, canvas.height) : null;
     var noPart = off || reading || !r || (r.width >= 0.92 * canvas.width && r.height >= 0.92 * canvas.height);
     partBtn.style.visibility = noPart ? 'hidden' : '';
-    wholeBtn.style.visibility = off || reading || _szSignIsWhole(curPart) ? 'hidden' : '';
+    wholeBtn.style.visibility = off || reading || (view.s <= 1.01 && _szSignIsWhole(curPart)) ? 'hidden' : '';
     zoombar.hidden = zoomHint.hidden = off;
     zoomHint.style.visibility = !touch || reading || !noPart ? 'hidden' : '';
     zoomHint.hidden = off || !touch;
   }
+  // A line tapped: its results, the sheet put away (the camera brings it back).
   function searchLine(text) {
+    hide();
     input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.focus({ preventScroll: true });
   }
-  var ptrs = {}, gesture = null, lastTap = null, tapTimer = null;
+  var ptrs = {}, gesture = null, lastTap = null;
   function framePoint(e) {
     var r = frame.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -1176,7 +1194,6 @@ function initSignSearch(map, config) {
   }
   frame.addEventListener('pointerdown', function (e) {
     if (!fit) return;
-    clearTimeout(tapTimer);     // a box tapped, then a pinch: no search
     try { frame.setPointerCapture(e.pointerId); } catch (x) {}
     ptrs[e.pointerId] = framePoint(e);
     startGesture(Object.keys(ptrs).length === 1 ? false : true);
@@ -1226,22 +1243,16 @@ function initSignSearch(map, config) {
     var p = framePoint(e);
     setView(_szSignZoomAt(view, Math.max(1, Math.min(MAX_ZOOM, view.s * Math.exp(-e.deltaY / 300))), p.x, p.y));
   }, { passive: false });
-  // A tap on a box searches its line; a double tap elsewhere zooms in there
-  // (or back out to the whole frame).
-  // (A box's search waits a moment for a second tap: a double tap zooms
-  // there too, and does not open the keyboard first.)
+  // A double tap zooms in there (or back out to the whole frame). Nothing
+  // done on the photo searches: the reader frames what to search, then asks.
   function tapAt(p) {
     var now = Date.now();
-    clearTimeout(tapTimer);
     if (lastTap && now - lastTap.t < 350 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
       lastTap = null;
       setView(view.s > 1.01 ? { s: 1, tx: fit.ox, ty: fit.oy } : _szSignZoomAt(view, 2.5, p.x, p.y));
       return;
     }
     lastTap = { t: now, x: p.x, y: p.y };
-    var c = _szSignAt(view, fit, p.x, p.y), seq = readSeq;
-    var hit = sheet.getAttribute('data-sz-ocr') !== 'reading' && _szSignHit(curLines, c.x, c.y, 6 / (fit.k * view.s));
-    if (hit) tapTimer = setTimeout(function () { if (seq === readSeq) searchLine(hit.text); }, 360);
   }
   // The keyboard: + and - zoom about the middle, the arrows move the photo.
   frame.addEventListener('keydown', function (e) {
@@ -1259,28 +1270,36 @@ function initSignSearch(map, config) {
   partBtn.addEventListener('click', function () {
     if (frame.hidden || !fit || !photo) return;
     var f = frameSize();
-    readPart(_szSignSubPart(curPart, _szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.height),
-                            canvas.width, canvas.height));
+    readPart(_szSignPartOf(_szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.height), canvas.width, canvas.height));
   });
-  wholeBtn.addEventListener('click', function () { if (photo) readPart(WHOLE); });
+  // Back to the whole photo: zoomed out, and read again.
+  wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readPart(WHOLE); } });
+  // The results, and the photo put away: the camera button brings it back
+  // as the reader left it. While the photo shows, no results cover it.
+  showBtn.addEventListener('click', hide);
+  input.addEventListener('focus', function () { if (!sheet.hidden && last) hide(); });
+  new MutationObserver(function () {
+    document.body.classList.toggle('sz-photo', !sheet.hidden);
+    if (sheet.hidden) resultsEl.scrollTop = 0;
+  }).observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
   if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(frame);
   else window.addEventListener('resize', refit);
 
   // The photo on the sheet's canvas at COARSE_SIDE ({k, image}: k its scale),
   // or null when it is not much bigger than that (one reading finds it all).
   function coarseCopy() {
-    var k = COARSE_SIDE / Math.max(canvas.width, canvas.height);
+    var k = COARSE_SIDE / Math.max(readCanvas.width, readCanvas.height);
     if (k > 0.6) return null;
     var c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(canvas.width * k));
-    c.height = Math.max(1, Math.round(canvas.height * k));
+    c.width = Math.max(1, Math.round(readCanvas.width * k));
+    c.height = Math.max(1, Math.round(readCanvas.height * k));
     var ctx = c.getContext('2d');
-    ctx.drawImage(canvas, 0, 0, c.width, c.height);
+    ctx.drawImage(readCanvas, 0, 0, c.width, c.height);
     var d = ctx.getImageData(0, 0, c.width, c.height);
-    return { k: c.width / canvas.width, image: { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) } };
+    return { k: c.width / readCanvas.width, image: { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) } };
   }
-  // Both readings of a photo: as drawn, then shrunk (copied before any box
-  // is drawn on the canvas); the coarse one's lines join the fine one's.
+  // Both readings of a photo: as drawn, then shrunk; the coarse one's lines
+  // join the fine one's.
   function readBoth(image) {
     var coarse = coarseCopy();
     return read(image).then(function (fine) {
@@ -1288,13 +1307,6 @@ function initSignSearch(map, config) {
       return read(coarse.image).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
                                      function () { return fine; });
     });
-  }
-
-  function outline(lines) {
-    var ctx = canvas.getContext('2d');
-    ctx.lineWidth = Math.max(2, canvas.width / 300);
-    ctx.strokeStyle = '#1a73e8';
-    lines.forEach(function (L) { ctx.strokeRect(L.box.x, L.box.y, L.box.width, L.box.height); });
   }
 
   // Each result's kind (_szSignKinds) as its row's label, and the first
@@ -1355,9 +1367,30 @@ function initSignSearch(map, config) {
         });
         verdictEl.innerHTML = '';
         verdictEl.hidden = !kinds.length;
-        if (!kinds.length) return true;
+        showBtn.hidden = !found.length;
+        showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') \u203a';
+        if (!kinds.length) { paint(lines); return true; }
         // Green only for an address that is the only one of its words.
         verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
+        // The first result's name as its sign writes it, big, to hold against
+        // the photo by eye, and its other name (Latin, English) under it; the
+        // lines it was found in, outlined on the photo.
+        var r0 = found[0].item, big = r0.nn || r0.n, nameEl = document.createElement('span');
+        nameEl.className = 'ocr-verdict-name';
+        nameEl.dir = 'auto';
+        nameEl.textContent = big;
+        verdictEl.appendChild(nameEl);
+        var other = [r0.n, r0.nl].filter(function (n) { return n && n !== big; })[0];
+        if (other) {
+          var otherEl = document.createElement('span');
+          otherEl.className = 'ocr-verdict-where';
+          otherEl.textContent = other;
+          verdictEl.appendChild(otherEl);
+        }
+        var names = [].concat.apply([], [r0.n, r0.nn, r0.nl].filter(Boolean).map(function (n) { return words(String(n).split(',')[0]); }));
+        paint(lines, lines.filter(function (L) {
+          return words(L.text + ' ' + (L.asRead || '')).some(function (w) { return w.length > 1 && names.indexOf(w) >= 0; });
+        }), kinds[0].kind);
         var main = document.createElement('strong');
         main.textContent = signLabel(kinds[0]);
         verdictEl.appendChild(main);
@@ -1388,7 +1421,7 @@ function initSignSearch(map, config) {
   }
   function forgetVerdict() {
     photoSeq++;
-    verdictEl.hidden = true;
+    verdictEl.hidden = showBtn.hidden = true;
   }
 
   function showLines(lines) {
@@ -1414,7 +1447,14 @@ function initSignSearch(map, config) {
     forget();
     setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
     var seq = ++loadSeq, rs = ++readSeq;
-    loadPhoto(f, seq).then(function (kept) { if (kept && seq === loadSeq) readPart(WHOLE); },
+    loadPhoto(f, seq).then(function (kept) {
+      if (!kept || seq !== loadSeq) return;
+      frame.hidden = false;
+      curPart = WHOLE;
+      drawPart(WHOLE, canvas);
+      resetView();
+      readPart(WHOLE);
+    },
                            function (err) { if (seq === loadSeq) failed(err, rs); });
   }
   // Reads `part` of the photo (WHOLE, or what the frame showed: "Search this
@@ -1430,15 +1470,14 @@ function initSignSearch(map, config) {
     setStatus(szT('search.photo_reading', 'Reading the photo…'), 'reading');
     var t0 = Date.now(), rs = ++readSeq;
     curPart = part;
-    curLines = [];
-    var image = drawPart(part);
-    resetView();
+    var image = drawPart(part, readCanvas);
+    readK = image.k;
+    paint([]);
     return readBoth(image).then(function (items) {
       if (rs !== readSeq) return;   // another photo or part since: not this sheet's
       var lines = _szSignLineGroups(items);
-      curLines = lines;
       dbg('sign reader: ' + lines.length + ' lines in ' + (Date.now() - t0) + ' ms');
-      outline(lines);
+      paint(lines);
       if (!lines.length) {
         setStatus(szT('search.photo_none', 'No text found in the photo'), 'none');
         showZoomBar();
@@ -1518,7 +1557,10 @@ function initSignSearch(map, config) {
     ev.preventDefault();
     handle(f);
   });
-  document.getElementById('ocr-close').addEventListener('click', discard);
+  // The x: back to the photo from the tiles opened over it; else it is let go.
+  document.getElementById('ocr-close').addEventListener('click', function () {
+    if (frame.hidden && last) reopen(); else discard();
+  });
   // A search typed, a line tapped or the field cleared: what follows is not the photo's.
   input.addEventListener('input', forgetVerdict);
   document.getElementById('search-clear').addEventListener('click', forgetVerdict);

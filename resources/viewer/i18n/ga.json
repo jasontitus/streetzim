@@ -313,7 +313,7 @@
  "search.photo_none": "Níor aimsíodh téacs sa ghrianghraf",
  "search.photo_part": "Cuardaigh an chuid seo",
  "search.photo_whole": "An grianghraf ar fad",
- "search.photo_zoom": "Fáisc chun súmáil isteach ar an téacs atá uait, nó tapáil bosca chun é a chuardach",
+ "search.photo_zoom": "Fáisc chun súmáil isteach ar an téacs atá uait",
  "search.photo_reading": "Ag léamh an ghrianghraf…",
  "search.sign_address": "Seoladh beacht",
  "search.sign_street_no_address": "An tsráid amháin: níor aimsíodh seoladh {n}",

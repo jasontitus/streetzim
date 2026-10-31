@@ -310,7 +310,7 @@
  "search.photo_none": "Na zdjęciu nie znaleziono tekstu",
  "search.photo_part": "Szukaj w tej części",
  "search.photo_whole": "Całe zdjęcie",
- "search.photo_zoom": "Rozsuń palce, aby powiększyć potrzebny tekst, lub dotknij ramki, aby go wyszukać",
+ "search.photo_zoom": "Rozsuń palce, aby powiększyć potrzebny tekst",
  "search.photo_reading": "Odczytywanie zdjęcia…",
  "search.sign_address": "Dokładny adres",
  "search.sign_street_no_address": "Tylko ulica: nie znaleziono adresu {n}",

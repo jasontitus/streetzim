@@ -304,7 +304,7 @@
  "search.photo_none": "Fotolt ei leitud teksti",
  "search.photo_part": "Otsi seda osa",
  "search.photo_whole": "Kogu foto",
- "search.photo_zoom": "Suurendage soovitud teksti kahe sõrmega või puudutage kasti, et seda otsida",
+ "search.photo_zoom": "Suurendage soovitud teksti kahe sõrmega",
  "search.photo_reading": "Foto lugemine…",
  "search.sign_address": "Täpne aadress",
  "search.sign_street_no_address": "Ainult tänav: aadressi {n} ei leitud",

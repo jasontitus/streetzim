@@ -304,7 +304,7 @@
  "search.photo_none": "Enginn texti fannst á myndinni",
  "search.photo_part": "Leita í þessum hluta",
  "search.photo_whole": "Öll myndin",
- "search.photo_zoom": "Klíptu til að stækka textann sem þú vilt, eða ýttu á reit til að leita að honum",
+ "search.photo_zoom": "Klíptu til að stækka textann sem þú vilt",
  "search.photo_reading": "Les myndina…",
  "search.sign_address": "Nákvæmt heimilisfang",
  "search.sign_street_no_address": "Aðeins gatan: heimilisfang {n} fannst ekki",

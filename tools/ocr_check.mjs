@@ -237,12 +237,25 @@ try {
     if (want.split('/').indexOf(got.results[0]) < 0 && !sameName) errs.push(`"${name}": first result is ${JSON.stringify(got.results[0])}, not ${JSON.stringify(want)}`);
   }
 
-  // Picking the result hides the sheet, flies the map there and keeps the
-  // photo on the camera button; tapping it brings the photo, its lines and
-  // its places back, even after the sheet's camera opened the tiles first.
+  // While the photo shows, nothing covers it: no results over it. The
+  // sheet's camera opens the tiles and the x goes back to the photo; then
+  // Results shows the list (the photo put away), picking the result flies
+  // the map there and keeps the photo on the camera button, and tapping it
+  // brings the photo, its lines and its places back.
   if (names.length && !errs.length) {
     const lines = await p.evaluate(() => document.querySelectorAll('#ocr-lines .ocr-line').length);
+    if (await p.evaluate(() => getComputedStyle(document.getElementById('search-results')).display !== 'none')) {
+      errs.push('the results show over the photo');
+    }
     await p.evaluate(() => document.getElementById('ocr-again').click());
+    await p.evaluate(() => document.getElementById('ocr-close').click());
+    const fromTiles = await p.waitForFunction(() => {
+      const sheet = document.getElementById('ocr-sheet');
+      return !sheet.hidden && !document.getElementById('ocr-frame').hidden && document.getElementById('ocr-pick').hidden &&
+        sheet.getAttribute('data-sz-ocr') === 'searched';
+    }, { timeout: 30000 }).then(() => true, () => false);
+    if (!fromTiles) errs.push("the x over the tiles did not go back to the photo");
+    await p.evaluate(() => document.getElementById('ocr-show').click());
     const before = await p.evaluate(() => window.__szMap.getCenter().toArray());
     const first = await p.evaluate(() =>
       document.querySelector('#search-results .search-result:not([data-sz-pending])').getAttribute('data-name'));

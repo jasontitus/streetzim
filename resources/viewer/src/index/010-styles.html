@@ -380,13 +380,13 @@
   #search-photo:hover { color: var(--text-secondary); }
   #search-container.has-photo #search-input { padding-right: 66px; }
   #search-container.has-photo #search-clear { right: 40px; }
+  /* The photo search takes the whole screen: the photo big, under the
+     head, at a fixed height (what comes below it, the answer and the lines,
+     never moves it), the column centred at 760 px on a wide screen. */
   #ocr-sheet {
-    position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 3;
-    width: 340px; max-width: calc(100% - 24px); max-height: 75vh; overflow-y: auto; scrollbar-gutter: stable;
-    box-sizing: border-box; padding: 10px 12px 12px;
-    background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--panel-shadow);
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    position: absolute; inset: 0; z-index: 40; overflow-y: auto; scrollbar-gutter: stable; box-sizing: border-box;
+    padding: calc(10px + var(--top-inset, 0px)) max(12px, calc((100% - 760px) / 2)) calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     font-family: var(--ui-font); color: var(--text-primary);
   }
   #ocr-sheet[hidden] { display: none; }
@@ -427,7 +427,7 @@
      (touch-action), the photo does; its canvas is placed and scaled by
      305-ocr-search.js (transform from its top left). */
   #ocr-frame {
-    position: relative; overflow: hidden; height: min(36vh, 360px); border-radius: 6px;
+    position: relative; overflow: hidden; height: 56vh; height: 56dvh; min-height: 180px; border-radius: 6px;
     background: var(--hover-bg); touch-action: none; cursor: zoom-in; user-select: none; -webkit-user-select: none;
   }
   #ocr-frame.zoomed { cursor: grab; }
@@ -444,12 +444,18 @@
   /* What a photo's result is: green only for an exact address; anything
      less (the street only, an area, a similar name) in amber, in words. */
   #ocr-verdict {
-    margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35;
+    margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35;
     background: #fef3c7; color: #78350f; border: 1px solid #f59e0b;
   }
   #ocr-verdict[hidden] { display: none; }
   #ocr-verdict[data-kind="address"] { background: #dcfce7; color: #14532d; border-color: #22c55e; }
   #ocr-verdict .ocr-verdict-several, #ocr-verdict .ocr-verdict-where { display: block; margin-top: 3px; }
+  #ocr-verdict .ocr-verdict-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+  /* While the photo shows, nothing covers it: the results open on "Results", the photo put away. */
+  body.sz-photo #search-results, body.sz-photo #find-chips, body.sz-photo #find-search-area-btn { display: none !important; }
+  #ocr-show { flex: none; min-height: 32px; padding: 4px 12px; border-radius: 999px; border: 0; background: var(--accent, #2563eb);
+    color: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+  #ocr-show[hidden] { display: none; }
   .search-result-sign {
     display: block; margin-top: 3px; font-size: 11px; font-weight: 600; color: #92400e;
   }

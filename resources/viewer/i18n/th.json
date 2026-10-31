@@ -301,7 +301,7 @@
  "search.photo_none": "ไม่พบข้อความในรูปภาพ",
  "search.photo_part": "ค้นหาส่วนนี้",
  "search.photo_whole": "ทั้งภาพ",
- "search.photo_zoom": "ถ่างนิ้วเพื่อซูมข้อความที่ต้องการ หรือแตะกรอบเพื่อค้นหา",
+ "search.photo_zoom": "ถ่างนิ้วเพื่อซูมข้อความที่ต้องการ",
  "search.photo_reading": "กำลังอ่านรูปภาพ…",
  "search.sign_address": "ที่อยู่ตรงกัน",
  "search.sign_street_no_address": "เฉพาะถนน: ไม่พบที่อยู่ {n}",
