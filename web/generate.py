@@ -807,6 +807,9 @@ def fetch_archive_items():
     return by_id
 
 
+_ITEM_DETAILS = {}     # identifier -> its listing, fetched once per build
+
+
 def fetch_item_details(identifier, *, retries=3):
     """Fetch the file list for an item to find the actual ZIM file size.
 
@@ -820,7 +823,17 @@ def fetch_item_details(identifier, *, retries=3):
     Returns None only after every attempt fails. Callers MUST treat
     a None return as a hard failure (don't render that region's
     card with a guessed URL — the URL won't work).
+
+    Every real item lists files (its _meta.xml at least): an answer
+    without a file list ({"error": "item metadata may be invalid"} while
+    the item's server is down, {} for an identifier archive.org does not
+    know) is a failed fetch, never an item without a ZIM, which would take
+    a live map's card off the site as "upcoming" (streetzim-africa,
+    2026-10-31). A listing is fetched once per build, so every language's
+    page is made from the same one.
     """
+    if identifier in _ITEM_DETAILS:
+        return _ITEM_DETAILS[identifier]
     url = f"https://archive.org/metadata/{identifier}"
     last_err = None
     for attempt in range(1, retries + 1):
@@ -829,7 +842,11 @@ def fetch_item_details(identifier, *, retries=3):
                 url, headers={"User-Agent": "streetzim-generate/1.0"}
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.load(resp)
+                data = json.load(resp)
+            if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+                raise RuntimeError(f"archive.org gave no file list: {str(data)[:120]}")
+            _ITEM_DETAILS[identifier] = data
+            return data
         except Exception as e:
             last_err = e
             if attempt < retries:
