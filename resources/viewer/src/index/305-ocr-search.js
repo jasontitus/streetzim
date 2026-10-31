@@ -982,6 +982,9 @@ function initSignSearch(map, config) {
   // The photo is let go: the sheet closes and the camera button is a camera.
   function discard() {
     sheet.hidden = true;
+    resultsEl.innerHTML = '';
+    resultsEl.style.display = 'none';
+    input.value = '';
     linesEl.innerHTML = '';
     forgetVerdict();
     forget();
@@ -1094,13 +1097,14 @@ function initSignSearch(map, config) {
   }
   // `part` of the photo drawn on the reading's canvas: the whole scaled to
   // MAX_SIDE at most, a part up to PART_UP times its own size; its pixels.
-  function drawPart(part, c) {
+  function drawPart(part, c, shown) {
     var sw = (part[2] - part[0]) * photo.w, sh = (part[3] - part[1]) * photo.h;
     var s = Math.min(_szSignIsWhole(part) ? 1 : PART_UP, MAX_SIDE / Math.max(sw, sh));
     c.width = Math.max(1, Math.round(sw * s));
     c.height = Math.max(1, Math.round(sh * s));
     var ctx = c.getContext('2d');
     ctx.drawImage(photo.img, part[0] * photo.w, part[1] * photo.h, sw, sh, 0, 0, c.width, c.height);
+    if (shown) return null;     // drawn to be seen, not read
     var d = ctx.getImageData(0, 0, c.width, c.height);
     return { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer), k: s };
   }
@@ -1110,7 +1114,7 @@ function initSignSearch(map, config) {
   // and where its answer is, can be seen without reading the script.
   function paint(lines, hit, kind) {
     if (!photo) return;
-    drawPart(WHOLE, canvas);
+    drawPart(WHOLE, canvas, true);
     var ctx = canvas.getContext('2d'), d = canvas.width / photo.w, lw = Math.max(2, canvas.width / 300);
     if (!_szSignIsWhole(curPart)) {
       ctx.setLineDash([3 * lw, 2 * lw]);
@@ -1181,6 +1185,7 @@ function initSignSearch(map, config) {
     hide();
     input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    btn.focus({ preventScroll: true });
   }
   var ptrs = {}, gesture = null, lastTap = null;
   function framePoint(e) {
@@ -1276,11 +1281,22 @@ function initSignSearch(map, config) {
   wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readPart(WHOLE); } });
   // The results, and the photo put away: the camera button brings it back
   // as the reader left it. While the photo shows, no results cover it.
-  showBtn.addEventListener('click', hide);
-  input.addEventListener('focus', function () { if (!sheet.hidden && last) hide(); });
+  showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
+  // the field reached behind the sheet (Tab): its results, or, while the
+  // photo is still read, not typed into unseen
+  input.addEventListener('focus', function () { if (!sheet.hidden) { if (last) hide(); else input.blur(); } });
+  // Escape: back to the photo from the tiles, to the results from the photo
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || sheet.hidden) return;
+    e.stopPropagation();
+    if (frame.hidden && last) reopen(); else if (last) hide(); else discard();
+  }, true);
+  // The search box's own watch (300-search.js) re-run: an open dropdown's
+  // .sz-search-open would put the box over the sheet.
   new MutationObserver(function () {
     document.body.classList.toggle('sz-photo', !sheet.hidden);
-    if (sheet.hidden) resultsEl.scrollTop = 0;
+    if (sheet.hidden) resultsEl.scrollTop = 0; else sheet.focus({ preventScroll: true });
+    window.dispatchEvent(new Event('resize'));
   }).observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
   if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(frame);
   else window.addEventListener('resize', refit);
@@ -1368,7 +1384,8 @@ function initSignSearch(map, config) {
         verdictEl.innerHTML = '';
         verdictEl.hidden = !kinds.length;
         showBtn.hidden = !found.length;
-        showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') \u203a';
+        showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') ' +
+          (getComputedStyle(showBtn).direction === 'rtl' ? '\u2039' : '\u203a');
         if (!kinds.length) { paint(lines); return true; }
         // Green only for an address that is the only one of its words.
         verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
@@ -1387,9 +1404,17 @@ function initSignSearch(map, config) {
           otherEl.textContent = other;
           verdictEl.appendChild(otherEl);
         }
-        var names = [].concat.apply([], [r0.n, r0.nn, r0.nl].filter(Boolean).map(function (n) { return words(String(n).split(',')[0]); }));
+        // The line the search matched it in (part of a line joined from two,
+        // an address plate's); an address's, the lines all of whose words
+        // are its number, its street's words or types ("2 КОСЫГИНА" for
+        // 2 улица Косыгина, not "18 ◂ УЛИЦА").
+        var sl = String(found[0].signLine || ''), pl = plateOf(words);
+        var ap = r0.t === 'addr' && _szSignAddressParts(r0, pl, words);
         paint(lines, lines.filter(function (L) {
-          return words(L.text + ' ' + (L.asRead || '')).some(function (w) { return w.length > 1 && names.indexOf(w) >= 0; });
+          if (!ap) return L.text.length > 1 && (sl.indexOf(L.text) >= 0 || (!!L.asRead && sl.indexOf(L.asRead) >= 0));
+          var ws = pl.norm(words(L.text));
+          return ws.length > 0 && ws.some(function (w) { return ap.rest.indexOf(w) >= 0 || ap.b.indexOf(w) >= 0; }) &&
+            ws.every(function (w) { return ap.b.indexOf(w) >= 0 || ap.rest.indexOf(w) >= 0 || pl.isType(w); });
         }), kinds[0].kind);
         var main = document.createElement('strong');
         main.textContent = signLabel(kinds[0]);
@@ -1451,7 +1476,7 @@ function initSignSearch(map, config) {
       if (!kept || seq !== loadSeq) return;
       frame.hidden = false;
       curPart = WHOLE;
-      drawPart(WHOLE, canvas);
+      drawPart(WHOLE, canvas, true);
       resetView();
       readPart(WHOLE);
     },

@@ -724,12 +724,14 @@ color: var(--text-tertiary); display: inline-flex; align-items: center; justify-
 #search-container.has-photo #search-input { padding-right: 66px; }
 #search-container.has-photo #search-clear { right: 40px; }
 #ocr-sheet {
-position: absolute; inset: 0; z-index: 40; overflow-y: auto; scrollbar-gutter: stable; box-sizing: border-box;
-padding: calc(10px + var(--top-inset, 0px)) max(12px, calc((100% - 760px) / 2)) calc(12px + env(safe-area-inset-bottom, 0px));
+position: absolute; inset: 0; z-index: 1650; overflow-y: auto; scrollbar-gutter: stable; box-sizing: border-box;
+padding: calc(10px + var(--top-inset, 0px)) max(12px, calc((100% - 760px) / 2))
+calc(12px + min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
 background: var(--panel-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 font-family: var(--ui-font); color: var(--text-primary);
 }
 #ocr-sheet[hidden] { display: none; }
+#ocr-sheet:focus { outline: none; }
 #ocr-sheet .ocr-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
 #ocr-status { flex: 1; font-size: 13px; color: var(--text-secondary); }
 #ocr-status .ocr-why { display: block; margin-top: 4px; font-size: 11px; opacity: 0.8; overflow-wrap: anywhere; }
@@ -759,7 +761,7 @@ font: inherit; font-size: 14px; font-weight: 600; line-height: 1.25; text-align:
 #ocr-pick .ocr-tile svg { width: 22px; height: 22px; flex: none; }
 }
 #ocr-frame {
-position: relative; overflow: hidden; height: 56vh; height: 56dvh; min-height: 180px; border-radius: 6px;
+position: relative; overflow: hidden; height: 56vh; height: calc(var(--app-height, 100dvh) * 0.56); min-height: 180px; border-radius: 6px;
 background: var(--hover-bg); touch-action: none; cursor: zoom-in; user-select: none; -webkit-user-select: none;
 }
 #ocr-frame.zoomed { cursor: grab; }
@@ -1740,7 +1742,7 @@ arm();
   <div id="wiki-panel-loading" data-i18n="wiki.loading_entries">Loading entries...</div>
   <div id="wiki-panel-list"></div>
 </div>
-<div id="ocr-sheet" hidden role="dialog" aria-labelledby="ocr-status">
+<div id="ocr-sheet" hidden role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="ocr-status">
   <div class="ocr-head">
     <span id="ocr-status" aria-live="polite"></span>
     <button id="ocr-show" type="button" hidden></button>
@@ -4349,7 +4351,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '2057d1dd';
+var SZ_VIEWER_BUILD = '113a731d';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8711,6 +8713,9 @@ sheet.hidden = true;
 }
 function discard() {
 sheet.hidden = true;
+resultsEl.innerHTML = '';
+resultsEl.style.display = 'none';
+input.value = '';
 linesEl.innerHTML = '';
 forgetVerdict();
 forget();
@@ -8810,19 +8815,20 @@ img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('not an i
 img.src = url;
 });
 }
-function drawPart(part, c) {
+function drawPart(part, c, shown) {
 var sw = (part[2] - part[0]) * photo.w, sh = (part[3] - part[1]) * photo.h;
 var s = Math.min(_szSignIsWhole(part) ? 1 : PART_UP, MAX_SIDE / Math.max(sw, sh));
 c.width = Math.max(1, Math.round(sw * s));
 c.height = Math.max(1, Math.round(sh * s));
 var ctx = c.getContext('2d');
 ctx.drawImage(photo.img, part[0] * photo.w, part[1] * photo.h, sw, sh, 0, 0, c.width, c.height);
+if (shown) return null;
 var d = ctx.getImageData(0, 0, c.width, c.height);
 return { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer), k: s };
 }
 function paint(lines, hit, kind) {
 if (!photo) return;
-drawPart(WHOLE, canvas);
+drawPart(WHOLE, canvas, true);
 var ctx = canvas.getContext('2d'), d = canvas.width / photo.w, lw = Math.max(2, canvas.width / 300);
 if (!_szSignIsWhole(curPart)) {
 ctx.setLineDash([3 * lw, 2 * lw]);
@@ -8883,6 +8889,7 @@ function searchLine(text) {
 hide();
 input.value = text;
 input.dispatchEvent(new Event('input', { bubbles: true }));
+btn.focus({ preventScroll: true });
 }
 var ptrs = {}, gesture = null, lastTap = null;
 function framePoint(e) {
@@ -8970,11 +8977,17 @@ var f = frameSize();
 readPart(_szSignPartOf(_szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.height), canvas.width, canvas.height));
 });
 wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readPart(WHOLE); } });
-showBtn.addEventListener('click', hide);
-input.addEventListener('focus', function () { if (!sheet.hidden && last) hide(); });
+showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
+input.addEventListener('focus', function () { if (!sheet.hidden) { if (last) hide(); else input.blur(); } });
+document.addEventListener('keydown', function (e) {
+if (e.key !== 'Escape' || sheet.hidden) return;
+e.stopPropagation();
+if (frame.hidden && last) reopen(); else if (last) hide(); else discard();
+}, true);
 new MutationObserver(function () {
 document.body.classList.toggle('sz-photo', !sheet.hidden);
-if (sheet.hidden) resultsEl.scrollTop = 0;
+if (sheet.hidden) resultsEl.scrollTop = 0; else sheet.focus({ preventScroll: true });
+window.dispatchEvent(new Event('resize'));
 }).observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
 if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(frame);
 else window.addEventListener('resize', refit);
@@ -9047,7 +9060,8 @@ m.signBadge = k.kind === 'address' && k.several
 verdictEl.innerHTML = '';
 verdictEl.hidden = !kinds.length;
 showBtn.hidden = !found.length;
-showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') \u203a';
+showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') ' +
+(getComputedStyle(showBtn).direction === 'rtl' ? '\u2039' : '\u203a');
 if (!kinds.length) { paint(lines); return true; }
 verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
 var r0 = found[0].item, big = r0.nn || r0.n, nameEl = document.createElement('span');
@@ -9062,9 +9076,13 @@ otherEl.className = 'ocr-verdict-where';
 otherEl.textContent = other;
 verdictEl.appendChild(otherEl);
 }
-var names = [].concat.apply([], [r0.n, r0.nn, r0.nl].filter(Boolean).map(function (n) { return words(String(n).split(',')[0]); }));
+var sl = String(found[0].signLine || ''), pl = plateOf(words);
+var ap = r0.t === 'addr' && _szSignAddressParts(r0, pl, words);
 paint(lines, lines.filter(function (L) {
-return words(L.text + ' ' + (L.asRead || '')).some(function (w) { return w.length > 1 && names.indexOf(w) >= 0; });
+if (!ap) return L.text.length > 1 && (sl.indexOf(L.text) >= 0 || (!!L.asRead && sl.indexOf(L.asRead) >= 0));
+var ws = pl.norm(words(L.text));
+return ws.length > 0 && ws.some(function (w) { return ap.rest.indexOf(w) >= 0 || ap.b.indexOf(w) >= 0; }) &&
+ws.every(function (w) { return ap.b.indexOf(w) >= 0 || ap.rest.indexOf(w) >= 0 || pl.isType(w); });
 }), kinds[0].kind);
 var main = document.createElement('strong');
 main.textContent = signLabel(kinds[0]);
@@ -9119,7 +9137,7 @@ loadPhoto(f, seq).then(function (kept) {
 if (!kept || seq !== loadSeq) return;
 frame.hidden = false;
 curPart = WHOLE;
-drawPart(WHOLE, canvas);
+drawPart(WHOLE, canvas, true);
 resetView();
 readPart(WHOLE);
 },

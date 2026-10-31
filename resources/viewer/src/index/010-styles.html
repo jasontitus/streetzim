@@ -382,14 +382,19 @@
   #search-container.has-photo #search-clear { right: 40px; }
   /* The photo search takes the whole screen: the photo big, under the
      head, at a fixed height (what comes below it, the answer and the lines,
-     never moves it), the column centred at 760 px on a wide screen. */
+     never moves it), the column centred at 760 px on a wide screen; over
+     the find strip (1500), an open search box (1550) and the toasts (1600),
+     under a place's sheet (1700). Its heights are the visible screen's
+     (--app-height, body's: Kiwix's web view is taller than what shows). */
   #ocr-sheet {
-    position: absolute; inset: 0; z-index: 40; overflow-y: auto; scrollbar-gutter: stable; box-sizing: border-box;
-    padding: calc(10px + var(--top-inset, 0px)) max(12px, calc((100% - 760px) / 2)) calc(12px + env(safe-area-inset-bottom, 0px));
+    position: absolute; inset: 0; z-index: 1650; overflow-y: auto; scrollbar-gutter: stable; box-sizing: border-box;
+    padding: calc(10px + var(--top-inset, 0px)) max(12px, calc((100% - 760px) / 2))
+             calc(12px + min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px));
     background: var(--panel-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     font-family: var(--ui-font); color: var(--text-primary);
   }
   #ocr-sheet[hidden] { display: none; }
+  #ocr-sheet:focus { outline: none; }
   #ocr-sheet .ocr-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   #ocr-status { flex: 1; font-size: 13px; color: var(--text-secondary); }
   #ocr-status .ocr-why { display: block; margin-top: 4px; font-size: 11px; opacity: 0.8; overflow-wrap: anywhere; }
@@ -427,7 +432,7 @@
      (touch-action), the photo does; its canvas is placed and scaled by
      305-ocr-search.js (transform from its top left). */
   #ocr-frame {
-    position: relative; overflow: hidden; height: 56vh; height: 56dvh; min-height: 180px; border-radius: 6px;
+    position: relative; overflow: hidden; height: 56vh; height: calc(var(--app-height, 100dvh) * 0.56); min-height: 180px; border-radius: 6px;
     background: var(--hover-bg); touch-action: none; cursor: zoom-in; user-select: none; -webkit-user-select: none;
   }
   #ocr-frame.zoomed { cursor: grab; }

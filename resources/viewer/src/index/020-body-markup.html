@@ -266,7 +266,7 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
   <div id="wiki-panel-loading" data-i18n="wiki.loading_entries">Loading entries...</div>
   <div id="wiki-panel-list"></div>
 </div>
-<div id="ocr-sheet" hidden role="dialog" aria-labelledby="ocr-status">
+<div id="ocr-sheet" hidden role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="ocr-status">
   <div class="ocr-head">
     <span id="ocr-status" aria-live="polite"></span>
     <button id="ocr-show" type="button" hidden></button>
