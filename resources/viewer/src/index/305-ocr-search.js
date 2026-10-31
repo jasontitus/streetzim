@@ -1285,17 +1285,38 @@ function initSignSearch(map, config) {
   // the field reached behind the sheet (Tab): its results, or, while the
   // photo is still read, not typed into unseen
   input.addEventListener('focus', function () { if (!sheet.hidden) { if (last) hide(); else input.blur(); } });
-  // Escape: back to the photo from the tiles, to the results from the photo
+  // Another dialog open over it (About): the sheet leaves it its keys and focus.
+  function otherModal() {
+    return [].some.call(document.querySelectorAll('[aria-modal="true"]'), function (d) {
+      return d !== sheet && !d.hidden && d.getClientRects().length > 0;
+    });
+  }
+  // Escape: back to the photo from the tiles, to the results from the photo;
+  // Tab stays in the sheet, from its last control to its first.
   document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape' || sheet.hidden) return;
+    if (sheet.hidden || otherModal()) return;
+    if (e.key === 'Tab') {
+      var f = [].filter.call(sheet.querySelectorAll('button, [tabindex="0"]'), function (el) {
+        return !el.closest('[hidden]') && getComputedStyle(el).visibility !== 'hidden';
+      });
+      var at = f.indexOf(document.activeElement);
+      if (f.length && (e.shiftKey ? at <= 0 : at === f.length - 1 || at < 0)) {
+        e.preventDefault();
+        f[e.shiftKey ? f.length - 1 : 0].focus();
+      }
+      return;
+    }
+    if (e.key !== 'Escape') return;
     e.stopPropagation();
-    if (frame.hidden && last) reopen(); else if (last) hide(); else discard();
+    if (frame.hidden && last) reopen();
+    else if (last) { hide(); btn.focus({ preventScroll: true }); }
+    else discard();
   }, true);
   // The search box's own watch (300-search.js) re-run: an open dropdown's
   // .sz-search-open would put the box over the sheet.
   new MutationObserver(function () {
     document.body.classList.toggle('sz-photo', !sheet.hidden);
-    if (sheet.hidden) resultsEl.scrollTop = 0; else sheet.focus({ preventScroll: true });
+    if (sheet.hidden) resultsEl.scrollTop = 0; else if (!otherModal()) sheet.focus({ preventScroll: true });
     window.dispatchEvent(new Event('resize'));
   }).observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
   if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(frame);
@@ -1408,10 +1429,16 @@ function initSignSearch(map, config) {
         // an address plate's); an address's, the lines all of whose words
         // are its number, its street's words or types ("2 КОСЫГИНА" for
         // 2 улица Косыгина, not "18 ◂ УЛИЦА").
-        var sl = String(found[0].signLine || ''), pl = plateOf(words);
+        // Whole words: "12" is not in "1234"; a right-to-left line read in
+        // visual order also backwards.
+        var sl = ' ' + words(String(found[0].signLine || '')).join(' ') + ' ', pl = plateOf(words);
+        var inSl = function (t) {
+          var ws = words(t || '');
+          return ws.length > 0 && (sl.indexOf(' ' + ws.join(' ') + ' ') >= 0 || sl.indexOf(' ' + ws.reverse().join(' ') + ' ') >= 0);
+        };
         var ap = r0.t === 'addr' && _szSignAddressParts(r0, pl, words);
         paint(lines, lines.filter(function (L) {
-          if (!ap) return L.text.length > 1 && (sl.indexOf(L.text) >= 0 || (!!L.asRead && sl.indexOf(L.asRead) >= 0));
+          if (!ap) return inSl(L.text) || inSl(L.asRead);
           var ws = pl.norm(words(L.text));
           return ws.length > 0 && ws.some(function (w) { return ap.rest.indexOf(w) >= 0 || ap.b.indexOf(w) >= 0; }) &&
             ws.every(function (w) { return ap.b.indexOf(w) >= 0 || ap.rest.indexOf(w) >= 0 || pl.isType(w); });
