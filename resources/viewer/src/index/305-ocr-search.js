@@ -200,7 +200,7 @@ function _szSignAddress(lines, tallest) {
 // "ممر 366" "Lane 366" (Bahrain's bilingual names). شارع stays itself: it is
 // Bahrain's "Avenue" and elsewhere a street. Russian and Ukrainian types as
 // one word each ("ул." and "вулиця" are "улица"; "узвіз" is "спуск", as old
-// Kyiv signs say it).
+// Kyiv signs say it), as the search folds them (ї as і: "проізд").
 var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', avenue: 'avenue', ave: 'avenue',
                       av: 'avenue', lane: 'lane', ln: 'lane', drive: 'drive', dr: 'drive', boulevard: 'boulevard',
                       blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة',
@@ -209,7 +209,7 @@ var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', 
                       'проспект': 'проспект', 'просп': 'проспект', 'бульвар': 'бульвар', 'бульв': 'бульвар',
                       'площадь': 'площадь', 'площа': 'площадь', 'пл': 'площадь', 'шоссе': 'шоссе', 'шосе': 'шоссе',
                       'набережная': 'набережная', 'набережна': 'набережная', 'наб': 'набережная',
-                      'проезд': 'проезд', 'проїзд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
+                      'проезд': 'проезд', 'проізд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
                       'аллея': 'аллея', 'алея': 'аллея' };
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
@@ -864,7 +864,7 @@ function initSignSearch(map, config) {
   // dropped (its lines, boxes, search and state are not the sheet's now).
   var readSeq = 0;
   var IDLE_MS = 60000;
-  var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
+  var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {}, busy = 0;
   // window.__szSignKiwixApp forces it, for tools/ocr_check.mjs (no zim: there).
   function kiwixApp() { return window.__szSignKiwixApp || _szSignKiwixApp(location.protocol, navigator); }
   // The last photo's search, kept when a result is picked so the reader can
@@ -890,6 +890,7 @@ function initSignSearch(map, config) {
     return getBytes(rel).then(function (b) { return new TextDecoder().decode(b); });
   }
 
+  // BEGIN sign-worker
   function release() {
     clearTimeout(idleTimer);
     if (worker) { try { worker.terminate(); } catch (e) {} }
@@ -897,6 +898,22 @@ function initSignSearch(map, config) {
     for (var k in waiting) waiting[k].reject(new Error('stopped'));
     waiting = {};
   }
+  // A reading; the worker goes a minute after the last one ends, never
+  // while one is under way (a photo read just before the minute was up,
+  // after a long search on a big map, was stopped).
+  function read(image) {
+    busy++;
+    clearTimeout(idleTimer);
+    var done = function () { if (--busy <= 0) { busy = 0; idleTimer = setTimeout(release, IDLE_MS); } };
+    return start().then(function (w) {
+      var id = ++reqSeq;
+      return new Promise(function (resolve, reject) {
+        waiting[id] = { resolve: resolve, reject: reject };
+        w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
+      });
+    }).then(function (items) { done(); return items; }, function (err) { done(); throw err; });
+  }
+  // END sign-worker
 
   // The worker, loaded with the manifest's files (fetched here, sent as bytes).
   function start() {
@@ -952,19 +969,6 @@ function initSignSearch(map, config) {
     return ready;
   }
 
-  function read(image) {
-    return start().then(function (w) {
-      var id = ++reqSeq;
-      return new Promise(function (resolve, reject) {
-        waiting[id] = { resolve: resolve, reject: reject };
-        w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
-      });
-    }).then(function (items) {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(release, IDLE_MS);
-      return items;
-    });
-  }
 
   // The text shown, and the state for the smoke gates (tools/ocr_check.mjs),
   // which must not read the (translatable) text: reading, searched, none, failed.

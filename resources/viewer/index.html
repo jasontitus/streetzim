@@ -4346,7 +4346,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '0c86940e';
+var SZ_VIEWER_BUILD = '1602d90c';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -6992,11 +6992,7 @@ return Math.max(0, 1 - d / name.length);
 var SZ_SIGN_RU_TYPES = 'улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проізд|тупик|спуск|узвіз|аллея|алея';
 var SZ_SIGN_DROP_TYPE = new RegExp('(^|\\s)(' + SZ_SIGN_RU_TYPES + ')(?=\\s|$)', 'giu');
 var SZ_SIGN_LINE_TYPE = new RegExp('(^|[\\s.])(' + SZ_SIGN_RU_TYPES + '|ул|вул|пер|пров|просп|бульв|пл|наб)(?=[\\s.]|$)', 'giu');
-var SZ_SIGN_TYPE_AS = { 'вулиця': 'улица', 'ул': 'улица', 'вул': 'улица', 'провулок': 'переулок', 'пер': 'переулок',
-'пров': 'переулок', 'просп': 'проспект', 'бульв': 'бульвар', 'площа': 'площадь', 'пл': 'площадь',
-'шосе': 'шоссе', 'набережна': 'набережная', 'наб': 'набережная', 'проізд': 'проезд',
-'узвіз': 'спуск', 'алея': 'аллея' };
-function _szSignTypeOf(w) { w = String(w).toLowerCase(); return SZ_SIGN_TYPE_AS[w] || w; }
+function _szSignTypeOf(w) { w = String(w).toLowerCase(); return SZ_SIGN_TYPES[w] || w; }
 function _szSignScore(rec, lines, norm) {
 var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [];
 if (rec.t === 'street') forms.slice().forEach(function (f) {
@@ -8158,7 +8154,7 @@ blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع':
 'проспект': 'проспект', 'просп': 'проспект', 'бульвар': 'бульвар', 'бульв': 'бульвар',
 'площадь': 'площадь', 'площа': 'площадь', 'пл': 'площадь', 'шоссе': 'шоссе', 'шосе': 'шоссе',
 'набережная': 'набережная', 'набережна': 'набережная', 'наб': 'набережная',
-'проезд': 'проезд', 'проїзд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
+'проезд': 'проезд', 'проізд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
 'аллея': 'аллея', 'алея': 'аллея' };
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
@@ -8619,7 +8615,7 @@ var WHOLE = [0, 0, 1, 1];
 var photo = null, curPart = WHOLE, curLines = [], view = { s: 1, tx: 0, ty: 0 }, fit = null, loadSeq = 0;
 var readSeq = 0;
 var IDLE_MS = 60000;
-var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {};
+var manifest = null, worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {}, busy = 0;
 function kiwixApp() { return window.__szSignKiwixApp || _szSignKiwixApp(location.protocol, navigator); }
 var last = null;
 btn.hidden = false;
@@ -8637,6 +8633,7 @@ return r.arrayBuffer();
 function getText(rel) {
 return getBytes(rel).then(function (b) { return new TextDecoder().decode(b); });
 }
+// BEGIN sign-worker
 function release() {
 clearTimeout(idleTimer);
 if (worker) { try { worker.terminate(); } catch (e) {} }
@@ -8644,6 +8641,19 @@ worker = null; ready = null;
 for (var k in waiting) waiting[k].reject(new Error('stopped'));
 waiting = {};
 }
+function read(image) {
+busy++;
+clearTimeout(idleTimer);
+var done = function () { if (--busy <= 0) { busy = 0; idleTimer = setTimeout(release, IDLE_MS); } };
+return start().then(function (w) {
+var id = ++reqSeq;
+return new Promise(function (resolve, reject) {
+waiting[id] = { resolve: resolve, reject: reject };
+w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
+});
+}).then(function (items) { done(); return items; }, function (err) { done(); throw err; });
+}
+// END sign-worker
 function start() {
 if (ready) return ready;
 ready = (manifest ? Promise.resolve(manifest) : getText(path).then(function (t) {
@@ -8694,19 +8704,6 @@ worker.postMessage(msg, transfer);
 });
 ready.catch(release);
 return ready;
-}
-function read(image) {
-return start().then(function (w) {
-var id = ++reqSeq;
-return new Promise(function (resolve, reject) {
-waiting[id] = { resolve: resolve, reject: reject };
-w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
-});
-}).then(function (items) {
-clearTimeout(idleTimer);
-idleTimer = setTimeout(release, IDLE_MS);
-return items;
-});
 }
 function setStatus(text, state) {
 statusEl.textContent = text || '';

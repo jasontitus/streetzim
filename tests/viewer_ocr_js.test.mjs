@@ -23,6 +23,7 @@ function slice(src, from, to) {
   return src.slice(a, b);
 }
 const M = new Function(
+  slice(HTML, 'var SZ_SIGN_TYPES = {', '\nvar SZ_SIGN_FILLER') +      // the street types, 305-ocr-search.js's
   slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   slice(HTML, '// BEGIN sign-match', '// END sign-match') +
   '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
@@ -799,4 +800,46 @@ ok('Russian and Ukrainian street signs: abbreviated types, the type on its own l
   // a lane is not a street of the same name
   assert.strictEqual(kinds([st('Desiatynna Street', 'Десятинна вулиця')], [{ text: 'ПРОВ. ДЕСЯТИННА' }])[0].kind, 'similar');
 });
+
+// The reader's worker (sign-worker): let go a minute after the last reading, never during one.
+await (async () => {
+  const name = 'the reader\'s worker is not stopped while a photo is being read';
+  try {
+  let now = 0;
+  const timers = [];
+  const set = (fn, ms) => { timers.push({ fn, at: now + ms }); return timers.length; };
+  const clear = (id) => { if (id) timers[id - 1] = null; };
+  const tick = (to) => { now = to; timers.forEach((t, i) => { if (t && t.at <= now) { timers[i] = null; t.fn(); } }); };
+  let terminated = 0;
+  const worker = { postMessage() {}, terminate() { terminated++; } };
+  const K = new Function('setTimeout', 'clearTimeout', 'start', 'IDLE_MS',
+    'var worker = null, ready = null, idleTimer = null, reqSeq = 0, waiting = {}, busy = 0;' +
+    slice(HTML, '// BEGIN sign-worker', '// END sign-worker') +
+    '\nreturn { read, release, waiting: function () { return waiting; } };')(set, clear, () => Promise.resolve(worker), 60000);
+  const image = { data: { buffer: null } };
+  const flush = () => new Promise((r) => setImmediate(r));
+  // a photo read: the minute starts when it ends
+  const a = K.read(image); await flush();
+  K.waiting()[1].resolve(['A']); assert.deepStrictEqual(await a, ['A']);
+  // the next photo is read just before the minute is up, and its reading outlasts it
+  tick(59000);
+  const b = K.read(image); await flush();
+  tick(61000); tick(200000);
+  assert.ok(K.waiting()[2], 'the reading under way was stopped');
+  assert.strictEqual(terminated, 0);
+  // two readings at once: the first to end does not start the minute
+  const c = K.read(image); await flush();
+  K.waiting()[2].resolve(['B']); assert.deepStrictEqual(await b, ['B']);
+  tick(400000);
+  assert.ok(K.waiting()[3]);
+  K.waiting()[3].resolve(['C']); await c;
+  // once none is under way, the worker goes a minute later; a failed reading counts as ended
+  tick(459000); assert.strictEqual(terminated, 0);
+  tick(461000); assert.strictEqual(terminated, 0);   // no worker held by this fake start
+  const d = K.read(image); await flush();
+  K.waiting()[4].reject(new Error('bad photo')); await assert.rejects(d);
+  assert.ok(timers.some((t) => t && t.at === now + 60000), 'a failed reading leaves no timer');
+    console.log('ok   ', name); pass++;
+  } catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
+})();
 console.log(`${pass} passed`);

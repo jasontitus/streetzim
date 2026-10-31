@@ -345,16 +345,12 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // "ВУЛ. МИРУ" are Миру's, but "Тверской" of "Тверской бульвар" is not what
 // "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" or "ТВЕРСКОЙ ПЕР." says. (Only the search: the
 // labels, whole words, say whether the sign names the type.) As the search
-// folds them (й as и, ї as і: "проізд"); SZ_SIGN_TYPE_AS, each type and
-// abbreviation as one word, as 305-ocr-search.js's SZ_SIGN_TYPES.
+// folds them (й as и, ї as і: "проізд"); each type and abbreviation as one
+// word by 305-ocr-search.js's SZ_SIGN_TYPES.
 var SZ_SIGN_RU_TYPES = 'улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проізд|тупик|спуск|узвіз|аллея|алея';
 var SZ_SIGN_DROP_TYPE = new RegExp('(^|\\s)(' + SZ_SIGN_RU_TYPES + ')(?=\\s|$)', 'giu');
 var SZ_SIGN_LINE_TYPE = new RegExp('(^|[\\s.])(' + SZ_SIGN_RU_TYPES + '|ул|вул|пер|пров|просп|бульв|пл|наб)(?=[\\s.]|$)', 'giu');
-var SZ_SIGN_TYPE_AS = { 'вулиця': 'улица', 'ул': 'улица', 'вул': 'улица', 'провулок': 'переулок', 'пер': 'переулок',
-                        'пров': 'переулок', 'просп': 'проспект', 'бульв': 'бульвар', 'площа': 'площадь', 'пл': 'площадь',
-                        'шосе': 'шоссе', 'набережна': 'набережная', 'наб': 'набережная', 'проізд': 'проезд',
-                        'узвіз': 'спуск', 'алея': 'аллея' };
-function _szSignTypeOf(w) { w = String(w).toLowerCase(); return SZ_SIGN_TYPE_AS[w] || w; }
+function _szSignTypeOf(w) { w = String(w).toLowerCase(); return SZ_SIGN_TYPES[w] || w; }
 function _szSignScore(rec, lines, norm) {
   var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [];
   if (rec.t === 'street') forms.slice().forEach(function (f) {
