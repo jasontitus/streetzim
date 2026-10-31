@@ -2520,6 +2520,15 @@ window.addEventListener('orientationchange', function() {
 setTimeout(setViewportVars, 250);
 });
 window.addEventListener('load', function() { setTimeout(setViewportVars, 300); });
+// BEGIN page-back
+window.addEventListener('pageshow', function(e) {
+if (e.persisted) window.location.reload();
+});
+try {
+var kiwixScroll = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scrollHandler;
+if (kiwixScroll) kiwixScroll.postMessage('up');
+} catch (e) {}
+// END page-back
 var DEBUG = /[?&]debug=1/.test(window.location.search);
 var _debugLog = [];
 function dbg() {
@@ -4351,7 +4360,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '2ad98118';
+var SZ_VIEWER_BUILD = '06dd2eb5';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {

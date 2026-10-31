@@ -640,3 +640,22 @@ window.addEventListener('orientationchange', function() {
 });
 window.addEventListener('load', function() { setTimeout(setViewportVars, 300); });
 
+// BEGIN page-back
+// Back from an article can bring this page back from the browser's
+// back/forward cache instead of loading it again (WebKit keeps pages with a
+// map's WebGL there: Kiwix on iOS and macOS, WebKitGTK; Chromium too), and the
+// viewer would carry on as it was left: a place's sheet and its backdrop over
+// the chips and the map, sizes measured before Kiwix hid its bars, a map
+// canvas WebKit may not draw again. It is loaded afresh: openWikiArticle put
+// the view in the URL (#map=), so the map opens where it was.
+window.addEventListener('pageshow', function(e) {
+  if (e.persisted) window.location.reload();
+});
+// Kiwix hides its bars while an article scrolls down and shows them when a
+// page scrolls up; the map never scrolls, so they are asked back (Kiwix's own
+// scroll handler), else the app has no way out of the map.
+try {
+  var kiwixScroll = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scrollHandler;
+  if (kiwixScroll) kiwixScroll.postMessage('up');
+} catch (e) {}
+// END page-back

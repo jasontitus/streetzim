@@ -31,9 +31,11 @@ MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
    other bytes;
 3. gates it as Kiwix runs it (`tools/langpack/fresh_viewer_gates.sh`:
    kiwix-serve, the UI, viewer and smoke gates of a base,
-   `cloud/viewer_scroll_check.mjs`, and a route in the viewer between the
+   `cloud/viewer_scroll_check.mjs`, a route in the viewer between the
    region file's two points, `tools/langpack/zim_route_gate.mjs`: the
-   routing worker and panel are viewer code). zimcheck and the command-line
+   routing worker and panel are viewer code, and back from a Wikipedia
+   article, `cloud/wiki_back_check.mjs`: the map loaded afresh and working,
+   with the browser's back/forward cache on, as WebKit has it). zimcheck and the command-line
    routing and search gates see the same data as the live file, which passed
    them when it was built;
 4. writes, into `web/build/recipes/REGION-viewer/` (a folder of its own:

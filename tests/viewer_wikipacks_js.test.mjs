@@ -1350,4 +1350,18 @@ await ok('the style: regionLanguages changes only a map in another language than
   assert.strictEqual(JSON.stringify(makeStyle(merged)), plainMerged);
 });
 
+// Back from an article (page-back, 100-wiki-bridge-and-viewport.js).
+ok('back from an article: a page the browser kept is loaded afresh; Kiwix is asked for its bars', () => {
+  const nav = { on: {}, reloads: 0, posts: [] };
+  const win = { location: { reload() { nav.reloads++; } }, addEventListener(t, f) { nav.on[t] = f; },
+                webkit: { messageHandlers: { scrollHandler: { postMessage(m) { nav.posts.push(m); } } } } };
+  new Function('window', slice('// BEGIN page-back', '// END page-back'))(win);
+  assert.deepStrictEqual(nav.posts, ['up']);          // the map never scrolls up for Kiwix to show them
+  nav.on.pageshow({ persisted: false });              // an ordinary load: nothing
+  assert.strictEqual(nav.reloads, 0);
+  nav.on.pageshow({ persisted: true });               // from the back/forward cache: loaded again
+  assert.strictEqual(nav.reloads, 1);
+  // outside Kiwix, no handler: nothing posted, nothing thrown
+  new Function('window', slice('// BEGIN page-back', '// END page-back'))({ location: {}, addEventListener() {} });
+});
 console.log(`\n${pass} passed`);
