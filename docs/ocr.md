@@ -159,7 +159,19 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    away: while the photo shows, no results or chips cover it. The search
    field holds the line the first one matched, as read: not the photo's
    other text (a status bar, a watermark). Tapping a line under the photo
-   runs an ordinary search for it, the photo put away.
+   runs an ordinary search for it, the photo put away. When more than one
+   result has the answer's name (as the rows show it: the name or its
+   other script, not every translation; for an address, the same address
+   before its place), **Map (n)** under the answer puts the photo and the
+   list away and shows them all on the map at once, framed clear of what
+   floats over the map: the search box and chips, the map's buttons and
+   layer panel, its name and the attribution, each kept off the side of
+   the map that costs the least room (a column of buttons on the right, a
+   row near the top of a short screen at the top), and a place's popup
+   left open put away: a metro station's entrances side by side, or two
+   places of the name across town. A tap on one (or Enter on it) goes to
+   it as its row does; they go with the next search or photo, a category,
+   or directions.
 4. **Part of the photo.** Zoomed in, **Search this part** reads only
    the part shown, enlarged up to twice (1600 px at most on its longest
    side), from a canvas of its own, and searches it as a photo of that part
@@ -337,7 +349,13 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
   tiles the sheet's camera opened goes back to the photo, that Results
   shows the list and picking the place moves the map and leaves the photo
   on the camera button, which brings the photo and its places back, with
-  its lines; that
+  its lines; that a name the map lists at two places or more (SAME_NAME, or
+  one its search finds, 400 m apart north to south and at least half as
+  far as east to west where it can) has Map, which, on a phone held
+  sideways, shows every one of them with its head and point under nothing
+  floating over the map, the photo and list put away; that a tap on one
+  (after a finger scrolled the list) and Enter on one go there, and that
+  directions, a category and the next search take them away; that
   photos given by Take a photo's camera input (while the tiles are open,
   which must give way), by Choose a photo's input, dropped on the map and
   pasted are all read, in turn; and that the camera's choice is right on a

@@ -30,7 +30,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN };')();
+  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
@@ -784,6 +784,43 @@ ok('the Russian and Ukrainian types are written as the search folds them', () =>
     assert.ok(ws.length > 10);
     for (const w of ws) assert.strictEqual(norm(w), w, w);
   }
+});
+ok("the results that share the answer's name, for Map: the answer first, then each of its names' places", () => {
+  const rec = (n, t, a, o, extra = {}) => ({ item: { n, t, a, o, ...extra } });
+  const found = [
+    rec('Хрещатик', 'poi', 50.4488, 30.5227, { s: 'subway_entrance' }),
+    rec('Khreschatyk', 'poi', 50.4472, 30.5229, { nn: 'Хрещатик' }),    // the same name in its other language
+    rec('вулиця Хрещатик', 'street', 50.4485, 30.5226),                 // a street of the name: another name
+    rec('Хрещатик', 'water', 50.4413, 30.5207),                         // across town
+    rec('Хрещатик 22', 'addr', 50.4475, 30.5230),                       // an address is not a place of the name
+    rec('Майдан Незалежності', 'poi', 50.4501, 30.5234),
+    rec('CristalBank', 'poi', 50.3955, 30.6316, { nn: 'КристалБанк', ln: { ru: 'Хрещатик' } }),   // an old translation of it
+    rec('Хрещатик;Khreshchatyk', 'poi', 50.4475, 30.5225),             // one of its ";" names
+  ];
+  assert.deepStrictEqual(L._szSignSameName(found, W), [0, 1, 3, 7]);
+  // an address answer: the addresses of its name before the comma
+  const addrs = [rec('12 Main Street, Springfield', 'addr', 1, 1), rec('12 Main Street, Shelbyville', 'addr', 2, 2),
+                 rec('12 Main Street', 'poi', 3, 3), rec('14 Main Street, Springfield', 'addr', 4, 4)];
+  assert.deepStrictEqual(L._szSignSameName(addrs, W), [0, 1]);
+  // the answer's other name finds its places too
+  assert.deepStrictEqual(L._szSignSameName([found[1], found[0], found[5]], W), [0, 1]);
+  // nothing found, or the answer alone
+  assert.deepStrictEqual(L._szSignSameName([], W), []);
+  assert.deepStrictEqual(L._szSignSameName([found[5]], W), [0]);
+});
+ok("Map's markers are framed clear of what floats over the map, each box kept off its cheapest side", () => {
+  const b = (l, t, r, bo) => ({ left: l, top: t, right: r, bottom: bo });
+  // as the viewer lays them out (search box, layer panel, map buttons, bottom corners), on three screens
+  const tall = [b(64, 10, 326, 105), b(296, 250, 380, 382), b(336, 0, 390, 196), b(0, 556, 390, 664), b(0, 584, 76, 616)];
+  assert.deepStrictEqual(L._szSignClearFrame(390, 664, tall), { top: 105, right: 94, bottom: 108, left: 0 });
+  // sideways: the layer panel, a row near the top, goes to the right
+  const wide = [b(200, 10, 540, 105), b(423, 152, 630, 196), b(642, 0, 740, 152), b(335, 302, 740, 390), b(0, 310, 76, 342)];
+  assert.deepStrictEqual(L._szSignClearFrame(740, 390, wide), { top: 105, right: 317, bottom: 88, left: 76 });
+  // short and narrow: the row goes to the top
+  const short = [b(64, 10, 326, 105), b(73, 152, 280, 196), b(292, 0, 390, 152), b(0, 322, 390, 430)];
+  assert.deepStrictEqual(L._szSignClearFrame(390, 430, short), { top: 196, right: 98, bottom: 108, left: 0 });
+  // what is hidden, empty or off the map counts for nothing
+  assert.deepStrictEqual(L._szSignClearFrame(390, 664, [b(0, 0, 0, 0), b(400, 10, 500, 50), null, b(10, -60, 50, -10)]), { top: 0, right: 0, bottom: 0, left: 0 });
 });
 ok('Kyiv address plates: the type over the name and the number under them; the street again in Latin letters', () => {
   const ln = (text, y, h, x = 100, w = 400) => ({ text, size: h, box: { x, y, width: w, height: h } });

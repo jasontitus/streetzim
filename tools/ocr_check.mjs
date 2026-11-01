@@ -10,7 +10,9 @@
 // That the search field holds the line the place matched, not the whole
 // photo's text. Then picks it and checks the photo sheet hides, the map flies
 // there and the camera button shows the photo; and that tapping it brings
-// back the photo and its places.
+// back the photo and its places. For a name the map lists at two places or
+// more (SAME_NAME, or found in its search), that Map under the answer shows
+// them all on the map, in view, and a tap on one goes there.
 //
 //   ZIM_ORIGIN=http://127.0.0.1:8902/content/<book> CHROME_PATH=... \
 //     node tools/ocr_check.mjs
@@ -135,16 +137,38 @@ try {
     });
   }
   if (!names.length) errs.push('no place names to photograph');
-
-  for (const [i, entry] of names.entries()) {
-    const [name, want = name] = entry.split('=>');
-    const t0 = Date.now();
-    // The first of every four photos comes in while the tiles are open (the
-    // camera's choice on a phone): it must take their place.
-    if (i % 4 === 0) {
-      await p.evaluate(() => { window.__szSignKiwixApp = ''; document.getElementById('search-photo').click(); });
+  // A name the search lists at two places or more, photographed last: Map
+  // under the answer shows them all (checked below). Given as SAME_NAME, or
+  // the first such street or POI name of the map's search.
+  // Places of the name at least 400 m apart north to south, and at least
+  // half as far as east to west, where one is found: the framing then fills
+  // the height, from the search box and chips to the attribution.
+  const same = process.env.SAME_NAME || await p.evaluate(async (queries) => {
+    const own = /^[\p{L} '\-.]{6,30}$/u;
+    const tall = (a, b) => {
+      const ns = Math.abs(a[0] - b[0]) * 111.2, ew = Math.abs(a[1] - b[1]) * 111.2 * Math.cos(a[0] * Math.PI / 180);
+      return ns >= 0.4 && ns >= 0.5 * ew;
+    };
+    let near = '';
+    for (const q of queries.concat(['av', 'bo', 'ru', 'pl', 'mu', 'ca', 'st', 'ma', 'sa', 'le'])) {
+      const found = await window.__szMap._queryPlaces(q), at = {};
+      for (const m of found) {
+        const n = (m.item.nn || m.item.n || '').trim();
+        if (['street', 'poi'].indexOf(m.item.t) < 0 || !own.test(n)) continue;
+        const pts = at[n] = at[n] || [], pt = [+m.item.a, +m.item.o];
+        if (pts.some((o) => tall(o, pt))) return n;
+        if (pts.length && !near) near = n;
+        pts.push(pt);
+      }
     }
-    // A photo of a sign, made in the page and given to the file input.
+    return near && '~' + near;
+  }, (process.env.QUERIES || '').split('|').filter(Boolean));
+  if (!same) console.log('no name the map lists twice: the Map check did not run');
+  else if (same.startsWith('~')) console.log(`no name the map lists twice far apart north to south: the Map check frames "${same.slice(1)}" by its width`);
+  const sameName = same.replace(/^~/, '');
+
+  // A photo of a sign, made in the page and given to the file input.
+  const drawPhoto = async (name, seed) => {
     await p.evaluate(async (name, seed) => {
       let s = seed * 9301 + 49297;
       const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
@@ -196,7 +220,18 @@ try {
       } else {
         document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
       }
-    }, name, i + 1);
+    }, name, seed);
+  };
+
+  for (const [i, entry] of names.entries()) {
+    const [name, want = name] = entry.split('=>');
+    const t0 = Date.now();
+    // The first of every four photos comes in while the tiles are open (the
+    // camera's choice on a phone): it must take their place.
+    if (i % 4 === 0) {
+      await p.evaluate(() => { window.__szSignKiwixApp = ''; document.getElementById('search-photo').click(); });
+    }
+    await drawPhoto(name, i + 1);
     // Read, then searched for: the results list shows real rows.
     // The sheet's state (305-ocr-search.js): reading, lines, then searched,
     // or none / failed.
@@ -284,6 +319,113 @@ try {
                                              tiles: !document.getElementById('ocr-pick').hidden }));
     if (again.lines !== lines || again.tiles) {
       errs.push(`back to the photo: ${again.lines} of its ${lines} lines, tiles ${again.tiles ? 'shown' : 'hidden'}`);
+    }
+  }
+  // Map, under the answer of a name shared by several places: the photo put
+  // away, every place of the name on the map at once and in view, and a tap
+  // on one goes there as its row does.
+  if (sameName && !errs.length) {
+    // a photo of its own, given to Choose a photo's input (the last one's answer not taken for it)
+    await p.evaluate(() => document.getElementById('ocr-sheet').setAttribute('data-sz-ocr', 'reading'));
+    await drawPhoto(sameName, 6);
+    const read = await p.waitForFunction(() => document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') === 'searched',
+      { timeout: 180000 }).then(() => true, () => false);
+    console.log(`"${sameName}": ${read ? 'searched' : 'not searched in 180 s'}`);
+    const m = await p.evaluate(() => {
+      const b = document.getElementById('ocr-map');
+      return { shown: !b.hidden, n: +((b.textContent.match(/\((\d+)\)/) || [])[1] || 0),
+               field: document.getElementById('search-input').value };
+    });
+    if (!m.shown || m.n < 2) {
+      errs.push(`"${sameName}" is found at several places but Map is ${m.shown ? 'for ' + m.n : 'not shown'} (field ${JSON.stringify(m.field)})`);
+    } else {
+      // The markers: each one's head and point under nothing floating over
+      // the map (the search box and chips, the map's buttons and panels, the
+      // attribution, a place's popup); under another marker is fine.
+      const framed = () => p.evaluate(() => {
+        const ms = [...document.querySelectorAll('.ocr-map-marker')];
+        const inView = ms.filter((el) => {
+          const r = el.getBoundingClientRect(), x = r.left + r.width / 2;
+          const hit = (y) => { const t = document.elementFromPoint(x, y); return !!(t && t.closest('.ocr-map-marker')); };
+          return hit(r.top + r.height * 0.3) && hit(r.bottom - 3);
+        }).length;
+        return { markers: ms.length, inView, sheet: document.getElementById('ocr-sheet').hidden,
+                 list: getComputedStyle(document.getElementById('search-results')).display,
+                 names: ms.map((el) => el.getAttribute('aria-label')) };
+      });
+      // on a phone held sideways, where the search box and chips take a third of the height
+      await p.setViewport({ width: 740, height: 390, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      await new Promise(r => setTimeout(r, 1000));
+      await p.click('#ocr-map');
+      await new Promise(r => setTimeout(r, 2500));
+      const on = await framed();
+      if (on.markers !== m.n || on.inView !== m.n || !on.sheet || on.list !== 'none') {
+        errs.push(`Map for "${sameName}": ${on.markers} markers (${on.inView} in view) for ${m.n}, sheet ${on.sheet ? 'hidden' : 'open'}, list ${on.list}`);
+      }
+      if (await p.evaluate(() => [...document.querySelectorAll('.ocr-map-marker')].some((el) => el.tabIndex !== 0))) {
+        errs.push(`Map for "${sameName}": a marker cannot be reached with the keyboard`);
+      }
+      // the list scrolled by a finger earlier (a scroll ends in no click) does not eat the marker's tap
+      await p.evaluate(() => {
+        const el = document.getElementById('search-results');
+        const at = (y) => new Touch({ identifier: 1, target: el, clientX: 100, clientY: y });
+        el.dispatchEvent(new TouchEvent('touchstart', { touches: [at(300)], bubbles: true }));
+        el.dispatchEvent(new TouchEvent('touchmove', { touches: [at(240)], bubbles: true }));
+      });
+      const before = await p.evaluate(() => window.__szMap.getCenter().toArray());
+      const tapped = await p.evaluate(() => { const el = document.querySelectorAll('.ocr-map-marker')[1]; el.click(); return el.getAttribute('aria-label'); });
+      await new Promise(r => setTimeout(r, 2500));
+      const picked = await p.evaluate(() => ({
+        center: window.__szMap.getCenter().toArray(),
+        popup: (document.querySelector('.maplibregl-popup') || {}).textContent || '',
+      }));
+      if (picked.popup.indexOf(tapped) < 0 || Math.abs(picked.center[0] - before[0]) + Math.abs(picked.center[1] - before[1]) < 1e-7) {
+        errs.push(`Map for "${sameName}": a tap on "${tapped}" did not go to its place (popup ${JSON.stringify(picked.popup.slice(0, 60))})`);
+      }
+      // with the keyboard: a marker takes the focus and Enter goes to it (from the one tapped)
+      const at0 = await p.evaluate(() => window.__szMap.getCenter().toArray());
+      if (!await p.evaluate(() => { const el = document.querySelectorAll('.ocr-map-marker')[0]; el.focus(); return document.activeElement === el; })) {
+        errs.push(`Map for "${sameName}": a marker does not take the keyboard's focus`);
+      } else {
+        await p.keyboard.press('Enter');
+        await new Promise(r => setTimeout(r, 2000));
+        const at1 = await p.evaluate(() => window.__szMap.getCenter().toArray());
+        if (Math.abs(at1[0] - at0[0]) + Math.abs(at1[1] - at0[1]) < 1e-7) errs.push(`Map for "${sameName}": Enter on a marker did not go to its place`);
+      }
+      await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      console.log(`Map for "${sameName}": ${on.markers} markers (${on.names.join(' | ')})`);
+      // shown again after a place was picked (its popup open): framed as the first time
+      const again = async () => {
+        await p.click('#search-photo');
+        await p.waitForFunction(() => !document.getElementById('ocr-sheet').hidden && !document.getElementById('ocr-map').hidden, { timeout: 30000 });
+        await p.click('#ocr-map');
+        await new Promise(r => setTimeout(r, 2500));
+        const f = await framed();
+        if (f.inView !== f.markers) errs.push(`Map for "${sameName}" shown again: ${f.markers} markers (${f.inView} in view)`);
+        return f.markers;
+      };
+      // shown again with the place just picked open beside them: its popup is put away
+      await again();
+      // directions from a place take them away
+      await p.evaluate(() => document.querySelectorAll('.ocr-map-marker')[0].click());
+      await new Promise(r => setTimeout(r, 2000));
+      if (await p.evaluate(() => { const b = document.querySelector('.maplibregl-popup .pin-directions'); if (b) b.click(); return !!b; })) {
+        await new Promise(r => setTimeout(r, 1000));
+        if (await p.evaluate(() => document.querySelectorAll('.ocr-map-marker').length)) errs.push('the Map markers stayed with directions open');
+        await p.evaluate(() => { const c = document.getElementById('routing-close'); if (c) c.click(); });
+        await new Promise(r => setTimeout(r, 500));
+      }
+      // a category, or a new search, takes them away
+      if (await again()) {
+        await p.evaluate(() => document.querySelector('#find-chips button').click());
+        await new Promise(r => setTimeout(r, 1000));
+        if (await p.evaluate(() => document.querySelectorAll('.ocr-map-marker').length)) errs.push('the Map markers stayed after a category was picked');
+      }
+      if (await again()) {
+        await p.focus('#search-input');
+        await p.keyboard.type('zz');
+        if (await p.evaluate(() => document.querySelectorAll('.ocr-map-marker').length)) errs.push('the Map markers stayed after a new search');
+      } else errs.push(`Map for "${sameName}": no markers the second time`);
     }
   }
   const sheetErrors = pageErrors.filter(m => !/ResizeObserver/.test(m));

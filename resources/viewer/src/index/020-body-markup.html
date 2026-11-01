@@ -294,8 +294,10 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
   <!-- What the first result is (its name as written, an exact address, the
        street only, an area, a similar name) and whether other places share
        its name (305-ocr-search.js, _szSignKinds). "Results", in the head,
-       opens the list, the photo put away. -->
+       opens the list, the photo put away; Map under it shows every result
+       of the answer's name on the map. -->
   <div id="ocr-verdict" hidden aria-live="polite"></div>
+  <button id="ocr-map" type="button" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg><span></span></button>
   <div id="ocr-lines"></div>
 </div>
 <div id="search-container">

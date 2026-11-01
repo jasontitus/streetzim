@@ -1545,7 +1545,9 @@ var SEARCH_SHARDS = (function () {
   }, { passive: true });
 
   resultsEl.addEventListener('click', function(e) {
-    if (__touchScrolled) {
+    // only a real tap: a scroll leaves no click to clear the flag, and a row
+    // clicked by the page (the photo's answer, a Map marker) is meant
+    if (__touchScrolled && e.isTrusted) {
       __touchScrolled = false;
       return;
     }

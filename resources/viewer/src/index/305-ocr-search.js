@@ -790,10 +790,7 @@ function _szSignKinds(matches, lines, words, all) {
   if (first) {
     var top = matches[out.indexOf(first)].item, rad = Math.PI / 180;
     var km = top.t === 'street' ? 2 : 0.15;
-    var key = function (it) {
-      if (it.t === 'addr') return [words(String(it.n || '').split(',')[0]).join(' ')];
-      return _szSignNames(it).map(function (n) { return words(n).join(' '); });
-    };
+    var key = function (it) { return _szSignNameKeys(it, words); };
     var topKeys = key(top);
     first.several = records.some(function (it) {
       if (!it || it === top || (it.t === 'addr') !== (top.t === 'addr')) return false;
@@ -807,6 +804,48 @@ function _szSignKinds(matches, lines, words, all) {
     if (first.several && top.t === 'addr') out.forEach(function (k) { if (k.kind === 'address') k.several = true; });
   }
   return out;
+}
+// A record's names as folded words (an address's before its comma).
+function _szSignNameKeys(it, words) {
+  if (it.t === 'addr') return [words(String(it.n || '').split(',')[0]).join(' ')];
+  return _szSignNames(it).map(function (n) { return words(n).join(' '); });
+}
+// The results that share the first one's name, the first among them: the
+// places a sign of that name may be, near each other (a station's
+// entrances) or across the map. By the names their rows show (the name,
+// its other script, their ";" parts), not every translation: a bank whose
+// old Russian name was "Хрещатик" is not a place of that name.
+function _szSignSameName(found, words) {
+  var keys = function (it) {
+    if (it.t === 'addr') return _szSignNameKeys(it, words);
+    return [it.n, it.nn].concat(String(it.n || '').split(';'), String(it.nn || '').split(';'))
+      .map(function (n) { return words(String(n || '').trim()).join(' '); }).filter(Boolean);
+  };
+  var top = found[0] && found[0].item;
+  if (!top) return [];
+  var k0 = keys(top);
+  return found.map(function (m, i) {
+    return m && m.item && (m.item.t === 'addr') === (top.t === 'addr') &&
+      keys(m.item).some(function (k) { return k0.indexOf(k) >= 0; }) ? i : -1;
+  }).filter(function (i) { return i >= 0; });
+}
+// The map's margins (px) that keep markers clear of what floats over it
+// (the search box and chips, the map's buttons and panels, the
+// attribution), from their boxes in the map's own coordinates: each box
+// is kept off whichever side of the map costs the least area to leave out
+// (a column of buttons on the right, a row of them near the top of a short
+// screen, the search box at the top).
+function _szSignClearFrame(w, h, boxes) {
+  var pad = { top: 0, right: 0, bottom: 0, left: 0 };
+  (boxes || []).forEach(function (r) {
+    if (!r || !(r.right > r.left) || !(r.bottom > r.top)) return;     // one off the map has a side that costs nothing
+    var keep = { top: r.bottom, bottom: h - r.top, left: r.right, right: w - r.left };
+    var side = ['top', 'right', 'bottom', 'left'].sort(function (a, b) {
+      return keep[a] * (a === 'top' || a === 'bottom' ? w : h) - keep[b] * (b === 'top' || b === 'bottom' ? w : h);
+    })[0];
+    pad[side] = Math.max(pad[side], keep[side]);
+  });
+  return pad;
 }
 // END sign-lines
 
@@ -929,6 +968,7 @@ function initSignSearch(map, config) {
   var partBtn = document.getElementById('ocr-part');
   var wholeBtn = document.getElementById('ocr-whole');
   var showBtn = document.getElementById('ocr-show');
+  var mapBtn = document.getElementById('ocr-map');
   var linesEl = document.getElementById('ocr-lines');
   var verdictEl = document.getElementById('ocr-verdict');
   var chooseBtn = document.getElementById('ocr-choose');
@@ -1149,7 +1189,7 @@ function initSignSearch(map, config) {
     }
     readSeq++; loadSeq++;     // the tiles replace the sheet: no reading or photo of before shows under them
     sheet.hidden = false;
-    frame.hidden = zoomHint.hidden = zoombar.hidden = showBtn.hidden = true;
+    frame.hidden = zoomHint.hidden = zoombar.hidden = showBtn.hidden = mapBtn.hidden = true;
     linesEl.innerHTML = '';
     pickRow.hidden = mode === 'drop';
     againBtn.hidden = true;
@@ -1383,6 +1423,73 @@ function initSignSearch(map, config) {
   // The results, and the photo put away: the camera button brings it back
   // as the reader left it. While the photo shows, no results cover it.
   showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
+  // The places sharing the answer's name, all on the map at once (Map),
+  // the photo put away as for the results: a station's entrances side by
+  // side, or two of the name across town. A tap on a marker goes to that
+  // place, as its row does. They stay until another search or photo
+  // (forgetVerdict).
+  var group = [], groupMarkers = [];
+  function clearGroup() {
+    groupMarkers.forEach(function (m) { m.remove(); });
+    groupMarkers = [];
+  }
+  function showGroup() {
+    clearGroup();
+    // the last pick's popup, left open, would cover them
+    if (typeof searchMarker !== 'undefined' && searchMarker && searchMarker.getPopup() && searchMarker.getPopup().isOpen()) {
+      searchMarker.togglePopup();
+    }
+    var w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+    group.forEach(function (g) {
+      var mk = new maplibregl.Marker({ color: '#ea580c' }).setLngLat([g.lon, g.lat]).addTo(map);
+      var el = mk.getElement();
+      el.classList.add('ocr-map-marker');
+      el.setAttribute('role', 'button');
+      el.setAttribute('aria-label', g.name);
+      el.title = g.name;
+      el.tabIndex = 0;
+      el.style.cursor = 'pointer';
+      var go = function (ev) {
+        ev.stopPropagation();
+        var row = resultsEl.querySelector('.search-result[data-idx="' + g.idx + '"]');
+        if (row) row.click();
+      };
+      el.addEventListener('click', go);
+      el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(ev); } });
+      groupMarkers.push(mk);
+      w = Math.min(w, g.lon); e = Math.max(e, g.lon); s = Math.min(s, g.lat); n = Math.max(n, g.lat);
+    });
+    if (!groupMarkers.length) return;
+    // Framed clear of what floats over the map as it is with the photo put
+    // away (the sheet's own watch has not run yet): a pin's height more at
+    // the top (pins stand on their point) and half its width at the sides.
+    document.body.classList.toggle('sz-photo', !sheet.hidden);
+    var canvas = map.getCanvas(), cr = canvas.getBoundingClientRect();
+    var cw = canvas.clientWidth || cr.width || 390, ch = canvas.clientHeight || cr.height || 600;
+    var boxes = [].map.call(document.querySelectorAll('#search-container, #controls, #info, #attr-btn, .maplibregl-ctrl-top-left, ' +
+      '.maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right'), function (el) {
+      var b = el.getBoundingClientRect();
+      return { left: b.left - cr.left, top: b.top - cr.top, right: b.right - cr.left, bottom: b.bottom - cr.top };
+    });
+    var clear = _szSignClearFrame(cw, ch, boxes);
+    var pad = { top: clear.top + 50, bottom: clear.bottom + 8, left: clear.left + 20, right: clear.right + 20 };
+    var opts = { duration: 1200, maxZoom: 16, padding: pad };
+    var box = [[w, s], [e, n]], cam = null;
+    try { cam = map.cameraForBounds(box, opts); } catch (err) { cam = null; }
+    if (cam) map.fitBounds(box, opts);
+    else map.flyTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 14, duration: 1200 });
+  }
+  // another way of looking at the map takes them away: a category, directions
+  document.getElementById('find-chips').addEventListener('click', clearGroup, true);
+  var routing = document.getElementById('routing-panel');
+  if (routing) new MutationObserver(function () { if (routing.style.display === 'block') clearGroup(); })
+    .observe(routing, { attributes: true, attributeFilter: ['style'] });
+  mapBtn.addEventListener('click', function () {
+    hide();
+    resultsEl.style.display = 'none';
+    showGroup();
+    btn.focus({ preventScroll: true });
+  });
   // The answer under the photo is the first result: a tap on it goes there,
   // as its row in the list would.
   function pickFirst() {
@@ -1518,6 +1625,14 @@ function initSignSearch(map, config) {
         showBtn.hidden = !found.length;
         showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') ' +
           (getComputedStyle(showBtn).direction === 'rtl' ? '\u2039' : '\u203a');
+        // Map, when more than one result has the answer's name
+        group = _szSignSameName(found, words).map(function (i) {
+          var it = found[i].item;
+          return { idx: i, lat: +it.a, lon: +it.o, name: szFirstName(_szShownNames(it, SZ_LANG2)[0] || it.n || '') };
+        }).filter(function (g) { return isFinite(g.lat) && isFinite(g.lon); });
+        clearGroup();
+        mapBtn.hidden = group.length < 2;
+        mapBtn.lastChild.textContent = szT('controls.map', 'Map') + ' (' + group.length + ')';
         if (!kinds.length) { paint(lines); return true; }
         // Green only for an address that is the only one of its words.
         verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
@@ -1585,7 +1700,9 @@ function initSignSearch(map, config) {
   }
   function forgetVerdict() {
     photoSeq++;
-    verdictEl.hidden = showBtn.hidden = true;
+    verdictEl.hidden = showBtn.hidden = mapBtn.hidden = true;
+    group = [];
+    clearGroup();
   }
 
   function showLines(lines) {
