@@ -808,6 +808,45 @@ def fetch_archive_items():
 
 
 _ITEM_DETAILS = {}     # identifier -> its listing, fetched once per build
+STALE_LISTINGS = {}    # identifier -> when the last good listing used for it was fetched
+# The last good listing of each item, for a build while archive.org's metadata
+# API fails for it: up to LISTING_MAX_AGE_S old.
+LISTING_MAX_AGE_S = 7 * 86400
+
+
+def _listing_cache(identifier):
+    d = os.environ.get("STREETZIM_IA_LISTINGS") or os.path.join(SCRIPT_DIR, "..", ".cache", "ia-listings")
+    return os.path.join(d, identifier + ".json")
+
+
+def _keep_listing(identifier, data):
+    """The listing archive.org just gave, kept (best effort) for a build
+    while its metadata API fails for the item."""
+    p = _listing_cache(identifier)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"fetched": time.time(), "listing": data}, fh)
+        os.replace(tmp, p)
+    except OSError as e:
+        print(f"  Warning: could not keep {identifier}'s listing: {e}")
+
+
+def _last_good_listing(identifier):
+    """(listing, fetched) of the item's last good listing, or (None, None)
+    when there is none, it cannot be read or it is too old."""
+    try:
+        with open(_listing_cache(identifier), encoding="utf-8") as fh:
+            kept = json.load(fh)
+        listing, fetched = kept["listing"], float(kept["fetched"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, None
+    if not isinstance(listing, dict) or not isinstance(listing.get("files"), list):
+        return None, None
+    if not 0 <= time.time() - fetched <= LISTING_MAX_AGE_S:
+        return None, None
+    return listing, fetched
 
 
 def fetch_item_details(identifier, *, retries=3):
@@ -831,6 +870,14 @@ def fetch_item_details(identifier, *, retries=3):
     a live map's card off the site as "upcoming" (streetzim-africa,
     2026-10-31). A listing is fetched once per build, so every language's
     page is made from the same one.
+
+    Each listing archive.org gives is kept (.cache/ia-listings/, or
+    $STREETZIM_IA_LISTINGS); when every attempt fails, the item's last good
+    listing, up to a week old, is used instead (and named in
+    STALE_LISTINGS): archive.org's metadata API failed for Africa, Europe and
+    Kyiv for over a day (2026-10-31 to 11-01) while their files downloaded,
+    and the refusal held every site deploy back, the builder page's new
+    recipes included. Without one, None as before.
     """
     if identifier in _ITEM_DETAILS:
         return _ITEM_DETAILS[identifier]
@@ -846,6 +893,7 @@ def fetch_item_details(identifier, *, retries=3):
             if not isinstance(data, dict) or not isinstance(data.get("files"), list):
                 raise RuntimeError(f"archive.org gave no file list: {str(data)[:120]}")
             _ITEM_DETAILS[identifier] = data
+            _keep_listing(identifier, data)
             return data
         except Exception as e:
             last_err = e
@@ -857,6 +905,14 @@ def fetch_item_details(identifier, *, retries=3):
                     f"(retrying in {wait}s)"
                 )
                 time.sleep(wait)
+    listing, fetched = _last_good_listing(identifier)
+    if listing is not None:
+        hours = (time.time() - fetched) / 3600
+        print(f"  WARNING: archive.org did not give {identifier}'s listing after {retries} attempts ({last_err}); "
+              f"using the last good one, {hours:.0f} h old")
+        _ITEM_DETAILS[identifier] = listing
+        STALE_LISTINGS[identifier] = fetched
+        return listing
     print(f"  ERROR: failed to fetch {identifier} after {retries} attempts: {last_err}")
     return None
 
