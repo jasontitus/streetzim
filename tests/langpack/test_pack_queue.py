@@ -1651,27 +1651,29 @@ def _scheme(index: Path | None = None) -> str:
 def test_a_map_published_under_an_older_scheme_ships_again(q: SimpleNamespace) -> None:
     """The recipes' scheme changed (2: each version's search pack in its own
     language): a map published under an older one (a published.tsv row
-    without the scheme) ships again, once; ship_packs.sh redoes only what the
-    scheme changes."""
+    without the scheme, or with scheme 2) ships again, once; ship_packs.sh
+    redoes only what the scheme changes."""
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     done = q.qd / "published.tsv"
     rows = [x.split("\t") for x in done.read_text().splitlines()]
     S = _scheme()
     assert all(len(r) == 6 and r[5] == S for r in rows), rows
-    done.write_text("".join("\t".join(r[:5] if r[0] == "beta" else r) + "\n" for r in rows))     # beta: the old format
+    done.write_text("".join("\t".join(r[:5] if r[0] == "beta" else r[:5] + ["2"] if r[0] == "alpha" else r) + "\n"
+                            for r in rows))     # beta: the old format; alpha: scheme 2
     n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1
-    assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"]
-    assert f"beta: published under an older recipe scheme or viewer: shipped again for {S}" in log_text(q)
+    assert len([c for c in _calls(q, "ship") if c["ship"] == "alpha"]) == n["alpha"] + 1
+    assert f"beta: published under an older recipe scheme: shipped again for {S}" in log_text(q)
     assert _run(q, FAKE_SHIP_RC="").returncode == 0
     assert len([c for c in _calls(q, "ship") if c["ship"] == "beta"]) == n["beta"] + 1        # once
 
 
-def test_a_viewer_change_ships_every_map_again_once(q: SimpleNamespace) -> None:
-    """Every version carries the checkout's viewer: the scheme ends in its
-    code, read again for each map, so a viewer merged while the queue runs
-    ships each published map again, once, without a restart."""
+def test_a_viewer_change_alone_ships_no_map_again(q: SimpleNamespace) -> None:
+    """A map ships with the checkout's viewer, and the scheme recorded ends in
+    its code; a viewer change alone ships no published map again (the gates
+    and recipes took hours a region for the viewer slots' bytes), nor does a
+    row of the scheme from before it carried a code."""
     idx = q.d / "index.html"
     idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
     assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
@@ -1679,49 +1681,21 @@ def test_a_viewer_change_ships_every_map_again_once(q: SimpleNamespace) -> None:
     rows = [x.split("\t") for x in done.read_text().splitlines()]
     assert rows and all(r[5] == _scheme(idx) == _scheme(idx).split("-")[0] + "-0123abcd" for r in rows), rows
     n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in ("beta", "alpha")}
-    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0     # the same viewer: nothing
-    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == n
     idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
     assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
-    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == {k: v + 1 for k, v in n.items()}
-    assert f"beta: published under an older recipe scheme or viewer: shipped again for {_scheme(idx)}" in log_text(q)
-    assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0     # once
-    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == {k: v + 1 for k, v in n.items()}
-
-
-def test_a_viewer_merged_while_the_queue_runs_reaches_it(q: SimpleNamespace) -> None:
-    """The viewer code is read for each map: a running queue (no restart)
-    ships the published maps again once the checkout's viewer changes."""
-    idx = q.d / "index.html"
-    idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
+    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == n
+    assert "shipped again" not in log_text(q)
+    scheme = _scheme(idx).split("-")[0]
+    done.write_text("".join("\t".join(r[:5] + [scheme] if r[0] == "beta" else r) + "\n" for r in rows))   # beta: "3"
     assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
-    done = q.qd / "published.tsv"
-    first = {r.split("\t")[0] for r in done.read_text().splitlines()}
-    n = len(_calls(q, "ship"))
-    assert first and n
-    p = _start(q, (), FAKE_SHIP_RC="", QUEUE_JOBS="1", QUEUE_POLL_SECS="2", QUEUE_VIEWER_INDEX=str(idx))
-    try:
-        _until(lambda: "waiting" in log_text(q) or len(log_text(q).splitlines()) > 0, "the queue going", 30)
-        time.sleep(3)
-        assert len(_calls(q, "ship")) == n                       # the same viewer: nothing ships
-        idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
-        new = lambda: [r.split("\t")[0] for r in done.read_text().splitlines() if r.endswith("\t3-4567cdef")]  # noqa: E731
-        _until(lambda: set(new()) == first, "the maps shipped again for the new viewer", 120)
-        time.sleep(3)
-        (q.qd / "stop").touch()
-        p.wait(timeout=90)
-    finally:
-        if p.poll() is None:
-            os.killpg(p.pid, signal.SIGKILL)
-    assert sorted(new()) == sorted(first) and len(_calls(q, "ship")) == n + len(first)     # each once
-    assert _scheme(idx).endswith("-4567cdef")
+    assert {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in n} == n
 
 
-def test_a_run_records_the_viewer_it_shipped_and_no_slots_ships_once(q: SimpleNamespace) -> None:
+def test_a_run_records_the_viewer_it_shipped(q: SimpleNamespace) -> None:
     """The scheme recorded is the viewer ship_packs.sh put in (it reads the
-    checkout hours after the start, maybe), not the queue's at the start; a
-    base without viewer slots ("none") keeps its own viewer and is not
-    shipped again when the checkout's changes."""
+    checkout hours after the start, maybe), not the queue's at the start,
+    "none" for a base without viewer slots (it keeps its own viewer); none
+    of them ships again when the checkout's viewer changes."""
     idx = q.d / "index.html"
     idx.write_text("<script>var SZ_VIEWER_BUILD = '0123abcd';</script>\n")
     assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx), FAKE_SHIP_VCODE="beta:4567cdef;alpha:none").returncode == 0
@@ -1729,11 +1703,10 @@ def test_a_run_records_the_viewer_it_shipped_and_no_slots_ships_once(q: SimpleNa
     assert rows["beta"] == "3-4567cdef" and rows["alpha"] == "3-none", rows
     assert all(v == "3-0123abcd" for k, v in rows.items() if k not in ("beta", "alpha")), rows    # none recorded: the start's
     n = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in rows}
-    idx.write_text("<script>var SZ_VIEWER_BUILD = '4567cdef';</script>\n")
+    idx.write_text("<script>var SZ_VIEWER_BUILD = '89abcdef';</script>\n")
     assert _run(q, FAKE_SHIP_RC="", QUEUE_VIEWER_INDEX=str(idx)).returncode == 0
     m = {rid: len([c for c in _calls(q, "ship") if c["ship"] == rid]) for rid in rows}
-    assert m["beta"] == n["beta"] and m["alpha"] == n["alpha"], (n, m)     # beta has it already; alpha has no slots
-    assert all(m[k] == n[k] + 1 for k in rows if k not in ("beta", "alpha")), (n, m)
+    assert m == n, (n, m)     # a viewer change alone ships none of them again
 
 
 def test_an_unreadable_viewer_never_reads_as_an_old_scheme(q: SimpleNamespace) -> None:

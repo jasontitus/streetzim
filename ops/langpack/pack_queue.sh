@@ -206,13 +206,12 @@ MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
 # 3: each search pack's title index holds the base's pages and redirects (index_pack.py
 # TEXT_VERSION 3, 2026-10-29): versions whose Kiwix search found none of the map's places
 # get new search packs, and those the gates held back for it are published.
-# The viewer's code follows it (3-db752f01): every version carries this checkout's viewer
-# (ship_packs.sh, tools/langpack/viewer_base.py), so a viewer change ships each map again,
-# only its recipes redone. Read again for each map: a viewer merged into the checkout
-# reaches the queue without a restart; while index.html cannot be read (a checkout
-# rewriting it), the last code read stands. A run records the code it shipped
-# (ship_packs.sh's packs/<base>/viewer-code); "none" for a base without viewer slots, whose
-# versions keep its own viewer: it is not shipped again for a new one.
+# The viewer's code follows it (3-db752f01): a map ships with this checkout's viewer
+# (ship_packs.sh, tools/langpack/viewer_base.py), read again for each map, and a run records
+# the code it shipped (ship_packs.sh's packs/<base>/viewer-code; "none" for a base without
+# viewer slots, whose versions keep its own viewer). A viewer change alone does not ship a
+# map again (2026-11-01): the gates and recipes took hours a region for bytes the viewer
+# slots hold alone, and a published map under any viewer counts as done for its scheme.
 RECIPE_SCHEME=3
 VIEWER_INDEX=${QUEUE_VIEWER_INDEX:-$ROOT/resources/viewer/index.html}
 scheme_now() {
@@ -559,12 +558,12 @@ eligible() {  # region zim round-status
   fi
   md5=$(exec 9>&-; file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
   KEY=$uuid/$md5
-  # published for this base already, under this recipe scheme; under an older one: shipped again
-  # (ship_packs.sh redoes only what the scheme changes)
-  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t($SCHEME|$RECIPE_SCHEME-none)$" "$DONE" && return 1
+  # published for this base already, under this recipe scheme (with any viewer); under an
+  # older one: shipped again (ship_packs.sh redoes only what the scheme changes)
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t$RECIPE_SCHEME(-[0-9a-f]{8}|-none)?$" "$DONE" && return 1
   if grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE"; then
     case "$(state_of "$rid" "$KEY" | cut -f1)" in
-      published*) say "$rid: published under an older recipe scheme or viewer: shipped again for $SCHEME (only the entries whose recipes change are redone)" ;;
+      published*) say "$rid: published under an older recipe scheme: shipped again for $SCHEME (only the entries whose recipes change are redone)" ;;
     esac
   fi
   st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
