@@ -139,13 +139,14 @@ export function isolateMeter(budget) {
   };
 }
 
-// createMergedHandler({site, upstream, fetchImpl, blobCacheBytes, stats, meter})
+// createMergedHandler({site, upstream, fetchImpl, blobCacheBytes, stats, meter, firstByteMs})
 //   site      origin of the site holding /build/recipes/<region>/ (index, blobs)
 //   upstream  archive.org's download prefix, "https://archive.org/download/"
 //   stats     optional (event) => void: per-request counters (tests, measurements)
 //   meter     optional {allow(ctx) -> boolean | Promise<boolean>}: false = the
 //             webseed's daily budget is used (503, before anything is fetched)
 //   subrequests  the most subrequests one request may spend (45: the free plan's 50)
+//   firstByteMs  how long a storage node may take to send its first bytes (15 s)
 // -> (request, ctx) => Promise<Response>; handle.state() for tests
 export function createMergedHandler(opts) {
   const site = String(opts.site || '').replace(/\/+$/, '');
@@ -162,6 +163,7 @@ export function createMergedHandler(opts) {
   const nodes = new Map();          // "<item>/<file>" -> storage-node URL after archive.org's redirect
   const stale = new Map();          // recipe UUID -> when its archive.org file was found replaced
   const subBudget = opts.subrequests || 45;
+  const firstByteMs = opts.firstByteMs || 15000;   // a node that sends the headers and then nothing is down
   const outOfDate = () => reply(404, 'this language version is out of date (the map or its packs were updated): get the new torrent or link from https://streetzim.web.app/build/');
 
   async function siteFetch(url, init, counter) {
@@ -237,31 +239,90 @@ export function createMergedHandler(opts) {
     return p;
   }
 
+  // The item's storage nodes the index names (`mirrors`: archive.org's d1
+  // and d2 for it when the map was composed), for when archive.org's front
+  // door cannot reach the first and answers 503 instead of redirecting: only
+  // URLs on archive.org's own domain that end in this item and file, four at most.
+  const upHost = new URL(upstream).hostname;
+  function mirrorsOf(src) {
+    return (Array.isArray(src.mirrors) ? src.mirrors : []).filter((m) => {
+      try {
+        const u = new URL(String(m));
+        return u.protocol === new URL(upstream).protocol && (u.hostname === upHost || u.hostname.endsWith(`.${upHost}`))
+          && decodeURIComponent(u.pathname).endsWith(`/${src.item}/${src.file}`) && !u.search && !u.hash;
+      } catch (e) { return false; }
+    }).slice(0, 4).map(String);
+  }
+
+  // BODY once its first bytes arrive within firstByteMs, else null
+  // (cancelled): {pipeTo, cancel}, the first bytes written and then the rest
+  // of BODY piped as it is (no script runs per chunk).
+  async function started(body) {
+    if (!body) return null;
+    const reader = body.getReader();
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(null), firstByteMs); });
+    let got;
+    try { got = await Promise.race([reader.read(), late]); } catch (e) { got = null; }
+    clearTimeout(timer);
+    if (!got || got.done) { reader.cancel().catch(() => {}); return null; }
+    reader.releaseLock();
+    const first = got.value;
+    return {
+      async pipeTo(writable, options) {
+        const w = writable.getWriter();
+        try { await w.write(first); } catch (e) { body.cancel(e).catch(() => {}); throw e; } finally { w.releaseLock(); }
+        return body.pipeTo(writable, options);
+      },
+      cancel: (reason) => body.cancel(reason),
+    };
+  }
+
   // One ranged GET of an archive.org file; follows the redirect once, then
-  // goes to the remembered storage node (falling back to archive.org). Only
-  // a 206 for exactly these bytes of a file of the index's size is used. An
-  // answer with another ETag (a 200 to our If-Range) or another size means
-  // the file was replaced since the index was made: StaleSource, and this
-  // version is out of date; anything else is transient.
+  // goes to the remembered storage node (falling back to archive.org, then
+  // to the index's other nodes for the file, each once). Only a 206 for
+  // exactly these bytes of a file of the index's size, whose bytes start
+  // coming, is used. An answer with another ETag (a 200 to our If-Range) or
+  // another size means the file was replaced since the index was made:
+  // StaleSource, and this version is out of date; anything else is transient.
   async function source(src, from, to, counter) {
     const key = `${src.item}/${src.file}`;
     const headers = { Range: `bytes=${from}-${to}` };
     if (src.etag) headers['If-Range'] = src.etag;
     const tries = nodes.has(key) ? [nodes.get(key), upstream + key] : [upstream + key];
+    for (const m of mirrorsOf(src)) if (!tries.includes(m)) tries.push(m);
+    // the index's nodes are asked once per call; one that sent no bytes, not
+    // again in this request, even when the front door redirects to it
+    const seen = new Set(), stalled = counter.stalled || (counter.stalled = new Set());
+    const drop = (r) => { if (r && r.body) r.body.cancel().catch(() => {}); };
     let last = '';
     for (const url of tries) {
-      counter.sub += url === upstream + key ? 2 : 1;   // archive.org redirects to its storage node
-      let r;
+      if (seen.has(url) || stalled.has(url)) continue;
+      seen.add(url);
+      const front = url === upstream + key;
+      counter.sub += front ? 2 : 1;                   // archive.org redirects to its storage node
+      let r, node = url;
       try {
-        r = await fetchImpl(url, { headers, redirect: 'follow' });
+        // the front door's redirect is followed here, so a node that stalled is not asked again
+        r = await fetchImpl(url, { headers, redirect: front ? 'manual' : 'follow' });
+        const loc = front && r.status >= 300 && r.status < 400 ? r.headers.get('location') : null;
+        if (loc) {
+          drop(r);
+          node = new URL(loc, url).href;
+          if (stalled.has(node)) { last = `archive.org sent us to ${node}, which sent no bytes`; continue; }
+          seen.add(node);
+          r = await fetchImpl(node, { headers, redirect: 'follow' });
+        }
       } catch (e) { last = String(e && e.message || e); nodes.delete(key); continue; }
       const cr = r.headers.get('content-range') || '';
       const cl = r.headers.get('content-length');
       if (r.status === 206 && cr === `bytes ${from}-${to}/${src.size}` && (cl == null || Number(cl) === to - from + 1)) {
-        if (url === upstream + key && r.url && r.url !== url) nodes.set(key, r.url);
-        return r.body;
+        const body = await started(r.body);
+        if (!body) { last = `no bytes in ${firstByteMs} ms from ${node}`; stalled.add(node); nodes.delete(key); continue; }
+        if (node !== upstream + key && node !== nodes.get(key)) nodes.set(key, node);
+        return body;
       }
-      try { r.body && r.body.cancel(); } catch (e) { /* ignore */ }
+      drop(r);
       // replaced only when the file says so: another ETag or another size (a
       // 200 with the same ETag and size is archive.org ignoring Range: transient)
       const total = /\/(\d+)$/.exec(cr);

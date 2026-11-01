@@ -48,6 +48,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import uuid as uuidlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,9 +166,21 @@ def changed_runs(base: str, fresh: str, windows: list[tuple[int, int]]) -> list[
     return [(lo, hi - lo) for lo, hi in runs]
 
 
+def check_mirrors(mirrors: list[str], item: str, base_file: str) -> list[str]:
+    """--mirror URLs: archive.org storage nodes' URLs for exactly this file."""
+    want = f"/{item}/{base_file}"
+    for m in mirrors:
+        if not re.fullmatch(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.archive\.org/[\w./%-]+", m) or ".." in m \
+                or not urllib.parse.unquote(m).endswith(want):
+            raise FreshError(f"--mirror {m!r} is not an archive.org storage node's URL for {item}/{base_file}")
+    if len(mirrors) > 4:
+        raise FreshError("at most 4 --mirror URLs")
+    return list(mirrors)
+
+
 def build_index(region: str, lang: str, item: str, base_file: str, base_size: int, etag: str | None,
                 fresh_path: str, fresh_file: str, uuid: str, runs: list[tuple[int, int]],
-                webseed: str) -> tuple[dict, dict[str, bytes]]:
+                webseed: str, mirrors: list[str] | None = None) -> tuple[dict, dict[str, bytes]]:
     """The segment index of the composed file: the base's bytes at their own
     offsets, and a blob for each changed run."""
     if not (REGION_RE.match(region) and LANG_RE.match(lang) and ITEM_RE.match(item)
@@ -188,9 +201,11 @@ def build_index(region: str, lang: str, item: str, base_file: str, base_size: in
             pos = start + n
     if pos < base_size:
         parts.append([pos, base_size - pos, "s", "base", pos])
-    src = {"item": item, "file": base_file, "size": base_size}
+    src: dict = {"item": item, "file": base_file, "size": base_size}
     if etag:
         src["etag"] = etag
+    if mirrors:
+        src["mirrors"] = list(mirrors)                  # the worker's fallback: build-proxy/merged-webseed.js
     index = {
         "format": INDEX_FORMAT, "region": region, "lang": lang, "uuid": uuid,
         "file": fresh_file, "size": base_size, "md5": None, "file_md5": None,
@@ -278,6 +293,9 @@ def main(argv=None) -> int:
     ap.add_argument("--webseed", required=True, help="the build worker's origin")
     ap.add_argument("--md5", required=True, help="the MD5 archive.org lists for the live file")
     ap.add_argument("--etag", required=True, help="archive.org's ETag for it (\"<mtime hex>-<size hex>\", quotes included)")
+    ap.add_argument("--mirror", action="append", default=[],
+                    help="a storage node's URL for that file (the item's d1/d2 + dir), which the worker tries when "
+                         "archive.org's front door fails; repeatable")
     ap.add_argument("--viewer-root", default=ROOT, help="the checkout whose resources/viewer goes in")
     ap.add_argument("--rev", help="the viewer's revision (default: the last commit to resources/viewer)")
     ap.add_argument("--work", default=None, help="where the composed file is made (default: beside ZIM)")
@@ -300,6 +318,7 @@ def run(a) -> int:
     lang = a.lang
     site_region = f"{a.region}-viewer"          # the worker's folder for it: build/recipes/<region>-viewer/
     etag = check_etag(a.etag, base_size)
+    nodes = check_mirrors(a.mirror, a.item, base_file)
     print(f"fresh_viewer: {a.region}: checking {base_file} against archive.org's MD5", flush=True)
     if md5_file(zim) != a.md5.lower():
         raise FreshError(f"{zim} is not the file archive.org serves (MD5 {a.md5})")
@@ -332,7 +351,7 @@ def run(a) -> int:
         windows = [(0, HEADER_LEN)] + slot_windows(path) + [(base_size - MD5_LEN, MD5_LEN)]
         runs = changed_runs(zim, path, windows)
         index, blobs = build_index(site_region, lang, a.item, base_file, base_size, etag, path, name, uuid,
-                                   runs, a.webseed)
+                                   runs, a.webseed, nodes)
         plen = auto_piece_size(base_size)
         pieces, file_md5, body_md5, tail = read_index(index, blobs, zim, plen)
         if body_md5 != tail.hex():

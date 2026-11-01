@@ -21,7 +21,10 @@ MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
 
 1. checks ZIM is the file archive.org serves (size and MD5 as the item lists,
    and the ETag the worker will send as If-Range: `"<mtime hex>-<size hex>"`,
-   quotes included, its size this file's);
+   quotes included, its size this file's); `--mirror` URLs (the item's two
+   storage nodes, which `ops/langpack/fresh_all.py` passes from the item's
+   metadata) go in the index for the worker to try when archive.org's front
+   door answers 503 (build-proxy/README.md);
 2. makes the map with this checkout's viewer (`tools/langpack/swap_base_viewer.py`:
    a reflink copy, the slots written, a fresh UUID derived from the old one
    and the viewer's revision, the MD5; every item but the viewer compared

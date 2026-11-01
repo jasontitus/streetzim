@@ -120,6 +120,34 @@ def test_the_worker_accepts_the_index(fv: SimpleNamespace) -> None:
     assert r.returncode == 0 and json.loads(r.stdout) == "", r.stdout + r.stderr
 
 
+def test_the_item_s_storage_nodes_go_in_the_index(fv: SimpleNamespace, capsys) -> None:
+    # the worker's fallback when archive.org's front door answers 503 for the item
+    nodes = [f"https://ia800707.us.archive.org/22/items/streetzim-testland/{fv.base.name}",
+             f"https://ia600707.us.archive.org/22/items/streetzim-testland/{fv.base.name}"]
+    assert run(fv, *[x for m in nodes for x in ("--mirror", m)]) == 0
+    assert json.loads((fv.out / "en.ws.json").read_text())["sources"]["base"]["mirrors"] == nodes
+    # none given: none written
+    assert run(fv) == 0 and "mirrors" not in json.loads((fv.out / "en.ws.json").read_text())["sources"]["base"]
+    # the file's name percent-encoded is the same file
+    enc = nodes[0].replace("osm-testland", "osm%2Dtestland")
+    assert run(fv, "--mirror", enc) == 0
+    assert json.loads((fv.out / "en.ws.json").read_text())["sources"]["base"]["mirrors"] == [enc]
+    # four at most
+    assert run(fv, *[x for i in range(5) for x in ("--mirror", nodes[0].replace("ia800707", f"ia80070{i}"))]) == 1
+    assert "at most 4 --mirror URLs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("url", ["https://example.org/22/items/streetzim-testland/osm-testland-2026-10-13.zim",
+                                 "https://ia800707.us.archive.org/22/items/streetzim-testland/other.zim",
+                                 "http://ia800707.us.archive.org/22/items/streetzim-testland/osm-testland-2026-10-13.zim",
+                                 "https://ia800707.us.archive.org/22/items/../streetzim-testland/osm-testland-2026-10-13.zim",
+                                 "https://evil.com/.archive.org/streetzim-testland/osm-testland-2026-10-13.zim"])
+def test_a_mirror_must_be_an_archive_org_node_for_the_file(fv: SimpleNamespace, url: str, capsys) -> None:
+    assert run(fv, "--mirror", url) == 1
+    assert "not an archive.org storage node's URL" in capsys.readouterr().err
+    assert not (fv.out / "en.ws.json").exists()
+
+
 def test_nothing_is_published_for_a_file_archive_org_does_not_serve(fv: SimpleNamespace) -> None:
     assert run(fv, md5sum="0" * 32) == 1 and not fv.out.exists()
 

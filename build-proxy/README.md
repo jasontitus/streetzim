@@ -98,6 +98,19 @@ and the isolate remembers the version as out of date. The index is kept by
 an isolate for at most 5 minutes; a UUID it does not know is checked with
 the site itself, past every cache, before a 404.
 
+archive.org's front door (`/download/<item>/<file>`) redirects to one of the
+item's two storage nodes; when it cannot reach the first it may answer 503
+instead, though the other node still serves the file (Kyiv, 2026-11-01).
+An index made by `fresh_viewer.py` names both nodes (`mirrors`: the item's
+`d1` and `d2` under its `dir`), and the worker tries them after the front
+door, using only URLs on archive.org's own domain that end in that item and
+file; the one that answers is remembered like a redirect's target. A node
+that sends the headers and then no bytes for 15 s (`firstByteMs`) is down
+too: the worker goes on to the next one, forgets it if it was remembered,
+and does not ask it again in that request, even when the front door (whose
+redirect the worker follows itself) sends it there. Once the first bytes
+come, the rest of the node's answer is piped as it is.
+
 A base whose recipes are published is frozen against in-place viewer
 patches (user decision 2026-10-21): `ops/cloud/upload_validated.sh` refuses
 (exit 7) to re-upload such a base with other bytes, and

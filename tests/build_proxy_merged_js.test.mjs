@@ -71,7 +71,7 @@ const upFiles = new Map([
   ['streetzim-testland-lang/osm_testland_wiki-de_2026-10-13.zim', { data: B, etag: '"1-2"' }],
 ]);
 const hits = { site: 0, download: 0, node: 0, blobs: 0 };
-let upMode = 'ok';             // ok | ignore-range | ignore-range-de | shift | wrong-total | short-length | node404-once | node404-de-once
+let upMode = 'ok';             // ok | ignore-range | ignore-range-de | shift | wrong-total | short-length | node404-once | node404-de-once | front503 | stall-node | reset-node | empty-node | front206
 
 function listen(handler) {
   return new Promise((resolve) => {
@@ -94,13 +94,40 @@ const up = await listen((req, res) => {
   let m;
   if ((m = /^\/download\/(.+)$/.exec(req.url))) {
     hits.download++; downloadsSeen++;
+    if (upMode === 'front503' && m[1].startsWith('streetzim-testland/')) { res.writeHead(503); res.end(); return; }
+    if (upMode === 'front206' && m[1].startsWith('streetzim-testland/')) {   // the front door answers itself
+      const f = upFiles.get(m[1]), r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+      res.writeHead(206, { 'Content-Range': `bytes ${r[1]}-${r[2]}/${f.data.length}`, 'Content-Length': Number(r[2]) - Number(r[1]) + 1, ETag: f.etag });
+      res.end(Buffer.from(f.data.subarray(Number(r[1]), Number(r[2]) + 1)));
+      return;
+    }
     res.writeHead(302, { Location: `http://127.0.0.1:${up.address().port}/node/${m[1]}` });
     res.end();
     return;
   }
-  m = /^\/node\/(.+)$/.exec(req.url);
-  const f = m && upFiles.get(m[1]);
+  m = /^\/node2?\/(.+)$/.exec(req.url);
+  const f = m && upFiles.get(decodeURIComponent(m[1]));
   hits.node++;
+  if (upMode === 'stall-node' && f && req.url.startsWith('/node/')) {   // the headers, then nothing
+    const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+    res.writeHead(206, { 'Content-Range': `bytes ${r[1]}-${r[2]}/${f.data.length}`, 'Content-Length': Number(r[2]) - Number(r[1]) + 1, ETag: f.etag });
+    res.flushHeaders();
+    setTimeout(() => res.destroy(), 3000);
+    return;
+  }
+  if (upMode === 'reset-node' && f && req.url.startsWith('/node/')) {   // the headers, then the connection drops
+    const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+    res.writeHead(206, { 'Content-Range': `bytes ${r[1]}-${r[2]}/${f.data.length}`, 'Content-Length': Number(r[2]) - Number(r[1]) + 1, ETag: f.etag });
+    res.flushHeaders();
+    setTimeout(() => res.destroy(), 20);
+    return;
+  }
+  if (upMode === 'empty-node' && f && req.url.startsWith('/node/')) {   // the headers, then an empty body
+    const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+    res.writeHead(206, { 'Content-Range': `bytes ${r[1]}-${r[2]}/${f.data.length}`, ETag: f.etag });
+    res.end();
+    return;
+  }
   if (upMode === 'node404-once') { upMode = 'ok'; res.writeHead(404); res.end(); return; }
   if (upMode === 'node404-de-once' && m[1].startsWith('streetzim-testland-lang/')) { upMode = 'ok'; res.writeHead(404); res.end(); return; }
   if (!f) { res.writeHead(404); res.end(); return; }
@@ -235,6 +262,155 @@ res = await get('bytes=250990-251100');                            // base, blob
 assert.deepEqual(await bytesOf(res), expected.subarray(250990, 251101));
 assert.equal(downloadsSeen, d1 + 1);
 upMode = 'ok';
+
+// archive.org's front door cannot reach the item's first node and answers 503
+// instead of redirecting: the index's other nodes for the file are tried (only
+// ones on archive.org's domain ending in this item and file), and the one that
+// answers is remembered
+{
+  const node = `http://127.0.0.1:${up.address().port}/node/streetzim-testland/osm-testland-2026-10-13.zim`;
+  const bad = [`http://127.0.0.1:${up.address().port}/node/streetzim-testland/other.zim`,
+    'http://example.invalid/node/streetzim-testland/osm-testland-2026-10-13.zim',
+    `${node}?x=1`, node.replace('http:', 'https:'), node.replace('127.0.0.1', 'x127.0.0.1'),
+    `http://127.0.0.1:${up.address().port}/node/other-item/osm-testland-2026-10-13.zim`];
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [...bad, node] } } });
+  upMode = 'front503';
+  const h = mk();
+  res = await get('bytes=1000-2000', { handle: h });
+  assert.equal(res.status, 206);
+  assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+  await settle();
+  assert.equal(events.at(-1).sub, 1 + 2 + 1, JSON.stringify(events.at(-1)));   // index, archive.org's 503, the node
+  res = await get('bytes=3000-4000', { handle: h });
+  assert.deepEqual(await bytesOf(res), expected.subarray(3000, 4001));
+  await settle();
+  assert.equal(events.at(-1).sub, 1, JSON.stringify(events.at(-1)));           // the node remembered
+  // the node the front door sends us to sends the headers and then nothing:
+  // after firstByteMs the index's other node is tried (not that one again) and remembered
+  const node2 = node.replace('/node/', '/node2/');
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [node, node2] } } });
+  upMode = 'stall-node';
+  const hs = mk({ firstByteMs: 200 });
+  const t0 = Date.now();
+  res = await get('bytes=1000-2000', { handle: hs });
+  assert.equal(res.status, 206);
+  assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+  assert.ok(Date.now() - t0 < 2500, `${Date.now() - t0} ms`);
+  await settle();
+  assert.equal(events.at(-1).sub, 1 + 2 + 1, JSON.stringify(events.at(-1)));   // index, the stalled redirect, node2
+  res = await get('bytes=3000-4000', { handle: hs });
+  assert.deepEqual(await bytesOf(res), expected.subarray(3000, 4001));
+  await settle();
+  assert.equal(events.at(-1).sub, 1, JSON.stringify(events.at(-1)));           // node2 remembered
+  // a remembered node that stops sending is forgotten: the next request asks archive.org again
+  setIndex(index);
+  upMode = 'ok';
+  const hf = mk({ firstByteMs: 200 });
+  await bytesOf(await get('bytes=1000-2000', { handle: hf }));                  // remembers /node/
+  upMode = 'stall-node';
+  const n0 = hits.node;
+  assert.equal((await get('bytes=1000-2000', { handle: hf })).status, 503);
+  assert.equal(hits.node - n0, 1);                    // asked once, though remembered and redirected to
+  upMode = 'ok';
+  await settle();
+  await bytesOf(await get('bytes=1000-2000', { handle: hf }));
+  await settle();
+  assert.equal(events.at(-1).sub, 2, JSON.stringify(events.at(-1)));           // archive.org's redirect, then the node
+  // a stalled node is not asked again as one of the index's nodes, on the first part's second try either
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [node] } } });
+  upMode = 'stall-node';
+  const n1 = hits.node;
+  assert.equal((await get('bytes=1000-2000', { handle: mk({ firstByteMs: 200 }) })).status, 503);
+  assert.equal(hits.node - n1, 1);
+  // a node the front door just sent us to (and that failed) is not asked again as one of the index's nodes
+  upMode = 'node404-once';
+  res = await get('bytes=1000-2000', { handle: mk() });
+  assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+  await settle();
+  assert.equal(events.at(-1).sub, 1 + 2 + 2, JSON.stringify(events.at(-1)));   // index, the 404 via the front door, the second try
+  // the front door answering the range itself is not remembered as a node
+  setIndex(index);
+  upMode = 'front206';
+  const hd = mk();
+  await bytesOf(await get('bytes=1000-2000', { handle: hd }));
+  await bytesOf(await get('bytes=3000-4000', { handle: hd }));
+  await settle();
+  assert.equal(events.at(-1).sub, 2, JSON.stringify(events.at(-1)));
+  assert.equal(hd.state().nodes, 0);
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [node, node2] } } });
+  // a node that drops the connection after the headers, or sends an empty body: the next one
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [node, node2] } } });
+  for (const mode of ['reset-node', 'empty-node']) {
+    upMode = mode;
+    res = await get('bytes=1000-2000', { handle: mk({ firstByteMs: 2000 }) });
+    assert.equal(res.status, 206, mode);
+    assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001), mode);
+  }
+  upMode = 'front503';
+  // four usable nodes at most are tried
+  const port = up.address().port;
+  const dead = [1, 2, 3, 4].map((i) => `http://127.0.0.1:${port}/x${i}/streetzim-testland/osm-testland-2026-10-13.zim`);
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [...dead, node] } } });
+  res = await get('bytes=1000-2000', { handle: mk() });
+  assert.equal(res.status, 503);
+  // a host that only ends in archive.org's name ("xarchive.org") is not its domain
+  {
+    const lh = (u) => u.replace('127.0.0.1', 'localhost');
+    setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [lh(node).replace('localhost', 'xlocalhost'), lh(node)] } } });
+    res = await get('bytes=1000-2000', { handle: mk({ upstream: lh(UP) }) });
+    assert.equal(res.status, 206);
+    assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+    await settle();
+    assert.equal(events.at(-1).sub, 1 + 2 + 1, JSON.stringify(events.at(-1)));
+  }
+  // a node URL with a fragment is not used; one with its file name percent-encoded is
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [`${node}#x`] } } });
+  assert.equal((await get('bytes=1000-2000', { handle: mk() })).status, 503);
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: [node.replace('osm-testland', 'osm%2Dtestland')] } } });
+  res = await get('bytes=1000-2000', { handle: mk() });
+  assert.equal(res.status, 206);
+  assert.deepEqual(await bytesOf(res), expected.subarray(1000, 2001));
+  // with no usable node in the index, archive.org's 503 stays a 503
+  setIndex({ ...index, sources: { ...index.sources, base: { ...index.sources.base, mirrors: bad } } });
+  res = await get('bytes=1000-2000', { handle: mk() });
+  assert.equal(res.status, 503);
+  upMode = 'ok';
+  setIndex(index);
+}
+
+// the client goes away while a later part's node is opening: that node's answer is cancelled, not left open
+{
+  const SA = 1000, SB = 1 << 20, ET = '"1-2"', U0 = '00000000-0000-0000-0000-000000000000';
+  let sp, closedAfter = null, started0 = 0;
+  const srv = await listen((req, res) => {
+    const p = req.url.split('/')[1];
+    if (p === 'build') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ format: 'streetzim-webseed/1', region: 'r', lang: 'en', uuid: U0, file: 'f.zim', size: SA + SB, md5: 'x',
+        sources: { a: { item: 'streetzim-a', file: 'a.zim', size: SA, etag: ET }, b: { item: 'streetzim-b', file: 'b.zim', size: SB, etag: ET } },
+        blobs: {}, parts: [[0, SA, 's', 'a', 0], [SA, SB, 's', 'b', 0]] }));
+      return;
+    }
+    if (p === 'download') { res.writeHead(302, { Location: `http://127.0.0.1:${sp}/node/${req.url.slice(10)}` }); res.end(); return; }
+    const [, a, b] = /bytes=(\d+)-(\d+)/.exec(req.headers.range);
+    const size = req.url.includes('streetzim-a') ? SA : SB;
+    const head = { 'Content-Range': `bytes ${a}-${b}/${size}`, 'Content-Length': String(b - a + 1), ETag: ET };
+    if (size === SA) { res.writeHead(206, head); res.end(Buffer.alloc(b - a + 1, 1)); return; }
+    started0 = Date.now();
+    req.socket.on('close', () => { closedAfter = Date.now() - started0; });
+    setTimeout(() => { res.writeHead(206, head); res.write(Buffer.alloc(b - a + 1, 2), () => {}); }, 300);
+  });
+  sp = srv.address().port;
+  const h = createMergedHandler({ site: `http://127.0.0.1:${sp}`, upstream: `http://127.0.0.1:${sp}/download/`, firstByteMs: 2000 });
+  const r = await h(new Request(`https://w/merged/r/en/${U0}/f.zim`, { headers: { Range: `bytes=0-${SA + SB - 1}` } }));
+  const reader = r.body.getReader();
+  for (let n = 0; n < SA;) n += (await reader.read()).value.length;
+  while (!started0) await new Promise((ok) => setTimeout(ok, 10));
+  await reader.cancel('client went away');            // while part 2's node is opening
+  await new Promise((ok) => setTimeout(ok, 1500));
+  assert.ok(closedAfter != null, 'the second part\'s answer was left open');
+  srv.close(); srv.closeAllConnections();
+}
 
 // ---------- client If-Range ----------
 res = await get('bytes=0-9', { headers: { 'If-Range': `"${UUID}-${index.md5}"` } });

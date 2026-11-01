@@ -23,7 +23,9 @@ if rid == "bad":
     sys.exit(4)
 out = a["--out"]
 os.makedirs(out, exist_ok=True)
-open(os.path.join(out, a["--lang"] + ".ws.json"), "w").write("{}")
+nodes = [sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == "--mirror"]
+base = {"file": os.path.basename(zim), **({"mirrors": nodes} if nodes else {})}
+json.dump({"sources": {"base": base}}, open(os.path.join(out, a["--lang"] + ".ws.json"), "w"))
 json.dump({"base": {"file": os.path.basename(zim), "md5": a["--md5"], "etag": a["--etag"]},
            "lang": a["--lang"], "viewer_code": os.environ["CODE"]}, open(os.path.join(out, "fresh.json"), "w"))
 open(os.environ["FAKE_LOG"], "a").write(rid + "\n")
@@ -87,3 +89,101 @@ def test_a_dry_run_makes_nothing(tmp_path: Path) -> None:
     r = run(tmp_path, "--regions", "alpha", "--dry-run")
     assert r.returncode == 0 and f"alpha: osm-alpha-2026-10-20b.zim (0.00 GB, en) -> viewer {CODE}" in r.stdout
     assert not (tmp_path / "log").exists() and not (tmp_path / "site" / "alpha-viewer").exists()
+
+
+def test_the_item_s_storage_nodes_go_to_the_index(tmp_path: Path) -> None:
+    setup(tmp_path)
+    meta = {"d1": "ia600707.us.archive.org", "d2": "ia800707.us.archive.org", "dir": "/22/items/streetzim-alpha",
+            "files": [{"name": "osm-alpha-2026-10-20b.zim", "size": "400", "md5": "c" * 32, "mtime": "1793000000"}]}
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps(meta))
+    nodes = [f"https://ia{n}.us.archive.org/22/items/streetzim-alpha/osm-alpha-2026-10-20b.zim" for n in ("600707", "800707")]
+    r = run(tmp_path, "--regions", "alpha")
+    assert r.returncode == 0, r.stdout + r.stderr
+    for d in ("site", "preview"):
+        ix = json.loads((tmp_path / d / "alpha-viewer" / "en.ws.json").read_text())
+        assert ix["sources"]["base"]["mirrors"] == nodes, d
+    assert (tmp_path / "log").read_text().split() == ["alpha"]
+    # the same nodes listed the other way round: current
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({**meta, "d1": meta["d2"], "d2": meta["d1"]}))
+    r = run(tmp_path, "--regions", "alpha")
+    assert r.returncode == 0 and "already has viewer" in r.stdout
+    assert (tmp_path / "log").read_text().split() == ["alpha"]
+
+
+def test_a_map_made_before_its_nodes_were_recorded_gets_them_written_in(tmp_path: Path) -> None:
+    setup(tmp_path)
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({
+        "d1": "ia600707.us.archive.org", "d2": "ia800707.us.archive.org", "dir": "/22/items/streetzim-alpha",
+        "files": [{"name": "osm-alpha-2026-10-20b.zim", "size": "400", "md5": "c" * 32, "mtime": "1793000000"}]}))
+    nodes = [f"https://ia{n}.us.archive.org/22/items/streetzim-alpha/osm-alpha-2026-10-20b.zim" for n in ("600707", "800707")]
+    for d in ("site", "preview"):
+        (tmp_path / d / "alpha-viewer").mkdir()
+        (tmp_path / d / "alpha-viewer" / "en.ws.json").write_text(json.dumps(
+            {"uuid": "u", "sources": {"base": {"file": "osm-alpha-2026-10-20b.zim", "size": 400}}, "parts": [[0, 400, "s", "base", 0]]}))
+        (tmp_path / d / "alpha-viewer" / "fresh.json").write_text(json.dumps(
+            {"base": {"file": "osm-alpha-2026-10-20b.zim", "md5": "c" * 32}, "lang": "en", "viewer_code": CODE}))
+    r = run(tmp_path, "--regions", "alpha")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "the item's nodes recorded" in r.stdout and "made 1: alpha" in r.stdout
+    assert not (tmp_path / "log").exists()                             # not composed again
+    for d in ("site", "preview"):
+        ix = json.loads((tmp_path / d / "alpha-viewer" / "en.ws.json").read_text())
+        assert ix["sources"]["base"] == {"file": "osm-alpha-2026-10-20b.zim", "size": 400, "mirrors": nodes}, d
+        assert ix["uuid"] == "u" and ix["parts"] == [[0, 400, "s", "base", 0]], d
+    r = run(tmp_path, "--regions", "alpha")                            # current now
+    assert r.returncode == 0 and "already has viewer" in r.stdout
+    # a node that is not archive.org's is left out; a dir with ".." leaves both out
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({
+        "d1": "evil.example", "d2": "ia800707.us.archive.org", "dir": "/22/items/streetzim-alpha",
+        "files": [{"name": "osm-alpha-2026-10-27.zim", "size": "450", "md5": "9" * 32, "mtime": "1793000000"}]}))
+    (tmp_path / "maps" / "osm-alpha-2026-10-27.zim").write_bytes(b"z" * 450)
+    assert run(tmp_path, "--regions", "alpha").returncode == 0
+    ix = json.loads((tmp_path / "site" / "alpha-viewer" / "en.ws.json").read_text())
+    assert ix["sources"]["base"]["mirrors"] == ["https://ia800707.us.archive.org/22/items/streetzim-alpha/osm-alpha-2026-10-27.zim"]
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({
+        "d1": "ia600707.us.archive.org", "dir": "/22/../x",
+        "files": [{"name": "osm-alpha-2026-10-28.zim", "size": "460", "md5": "8" * 32, "mtime": "1793000000"}]}))
+    (tmp_path / "maps" / "osm-alpha-2026-10-28.zim").write_bytes(b"z" * 460)
+    assert run(tmp_path, "--regions", "alpha").returncode == 0
+    assert "mirrors" not in json.dumps(json.loads((tmp_path / "site" / "alpha-viewer" / "en.ws.json").read_text()))
+
+
+def test_recording_the_nodes_dry_runs_falls_back_and_checks_the_index(tmp_path: Path) -> None:
+    setup(tmp_path)
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({
+        "d1": "ia600707.us.archive.org", "d2": "ia800707.us.archive.org", "dir": "/22/items/streetzim-alpha",
+        "files": [{"name": "osm-alpha-2026-10-20b.zim", "size": "400", "md5": "c" * 32, "mtime": "1793000000"}]}))
+    def made_before(index_file: str = "osm-alpha-2026-10-20b.zim", preview_index: bool = True) -> None:
+        for d in ("site", "preview"):
+            v = tmp_path / d / "alpha-viewer"
+            v.mkdir(parents=True, exist_ok=True)
+            if d == "site" or preview_index:
+                (v / "en.ws.json").write_text(json.dumps({"sources": {"base": {"file": index_file}}}))
+            elif (v / "en.ws.json").exists():
+                (v / "en.ws.json").unlink()
+            (v / "fresh.json").write_text(json.dumps(
+                {"base": {"file": "osm-alpha-2026-10-20b.zim", "md5": "c" * 32}, "lang": "en", "viewer_code": CODE}))
+    # a dry run says so and writes nothing
+    made_before()
+    r = run(tmp_path, "--regions", "alpha", "--dry-run")
+    assert r.returncode == 0 and "would record the item's nodes" in r.stdout, r.stdout
+    assert "mirrors" not in (tmp_path / "site" / "alpha-viewer" / "en.ws.json").read_text()
+    # the preview copy's index cannot be written: composed again instead
+    made_before(preview_index=False)
+    r = run(tmp_path, "--regions", "alpha")
+    assert r.returncode == 0 and "could not record the item's nodes" in r.stdout and "made again" in r.stdout, r.stdout
+    assert (tmp_path / "log").read_text().split() == ["alpha"]
+    # an index that names another file is not current
+    (tmp_path / "log").unlink()
+    made_before(index_file="osm-alpha-2026-10-01.zim")
+    r = run(tmp_path, "--regions", "alpha")
+    assert r.returncode == 0 and (tmp_path / "log").read_text().split() == ["alpha"], r.stdout
+
+
+def test_metadata_archive_org_did_not_give_is_a_failure(tmp_path: Path) -> None:
+    setup(tmp_path)
+    (tmp_path / "meta" / "streetzim-alpha.json").write_text(json.dumps({"error": "item metadata may be invalid"}))
+    r = run(tmp_path, "--regions", "alpha,none")
+    assert r.returncode == 1
+    assert "alpha: archive.org's metadata for streetzim-alpha failed: item metadata may be invalid" in r.stdout
+    assert "failed 1: alpha" in r.stdout and "none: no live ZIM on archive.org" in r.stdout

@@ -6,12 +6,15 @@
 
 For each region of cloud/regions.tsv (or --regions, in that order): its live
 file on archive.org (item streetzim-<region>, the newest dated ZIM, as
-web/generate.py picks it) and that file's MD5 and ETag; then
+web/generate.py picks it), that file's MD5 and ETag, and the item's storage
+nodes (the worker's fallback when archive.org's front door fails); then
 tools/langpack/fresh_viewer.py with the local copy in MAPS (its gates
 included) into SITE/<region>-viewer/, copied to PREVIEW/<region>-viewer/ (the
 preview channel the build worker reads). A region whose fresh.json already
 names that live file and today's viewer code is skipped, as is one without a
-local copy (said so). --deploy then deploys the preview channel and, under
+local copy (said so); one whose index lacks only the item's current nodes
+gets them written in. A region whose metadata archive.org did not give is a
+failure. --deploy then deploys the preview channel and, under
 the site-deploy lock, the live site (web/generate.py, firebase deploy), as
 ops/langpack/pack_queue.sh does. Exit 0 when every region is done or
 skipped for being current, 1 when any failed or had no local copy.
@@ -27,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -54,10 +58,11 @@ def regions(path: str) -> list[str]:
 
 
 def item_meta(item: str, meta_dir: str | None) -> dict | None:
-    """archive.org's metadata for ITEM (META_DIR/<item>.json in tests)."""
+    """archive.org's metadata for ITEM (META_DIR/<item>.json in tests): {}
+    for no such item, None when archive.org did not answer."""
     if meta_dir:
         p = os.path.join(meta_dir, f"{item}.json")
-        return json.load(open(p)) if os.path.exists(p) else None
+        return json.load(open(p)) if os.path.exists(p) else {}
     for attempt in range(3):
         try:
             req = urllib.request.Request(f"https://archive.org/metadata/{item}",
@@ -97,14 +102,46 @@ def map_language(zim: str) -> str:
         return "en"
 
 
-def current(site_dir: str, file: str, md5: str, code: str) -> bool:
+def mirrors(meta: dict, name: str) -> list[str]:
+    """The item's storage nodes for NAME (archive.org's d1 and d2 under its
+    dir): the build worker tries them when archive.org's front door cannot
+    reach the first and answers 503 instead of redirecting."""
+    d = str(meta.get("dir") or "")
+    if not re.fullmatch(r"/[\w./-]+", d) or ".." in d:
+        return []
+    return [f"https://{n}{d}/{urllib.parse.quote(name)}" for n in (meta.get("d1"), meta.get("d2"))
+            if isinstance(n, str) and re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)*\.archive\.org", n)]
+
+
+def current(site_dir: str, file: str, md5: str, code: str, nodes: list[str] | None = None) -> bool | str:
+    """True when SITE_DIR already serves FILE with viewer CODE (and, when the
+    item's nodes are known, names them, in any order); "nodes" when only the
+    nodes are missing or others; False otherwise."""
     try:
         fr = json.load(open(os.path.join(site_dir, "fresh.json")))
-    except (OSError, ValueError):
+        ix = json.load(open(os.path.join(site_dir, f"{fr.get('lang')}.ws.json")))
+    except (OSError, ValueError, AttributeError):
         return False
     b = fr.get("base") or {}
-    return (b.get("file") == file and str(b.get("md5", "")).lower() == md5.lower() and fr.get("viewer_code") == code
-            and os.path.isfile(os.path.join(site_dir, f"{fr.get('lang')}.ws.json")))
+    base = ((ix.get("sources") or {}).get("base") or {}) if isinstance(ix, dict) else {}
+    if not (b.get("file") == file and str(b.get("md5", "")).lower() == md5.lower() and fr.get("viewer_code") == code
+            and base.get("file") == file):
+        return False
+    return True if not nodes or sorted(base.get("mirrors") or []) == sorted(nodes) else "nodes"
+
+
+def record_nodes(dirs: list[str], nodes: list[str]) -> None:
+    """The item's nodes written into each DIR's index, as fresh_viewer.py
+    would (the composed file, its torrent and blobs are the same)."""
+    for d in dirs:
+        fr = json.load(open(os.path.join(d, "fresh.json")))
+        p = os.path.join(d, f"{fr['lang']}.ws.json")
+        ix = json.load(open(p))
+        ix["sources"]["base"]["mirrors"] = list(nodes)
+        tmp = p + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(json.dumps(ix, indent=1))
+        os.replace(tmp, p)
 
 
 def deploy(preview: str, prod: str, lock: str, firebase: str) -> bool:
@@ -151,7 +188,10 @@ def main(argv: list[str] | None = None) -> int:
             say(f"{rid!r}: not a region id; skipped"); continue
         item = f"streetzim-{rid}"
         meta = item_meta(item, a.meta_dir)
-        f = live_file(meta) if meta else None
+        if meta is None or "error" in meta:
+            say(f"{rid}: archive.org's metadata for {item} failed{': ' + str(meta['error']) if meta else ''}")
+            failed.append(rid); continue
+        f = live_file(meta)
         if not f or not f.get("md5"):
             say(f"{rid}: no live ZIM on archive.org ({item}); skipped"); continue
         name, md5 = f["name"], str(f["md5"]).lower()
@@ -160,8 +200,20 @@ def main(argv: list[str] | None = None) -> int:
         except (KeyError, TypeError, ValueError):
             say(f"{rid}: {name} has no mtime/size in the listing; skipped"); failed.append(rid); continue
         site_dir = os.path.join(a.site, f"{rid}-viewer")
-        if current(site_dir, name, md5, code):
+        nodes = mirrors(meta, name)
+        state = current(site_dir, name, md5, code, nodes)
+        if state is True:
             say(f"{rid}: {name} already has viewer {code}"); continue
+        if state == "nodes" and a.dry_run:
+            say(f"{rid}: {name} has viewer {code}; would record the item's nodes"); continue
+        if state == "nodes":
+            dirs = [site_dir] + ([os.path.join(a.preview, f"{rid}-viewer")] if a.preview else [])
+            try:
+                record_nodes([d for d in dirs if os.path.isfile(os.path.join(d, "fresh.json"))], nodes)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                say(f"{rid}: could not record the item's nodes ({e}); made again")
+            else:
+                say(f"{rid}: {name} has viewer {code}; the item's nodes recorded"); made.append(rid); continue
         local = os.path.join(a.maps, name)
         if not os.path.isfile(local) or os.path.getsize(local) != int(f["size"]):
             say(f"{rid}: no local copy of {name} ({int(f['size']) / 1e9:.2f} GB) in {a.maps}"); missing.append(rid); continue
@@ -170,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.dry_run:
             continue
         r = subprocess.run([sys.executable, a.fresh_tool, rid, local, "--item", item, "--lang", lang, "--out", site_dir,
-                            "--webseed", a.webseed, "--md5", md5, "--etag", etag, "--work", work],
+                            "--webseed", a.webseed, "--md5", md5, "--etag", etag, "--work", work,
+                            *[x for m in nodes for x in ("--mirror", m)]],
                            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         if r.returncode:
             say(f"{rid}: fresh_viewer.py rc={r.returncode}"); failed.append(rid); continue
