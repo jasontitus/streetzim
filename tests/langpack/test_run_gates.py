@@ -457,6 +457,106 @@ def test_a_viewer_patch_needs_only_a_light_gate(gates: SimpleNamespace, tmp_path
     assert "light gate" not in r.stdout and int(runs.read_text()) == 6, r.stdout
 
 
+def test_a_viewer_patch_with_viewer_carry_runs_nothing_for_the_entry(gates: SimpleNamespace, tmp_path: Path) -> None:
+    """VIEWER_CARRY=1 (a viewer change alone, while the viewer is worked on):
+    an entry whose base changed only in its viewer slots runs nothing (no
+    merge, no zimcheck, no browser check); its last passing verdict is
+    carried whole for the new recipe, and the base's own checks run with the
+    new viewer. compose_verdicts.py checks the carry again (the fingerprint,
+    a base MD5 that changed); a carry of a carry keeps the recipe whose gates
+    last ran; anything else changed means the full gate as before."""
+    from tests.langpack.test_viewer_slots import V2, patch
+    d = tmp_path
+    base = d / "bases" / "osm-testland-2026-10-13.zim"
+    base.parent.mkdir()
+    uuid = lpzims.write_base(base, slots=lpzims.VIEWER_V1)
+    packs = d / "packs"
+    packs.mkdir()
+    de = packs / "osm_testland_wiki-de_2026-10-13.zim"
+    lpzims.write_pack(de, "de", uuid)
+    zc_pack = lpzims.fake_zimcheck(d / "zcp", "clean", None)
+    assert tool("pack_gate.py", de, "--base", base, env={"PACK_GATE_ZIMCHECK": zc_pack}).returncode == 0
+    zc = _flaky_zimcheck(d / "zc", "[INFO] Overall Test Status: Pass\n", "[INFO] Overall Test Status: Pass\n")
+    runs = d / "zc" / "runs"
+    work = d / "work"
+    env = {**gates.env, "LANGPACK_WORK": str(work), "RESUME": "1", "PACK_GATE_ZIMCHECK": zc, "VIEWER_CARRY": "1"}
+    args = [str(TOOLS / "run_gates.sh"), str(base), str(packs), "de", "en", "testland", str(gates.region),
+            str(_free_port())]
+    out = work / "gates" / "osm-testland-2026-10-13"
+
+    def run(e: dict) -> subprocess.CompletedProcess[str]:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=600, env=e)
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        return r
+
+    run(env)                                                  # no verdict yet: the full gate
+    vp = work / "verdicts" / "osm-testland-2026-10-13" / "de.json"
+    v1 = _passed_by_hand(vp)
+    assert int(runs.read_text()) == 1
+    patch(base, d / "patched.zim", V2, d)
+    shutil.copy(d / "patched.zim", base)                      # in place: same name and UUID, new viewer
+    (out / "base.viewer.json").unlink()
+    r = run(env)
+    assert "de: the base changed only in its viewer slots: its verdict carried (VIEWER_CARRY=1)" in r.stdout, r.stdout
+    assert "light gate" not in r.stdout
+    assert int(runs.read_text()) == 1                         # no zimcheck: nothing of the entry ran
+    assert not (out / "de.merge.json").exists() and not (out / "de.smoke.log").exists()
+    assert (out / "base.viewer.json").exists()                # the base's checks ran with the new viewer
+    v2 = json.loads(vp.read_text())
+    assert v2["recipe_md5"] != v1["recipe_md5"] and v2["fingerprint"] == v1["fingerprint"]
+    assert v2["base_md5"] != v1["base_md5"] and v2["all_pass"] is True, v2["checks"]
+    assert all(v2["checks"][k] for k in ("recipe_eq_merge", "verify", "zimcheck", "route", "kiwix", "search",
+                                          "viewer", "ui", "smoke", "logs_for_recipe", "base_viewer"))
+    assert v2["evidence"]["viewer_carry"] == {"from_recipe_md5": v1["recipe_md5"], "since_recipe_md5": v1["recipe_md5"]}
+    # compose_verdicts checks the carry again: the fingerprint, a base MD5 that changed, a passing verdict
+    compose = [sys.executable, str(TOOLS / "compose_verdicts.py"), str(out), str(base), "de"]
+    for change, ok in (({}, True), ({"fingerprint": "0" * 64}, False), ({"base_md5": v2["base_md5"]}, False),
+                       ({"all_pass": False}, False), ({"checks": {**v1["checks"], "zimcheck": False}}, False)):
+        (out / "de.carry.json").write_text(json.dumps({**v1, "base_md5": "f" * 32, **change}))
+        subprocess.run(compose, capture_output=True, text=True, env=env)
+        v = json.loads(vp.read_text())
+        assert v["all_pass"] is ok and v["checks"]["verify"] is (ok or "checks" in change), change
+    # a carry of a carry: the recipe whose gates last ran stays named
+    (out / "de.carry.json").write_text(json.dumps({**v1, "base_md5": "f" * 32}))
+    subprocess.run(compose, capture_output=True, text=True, env=env)
+    v2 = json.loads(vp.read_text())
+    patch(base, d / "patched2.zim", lpzims.VIEWER_V1, d)
+    shutil.copy(d / "patched2.zim", base)
+    r = run(env)
+    assert "its verdict carried" in r.stdout and int(runs.read_text()) == 1, r.stdout
+    v3 = json.loads(vp.read_text())
+    assert v3["all_pass"] and v3["evidence"]["viewer_carry"] == {"from_recipe_md5": v2["recipe_md5"],
+                                                                  "since_recipe_md5": v1["recipe_md5"]}
+    # a viewer failing the base's checks fails every verdict; the last passing one is kept
+    # beside it, so the next viewer is carried from that, not gated in full
+    pass_path = vp.with_name("de.pass.json")
+    assert json.loads(pass_path.read_text())["recipe_md5"] == v3["recipe_md5"]
+    (out / "base.viewer.json").write_text('{"pass": false}\n')
+    subprocess.run(compose, capture_output=True, text=True, env=env)
+    assert json.loads(vp.read_text())["all_pass"] is False
+    assert json.loads(pass_path.read_text())["recipe_md5"] == v3["recipe_md5"]
+    patch(base, d / "patched4.zim", V2, d)
+    shutil.copy(d / "patched4.zim", base)
+    r = run(env)
+    assert "its verdict carried" in r.stdout and int(runs.read_text()) == 1, r.stdout
+    assert json.loads(vp.read_text())["evidence"]["viewer_carry"]["from_recipe_md5"] == v3["recipe_md5"]
+    # LIGHT_GATE=0 (the full gate) carries nothing
+    patch(base, d / "patched5.zim", lpzims.VIEWER_V1, d)
+    shutil.copy(d / "patched5.zim", base)
+    r = run({**env, "LIGHT_GATE": "0"})
+    assert "carried" not in r.stdout and "light gate" not in r.stdout and int(runs.read_text()) == 2, r.stdout
+    _passed_by_hand(vp)
+    # without VIEWER_CARRY the same change gets the light gate
+    patch(base, d / "patched3.zim", V2, d)
+    shutil.copy(d / "patched3.zim", base)
+    r = run({**env, "VIEWER_CARRY": "0"})
+    assert "light gate" in r.stdout and "carried (VIEWER_CARRY" not in r.stdout and int(runs.read_text()) == 3, r.stdout
+    # another title: another fingerprint, the full gate even with VIEWER_CARRY
+    _passed_by_hand(vp)
+    r = run({**env, "TITLES": json.dumps({"de": "Testland neu"})})
+    assert "carried" not in r.stdout and "light gate" not in r.stdout and int(runs.read_text()) == 4, r.stdout
+
+
 def _servers(log: Path) -> list[dict]:
     """kiwix-serve's lifetimes: start (with what it served) and end, by port and books."""
     starts = [json.loads(x) for x in log.read_text().splitlines()]

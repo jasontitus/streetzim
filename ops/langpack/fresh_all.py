@@ -171,6 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--work", help="where the composed files are made (default MAPS/langpack-work/fresh-viewer)")
     ap.add_argument("--webseed", default=WEBSEED)
     ap.add_argument("--meta-dir", help=argparse.SUPPRESS)               # tests: <item>.json instead of archive.org
+    ap.add_argument("--thorough", action="store_true",
+                    help="fresh_viewer.py --thorough: the swap with its comparison, every MD5 read afresh "
+                         "(the periodic full check); by default each map is read once")
     ap.add_argument("--fresh-tool", default=os.path.join(ROOT, "tools", "langpack", "fresh_viewer.py"),
                     help=argparse.SUPPRESS)
     ap.add_argument("--deploy", action="store_true", help="deploy the preview channel and the live site at the end")
@@ -223,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         r = subprocess.run([sys.executable, a.fresh_tool, rid, local, "--item", item, "--lang", lang, "--out", site_dir,
                             "--webseed", a.webseed, "--md5", md5, "--etag", etag, "--work", work,
-                            *[x for m in nodes for x in ("--mirror", m)]],
+                            *[x for m in nodes for x in ("--mirror", m)], *(["--thorough"] if a.thorough else [])],
                            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         if r.returncode:
             say(f"{rid}: fresh_viewer.py rc={r.returncode}"); failed.append(rid); continue

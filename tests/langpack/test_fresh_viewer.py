@@ -196,13 +196,21 @@ def test_a_viewer_without_its_code_is_refused(fv: SimpleNamespace, capsys) -> No
 
 def test_the_composed_file_must_carry_the_viewer_it_is_named_after(fv: SimpleNamespace, monkeypatch) -> None:
     """A composed file with another viewer in it (here the base's own) is not
-    published under the code's name."""
+    published under the code's name, on either path."""
     def stale(zim, work, repo, viewer, name, full_copy=False):
         os.makedirs(work, exist_ok=True)
         out = os.path.join(work, name)
         shutil.copy(zim, out)
         return out, {}
     monkeypatch.setattr(fresh_viewer, "compose", stale)
+    assert run(fv, "--thorough") == 1 and not fv.out.exists()
+    real = fresh_viewer.compose_fast
+
+    def stale_fast(zim, work, repo, code, name, full_copy=False):
+        out, uuid, windows = real(zim, work, repo, code, name, full_copy)
+        shutil.copy(zim, out)                          # the base's own viewer back in
+        return out, uuid, windows
+    monkeypatch.setattr(fresh_viewer, "compose_fast", stale_fast)
     assert run(fv) == 1 and not fv.out.exists()
 
 
@@ -219,6 +227,62 @@ def test_the_uuid_follows_the_viewer_not_the_commit(fv: SimpleNamespace) -> None
 def test_the_uuid_must_be_the_one_the_swap_wrote(fv: SimpleNamespace, monkeypatch) -> None:
     real = fresh_viewer.compose
     monkeypatch.setattr(fresh_viewer, "compose", lambda *a, **k: (real(*a, **k)[0], {"new_uuid": "0" * 8 + "-0000-0000-0000-" + "0" * 12}))
+    assert run(fv, "--thorough") == 1 and not fv.out.exists()
+    fast = fresh_viewer.compose_fast
+    monkeypatch.setattr(fresh_viewer, "compose_fast",
+                        lambda *a, **k: (lambda r: (r[0], "0" * 8 + "-0000-0000-0000-" + "0" * 12, r[2]))(fast(*a, **k)))
+    assert run(fv) == 1 and not fv.out.exists()
+
+
+def test_the_one_pass_publishes_what_the_thorough_path_does(fv: SimpleNamespace, monkeypatch) -> None:
+    """The default path (the map read once) and --thorough (the swap, its
+    comparison and every MD5 afresh) publish the same file: the same UUID,
+    MD5s, torrent, index and blobs; the worker's bytes are that file."""
+    assert run(fv, "--thorough") == 0
+    slow = {p.name: p.read_bytes() for p in fv.out.iterdir()}
+    shutil.rmtree(fv.out)
+    assert run(fv) == 0
+    fast = {p.name: p.read_bytes() for p in fv.out.iterdir()}
+    strip = lambda b: {k: v for k, v in json.loads(b).items() if k != "made"}  # noqa: E731
+    assert strip(fast.pop("fresh.json")) == strip(slow.pop("fresh.json"))
+    assert fast == slow
+    index = json.loads(fast["en.ws.json"])
+    data = materialize(index, fv.out, fv.base)
+    assert hashlib.md5(data, usedforsecurity=False).hexdigest() == index["file_md5"]
+    assert hashlib.md5(data[:-16], usedforsecurity=False).digest() == data[-16:]
+
+
+def test_the_one_pass_reads_the_base_for_its_md5_once(fv: SimpleNamespace, monkeypatch) -> None:
+    """archive.org's file is checked against its MD5 once, then by its path,
+    size, mtime and inode (cached_md5), until it changes; --thorough reads it
+    every time; a file of another MD5 is refused however it was cached."""
+    assert run(fv) == 0
+    reads = []
+    real = fresh_viewer.md5_file
+    monkeypatch.setattr(fresh_viewer, "md5_file", lambda p: reads.append(p) or real(p))
+    assert run(fv) == 0 and reads == []
+    assert run(fv, "--thorough") == 0 and len(reads) == 1
+    os.utime(fv.base, (1_700_000_000, 1_700_000_000))          # touched: read again
+    assert run(fv, tag=etag(fv.base)) == 0 and len(reads) == 2
+    assert run(fv, md5sum="0" * 32) == 1                       # not the listed file: refused
+    # patched in place with its mtime put back (touch -r): the change time says so, read again
+    archived = md5(fv.base)
+    assert run(fv, md5sum=archived, tag=etag(fv.base)) == 0
+    st = os.stat(fv.base)
+    data = bytearray(fv.base.read_bytes())
+    data[200] ^= 0xFF
+    with open(fv.base, "r+b") as fh:
+        fh.write(bytes(data))
+    os.utime(fv.base, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert os.stat(fv.base).st_mtime_ns == st.st_mtime_ns and os.stat(fv.base).st_size == st.st_size
+    n = len(reads)
+    assert run(fv, md5sum=archived, tag=etag(fv.base)) == 1 and len(reads) == n + 1
+
+
+def test_a_slot_not_where_it_was_written_is_refused(fv: SimpleNamespace, monkeypatch) -> None:
+    real = fresh_viewer.compose_fast
+    monkeypatch.setattr(fresh_viewer, "compose_fast",
+                        lambda *a, **k: (lambda r: (r[0], r[1], r[2][:-1] + [(r[2][-1][0] + 1, r[2][-1][1])]))(real(*a, **k)))
     assert run(fv) == 1 and not fv.out.exists()
 
 

@@ -36,6 +36,18 @@ but its last 16 bytes, which must equal those 16 bytes (the ZIM checksum the
 composed file was given): so the worker serves exactly the file that passed
 the gates. The composed file is deleted at the end (--keep keeps it).
 docs/fresh-viewer.md has the why and the rollout.
+
+That is --thorough (about seven reads of the map: the MD5 check, the swap's
+MD5, its entry-by-entry comparison, libzim's check, the lineage MD5s, the
+index). By default (2026-11-01: a viewer change, while the viewer is worked
+on, refreshes every map) the map is read once: ZIM's MD5 is kept by its
+path, size, mtime and inode (cached_md5: archive.org's file does not change
+under it); the copy is a reflink of ZIM with the new UUID and the three slots
+written here (cloud/patch_viewer_inplace.slot_plan), nothing else, so only
+those windows can differ and no comparison is needed; and one pass over it
+(seal) gives its checksum, written into it, the whole file's MD5 and the
+torrent's pieces. The worker serves ZIM's bytes and the blobs of the windows
+that differ, i.e. exactly that copy, which the gates check.
 """
 from __future__ import annotations
 
@@ -50,6 +62,7 @@ import subprocess
 import sys
 import urllib.parse
 import uuid as uuidlib
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
@@ -117,6 +130,70 @@ def md5_file(path: str) -> str:
         while b := fh.read(16 << 20):
             h.update(b)
     return h.hexdigest()
+
+
+def cached_md5(path: str) -> str:
+    """md5_file(path), kept under $LANGPACK_WORK/md5-cache/files by the file's
+    real path, size, mtime, change time, inode and device: a file read for it
+    once is not read again until it changes (each viewer change checks the
+    same live files). The change time catches a file patched in place with
+    its mtime put back (touch -r), which mtime alone would not."""
+    from tools.langpack.gatelib import work_dir
+    real = os.path.realpath(path)
+    st = os.stat(real)
+    ident = [real, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev]
+    p = os.path.join(work_dir(), "md5-cache", "files", hashlib.sha256(real.encode()).hexdigest()[:32] + ".json")
+    try:
+        kept = json.load(open(p))
+        if kept.get("ident") == ident and re.fullmatch(r"[0-9a-f]{32}", str(kept.get("md5"))):
+            return kept["md5"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    md5 = md5_file(real)
+    now = os.stat(real)
+    if ident[1:] == [now.st_size, now.st_mtime_ns, now.st_ctime_ns, now.st_ino, now.st_dev]:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            write_atomic(p, json.dumps({"ident": ident, "md5": md5}).encode())
+        except OSError:
+            pass
+    return md5
+
+
+def seal(path: str, plen: int) -> tuple[bytes, str, str]:
+    """One pass over the composed file: its checksum (the MD5 of all but its
+    last 16 bytes) written as those 16 bytes, the torrent's piece hashes and
+    the whole file's MD5. Returns (pieces, md5, file_md5)."""
+    size = os.path.getsize(path)
+    body = hashlib.md5(usedforsecurity=False)
+    pieces = bytearray()
+    buf = bytearray()
+    with open(path, "rb", buffering=0) as fh:
+        left = size - MD5_LEN
+        while left:
+            c = fh.read(min(4 << 20, left))
+            if not c:
+                raise FreshError(f"short read in {path} at {size - MD5_LEN - left}")
+            body.update(c)
+            buf += c
+            left -= len(c)
+            if len(buf) >= plen:
+                k = len(buf) - len(buf) % plen
+                for i in range(0, k, plen):
+                    pieces += hashlib.sha1(buf[i:i + plen], usedforsecurity=False).digest()
+                del buf[:k]
+    tail = body.digest()
+    with open(path, "r+b") as fh:
+        fh.seek(size - MD5_LEN)
+        fh.write(tail)
+        fh.flush()
+        os.fsync(fh.fileno())
+    buf += tail
+    for i in range(0, len(buf), plen):
+        pieces += hashlib.sha1(buf[i:i + plen], usedforsecurity=False).digest()
+    whole = body.copy()
+    whole.update(tail)
+    return bytes(pieces), tail.hex(), whole.hexdigest()
 
 
 def slot_windows(path: str) -> list[tuple[int, int]]:
@@ -264,6 +341,49 @@ def read_index(index: dict, blobs: dict[str, bytes], base_path: str, plen: int) 
     return bytes(pieces), whole.hexdigest(), body.hexdigest(), tail
 
 
+def compose_fast(zim: str, work: str, repo: str, code: str, name: str, full_copy: bool = False) -> tuple[str, str, list]:
+    """The map with the viewer of `repo` in `work`: a reflink copy of ZIM (a
+    full one only with full_copy) with the three slots and the new UUID
+    written, nothing else (the UUID as swap_base_viewer.py derives it, so
+    the same viewer is the same file either way). Its checksum is left for
+    seal(). Returns (path, uuid, windows): the byte ranges written, beside
+    the checksum."""
+    import mmap
+    from cloud.patch_viewer_inplace import slot_bytes, slot_plan
+    from libzim.reader import Archive
+    from tools.langpack.swap_base_viewer import NS, copy_base
+    from tools.langpack.zimfmt import ZimReader
+    os.makedirs(work, exist_ok=True)
+    out = os.path.join(work, name)
+    try:
+        copy_base(zim, out, full_copy)
+    except SystemExit as e:
+        raise FreshError(str(e)) from None
+    os.chmod(out, 0o644)
+    try:
+        cfg = json.loads(bytes(Archive(Path(zim)).get_entry_by_path("map-config.json").get_item().content))
+    except (KeyError, RuntimeError, ValueError):
+        cfg = None
+    old = ZimReader(zim).header.uuid
+    new = uuidlib.uuid5(NS, f"{old.hex()}:viewer:{code}").bytes
+    windows = [(0, HEADER_LEN)]
+    with open(out, "r+b") as fh:
+        mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_WRITE)
+        try:
+            try:
+                plan = slot_plan(mm, Path(repo) / "resources" / "viewer", cfg)
+            except SystemExit as e:
+                raise FreshError(str(e)) from None
+            for _name, start, slot_len, data, head, closer in plan:
+                mm[start:start + slot_len] = slot_bytes(slot_len, data, head, closer)
+                windows.append((start, slot_len))
+            mm[8:24] = new
+            mm.flush()
+        finally:
+            mm.close()
+    return out, str(uuidlib.UUID(bytes=new)), sorted(windows)
+
+
 def compose(zim: str, work: str, repo: str, rev: str, name: str, full_copy: bool = False) -> tuple[str, dict]:
     """swap_base_viewer.py: the map with the viewer of `repo`, in `work` (a
     reflink copy of ZIM; full_copy: every byte copied where the filesystem
@@ -292,6 +412,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, help="where the index, blobs, torrent and fresh.json go")
     ap.add_argument("--webseed", required=True, help="the build worker's origin")
     ap.add_argument("--md5", required=True, help="the MD5 archive.org lists for the live file")
+    ap.add_argument("--thorough", action="store_true",
+                    help="swap_base_viewer.py's swap and comparison, and every MD5 read afresh (the periodic full "
+                         "check); by default the map is read once")
     ap.add_argument("--etag", required=True, help="archive.org's ETag for it (\"<mtime hex>-<size hex>\", quotes included)")
     ap.add_argument("--mirror", action="append", default=[],
                     help="a storage node's URL for that file (the item's d1/d2 + dir), which the worker tries when "
@@ -320,7 +443,7 @@ def run(a) -> int:
     etag = check_etag(a.etag, base_size)
     nodes = check_mirrors(a.mirror, a.item, base_file)
     print(f"fresh_viewer: {a.region}: checking {base_file} against archive.org's MD5", flush=True)
-    if md5_file(zim) != a.md5.lower():
+    if (md5_file(zim) if a.thorough else cached_md5(zim)) != a.md5.lower():
         raise FreshError(f"{zim} is not the file archive.org serves (MD5 {a.md5})")
     rev = a.rev or viewer_rev(a.viewer_root)
     if not re.fullmatch(r"[0-9a-f]{7,40}", rev):
@@ -334,9 +457,18 @@ def run(a) -> int:
     work = a.work or os.path.join(os.path.dirname(zim), "fresh-viewer")
     print(f"fresh_viewer: {a.region}: composing {name} (viewer {code}, revision {rev})", flush=True)
     # the new UUID follows the code too: the same viewer bytes are the same book, whatever the commit
-    path, swap = compose(zim, work, a.viewer_root, code, name, a.allow_full_copy)
+    plen = auto_piece_size(base_size)
+    if a.thorough:
+        path, swap = compose(zim, work, a.viewer_root, code, name, a.allow_full_copy)
+    else:
+        if os.path.exists(os.path.join(work, name)):
+            os.unlink(os.path.join(work, name))
+        path, new_uuid, written = compose_fast(zim, work, a.viewer_root, code, name, a.allow_full_copy)
+        swap = {"new_uuid": new_uuid}
     published = False
     try:
+        if not a.thorough:
+            sealed = seal(path, plen)                     # the one pass: checksum, pieces, MD5s
         from tools.langpack.recipe2 import zim_viewer_code
         if zim_viewer_code(path) != code:
             raise FreshError(f"{name} carries viewer {zim_viewer_code(path) or '(none)'}, not {code}")
@@ -349,15 +481,21 @@ def run(a) -> int:
         if swap.get("new_uuid") and swap["new_uuid"] != uuid:
             raise FreshError(f"UUID {uuid} is not the one swap_base_viewer.py wrote ({swap['new_uuid']})")
         windows = [(0, HEADER_LEN)] + slot_windows(path) + [(base_size - MD5_LEN, MD5_LEN)]
+        if not a.thorough and sorted(windows[:-1]) != written:
+            raise FreshError(f"the slots found in {name} are not the ones written: {windows[:-1]} != {written}")
         runs = changed_runs(zim, path, windows)
         index, blobs = build_index(site_region, lang, a.item, base_file, base_size, etag, path, name, uuid,
                                    runs, a.webseed, nodes)
-        plen = auto_piece_size(base_size)
-        pieces, file_md5, body_md5, tail = read_index(index, blobs, zim, plen)
-        if body_md5 != tail.hex():
-            raise FreshError(f"the indexed bytes do not carry their own checksum ({body_md5} != {tail.hex()}): "
-                             "they are not the composed file")
-        index["md5"], index["file_md5"] = tail.hex(), file_md5
+        if a.thorough:
+            pieces, file_md5, body_md5, tail = read_index(index, blobs, zim, plen)
+            if body_md5 != tail.hex():
+                raise FreshError(f"the indexed bytes do not carry their own checksum ({body_md5} != {tail.hex()}): "
+                                 "they are not the composed file")
+            md5 = tail.hex()
+        else:
+            # only the windows were written: ZIM's bytes and their blobs are the sealed copy
+            pieces, md5, file_md5 = sealed
+        index["md5"], index["file_md5"] = md5, file_md5
         torrent, infohash = make_torrent(index, pieces, plen)
         index["piece_length"], index["infohash"], index["torrent"] = plen, infohash, f"{lang}.torrent"
         os.makedirs(a.out, exist_ok=True)

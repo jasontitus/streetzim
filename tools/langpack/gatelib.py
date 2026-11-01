@@ -46,6 +46,12 @@ def verdict_path(base_path: str, lang: str) -> str:
     return os.path.join(work_dir(), "verdicts", tag, f"{lang}.json")
 
 
+def last_pass_path(base_path: str, lang: str) -> str:
+    """Where compose_verdicts.py keeps an entry's last passing verdict, beside
+    its verdict (run_gates.sh's light gate and carry start from it)."""
+    return verdict_path(base_path, lang)[:-5] + ".pass.json"
+
+
 def entry_verdict_ok(base_path: str, lang: str, recipe: dict) -> tuple[bool, str]:
     """An entry may be published only with an all-PASS run_gates verdict for this exact recipe."""
     p = verdict_path(base_path, lang)

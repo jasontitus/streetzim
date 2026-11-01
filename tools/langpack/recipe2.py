@@ -129,6 +129,49 @@ def chunk_hashes(path: str, chunk: int = CHUNK, mask: list | None = None) -> lis
     return out
 
 
+def md5_key(recipe: dict) -> str:
+    """The bytes a recipe makes, named by what decides them: the segments (an
+    inline one by its SHA-256), the size, and every input's chunk hashes (the
+    base's with its mask zeroed: no base segment reads the mask). Two recipes
+    with the same key make the same file, whatever their URLs, titles in the
+    menu or the gates' verdicts say."""
+    b = recipe["base"]
+    doc = {"format": recipe["format"], "size": recipe["size"],
+           "segments": [{k: v for k, v in s.items() if k != "data"} for s in recipe["segments"]],
+           "base": [b["size"], b["chunk"], b["sha256"], b.get("mask")],
+           "packs": {k: [p["size"], p["chunk"], p["sha256"]] for k, p in sorted(recipe["packs"].items())}}
+    return hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()
+
+
+def _md5_cache(key: str) -> str:
+    return os.path.join(work_dir(), "md5-cache", key + ".json")
+
+
+def recipe_md5(recipe: dict, base_path: str, inputs: dict[str, str]) -> tuple[str, str, bool]:
+    """(md5, file_md5, computed) of the file the recipe makes: streamed once
+    (materialize, every chunk checked), then kept under
+    $LANGPACK_WORK/md5-cache by md5_key, so the same file is never streamed
+    twice: the gates' recipes and make_site.py's are the same bytes, and a
+    viewer change refreshes each version in one pass, not two."""
+    p = _md5_cache(md5_key(recipe))
+    try:
+        kept = json.load(open(p))
+        if isinstance(kept.get("md5"), str) and isinstance(kept.get("file_md5"), str):
+            return kept["md5"], kept["file_md5"], False
+    except (OSError, ValueError, AttributeError):
+        pass
+    md5 = materialize(recipe, base_path, inputs, out=None, trust_md5=False)
+    file_md5 = _LAST_FILE_MD5[0] or ""
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p + ".tmp", "w") as fh:
+            json.dump({"md5": md5, "file_md5": file_md5}, fh)
+        os.replace(p + ".tmp", p)
+    except OSError:
+        pass
+    return md5, file_md5, True
+
+
 def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template: str = PROXY + "/{file}",
                  url_overrides: dict | None = None, **kw) -> tuple[dict, Plan, dict]:
     """url_template: each pack's absolute Range URL, {file} = the pack's file
@@ -243,12 +286,12 @@ def build_recipe(base_path: str, pack_paths: list[str], lang: str, url_template:
                                    "sha256": chunk_hashes(ix.path)}
     recipe["generated_sha256"] = gen.hexdigest()
     recipe["fingerprint"] = fingerprint(recipe, plan)
-    # exact MD5: stream the recipe once (the same code path the browser follows)
+    # exact MD5: stream the recipe once (the same code path the browser follows),
+    # and the MD5 of the whole file as `md5sum` prints it (the ZIM checksum
+    # appended); a file streamed before is not streamed again (recipe_md5)
     t1 = time.perf_counter()
-    recipe["md5"] = materialize(recipe, base_path, plan_inputs(plan), out=None, trust_md5=False)
-    # md5 of the whole file as `md5sum` prints it (the ZIM checksum appended)
-    recipe["file_md5"] = _LAST_FILE_MD5[0]
-    stats = {"plan_s": round(t_plan, 4), "md5_pass_s": round(time.perf_counter() - t1, 2),
+    recipe["md5"], recipe["file_md5"], streamed = recipe_md5(recipe, base_path, plan_inputs(plan))
+    stats = {"plan_s": round(t_plan, 4), "md5_pass_s": round(time.perf_counter() - t1, 2), "md5_streamed": streamed,
              "segments": len(segs),
              "inline_segments": sum(1 for s in segs if s["src"] == "inline"),
              "inline_bytes": sum(s["len"] for s in segs if s["src"] == "inline"),

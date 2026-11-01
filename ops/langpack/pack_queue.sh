@@ -132,7 +132,8 @@
 # (swiss-languages), FIREBASE_PROJECT (streetzim), FIREBASE (firebase),
 # LANGPACK_WEBSEED (https://streetzim-build-proxy.tiltastech.workers.dev),
 # QUEUE_POLL_SECS (300), QUEUE_RETRY_SECS (1800), QUEUE_MAX_AGAIN (8), QUEUE_PARTIAL_RETRIES (3),
-# QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8),
+# QUEUE_RETRY_FAILED (0), QUEUE_MAX_BASE_GB (8), QUEUE_VIEWER_CARRY (1) and
+# QUEUE_FULL_GATE_REGIONS (switzerland; see "The viewer's code" below),
 # QUEUE_JOBS (2), QUEUE_MIN_MEM_GB (24), QUEUE_DISK_MARGIN_GB (40), QUEUE_RETRY_IN_PASS (1),
 # QUEUE_PREFETCH_AHEAD (1), QUEUE_ROUND_JOBS (1: runs at once while the round builds, each
 # past the first under the memory and disk rules; QUEUE_JOBS still the most),
@@ -206,12 +207,27 @@ MAX_AGAIN=${QUEUE_MAX_AGAIN:-8}
 # 3: each search pack's title index holds the base's pages and redirects (index_pack.py
 # TEXT_VERSION 3, 2026-10-29): versions whose Kiwix search found none of the map's places
 # get new search packs, and those the gates held back for it are published.
-# The viewer's code follows it (3-db752f01): a map ships with this checkout's viewer
-# (ship_packs.sh, tools/langpack/viewer_base.py), read again for each map, and a run records
-# the code it shipped (ship_packs.sh's packs/<base>/viewer-code; "none" for a base without
-# viewer slots, whose versions keep its own viewer). A viewer change alone does not ship a
-# map again (2026-11-01): the gates and recipes took hours a region for bytes the viewer
-# slots hold alone, and a published map under any viewer counts as done for its scheme.
+# The viewer's code follows it (3-db752f01): every version carries this checkout's viewer
+# (ship_packs.sh, tools/langpack/viewer_base.py), so a viewer change ships each map again,
+# only its recipes redone. Read again for each map: a viewer merged into the checkout
+# reaches the queue without a restart; while index.html cannot be read (a checkout
+# rewriting it), the last code read stands. A run records the code it shipped
+# (ship_packs.sh's packs/<base>/viewer-code); "none" for a base without viewer slots, whose
+# versions keep its own viewer: it is not shipped again for a new one.
+# Such a run carries the versions' gates (VIEWER_CARRY=1, run_gates.sh: a version whose base
+# changed only in its viewer slots runs nothing; the base's own checks try the new viewer),
+# so a viewer change costs a few passes over each version (its recipe, its torrent, the site
+# check) and no merge, zimcheck or browser check: minutes a region, not the light gate's hours. QUEUE_VIEWER_CARRY=0 gates them lightly instead (the
+# periodic full check while the viewer is not being worked on), and the regions of
+# QUEUE_FULL_GATE_REGIONS (separated by commas or spaces; switzerland, the canary) always
+# are. The canary does not hold the others back, and a carried version's new viewer is tried
+# only by its base's own checks (in English, no packs): the periodic full check covers the rest.
+CARRY=${QUEUE_VIEWER_CARRY:-1}
+FULL_GATE=${QUEUE_FULL_GATE_REGIONS-switzerland}
+FULL_GATE=",${FULL_GATE//[[:space:],]/,},"            # commas or spaces between them
+carry_for() {  # region: the VIEWER_CARRY its run gets
+  if [ "$CARRY" = 1 ] && [[ $FULL_GATE != *",$1,"* ]]; then echo 1; else echo 0; fi
+}
 RECIPE_SCHEME=3
 VIEWER_INDEX=${QUEUE_VIEWER_INDEX:-$ROOT/resources/viewer/index.html}
 scheme_now() {
@@ -558,12 +574,12 @@ eligible() {  # region zim round-status
   fi
   md5=$(exec 9>&-; file_md5 "$base") || { loud "$rid: could not read $base for its MD5"; ANY_FAILED=1; return 1; }
   KEY=$uuid/$md5
-  # published for this base already, under this recipe scheme (with any viewer); under an
-  # older one: shipped again (ship_packs.sh redoes only what the scheme changes)
-  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t$RECIPE_SCHEME(-[0-9a-f]{8}|-none)?$" "$DONE" && return 1
+  # published for this base already, under this recipe scheme; under an older one: shipped again
+  # (ship_packs.sh redoes only what the scheme changes)
+  grep -qP "^\Q$rid\E\t$uuid\t$md5\t[^\t]*\t[^\t]*\t($SCHEME|$RECIPE_SCHEME-none)$" "$DONE" && return 1
   if grep -qP "^\Q$rid\E\t$uuid\t$md5\t" "$DONE"; then
     case "$(state_of "$rid" "$KEY" | cut -f1)" in
-      published*) say "$rid: published under an older recipe scheme: shipped again for $SCHEME (only the entries whose recipes change are redone)" ;;
+      published*) say "$rid: published under an older recipe scheme or viewer: shipped again for $SCHEME (only the entries whose recipes change are redone)" ;;
     esac
   fi
   st=$(state_of "$rid" "$KEY"); state=${st%%$'\t'*}; retry=${st#*$'\t'}
@@ -645,7 +661,7 @@ start_ship() {  # region zim key
   rm -f "$Q/rc-$rid" "$LANGPACK_WORK/packs/${zim%.zim}/prefetch.ended" "$vc"
   say "$rid: ship_packs.sh $rid $base (runs going: $(( ${#RUN_PID[@]} + 1 )))"
   ( cd "$ROOT" && env -i "${SHIP_ENV[@]}" SHIP_PACK_ITEM="streetzim-$rid-lang" SHIP_BASE_ITEM="streetzim-$rid" \
-      ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
+      VIEWER_CARRY="$(carry_for "$rid")" ionice -c2 -n7 nice -n10 bash "$SHIP" "$rid" "$base" >> "$Q/ship-$rid.out" 2>&1 < /dev/null
     rc=$? c=$(head -c 16 "$vc" 2> /dev/null) s=$SCHEME
     # the scheme of what it shipped: the viewer ship_packs.sh put in (hours after the start, maybe)
     if [ "$c" = none ]; then s=$RECIPE_SCHEME-none; elif [[ $c =~ ^[0-9a-f]{8}$ ]]; then s=$RECIPE_SCHEME-$c; fi

@@ -29,6 +29,7 @@ json.dump({"sources": {"base": base}}, open(os.path.join(out, a["--lang"] + ".ws
 json.dump({"base": {"file": os.path.basename(zim), "md5": a["--md5"], "etag": a["--etag"]},
            "lang": a["--lang"], "viewer_code": os.environ["CODE"]}, open(os.path.join(out, "fresh.json"), "w"))
 open(os.environ["FAKE_LOG"], "a").write(rid + "\n")
+open(os.environ["FAKE_LOG"] + ".args", "a").write(" ".join(sys.argv[1:]) + "\n")
 '''
 
 
@@ -187,3 +188,14 @@ def test_metadata_archive_org_did_not_give_is_a_failure(tmp_path: Path) -> None:
     assert r.returncode == 1
     assert "alpha: archive.org's metadata for streetzim-alpha failed: item metadata may be invalid" in r.stdout
     assert "failed 1: alpha" in r.stdout and "none: no live ZIM on archive.org" in r.stdout
+
+
+def test_thorough_reaches_the_composer(tmp_path: Path) -> None:
+    """--thorough (the periodic full check) is passed to fresh_viewer.py; by default it is not."""
+    setup(tmp_path)
+    assert run(tmp_path, "--regions", "alpha").returncode == 0
+    item(tmp_path / "meta", "alpha", [("osm-alpha-2026-10-27.zim", 450, "9" * 32)])
+    (tmp_path / "maps" / "osm-alpha-2026-10-27.zim").write_bytes(b"z" * 450)
+    assert run(tmp_path, "--regions", "alpha", "--thorough").returncode == 0
+    args = (tmp_path / "log.args").read_text().splitlines()
+    assert len(args) == 2 and "--thorough" not in args[0].split() and args[1].split()[-1] == "--thorough", args

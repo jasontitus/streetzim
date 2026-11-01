@@ -312,19 +312,33 @@ and never reads them from the base. So:
   regenerates, light-gates and re-seals the recipes; until it has, the
   live-MD5 rule keeps the region off `/build/`.
 
-A region ships with **today's viewer** without touching the published base:
+The versions carry **today's viewer** without touching the published base:
 `ship_packs.sh` gates and builds the recipes from
 `tools/langpack/viewer_base.py`'s copy of the base, a reflink copy patched in
 place with this checkout's viewer (`$LANGPACK_WORK/viewer-base/<base>/`, the
 same name, size and UUID). Only masked bytes differ, so the recipes still read
 the live base from archive.org, carry the new slots inline, get a new merged
-UUID (the copy's MD5 differs) and a light gate. A version's file name ends in
+UUID (the copy's MD5 differs) and a light gate, or under the queue their
+gates carried (below). A version's file name ends in
 `.v<code>`, the viewer code its About line shows (`recipe2.zim_viewer_code`),
-so a download says which viewer it has before it is opened. A viewer change
-alone does not ship a region again (2026-11-01): that took the light gate and
-new recipes, hours a region, for bytes only the viewer slots hold, and with
-several viewer changes a day `pack_queue.sh` never caught up. Its versions keep
-the viewer they shipped with until their recipes are refreshed for a new one.
+so a download says which viewer it has before it is opened. `pack_queue.sh`
+ships a region again when the checkout's viewer code differs from the one it
+was published with, its gates carried (2026-11-01): `run_gates.sh` with
+`VIEWER_CARRY=1` runs nothing for an entry whose base changed only in its
+viewer slots (the same fingerprint, another base MD5), carrying its last
+passing verdict whole (`compose_verdicts.py` checks that again and names, in
+`evidence.viewer_carry.since_recipe_md5`, the recipe whose gates last ran),
+while the base's own checks (smoke, viewer, UI) try the new viewer. The
+recipes' MD5s are streamed once (`recipe2.recipe_md5`, kept by `md5_key`: the
+segments, the size and every input's chunk hashes), so a viewer change costs
+a few passes over each version (its recipe, its torrent, the site check)
+and no merge, zimcheck or browser check, not the light gate's
+hours a region. The regions of `QUEUE_FULL_GATE_REGIONS` (switzerland, the
+canary) are always gated lightly, and a queue started with
+`QUEUE_VIEWER_CARRY=0` gates every one so (the periodic full check, while
+the viewer is not being worked on). The apps that compose from the recipes
+(kiwix-tauri, kiwix-apple) and the builder page pick up the new viewer from
+the refreshed recipes; nothing changes on their side.
 
 ## The browser holds no pack whole
 

@@ -20,15 +20,20 @@ viewer is the same bytes except the three slots, the UUID and the trailing
 MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
 
 1. checks ZIM is the file archive.org serves (size and MD5 as the item lists,
+   the MD5 kept once read, by the file's path, size, mtime, change time,
+   inode and device, so a file patched in place is read again,
    and the ETag the worker will send as If-Range: `"<mtime hex>-<size hex>"`,
    quotes included, its size this file's); `--mirror` URLs (the item's two
    storage nodes, which `ops/langpack/fresh_all.py` passes from the item's
    metadata) go in the index for the worker to try when archive.org's front
    door answers 503 (build-proxy/README.md);
-2. makes the map with this checkout's viewer (`tools/langpack/swap_base_viewer.py`:
-   a reflink copy, the slots written, a fresh UUID derived from the old one
-   and the viewer's revision, the MD5; every item but the viewer compared
-   byte for byte). Kiwix tells books apart by UUID, so the file is a new
+2. makes the map with this checkout's viewer: a reflink copy, the three
+   slots and a fresh UUID derived from the old one and the viewer's code
+   written into it, nothing else, then one pass that writes its checksum
+   and gives the torrent's pieces and the whole file's MD5 (`compose_fast`,
+   `seal`); with `--thorough`, `tools/langpack/swap_base_viewer.py` instead
+   (the same file, every item but the viewer compared byte for byte, the
+   MD5s read afresh). Kiwix tells books apart by UUID, so the file is a new
    book; the same viewer again gives the same file (the same torrent). A
    viewer with uncommitted changes is refused: its revision would name
    other bytes;
@@ -54,9 +59,13 @@ MD5. `tools/langpack/fresh_viewer.py REGION ZIM ...`:
    - `fresh.json`: which file it was made from (name, MD5, ETag), the new
      file's name (`<map>.v<code>.zim`, the viewer code its About line shows), UUID, MD5s and URL.
 
-   The index's bytes are read once, for the torrent's pieces and two MD5s:
-   that of all but the last 16 bytes must equal those 16 bytes, so the
-   worker serves exactly the file that passed the gates. An earlier viewer's
+   With `--thorough` the index's bytes are read once more, for the
+   torrent's pieces and two MD5s: that of all but the last 16 bytes must
+   equal those 16 bytes, so the worker serves exactly the file that passed
+   the gates. By default the sealed copy gives them: only the windows
+   written differ from ZIM, and the blobs are those windows' bytes as they
+   differ, so ZIM's bytes and the blobs are that copy (as long as ZIM is
+   the file archive.org serves, which step 1 checks). An earlier viewer's
    blobs, index and torrent in the folder are removed.
 
 `web/generate.py` (`fresh_viewer`) points a card's Download (and the
@@ -73,9 +82,17 @@ the same map within 5 s does nothing.
 After a viewer change merges: `ops/langpack/fresh_all.py --deploy` (each live map,
 the test-photo regions first with `--regions`): for each live map, `fresh_viewer.py` with the
 local copy (every live map has one on the build host), then one site deploy.
-Per map: the MD5 check, the swap's MD5 and comparison, and the index read
-are about four reads of the file (Taipei: 74 s with the gates; all 75 maps,
-430 GB, a few hours of disk), and no upload.
+Per map, by default, one read of the file (2026-11-01): archive.org's
+file's MD5 is kept by its path, size, mtime and inode once checked
+(`cached_md5`); the copy is a reflink of it with the UUID and the three
+slots written by `fresh_viewer.py` itself (`patch_viewer_inplace.slot_plan`),
+nothing else, so only those windows can differ and the comparison is not
+needed; and one pass over it (`seal`) writes its checksum and gives the
+torrent's pieces and the whole file's MD5. Then the gates, and no upload.
+`--thorough` is the earlier path (the swap with its entry-by-entry
+comparison, libzim's check and every MD5 read afresh: about seven reads of
+the file, 11 min for California, half an hour for Brazil): the periodic
+full check. Both publish the same bytes (tests/langpack/test_fresh_viewer.py).
 
 ## What it does not change
 

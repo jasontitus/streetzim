@@ -257,6 +257,47 @@ def test_materialize_refuses_a_tampered_inline_piece(trust_md5: bool, lp: Simple
                             trust_md5=trust_md5)
 
 
+def test_a_file_is_streamed_for_its_md5_once(lp: SimpleNamespace, tmp_path: Path, work: Path, monkeypatch) -> None:
+    """The gates' recipe and make_site.py's are the same bytes: the second
+    takes the MD5s the first streamed (md5_key: the segments, the size and the
+    inputs' chunk hashes), never a stale pair for other bytes."""
+    import hashlib
+    out = tmp_path / "m-fr.zim"
+    merge_zim.merge(str(lp.base), _packs(lp), str(out), "fr", region_langs=["en"])
+    r1, _, st1 = recipe2.build_recipe(str(lp.base), _packs(lp), "fr", region_langs=["en"])
+    assert st1["md5_streamed"] is True
+    real = recipe2.materialize
+    monkeypatch.setattr(recipe2, "materialize", lambda *a, **k: (_ for _ in ()).throw(AssertionError("streamed again")))
+    r2, _, st2 = recipe2.build_recipe(str(lp.base), _packs(lp), "fr", region_langs=["en"],
+                                      url_template="https://example.org/{file}")       # other URLs, same bytes
+    assert st2["md5_streamed"] is False and (r2["md5"], r2["file_md5"]) == (r1["md5"], r1["file_md5"])
+    assert r2["file_md5"] == hashlib.md5(out.read_bytes(), usedforsecurity=False).hexdigest()
+    monkeypatch.setattr(recipe2, "materialize", real)
+    # other bytes: another key, streamed (another language's version; an inline byte; a pack chunk)
+    r3, _, st3 = recipe2.build_recipe(str(lp.base), _packs(lp), "de", region_langs=["en"])
+    assert st3["md5_streamed"] is True and r3["md5"] != r1["md5"]
+    keys = {recipe2.md5_key(r1)}
+    for change in ("inline", "pack", "size", "base"):
+        r = copy.deepcopy(r1)
+        if change == "inline":
+            seg = next(x for x in r["segments"] if x["src"] == "inline")
+            seg["sha256"] = "0" * 64
+        elif change == "pack":
+            next(iter(r["packs"].values()))["sha256"][0] = "0" * 64
+        elif change == "size":
+            r["size"] += 1
+        else:
+            r["base"]["sha256"][0] = "0" * 64
+        keys.add(recipe2.md5_key(r))
+    assert len(keys) == 5
+    # a damaged cache entry is streamed again
+    p = work / "md5-cache" / (recipe2.md5_key(r1) + ".json")
+    assert p.exists()
+    p.write_text("not json")
+    assert recipe2.recipe_md5(r1, str(lp.base), {pk.lang: pk.path for pk in
+                              recipe2.build_plan(str(lp.base), _packs(lp), "fr", region_langs=["en"]).packs})[2] is True
+
+
 def test_materialize_refuses_a_recipe_whose_file_md5_is_wrong(lp: SimpleNamespace, tmp_path: Path) -> None:
     """The recipe's file_md5 (what md5sum prints, shown to visitors) must be the
     assembled file's, even when its internal checksum is right (review r3 M-5)."""

@@ -65,6 +65,39 @@ def _find_slot(mm: mmap.mmap, name: str):
     return content_start, slot_len, head_len, is_js
 
 
+def slot_plan(mm, vdir: Path, cfg) -> list:
+    """Each viewer slot of the mapped ZIM with the viewer of VDIR (the map's
+    UI tables from CFG, its map-config): [(name, start, slot_len, new,
+    head, closer)], the new file's bytes and the slot's marker and closer.
+    Refuses a ZIM without slots and a viewer file too big for its slot."""
+    plan = []
+    for name in VIEWER_FILES:
+        found = _find_slot(mm, name)
+        if not found:
+            raise SystemExit(
+                f"{name}: no viewer slot in this ZIM. It was built "
+                f"before slots existed -- it needs a full viewer swap (re-pack).")
+        start, slot_len, head_len, is_js = found
+        new = viewer_page(name, vdir, cfg)
+        _opener, closer = comment_delims(name)
+        head = slot_header(name, slot_len)
+        overhead = len(head) + len(closer)
+        if len(new) + overhead > slot_len:
+            raise SystemExit(
+                f"{name}: new viewer is {len(new)} B + {overhead} B "
+                f"marker > {slot_len} B slot. Raise "
+                f"SLOT_SIZES[{name!r}] in cloud/viewer_slots.py and "
+                f"re-pack this region (a full viewer swap); "
+                f"refusing to truncate.")
+        plan.append((name, start, slot_len, new, head, closer))
+    return plan
+
+
+def slot_bytes(slot_len: int, new: bytes, head: bytes, closer: bytes) -> bytes:
+    """A slot's bytes: the file, its marker, newline padding, the closer."""
+    return new + head + b"\n" * (slot_len - len(new) - len(head) - len(closer)) + closer
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("zim")
@@ -92,36 +125,17 @@ def main() -> int:
         access = mmap.ACCESS_READ if args.dry_run else mmap.ACCESS_WRITE
         mm = mmap.mmap(fh.fileno(), 0, access=access)
         try:
-            plan = []
-            for name in VIEWER_FILES:
-                found = _find_slot(mm, name)
-                if not found:
-                    raise SystemExit(
-                        f"{name}: no viewer slot in this ZIM. It was built "
-                        f"before slots existed -- it needs a full viewer swap (re-pack).")
-                start, slot_len, head_len, is_js = found
-                new = viewer_page(name, vdir, cfg)
-                _opener, closer = comment_delims(name)
-                head = slot_header(name, slot_len)
-                overhead = len(head) + len(closer)
-                if len(new) + overhead > slot_len:
-                    raise SystemExit(
-                        f"{name}: new viewer is {len(new)} B + {overhead} B "
-                        f"marker > {slot_len} B slot. Raise "
-                        f"SLOT_SIZES[{name!r}] in cloud/viewer_slots.py and "
-                        f"re-pack this region (a full viewer swap); "
-                        f"refusing to truncate.")
-                plan.append((name, start, slot_len, new, head, closer))
+            plan = slot_plan(mm, vdir, cfg)
+            for name, start, slot_len, new, head, closer in plan:
                 print(f"  {name:20} slot@{start} len={slot_len} "
-                      f"new={len(new)} B free={slot_len - len(new) - overhead}")
+                      f"new={len(new)} B free={slot_len - len(new) - len(head) - len(closer)}")
 
             if args.dry_run:
                 print("  dry-run: nothing written")
                 return 0
 
             for _name, start, slot_len, new, head, closer in plan:
-                filler = b"\n" * (slot_len - len(new) - len(head) - len(closer))
-                mm[start:start + slot_len] = new + head + filler + closer
+                mm[start:start + slot_len] = slot_bytes(slot_len, new, head, closer)
             mm.flush()
         finally:
             mm.close()

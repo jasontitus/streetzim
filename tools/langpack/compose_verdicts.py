@@ -31,7 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from tools.langpack.gatelib import md5_file, verdict_path, work_dir, zimcheck_log_passed  # noqa: E402
+from tools.langpack.gatelib import last_pass_path, md5_file, verdict_path, work_dir, zimcheck_log_passed  # noqa: E402
 from tools.langpack.merge_zim import file_md5  # noqa: E402
 
 
@@ -61,6 +61,9 @@ def smoke_ok(p):
 # new viewer cannot change (it lives in three uncompressed slots of the base).
 # Not zimcheck: its link checks read the viewer's HTML (28 s on Greece).
 CARRIED = ("route", "kiwix", "search")
+# What a carried verdict (run_gates.sh VIEWER_CARRY=1) takes from the last
+# passing one: every check of the entry; the base's own come from this run.
+ENTRY_CHECKS = ("recipe_eq_merge", "verify", "zimcheck", "route", "kiwix", "search", "viewer", "ui", "smoke")
 
 
 def zimcheck_rc(log_path):
@@ -133,6 +136,23 @@ def main():
             for k in CARRIED:
                 checks[k] = bool(same and (light.get("checks") or {}).get(k))
                 carried.append(k)
+        # carried (run_gates.sh, VIEWER_CARRY=1): nothing of the entry ran; checked
+        # again as for a light gate, and every entry check from that verdict
+        carry = {}
+        try:
+            carry = json.load(open(f"{out}/{L}.carry.json"))
+        except (OSError, ValueError):
+            carry = {}
+        evidence_carry = None
+        if carry:
+            same = (bool(r.get("fingerprint")) and carry.get("fingerprint") == r.get("fingerprint")
+                    and carry.get("all_pass") and bool(carry.get("base_md5")) and carry["base_md5"] != base_md5)
+            for k in ENTRY_CHECKS:
+                checks[k] = bool(same and (carry.get("checks") or {}).get(k))
+            # since: the recipe whose gates last ran (a carry of a carry keeps it)
+            prev = (carry.get("evidence") or {}).get("viewer_carry") or {}
+            evidence_carry = {"from_recipe_md5": carry.get("recipe_md5"),
+                              "since_recipe_md5": prev.get("since_recipe_md5") or carry.get("recipe_md5")}
         checks.update(base_checks)
         if carried:
             evidence_light = {"from_recipe_md5": light.get("recipe_md5"), "carried": carried}
@@ -154,11 +174,18 @@ def main():
                           "ui_search": [(uj.get(k) or {}).get("n") for k in ("search_native", "search_english")],
                           "ui_search_map_lang": (uj.get("search_map_lang") or {}).get("n"),
                           "html_lang": (uj.get("html_lang") or {}).get("htmlLang"),
-                          "light_gate": evidence_light}}
+                          "light_gate": evidence_light, "viewer_carry": evidence_carry}}
         vp = verdict_path(base, L)
         os.makedirs(os.path.dirname(vp), exist_ok=True)
         with open(vp, "w") as fh:
             json.dump(v, fh, ensure_ascii=False, indent=1)
+        # the last passing one also beside it (gatelib.last_pass_path): a viewer that
+        # fails the base's checks fails every entry's verdict, and the light gate and
+        # the carry (run_gates.sh viewer_only) start again from that, not a full gate
+        if v["all_pass"]:
+            with open(last_pass_path(base, L) + ".tmp", "w") as fh:
+                json.dump(v, fh, ensure_ascii=False, indent=1)
+            os.replace(last_pass_path(base, L) + ".tmp", last_pass_path(base, L))
         rows.append([L, ",".join(r["packs"]) or "-"] + [mark(checks[k]) for k in
                     ("recipe_eq_merge", "verify", "zimcheck", "route", "kiwix", "search", "viewer", "ui", "smoke")]
                     + [mark(v["all_pass"])])
