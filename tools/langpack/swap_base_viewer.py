@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import subprocess
@@ -83,6 +84,31 @@ def copy_base(src: str, dst: str, allow_full: bool, cp: str = "cp") -> str:
     return "full"
 
 
+def compare(src: str, dst: str) -> tuple[bool, int, list[str]]:
+    """(same dirents, items compared, paths whose bytes differ): the two files
+    entry by entry, in step, so a map of tens of millions of entries (Russia,
+    Canada) is never held in memory. A dirent that differs ends it."""
+    za, zb = ZimReader(src), ZimReader(dst)
+    aa, ab = Archive(Path(src)), Archive(Path(dst))
+    differ, n = [], 0
+    for x, y in itertools.zip_longest(za.iter_dirents(), zb.iter_dirents()):
+        if x is None or y is None or (x.key, x.mime, x.title_raw, x.cluster, x.blob, x.target, x.offset) != \
+                (y.key, y.mime, y.title_raw, y.cluster, y.blob, y.target, y.offset):
+            return False, n, differ
+        if x.is_redirect:
+            continue
+        n += 1
+        if x.ns == ord("C"):
+            ca = bytes(aa.get_entry_by_path(x.path.decode()).get_item().content)
+            cb = bytes(ab.get_entry_by_path(x.path.decode()).get_item().content)
+        else:
+            assert x.cluster is not None and x.blob is not None
+            ca, cb = za.blob_bytes(x.cluster, x.blob), zb.blob_bytes(x.cluster, x.blob)
+        if ca != cb:
+            differ.append(x.path.decode())
+    return True, n, differ
+
+
 def main():
     args = [x for x in sys.argv[1:] if x != "--allow-full-copy"]
     allow_full = len(args) != len(sys.argv) - 1
@@ -112,24 +138,8 @@ def main():
     za, zb = ZimReader(src), ZimReader(dst)
     ha, hb = za.header, zb.header
     hdr_same = all(getattr(ha, f) == getattr(hb, f) for f in ha.__dataclass_fields__ if f != "uuid")
-    da, db_ = list(za.iter_dirents()), list(zb.iter_dirents())
-    dirents_same = len(da) == len(db_) and all(
-        (x.key, x.mime, x.title_raw, x.cluster, x.blob, x.target, x.offset) ==
-        (y.key, y.mime, y.title_raw, y.cluster, y.blob, y.target, y.offset) for x, y in zip(da, db_))
+    dirents_same, n, differ = compare(src, dst)
     aa, ab = Archive(Path(src)), Archive(Path(dst))
-    differ, n = [], 0
-    for x in da:
-        if x.is_redirect:
-            continue
-        n += 1
-        if x.ns == ord("C"):
-            ca = bytes(aa.get_entry_by_path(x.path.decode()).get_item().content)
-            cb = bytes(ab.get_entry_by_path(x.path.decode()).get_item().content)
-        else:
-            assert x.cluster is not None and x.blob is not None
-            ca, cb = za.blob_bytes(x.cluster, x.blob), zb.blob_bytes(x.cluster, x.blob)
-        if ca != cb:
-            differ.append(x.path.decode())
     # bytes outside the three slots: compare the whole files minus header uuid / md5 / slot ranges
     res = {
         "copy": how, "src": src, "dst": dst, "size": os.path.getsize(dst),

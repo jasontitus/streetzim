@@ -3,13 +3,15 @@ when --allow-full-copy says so (a silent multi-GB copy doubles the disk use
 of a base). The swap itself needs a real base: test_real_data.py."""
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 
 import pytest
 
 from tests.langpack.conftest import tool
-from tools.langpack.swap_base_viewer import copy_base
+from tools.langpack import swap_base_viewer
+from tools.langpack.swap_base_viewer import compare, copy_base
 
 
 def _cp(tmp_path: Path, reflink_ok: bool) -> str:
@@ -86,3 +88,110 @@ def test_cli_swap_onto_itself_keeps_the_base(tmp_path: Path) -> None:
 def test_missing_src(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="is not a file"):
         copy_base(str(tmp_path / "nope.zim"), str(tmp_path / "b.zim"), True, cp=_cp(tmp_path, True))
+
+
+def test_compare_same_file(lp) -> None:
+    same, n, differ = compare(str(lp.base), str(lp.base))
+    assert same and n > 3 and differ == []
+
+
+def test_compare_other_entries(lp) -> None:
+    assert compare(str(lp.base), str(lp.packs["de"]))[0] is False
+
+
+def test_compare_streams(lp, monkeypatch: pytest.MonkeyPatch) -> None:
+    # the two files' dirents are read in step, never one list then the other:
+    # Russia's or Canada's would not fit in memory
+    log: list[tuple[str, int]] = []
+
+    class Logged(swap_base_viewer.ZimReader):
+        def iter_dirents(self, *a, **k):
+            for i, d in enumerate(super().iter_dirents(*a, **k)):
+                log.append((self.tag, i))
+                yield d
+
+    tags = iter("ab")
+
+    def reader(path: str) -> Logged:
+        r = Logged(path)
+        r.tag = next(tags)
+        return r
+    monkeypatch.setattr(swap_base_viewer, "ZimReader", reader)
+    compare(str(lp.base), str(lp.base))
+    assert log[:4] == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
+
+
+def _second(monkeypatch: pytest.MonkeyPatch, **over) -> None:
+    """compare()'s second reader (dst) with methods overridden."""
+    real = swap_base_viewer.ZimReader
+    B = type("B", (real,), over)
+    made: list[str] = []
+
+    def reader(path: str):
+        made.append(path)
+        return (real if len(made) == 1 else B)(path)
+    monkeypatch.setattr(swap_base_viewer, "ZimReader", reader)
+
+
+def test_compare_extra_trailing_dirent(lp, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = swap_base_viewer.ZimReader.iter_dirents
+
+    def more(self, *a, **k):
+        last = None
+        for d in real(self, *a, **k):
+            last = d
+            yield d
+        yield last
+    _second(monkeypatch, iter_dirents=more)
+    assert compare(str(lp.base), str(lp.base))[0] is False
+
+
+@pytest.mark.parametrize("field", ["mime", "title_raw", "cluster", "blob", "target", "offset"])
+def test_compare_each_dirent_field(lp, monkeypatch: pytest.MonkeyPatch, field: str) -> None:
+    real = swap_base_viewer.ZimReader.iter_dirents
+    hit: list[object] = []
+
+    def changed(self, *a, **k):
+        for d in real(self, *a, **k):
+            v = getattr(d, field)
+            if not hit and v is not None:
+                hit.append((d.path, field))
+                d = dataclasses.replace(d, **{field: v + (b"x" if isinstance(v, bytes) else 1)})
+            yield d
+    _second(monkeypatch, iter_dirents=changed)
+    assert compare(str(lp.base), str(lp.base))[0] is False, hit
+
+
+def test_compare_redirect_target(lp, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = swap_base_viewer.ZimReader.iter_dirents
+
+    def changed(self, *a, **k):
+        for d in real(self, *a, **k):
+            if d.is_redirect:
+                d = dataclasses.replace(d, target=d.target + 1)
+            yield d
+    _second(monkeypatch, iter_dirents=changed)
+    assert compare(str(lp.base), str(lp.base))[0] is False
+
+
+def test_compare_reads_every_namespace(lp, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = swap_base_viewer.ZimReader.blob_bytes
+    _second(monkeypatch, blob_bytes=lambda self, c, b: real(self, c, b) + b"!")
+    same, _n, differ = compare(str(lp.base), str(lp.base))
+    assert same and "Title" in differ, differ
+
+
+def test_compare_names_every_changed_item(tmp_path: Path) -> None:
+    pytest.importorskip("libzim")
+    from tests.langpack import lpzims
+    src, dst = tmp_path / "a.zim", tmp_path / "b.zim"
+    lpzims.write_base(src, slots={"index.html": b"<html>viewer-one</html>", "places.html": b"p",
+                                  "routing-worker.js": b"worker-one"})
+    data = bytearray(src.read_bytes())
+    for marker in (b"viewer-one", b"worker-one"):
+        at = data.find(marker)
+        assert at > 0 and data.count(marker) == 1
+        data[at] = ord("V")
+    dst.write_bytes(bytes(data))
+    same, _n, differ = compare(str(src), str(dst))
+    assert same and differ == ["index.html", "routing-worker.js"], differ
