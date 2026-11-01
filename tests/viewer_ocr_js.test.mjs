@@ -30,7 +30,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic };')();
+  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
@@ -784,6 +784,109 @@ ok('the Russian and Ukrainian types are written as the search folds them', () =>
     assert.ok(ws.length > 10);
     for (const w of ws) assert.strictEqual(norm(w), w, w);
   }
+});
+ok('Kyiv address plates: the type over the name and the number under them; the street again in Latin letters', () => {
+  const ln = (text, y, h, x = 100, w = 400) => ({ text, size: h, box: { x, y, width: w, height: h } });
+  const zh = street('Zhylianska Street', 'Жилянська вулиця');
+  const kind = (name, lines, recs = [zh]) => kinds([addr(name), ...recs], lines)[0].kind;
+  // an old plate: "ВУЛИЦЯ" over "ЖИЛЯНСЬКА", "58" under them
+  assert.strictEqual(kind('58 Жилянська вулиця', [ln('ВУЛИЦЯ', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), 'address');
+  // the type line away from the name, or a Latin one: the number is not the plate's
+  assert.notStrictEqual(kind('58 Жилянська вулиця', [ln('ВУЛИЦЯ', 100, 60), ln('ЖИЛЯНСЬКА', 400, 90), ln('58', 500, 120, 200, 120)]), 'address');
+  assert.notStrictEqual(kind('58 Zhylianska Street', [ln('STREET', 100, 60), ln('ZHYLIANSKA', 170, 90), ln('58', 270, 120, 200, 120)]), 'address');
+  assert.notStrictEqual(kind('58 Жилянська вулиця', [ln('STREET', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), 'address');
+  assert.notStrictEqual(kind('58 Жилянська вулиця', [ln('ВУЛИЦЯ', 170, 90, 900), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), 'address');
+  // what the plate claims as its number
+  const claim = (lines) => plate(lines).claim;
+  assert.strictEqual(claim([ln('ВУЛИЦЯ', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), '58');
+  assert.strictEqual(claim([ln('STREET', 100, 60), ln('ZHYLIANSKA', 170, 90), ln('58', 270, 120, 200, 120)]), '');
+  assert.strictEqual(claim([ln('STREET', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), '');
+  assert.strictEqual(claim([ln('ВУЛИЦЯ ХРЕЩАТИК', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), '');
+  // a line over the name with a type and a name of its own is another street's
+  assert.notStrictEqual(kind('58 Жилянська вулиця', [ln('ВУЛИЦЯ ХРЕЩАТИК', 100, 60), ln('ЖИЛЯНСЬКА', 170, 90), ln('58', 270, 120, 200, 120)]), 'address');
+  // today's plate: the street in Latin letters under it, with the neighbours' numbers, is no other town
+  const today = [ln('60 ВУЛ.ЖИЛЯНСЬКА', 100, 120, 50, 700), ln('76←→50 ZHYLIANSKA STR.', 240, 40, 50, 700)];
+  assert.strictEqual(kind('60 Жилянська вулиця', today), 'address');
+  // a house number with its letter: the same street
+  assert.strictEqual(kind('12-А Серпова вулиця', [ln('12-А ВУЛ. СЕРПОВА', 100, 120, 50, 700), ln('14←→10 SERPOVA STR.', 240, 40, 50, 700)],
+    [street('Serpova Street', 'Серпова вулиця')]), 'address');
+  // before the places are known (the search admitting addresses), the plate's address stays
+  const W2 = (x) => M._szSignWords(x, norm);
+  assert.notStrictEqual(L._szSignAddressKind(addr('60 Жилянська вулиця'), plate(today), W2, null), 'drop');
+  assert.notStrictEqual(L._szSignAddressKind(addr('10 Schulweg, Husum'), plate([{ text: 'Schulweg 10' }, { text: 'Husum' }]), W2, null), 'drop');
+  assert.notStrictEqual(L._szSignAddressKind(addr('32 вулиця Хрещатик'), plate([ln('ХРЕЩАТИК 32', 100, 120), ln('вУЛИЦЯ', 240, 60)]), W2, null), 'drop');
+  // ...when that street is among the places found; a line naming nothing found leaves it to check
+  assert.strictEqual(kind('60 Жилянська вулиця', today, []), 'similar');
+  // another street's plate in the photo is another street, not this one's other name
+  const sh = [ln('ПРОВУЛОК', 100, 60), ln('ТАРАСА ШЕВЧЕНКА', 170, 90), ln('5', 270, 120, 200, 120), ln('ВУЛ. ХРЕЩАТИК', 170, 90, 1200)];
+  const shStreets = [street('провулок Тараса Шевченка'), street('вулиця Тараса Шевченка'), street('вулиця Хрещатик')];
+  assert.notStrictEqual(kinds([addr('5 вулиця Тараса Шевченка'), ...shStreets], sh)[0].kind, 'address');
+  const gogol = [ln('ГОГОЛЯ', 100, 120), ln('ПЕРЕУЛОК', 230, 60), ln('7', 100, 180, 600, 120), ln('УЛ. ПУШКИНА', 170, 90, 1200)];
+  assert.notStrictEqual(kinds([addr('7 улица Гоголя'), street('улица Пушкина'), street('улица Гоголя')], gogol)[0].kind, 'address');
+  assert.strictEqual(kinds([addr('1121 Abbott Dr, Campbell'), street('Denver St'), street('Abbott Drive')],
+    [ln('1121', 100, 120), ln('Abbott Drive', 230, 80), ln('Denver', 400, 60)])[0].kind, 'similar');
+  // "STR." is a street on a plate
+  assert.deepStrictEqual(plate([{ text: 'ZHYLIANSKA STR.' }]).lines[0], ['zhylianska', 'street']);
+});
+ok('a Cyrillic or Greek word read by the Latin model as Latin letters: the reading in its own script, the Latin searched too', () => {
+  // as the reader answered on Kyiv's metro signs: the Latin model's reading first, every recognizer's with it
+  const it = (y, ...rs) => ({ text: rs[0][1], confidence: rs[0][2], script: rs[0][0], box: { x: 10 + (rs.x || 0), y, width: 400, height: 90 },
+    readings: rs.map(([script, text, confidence]) => ({ script, text, confidence })) });
+  const read = (...items) => L._szSignLineGroups(items).map((x) => [x.text, x.asRead]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'XPEATK', 0.88], ['Cyrl', 'ХРЕШАТИК', 0.84])), [['ХРЕШАТИК', 'XPEATK']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'MAAAH', 0.99], ['Cyrl', 'МАЙДАH', 0.62])), [['МАЙДАН', 'MAAAH']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'APCEHA入BHA', 0.92], ['Cyrl', 'APCEНАЛBHА', 0.49])), [['АРСЕНАЛВНА', 'APCEHA入BHA']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'AOHNA', 0.9], ['Grek', 'ΑΘΗΝΑ', 0.7])), [['ΑΘΗΝΑ', 'AOHNA']]);
+  // a third of the letters in the script is enough; a quarter is not
+  assert.deepStrictEqual(read(it(0, ['Latn', 'ABN', 0.9], ['Cyrl', 'ABЛ', 0.8])), [['АВЛ', 'ABN']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'ABCN', 0.9], ['Cyrl', 'ABCЛ', 0.8])), [['ABCN', '']]);
+  // a reading of look-alikes alone is never the script's own, whichever look-alike
+  const likes = { Cyrl: 'АВСЕНІЈКМОРЅТХУЬҺӀԚԜҮѴасеіјорѕхукьһԁӏԛԝүѵ', Grek: 'ΑΒΕΖΗΙΚΜΝΟΡΤΥΧϹαικνοτυχρηγωϲϳ' };
+  assert.deepStrictEqual(Object.keys(L.SZ_SIGN_OWN), Object.keys(likes));
+  for (const [script, like] of Object.entries(likes)) {
+    for (const c of like) assert.deepStrictEqual(read(it(0, ['Latn', 'Xyz', 0.9], [script, c + c + c, 0.9])), [['Xyz', '']], script + ' ' + c);
+  }
+  // exactly half as confident is enough; less is not
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TIAPK', 0.8], ['Cyrl', 'ПАРК', 0.4])), [['ПАРК', 'TIAPK']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TIAPK', 1], ['Cyrl', 'ПАРК', 0.48])), [['TIAPK', '']]);
+  // a word of look-alikes alone, read by the Cyrillic model as the same letters: Cyrillic, and as read
+  assert.deepStrictEqual(read(it(0, ['Latn', 'KOHTPAKTOBA', 1], ['Cyrl', 'КОНТРАКТОВА', 0.78])), [['КОНТРАКТОВА', 'KOHTPAKTOBA']]);
+  // ...which makes its line Cyrillic, a Latin word beside it too (as read, both are searched)
+  const beside = { ...it(0, ['Latn', 'TAXI', 0.95]), box: { x: 450, y: 0, width: 200, height: 90 } };
+  assert.deepStrictEqual(read(it(0, ['Latn', 'KOHTPAKTOBA', 1], ['Cyrl', 'КОНТРАКТОВА', 0.78]), beside), [['КОНТРАКТОВА ТАХІ', 'KOHTPAKTOBA TAXI']]);
+  // Latin text, which the Cyrillic model also reads in Latin letters, stays Latin
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TEREMKY', 1], ['Cyrl', 'TEREMKY', 0.98])), [['TEREMKY', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TAXI', 0.95], ['Cyrl', 'TAXI', 0.9])), [['TAXI', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'VASYLKIVSKA', 0.99], ['Cyrl', 'VASYLKVSKA', 0.73])), [['VASYLKIVSKA', '']]);
+  // ...and so does Latin text with a letter of it misread, or read in look-alikes alone
+  assert.deepStrictEqual(read(it(0, ['Latn', 'Teatralna', 0.98], ['Cyrl', 'Teatralпa', 0.85])), [['Teatralna', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'NOVUS', 0.97], ['Cyrl', 'ИOVUS', 0.6])), [['NOVUS', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'Coffee Shop', 0.97], ['Grek', 'Coffee Shoρ', 0.8])), [['Coffee Shop', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'Pub', 0.97], ['Cyrl', 'РuЬ', 0.8])), [['Pub', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TOP', 0.97], ['Grek', 'ΤΟρ', 0.8])), [['TOP', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'Pub', 0.97], ['Cyrl', 'Рuь', 0.8])), [['Pub', '']]);
+  // less than half as confident, another script, a box with no Latin letter, or the best reading not Latin: as before
+  assert.deepStrictEqual(read(it(0, ['Latn', 'BAMKC ToieG', 0.52], ['Cyrl', 'BОMКСAЙ', 0.2])), [['BAMKC ToieG', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'SALAM', 0.9], ['Arab', 'سلام', 0.8])), [['SALAM', '']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', '35', 0.95], ['Cyrl', 'З5', 0.6])).map((x) => x[0]), ['З 35']);
+  assert.deepStrictEqual(read(it(0, ['Latn', '山田', 0.98], ['Cyrl', 'ШП', 0.6])), [['山田', '']]);
+  assert.deepStrictEqual(read(it(0, ['Cyrl', 'ИПОДРОМ', 0.97], ['Latn', 'O', 0.55])), [['ИПОДРОМ', '']]);
+  assert.deepStrictEqual(read(it(0, ['Grek', 'ΠΑΡΚ', 0.9], ['Cyrl', 'ПАРК', 0.8])), [['ΠΑΡΚ', '']]);
+  assert.deepStrictEqual(read(it(0, ['Cyrl', 'АВТО', 0.9], ['Grek', 'ΑΦΤΟ', 0.7])), [['АВТО', '']]);
+  assert.deepStrictEqual(read(it(0, ['Cyrl', 'TAXI', 0.95], ['Grek', 'ΤΑΞΙ', 0.8])), [['TAXI', '']]);
+  // of two such readings, the more confident, whichever comes first
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TIAPK', 0.9], ['Grek', 'ΠΑΡΚ', 0.5], ['Cyrl', 'ПАРК', 0.8])), [['ПАРК', 'TIAPK']]);
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TIAPK', 0.9], ['Cyrl', 'ПАРК', 0.8], ['Grek', 'ΠΑΡΚ', 0.5])), [['ПАРК', 'TIAPK']]);
+  // a Greek word of look-alikes alone stays as read: only Cyrillic is searched both ways
+  assert.deepStrictEqual(read(it(0, ['Latn', 'KAI', 0.9], ['Grek', 'ΚΑΙ', 0.8])), [['KAI', '']]);
+  // a look-alike word the Cyrillic model read otherwise is not made Cyrillic
+  assert.deepStrictEqual(read(it(0, ['Latn', 'TAXI', 0.95], ['Cyrl', 'ТАХ', 0.9])), [['TAXI', '']]);
+  // the Cyrillic word on a line with the rest of the sign
+  assert.deepStrictEqual(read(it(0, ['Latn', 'BYANLA', 0.88], ['Cyrl', 'BYЛИЦЯ', 0.52]), it(100, ['Latn', 'COKAAbCbHA', 0.97], ['Cyrl', 'СОКАЛЬСЬКА', 0.92])),
+    [['ВУЛИЦЯ', 'BYANLA'], ['СОКАЛЬСЬКА', 'COKAAbCbHA']]);
+  // a name read in Latin look-alikes is still the name on the sign, as read
+  assert.strictEqual(kinds([{ n: 'OKKO', t: 'poi', a: 50.4, o: 30.5 }], [{ text: 'ОККО', asRead: 'OKKO' }])[0].kind, 'name');
+  assert.strictEqual(kinds([street('Teatralna Street')], [{ text: 'ТЕАТRАLNА SТRЕЕТ', asRead: 'TEATRALNA STREET' }])[0].kind, 'street');
 });
 ok('a Moscow plate framed with more wall: its house number, grouped with the row under the name, goes to the name', () => {
   const _szCyr = (t) => L._szSignCyrillic(t);

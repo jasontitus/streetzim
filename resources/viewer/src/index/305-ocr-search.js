@@ -45,6 +45,7 @@ function _szSignDigits(s) {
 }
 var SZ_SIGN_LETTER = /\p{L}/u;
 function _szSignCompose(it) {
+  it = _szSignOwnScript(it);
   var text = _szSignDigits(it.text).trim();
   if (!SZ_SIGN_LETTER.test(text) && /\d/.test(text)) {
     var words = null;
@@ -56,22 +57,50 @@ function _szSignCompose(it) {
     var w = whole.replace(/[\d\s.,:;'"()\-\u2013\u2014_\/\\]+/g, ' ').trim();
     if (w) return { text: w + ' ' + text, script: words.script };
   }
-  return { text: text, script: it.script };
+  return { text: text, script: it.script, cyr: it.cyr, read: it.read };
+}
+// The Latin model reads a Cyrillic or Greek word (in capitals above all) as
+// the Latin letters it has ("XPEATK" for ХРЕЩАТИК, "MAAAH" for МАЙДАН),
+// often more confidently than the Cyrillic model reads it right
+// ("ХРЕШАТИК", "МАЙДАH"). A reading of a box of Latin letters in such a
+// script, at least half as confident, a third of its letters or more in
+// that script and one of them a letter no Latin one looks like, is the
+// box's, and the Latin reading is searched too (`read`): that model reads
+// Latin text in Latin letters ("TEREMKY"), a letter of it misread now and
+// then ("Teatralпa"), which stays Latin. A word of look-alikes alone that
+// the Cyrillic model read as the same letters ("KOHTPAKTOBA",
+// "КОНТРАКТОВА") makes its line Cyrillic, and as read is searched too (`cyr`).
+var SZ_SIGN_OWN = { Cyrl: [/\p{Script=Cyrillic}/u, 'АВСЕНІЈКМОРЅТХУЬҺӀԚԜҮѴасеіјорѕхукьһԁӏԛԝүѵ'],
+                    Grek: [/\p{Script=Greek}/u, 'ΑΒΕΖΗΙΚΜΝΟΡΤΥΧϹαικνοτυχρηγωϲϳ'] };
+function _szSignOwnScript(it) {
+  if (it.script !== 'Latn' || !/\p{Script=Latin}/u.test(it.text)) return it;
+  var own = null, cyr = false, look = function (t) { return Array.from(t).map(function (c) { return SZ_SIGN_CYR[c] || c; }).join(''); };
+  (it.readings || []).forEach(function (r) {
+    var s = r && SZ_SIGN_OWN[r.script];
+    if (!s || !(r.confidence >= 0.5 * it.confidence)) return;
+    var letters = Array.from(r.text).filter(function (c) { return SZ_SIGN_LETTER.test(c); }), mine = letters.filter(function (c) { return s[0].test(c); });
+    if (mine.length * 3 >= letters.length && mine.some(function (c) { return s[1].indexOf(c) < 0; })) {
+      if (!own || r.confidence > own.confidence) own = r;
+    } else if (r.script === 'Cyrl' && mine.length && look(r.text) === look(it.text)) cyr = true;
+  });
+  if (own) return { text: own.text, confidence: it.confidence, script: own.script, readings: it.readings, box: it.box, read: it.text };
+  return cyr ? { text: it.text, confidence: it.confidence, script: it.script, readings: it.readings, box: it.box, cyr: true } : it;
 }
 // A Cyrillic reader gives Latin or Greek letters that look the same in a
 // Cyrillic word ("BYЛИЦЯ", "KPACИЛИBCЬKA", "YΛИЦА", "КОСbIГИНА"): in a word
 // with Cyrillic letters, or one made only of such look-alikes on a line
-// that is otherwise Cyrillic, they are read as the Cyrillic ones.
+// that is otherwise Cyrillic (or that CYRLINE says is), they are read as
+// the Cyrillic ones.
 var SZ_SIGN_CYR = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х',
                     Y: 'У', a: 'а', c: 'с', e: 'е', i: 'і', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к',
                     'Α': 'А', 'Β': 'В', 'Ε': 'Е', 'Η': 'Н', 'Ι': 'І', 'Κ': 'К', 'Μ': 'М', 'Ο': 'О', 'Ρ': 'Р',
                     'Τ': 'Т', 'Χ': 'Х', 'Υ': 'У', 'Λ': 'Л', 'Π': 'П', 'Φ': 'Ф', 'Γ': 'Г', 'Δ': 'Д' };
-function _szSignCyrillic(text, wordsOnly) {
+function _szSignCyrillic(text, wordsOnly, cyrLine) {
   var tokens = String(text).split(/(\s+)/);
   var cyr = function (w) { return /\p{Script=Cyrillic}/u.test(w); };
   var lookalike = function (w) { return /\p{L}/u.test(w) && Array.from(w).every(function (c) { return !/\p{L}/u.test(c) || SZ_SIGN_CYR[c]; }); };
   var words = tokens.filter(function (w) { return /\p{L}/u.test(w); });
-  var mostly = words.filter(cyr).length * 2 > words.length;
+  var mostly = cyrLine || words.filter(cyr).length * 2 > words.length;
   return tokens.map(function (w) {
     if (!(cyr(w) || (mostly && !wordsOnly && lookalike(w)))) return w;
     w = w.replace(/[bЬь][Il1|]/g, function (m) { return m.charAt(0) === 'ь' ? 'ы' : 'Ы'; });
@@ -86,7 +115,7 @@ function _szSignLineGroups(items) {
     return it && it.text && it.box && it.box.height > 0;
   }).map(function (it) {
     var c = _szSignCompose(it);
-    return { text: c.text, box: it.box, script: c.script, confidence: it.confidence };
+    return { text: c.text, box: it.box, script: c.script, confidence: it.confidence, cyr: c.cyr, read: c.read };
   }).filter(function (it) { return it.text; }).sort(function (a, b) {
     return (a.box.y + a.box.height / 2) - (b.box.y + b.box.height / 2);
   });
@@ -115,13 +144,14 @@ function _szSignLineGroups(items) {
   return lines.sort(function (a, b) { return a.y - b.y; }).map(function (L) {
     var rtl = L.items.filter(function (it) { return SZ_SIGN_RTL[it.script]; }).length * 2 > L.items.length;
     L.items.sort(function (a, b) { return rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
-    var text = '';
-    L.items.forEach(function (it, i) {
-      var t = String(it.text).trim();
-      if (i && !(SZ_SIGN_NOSPACE.test(text.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0)))) text += ' ';
-      text += t;
+    var text = '', seen = '', join = function (a, t) {
+      return a + (a && !(SZ_SIGN_NOSPACE.test(a.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0))) ? ' ' : '') + t;
+    };
+    L.items.forEach(function (it) {
+      text = join(text, String(it.text).trim());
+      seen = join(seen, String(it.read || it.text).trim());
     });
-    var cyrText = _szSignCyrillic(text), asRead = _szSignCyrillic(text, true);
+    var cyrText = _szSignCyrillic(text, false, L.items.some(function (it) { return it.cyr; })), asRead = _szSignCyrillic(seen, true);
     return { text: cyrText, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
              size: L.vertical ? L.width : L.height, asRead: asRead !== cyrText ? asRead : '' };
   });
@@ -246,7 +276,7 @@ function _szSignAddress(lines, tallest) {
 // Bahrain's "Avenue" and elsewhere a street. Russian and Ukrainian types as
 // one word each ("ул." and "вулиця" are "улица"; "узвіз" is "спуск", as old
 // Kyiv signs say it), as the search folds them (ї as і: "проізд").
-var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', avenue: 'avenue', ave: 'avenue',
+var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', str: 'street', avenue: 'avenue', ave: 'avenue',
                       av: 'avenue', lane: 'lane', ln: 'lane', drive: 'drive', dr: 'drive', boulevard: 'boulevard',
                       blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة',
                       'улица': 'улица', 'ул': 'улица', 'вулиця': 'улица', 'вул': 'улица',
@@ -347,6 +377,8 @@ function _szSignPlate(lines, words) {
     return { ws: plate.norm(words(L.text)), size: L.size || 0, box: L.box, text: String(L.text).trim() };
   });
   plate.lines = rows.map(function (r) { return r.ws; });
+  // each line as read, where it was read otherwise (in Latin look-alikes: "OKKO" for "ОККО")
+  plate.reads = ls.map(function (L) { return L.asRead ? plate.norm(words(L.asRead)) : null; });
   plate.texts = rows.map(function (r) { return r.text; });
   plate.sizes = rows.map(function (r) { return r.size; });
   // The street types the sign carries, in any line (a Russian plate's
@@ -377,7 +409,19 @@ function _szSignPlate(lines, words) {
         Math.min(C.x + C.width, A.x + A.width) - Math.max(C.x, A.x) > 0;
     });
   };
-  var street = function (r) { return r !== top && r.ws.some(plate.isType); };
+  // A street line: one with a type word, or a Cyrillic name with its type
+  // on a line of its own just over or under it (a Kyiv plate's "ВУЛИЦЯ"
+  // over "ЖИЛЯНСЬКА", its "58" under them).
+  var stacked = function (A, B) {
+    var over = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
+    var gap = Math.max(A.y, B.y) - Math.min(A.y + A.height, B.y + B.height);
+    return over >= 0.5 * Math.min(A.width, B.width) && gap < 0.5 * Math.max(A.height, B.height);
+  };
+  var street = function (r) {
+    return r !== top && (r.ws.some(plate.isType) || _szSignCyr(r.ws) && r.box && rows.some(function (t) {
+      return t.box && t.ws.length && t.ws.every(plate.isType) && _szSignCyr(t.ws) && stacked(t.box, r.box);
+    }));
+  };
   var onSpeedSign = rows.some(function (r) { return r.ws.some(function (w) { return speed.indexOf(w) >= 0; }); });
   plate.buildingSize = top ? top.size : 0;
   var claims = top && !onSpeedSign && (top.ws.length === 2 && plate.suffix.indexOf(top.ws[1]) >= 0 ||
@@ -549,6 +593,10 @@ function _szSignTownOk(rec, plate, words, used, places, pois) {
     var dy = (p.a - rec.a) * 111.2, dx = (p.o - rec.o) * 111.2 * Math.cos(rec.a * Math.PI / 180);
     return Math.sqrt(dx * dx + dy * dy) <= (SZ_SIGN_PLACE_KM[p.s] || 2);
   };
+  // the address's street by its other names
+  var parts = _szSignAddressParts(rec, plate, words);
+  var street = parts ? parts.rest.filter(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }).join(' ') : '';
+  var ownStreet = [].concat.apply([], ((pois && pois.streets) || []).filter(function (g) { return street && g.indexOf(street) >= 0; }));
   var confirmed = false, unknown = false;
   var conflict = plate.lines.some(function (L, i) {
     if (used.indexOf(L) >= 0 || SZ_SIGN_CONTACT.test(String(plate.texts[i] || ''))) return false;
@@ -578,7 +626,7 @@ function _szSignTownOk(rec, plate, words, used, places, pois) {
     }
     if (L.some(function (w) { return /^\d{4,6}$/.test(w); })) return true;              // a postcode line
     if (SZ_SIGN_TOWN_END.test(txtC) && Array.from(txtC).length <= 3) return true;   // 台中市, 中山區
-    if ((pois || []).some(function (k) { return k === txt || k === txtC; })) return false;
+    if ((pois || []).concat(ownStreet).some(function (k) { return k === txt || k === txtC; })) return false;
     unknown = true;
     return false;
   });
@@ -597,16 +645,24 @@ function _szSignPlaces(records, words) {
   });
 }
 // The map's other places among the records found (a hotel, a shop), their
-// names as folded words: a line naming one is not a town.
+// names as folded words: a line naming one is not a town. And in `streets`,
+// each street's names without their type or numbers: a line naming the
+// address's own street in another of them is not one either (a Kyiv plate's
+// "76←→50 ZHYLIANSKA STR." under "60 ВУЛ. ЖИЛЯНСЬКА"); another street's is.
 function _szSignPois(records, words) {
-  var keys = [];
+  var keys = [], streets = [], types = Object.keys(SZ_SIGN_TYPES).map(function (t) { return words(t)[0]; });
   records.forEach(function (it) {
-    if (!it || it.t !== 'poi') return;
+    if (!it || (it.t !== 'poi' && it.t !== 'street')) return;
+    var own = [];
     _szSignNames(it).forEach(function (nm) {
-      var k = words(nm).join(' ').replace(/臺/g, '台');
-      keys.push(k, k.replace(/ /g, ''));
+      var ws = words(nm);
+      if (it.t === 'street') ws = ws.filter(function (w) { return types.indexOf(w) < 0 && !_szSignIsNum(w); });
+      var k = ws.join(' ').replace(/臺/g, '台');
+      if (k) (it.t === 'poi' ? keys : own).push(k, k.replace(/ /g, ''));
     });
+    if (own.length) streets.push(own);
   });
+  keys.streets = streets;
   return keys;
 }
 // Whether an address may be the sign's, before its words are taken (a big
@@ -710,7 +766,7 @@ function _szSignKinds(matches, lines, words, all) {
     var area = it.t === 'place' || it.t === 'admin';
     return _szSignNames(it).some(function (n) {
       var ws = plate.norm(words(n));
-      return plate.lines.some(function (L) {
+      return plate.lines.concat(plate.reads.filter(Boolean)).some(function (L) {
         if (!L.some(function (w) { return !_szSignIsNum(w); })) return false;
         if (_szSignNameLine(L, ws, plate)) return true;
         var bare = L.filter(function (w) { return !_szSignIsNum(w) && units.indexOf(w) < 0; });
