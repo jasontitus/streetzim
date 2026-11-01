@@ -327,6 +327,8 @@ try {
   if (sameName && !errs.length) {
     // a photo of its own, given to Choose a photo's input (the last one's answer not taken for it)
     await p.evaluate(() => document.getElementById('ocr-sheet').setAttribute('data-sz-ocr', 'reading'));
+    // read on a short phone (an SE held upright, inside Kiwix): the buttons to tap are brought into sight
+    await p.setViewport({ width: 390, height: 560, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
     await drawPhoto(sameName, 6);
     const read = await p.waitForFunction(() => document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') === 'searched',
       { timeout: 180000 }).then(() => true, () => false);
@@ -339,6 +341,22 @@ try {
     if (!m.shown || m.n < 2) {
       errs.push(`"${sameName}" is found at several places but Map is ${m.shown ? 'for ' + m.n : 'not shown'} (field ${JSON.stringify(m.field)})`);
     } else {
+      // Map is the big button to tap, in sight; the answer is said, not
+      // offered, when it may not be the place (a similar name, places of the
+      // name far apart: data-kind); the sheet no longer says Searching…
+      await new Promise(r => setTimeout(r, 500));
+      const look = await p.evaluate(() => {
+        const b = document.getElementById('ocr-map'), v = document.getElementById('ocr-verdict'), r = b.getBoundingClientRect();
+        return { primary: b.classList.contains('primary'), h: Math.round(r.height), seen: r.top >= 0 && r.bottom <= innerHeight,
+                 results: document.getElementById('ocr-show').classList.contains('primary'), weak: v.classList.contains('weak'),
+                 unsure: v.hidden || ['several', 'similar'].indexOf(v.getAttribute('data-kind')) >= 0, kind: v.getAttribute('data-kind'),
+                 status: document.getElementById('ocr-status').textContent, searching: szT('search.searching', 'Searching…') };
+      });
+      if (!look.primary || look.results || look.h < 48 || !look.seen || look.weak !== look.unsure) {
+        errs.push(`Map for "${sameName}": Map ${look.primary ? '' : 'not '}filled, ${look.h} px, ${look.seen ? 'in' : 'out of'} sight; Results ${look.results ? '' : 'not '}filled; the answer (${look.kind}) ${look.weak ? 'said' : 'offered'}`);
+      }
+      if (look.status === look.searching) errs.push(`"${sameName}": the sheet still says ${JSON.stringify(look.status)} with the search done`);
+      await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       // The markers: each one's head and point under nothing floating over
       // the map (the search box and chips, the map's buttons and panels, the
       // attribution, a place's popup); under another marker is fine.
@@ -353,9 +371,12 @@ try {
                  list: getComputedStyle(document.getElementById('search-results')).display,
                  names: ms.map((el) => el.getAttribute('aria-label')) };
       });
+      const boxBefore = await p.evaluate(() => { const b = window.__szMap.getMaxBounds(); return b ? b.toArray().flat().map((v) => +v.toFixed(5)).join(',') : null; });
       // on a phone held sideways, where the search box and chips take a third of the height
       await p.setViewport({ width: 740, height: 390, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       await new Promise(r => setTimeout(r, 1000));
+      // the map turned (a two-finger twist): the fit faces north again, the box judged so
+      await p.evaluate(() => window.__szMap.setBearing(50));
       await p.click('#ocr-map');
       await new Promise(r => setTimeout(r, 2500));
       const on = await framed();
@@ -374,7 +395,9 @@ try {
       });
       const before = await p.evaluate(() => window.__szMap.getCenter().toArray());
       const tapped = await p.evaluate(() => { const el = document.querySelectorAll('.ocr-map-marker')[1]; el.click(); return el.getAttribute('aria-label'); });
-      await new Promise(r => setTimeout(r, 2500));
+      // the place's popup opens when the map stops: slow on a runner without a GPU
+      await p.waitForFunction((t) => ((document.querySelector('.maplibregl-popup') || {}).textContent || '').indexOf(t) >= 0,
+        { timeout: 15000 }, tapped).catch(() => {});
       const picked = await p.evaluate(() => ({
         center: window.__szMap.getCenter().toArray(),
         popup: (document.querySelector('.maplibregl-popup') || {}).textContent || '',
@@ -402,6 +425,10 @@ try {
         await new Promise(r => setTimeout(r, 2500));
         const f = await framed();
         if (f.inView !== f.markers) errs.push(`Map for "${sameName}" shown again: ${f.markers} markers (${f.inView} in view)`);
+        // a category left open goes: its pins and cards would bury them
+        if (await p.evaluate(() => !!document.querySelector('#find-chips .on') || !!document.getElementById('find-results-strip'))) {
+          errs.push(`Map for "${sameName}" shown again: the category picked before is still open`);
+        }
         return f.markers;
       };
       // shown again with the place just picked open beside them: its popup is put away
@@ -426,6 +453,14 @@ try {
         await p.keyboard.type('zz');
         if (await p.evaluate(() => document.querySelectorAll('.ocr-map-marker').length)) errs.push('the Map markers stayed after a new search');
       } else errs.push(`Map for "${sameName}": no markers the second time`);
+      // the field's x lets the photo go: the camera button a camera again
+      await p.evaluate(() => document.getElementById('search-clear').click());
+      if (await p.evaluate(() => document.getElementById('search-photo').classList.contains('has-last'))) {
+        errs.push("the search field's x left the photo on the camera button");
+      }
+      // the map's box, let go for places too far apart to fit in it, is back with them gone
+      const box = await p.evaluate(() => { const b = window.__szMap.getMaxBounds(); return b ? b.toArray().flat().map((v) => +v.toFixed(5)).join(',') : null; });
+      if (box !== boxBefore) errs.push(`Map for "${sameName}": the map's box is ${box} after, ${boxBefore} before`);
     }
   }
   const sheetErrors = pageErrors.filter(m => !/ResizeObserver/.test(m));

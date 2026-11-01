@@ -462,13 +462,22 @@
   #ocr-verdict .ocr-verdict-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
   /* While the photo shows, nothing covers it: the results open on "Results", the photo put away. */
   body.sz-photo #search-results, body.sz-photo #find-chips, body.sz-photo #find-search-area-btn { display: none !important; }
-  #ocr-show { flex: none; min-height: 32px; padding: 4px 12px; border-radius: 999px; border: 0; background: var(--accent, #2563eb);
-    color: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
-  #ocr-show[hidden] { display: none; }
-  #ocr-map { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 0; min-height: 36px; padding: 4px 14px;
-    border-radius: 999px; border: 1.5px solid var(--accent, #2563eb); background: transparent;
-    color: var(--accent, #2563eb); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
-  #ocr-map[hidden] { display: none; }
+  /* Under the answer, Map and Results, big. The filled one is the one to
+     tap: Map when places share the name, else Results when the answer is
+     not sure; an answer that may be wrong is said (.weak: no fill, a
+     smaller name), not offered. */
+  #ocr-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+    scroll-margin-bottom: calc(12px + min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px)); }
+  #ocr-show, #ocr-map {
+    flex: 1 1 0; min-width: 8em; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 8px 16px; border-radius: 12px; border: 2px solid var(--accent, #2563eb); background: transparent;
+    color: var(--accent, #2563eb); font: inherit; font-size: 18px; font-weight: 700; cursor: pointer;
+  }
+  #ocr-show.primary, #ocr-map.primary { background: var(--accent, #2563eb); color: #fff; }
+  #ocr-show[hidden], #ocr-map[hidden] { display: none; }
+  #ocr-verdict.weak { background: transparent; border-width: 0; border-inline-start-width: 4px; border-radius: 0; padding-block: 2px; }
+  #ocr-verdict.weak .ocr-verdict-name { font-size: 18px; }
+  #ocr-verdict.weak::after { opacity: 0.35; }
   .search-result-sign {
     display: block; margin-top: 3px; font-size: 11px; font-weight: 600; color: #92400e;
   }
@@ -1220,6 +1229,9 @@
   html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
   html.sz-dark #ocr-verdict { background: #3b2a0a; color: #fde68a; border-color: #b45309; }
   html.sz-dark #ocr-verdict[data-kind="address"] { background: #0f2e1a; color: #bbf7d0; border-color: #15803d; }
+  html.sz-dark #ocr-verdict.weak { background: transparent; }
+  /* the outlined buttons in the light accent, as other accent text on dark panels */
+  html.sz-dark #ocr-show:not(.primary), html.sz-dark #ocr-map:not(.primary) { color: #8ab4f8; border-color: #8ab4f8; }
   html.sz-dark .search-result-sign { color: #fbbf24; }
   html.sz-dark .search-result-sign[data-kind="address"] { color: #4ade80; }
   html.sz-dark #ocr-lines .ocr-line { background: rgba(35,38,45,0.96); color: #e8eaed; border-color: rgba(255,255,255,0.14); }

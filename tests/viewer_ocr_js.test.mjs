@@ -30,7 +30,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame };')();
+  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame, _szSignUnsure };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
@@ -807,6 +807,19 @@ ok("the results that share the answer's name, for Map: the answer first, then ea
   // nothing found, or the answer alone
   assert.deepStrictEqual(L._szSignSameName([], W), []);
   assert.deepStrictEqual(L._szSignSameName([found[5]], W), [0]);
+});
+
+ok('an answer that may not be the sign\'s place is said, not offered', () => {
+  // sure: the name as written (records of it close by are that place); an exact address; a street or an area
+  assert.strictEqual(L._szSignUnsure([{ kind: 'same' }]), false);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'address' }]), false);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'street', plate: true }]), false);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'area' }]), false);
+  // not: no answer, a similar name, or a name places far apart have too
+  assert.strictEqual(L._szSignUnsure([]), true);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'similar' }]), true);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'same', several: true }]), true);
+  assert.strictEqual(L._szSignUnsure([{ kind: 'address', several: true }]), true);
 });
 ok("Map's markers are framed clear of what floats over the map, each box kept off its cheapest side", () => {
   const b = (l, t, r, bo) => ({ left: l, top: t, right: r, bottom: bo });

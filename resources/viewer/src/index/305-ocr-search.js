@@ -829,6 +829,28 @@ function _szSignSameName(found, words) {
       keys(m.item).some(function (k) { return k0.indexOf(k) >= 0; }) ? i : -1;
   }).filter(function (i) { return i >= 0; });
 }
+
+// Whether a photo's answer may not be the sign's place (its kinds, from
+// _szSignKinds): no answer, a similar name, or a name places far apart have
+// too (`several`; records of the name close by, a station's entrances or
+// one street in pieces, are that place). Then the answer is said, not
+// offered (305's label: .weak).
+function _szSignUnsure(kinds) {
+  return !kinds.length || !!kinds[0].several || kinds[0].kind === 'similar';
+}
+
+// The lowest zoom at which a w x h screen, facing north, fits inside the box
+// `mb` (MapLibre zooms in to keep it there): its width or its height
+// filled, whichever needs more. In world pixels (512 at zoom 0), so the
+// map's bearing and pitch now do not count: the fit faces north.
+function _szInsideZoom(mb, w, h) {
+  var a = maplibregl.MercatorCoordinate.fromLngLat(mb.getNorthWest()),
+      b = maplibregl.MercatorCoordinate.fromLngLat(mb.getSouthEast());
+  var bw = Math.abs(b.x - a.x) * 512, bh = Math.abs(b.y - a.y) * 512;
+  if (!(bw > 0 && bh > 0)) return -Infinity;
+  return Math.max(Math.log(w / bw), Math.log(h / bh)) / Math.LN2;
+}
+
 // The map's margins (px) that keep markers clear of what floats over it
 // (the search box and chips, the map's buttons and panels, the
 // attribution), from their boxes in the map's own coordinates: each box
@@ -969,6 +991,7 @@ function initSignSearch(map, config) {
   var wholeBtn = document.getElementById('ocr-whole');
   var showBtn = document.getElementById('ocr-show');
   var mapBtn = document.getElementById('ocr-map');
+  var acts = document.getElementById('ocr-acts');
   var linesEl = document.getElementById('ocr-lines');
   var verdictEl = document.getElementById('ocr-verdict');
   var chooseBtn = document.getElementById('ocr-choose');
@@ -1166,14 +1189,17 @@ function initSignSearch(map, config) {
     // The tiles, opened since, emptied them: the lines read again, not the
     // search's joined ones ("366 116 طريق").
     showLines(last.raw || last.lines);
-    setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+    setStatus(szT('search.searching', 'Searching…'), 'lines');
     input.value = last.query;
     document.getElementById('search-clear').style.display = 'block';
     forgetVerdict();
-    var opts = signOpts(last.raw);
-    map._searchSign(last.lines, opts).then(function () {
-      if (opts.photo === photoSeq) sheet.setAttribute('data-sz-ocr', 'searched');
-    });
+    var opts = signOpts(last.raw), rs = readSeq;
+    // over, its answer shown or let go (the picker opened meanwhile): not
+    // "Searching…" for good; a photo read since has its own status
+    var done = function () {
+      if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+    };
+    map._searchSign(last.lines, opts).then(done, done);
   }
   // A new photo, as _szSignPickMode says: the two tiles (the camera off in
   // Kiwix on iOS), the note to drop or paste in Kiwix on macOS, or the
@@ -1428,10 +1454,12 @@ function initSignSearch(map, config) {
   // side, or two of the name across town. A tap on a marker goes to that
   // place, as its row does. They stay until another search or photo
   // (forgetVerdict).
-  var group = [], groupMarkers = [];
+  var group = [], groupMarkers = [], groupBounds = null;
   function clearGroup() {
     groupMarkers.forEach(function (m) { m.remove(); });
     groupMarkers = [];
+    // the map's box back (let go for them in showGroup)
+    if (groupBounds) { var mb = groupBounds; groupBounds = null; map.setMaxBounds(mb); }
   }
   function showGroup() {
     clearGroup();
@@ -1439,6 +1467,10 @@ function initSignSearch(map, config) {
     if (typeof searchMarker !== 'undefined' && searchMarker && searchMarker.getPopup() && searchMarker.getPopup().isOpen()) {
       searchMarker.togglePopup();
     }
+    // a category left open (its pins, its cards at the bottom), or still
+    // loading, would bury them
+    if (typeof _chipLoadSeq === 'number') _chipLoadSeq++;
+    if (typeof clearFindResults === 'function') clearFindResults();
     var w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
     group.forEach(function (g) {
       var mk = new maplibregl.Marker({ color: '#ea580c' }).setLngLat([g.lon, g.lat]).addTo(map);
@@ -1476,6 +1508,15 @@ function initSignSearch(map, config) {
     var opts = { duration: 1200, maxZoom: 16, padding: pad };
     var box = [[w, s], [e, n]], cam = null;
     try { cam = map.cameraForBounds(box, opts); } catch (err) { cam = null; }
+    // The map keeps the screen inside its box (_szMaxBounds), and a box
+    // wider than tall seen on a phone held upright is shown a slice at a
+    // time: places across town would not all fit. The box is let go while
+    // they show (clearGroup puts it back); past its edge the map is bare.
+    var mb = map.getMaxBounds && map.getMaxBounds();
+    if (cam && mb && cam.zoom < _szInsideZoom(mb, cw, ch) - 0.01) {
+      groupBounds = mb;
+      map.setMaxBounds(null);
+    }
     if (cam) map.fitBounds(box, opts);
     else map.flyTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 14, duration: 1200 });
   }
@@ -1633,6 +1674,17 @@ function initSignSearch(map, config) {
         clearGroup();
         mapBtn.hidden = group.length < 2;
         mapBtn.lastChild.textContent = szT('controls.map', 'Map') + ' (' + group.length + ')';
+        // Not sure: the answer is said, not offered, and the button to tap
+        // is Map, else Results.
+        var weak = _szSignUnsure(kinds);
+        verdictEl.classList.toggle('weak', weak);
+        mapBtn.classList.toggle('primary', !mapBtn.hidden);
+        showBtn.classList.toggle('primary', mapBtn.hidden && weak);
+        // on a short screen (a phone held sideways) they would be below the
+        // photo, out of sight: the sheet scrolls just enough to show them
+        if (!showBtn.hidden && !sheet.hidden) {
+          requestAnimationFrame(function () { if (!sheet.hidden && acts.scrollIntoView) acts.scrollIntoView({ block: 'nearest' }); });
+        }
         if (!kinds.length) { paint(lines); return true; }
         // Green only for an address that is the only one of its words.
         verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
@@ -1764,7 +1816,9 @@ function initSignSearch(map, config) {
         showZoomBar();
         return;
       }
-      setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+      // Searching until the map answers (seconds on a map streamed over the
+      // network): not a sheet that looks done with nothing found.
+      setStatus(szT('search.searching', 'Searching…'), 'lines');
       showZoomBar();
       showLines(lines);
       // Each line weighs as tall as its letters, against the sign's biggest.
@@ -1778,11 +1832,15 @@ function initSignSearch(map, config) {
       document.getElementById('search-clear').style.display = 'block';
       var opts = signOpts(lines);
       return map._searchSign(weighted, opts).then(function (found) {
-        if (opts.photo !== photoSeq || rs !== readSeq) return;   // let go meanwhile: its answer is not shown
+        if (rs !== readSeq) return;   // another photo or part since: its own status
+        if (opts.photo !== photoSeq) {   // let go meanwhile (the picker opened): its answer is not shown
+          setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+          return;
+        }
         var query = (found[0] && found[0].signLine) || biggest;
         input.value = query;
         keep(weighted, query, lines);
-        sheet.setAttribute('data-sz-ocr', 'searched');
+        setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
       });
     }).catch(function (err) { failed(err, rs); });
   }
@@ -1842,9 +1900,10 @@ function initSignSearch(map, config) {
   document.getElementById('ocr-close').addEventListener('click', function () {
     if (frame.hidden && last) reopen(); else discard();
   });
-  // A search typed, a line tapped or the field cleared: what follows is not the photo's.
+  // A search typed or a line tapped: what follows is not the photo's. The
+  // field's x clears the photo too: the camera button a camera again.
   input.addEventListener('input', forgetVerdict);
-  document.getElementById('search-clear').addEventListener('click', forgetVerdict);
+  document.getElementById('search-clear').addEventListener('click', discard);
   // A picked result flies the map there; the photo stays for the way back.
   resultsEl.addEventListener('click', function (ev) {
     if (!sheet.hidden && ev.target && ev.target.closest && ev.target.closest('.search-result')) hide();

@@ -155,8 +155,8 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    eye (for someone who cannot read the script), its other name (Latin,
    English) under it, and what it is (below); the lines it was found in
    are outlined on the photo, green for an exact address, amber else.
-   **Results**, in the head, opens the list from its top, the photo put
-   away: while the photo shows, no results or chips cover it. The search
+   **Results**, under the answer, opens the list from its top, the photo
+   put away: while the photo shows, no results or chips cover it. The search
    field holds the line the first one matched, as read: not the photo's
    other text (a status bar, a watermark). Tapping a line under the photo
    runs an ordinary search for it, the photo put away. When more than one
@@ -168,10 +168,21 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    layer panel, its name and the attribution, each kept off the side of
    the map that costs the least room (a column of buttons on the right, a
    row near the top of a short screen at the top), and a place's popup
-   left open put away: a metro station's entrances side by side, or two
-   places of the name across town. A tap on one (or Enter on it) goes to
-   it as its row does; they go with the next search or photo, a category,
-   or directions.
+   left open and a category's pins and cards put away: a metro station's
+   entrances side by side, or two places of the name across town. A tap
+   on one (or Enter on it) goes to it as its row does; they go with the
+   next search or photo, a category, or directions. Map and Results are
+   the big buttons under the answer; the filled one is the one to tap:
+   Map whenever it shows, else Results when the answer is not sure (a
+   similar name, or a name places far apart have too; records of the name
+   close by, a station's entrances, are that place). Such an answer is
+   said, not offered: no fill and a smaller name, so the sure-looking
+   card is not the thing to tap when it may be wrong. While the map is
+   searched for the lines read (seconds on a map streamed over the
+   network) the sheet says **Searching…**, not that it is done; on a short
+   screen the sheet scrolls just enough to show the buttons. The
+   search field's x lets the photo go too: the camera button is a camera
+   again.
 4. **Part of the photo.** Zoomed in, **Search this part** reads only
    the part shown, enlarged up to twice (1600 px at most on its longest
    side), from a canvas of its own, and searches it as a photo of that part

@@ -787,13 +787,18 @@ html[dir="rtl"] #ocr-verdict::after { content: '\2039'; }
 #ocr-verdict .ocr-verdict-several, #ocr-verdict .ocr-verdict-where { display: block; margin-top: 3px; }
 #ocr-verdict .ocr-verdict-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 body.sz-photo #search-results, body.sz-photo #find-chips, body.sz-photo #find-search-area-btn { display: none !important; }
-#ocr-show { flex: none; min-height: 32px; padding: 4px 12px; border-radius: 999px; border: 0; background: var(--accent, #2563eb);
-color: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
-#ocr-show[hidden] { display: none; }
-#ocr-map { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 0; min-height: 36px; padding: 4px 14px;
-border-radius: 999px; border: 1.5px solid var(--accent, #2563eb); background: transparent;
-color: var(--accent, #2563eb); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
-#ocr-map[hidden] { display: none; }
+#ocr-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+scroll-margin-bottom: calc(12px + min(var(--bottom-inset, 0px), 64px) + var(--safe-bottom, 0px)); }
+#ocr-show, #ocr-map {
+flex: 1 1 0; min-width: 8em; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+padding: 8px 16px; border-radius: 12px; border: 2px solid var(--accent, #2563eb); background: transparent;
+color: var(--accent, #2563eb); font: inherit; font-size: 18px; font-weight: 700; cursor: pointer;
+}
+#ocr-show.primary, #ocr-map.primary { background: var(--accent, #2563eb); color: #fff; }
+#ocr-show[hidden], #ocr-map[hidden] { display: none; }
+#ocr-verdict.weak { background: transparent; border-width: 0; border-inline-start-width: 4px; border-radius: 0; padding-block: 2px; }
+#ocr-verdict.weak .ocr-verdict-name { font-size: 18px; }
+#ocr-verdict.weak::after { opacity: 0.35; }
 .search-result-sign {
 display: block; margin-top: 3px; font-size: 11px; font-weight: 600; color: #92400e;
 }
@@ -1445,6 +1450,8 @@ box-shadow: 0 2px 6px rgba(0,0,0,0.45);
 html.sz-dark #find-chips .find-chip:not(.on):hover { background: #2e323a; }
 html.sz-dark #ocr-verdict { background: #3b2a0a; color: #fde68a; border-color: #b45309; }
 html.sz-dark #ocr-verdict[data-kind="address"] { background: #0f2e1a; color: #bbf7d0; border-color: #15803d; }
+html.sz-dark #ocr-verdict.weak { background: transparent; }
+html.sz-dark #ocr-show:not(.primary), html.sz-dark #ocr-map:not(.primary) { color: #8ab4f8; border-color: #8ab4f8; }
 html.sz-dark .search-result-sign { color: #fbbf24; }
 html.sz-dark .search-result-sign[data-kind="address"] { color: #4ade80; }
 html.sz-dark #ocr-lines .ocr-line { background: rgba(35,38,45,0.96); color: #e8eaed; border-color: rgba(255,255,255,0.14); }
@@ -1752,7 +1759,6 @@ arm();
 <div id="ocr-sheet" hidden role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="ocr-status">
   <div class="ocr-head">
     <span id="ocr-status" aria-live="polite"></span>
-    <button id="ocr-show" type="button" hidden></button>
     <button id="ocr-again" type="button" title="Search with a photo" data-i18n-title="search.photo"
             aria-label="Search with a photo" data-i18n-aria-label="search.photo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
     <button id="ocr-close" type="button" title="Close" data-i18n-title="common.close">&times;</button>
@@ -1768,7 +1774,10 @@ arm();
     <button id="ocr-whole" type="button" style="visibility:hidden" data-i18n="search.photo_whole">Whole photo</button>
   </div>
   <div id="ocr-verdict" hidden aria-live="polite"></div>
-  <button id="ocr-map" type="button" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg><span></span></button>
+  <div id="ocr-acts">
+    <button id="ocr-map" type="button" hidden><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg><span></span></button>
+    <button id="ocr-show" type="button" hidden></button>
+  </div>
   <div id="ocr-lines"></div>
 </div>
 <div id="search-container">
@@ -4383,7 +4392,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'a8df35db';
+var SZ_VIEWER_BUILD = '3a7d0bc1';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8634,6 +8643,16 @@ return m && m.item && (m.item.t === 'addr') === (top.t === 'addr') &&
 keys(m.item).some(function (k) { return k0.indexOf(k) >= 0; }) ? i : -1;
 }).filter(function (i) { return i >= 0; });
 }
+function _szSignUnsure(kinds) {
+return !kinds.length || !!kinds[0].several || kinds[0].kind === 'similar';
+}
+function _szInsideZoom(mb, w, h) {
+var a = maplibregl.MercatorCoordinate.fromLngLat(mb.getNorthWest()),
+b = maplibregl.MercatorCoordinate.fromLngLat(mb.getSouthEast());
+var bw = Math.abs(b.x - a.x) * 512, bh = Math.abs(b.y - a.y) * 512;
+if (!(bw > 0 && bh > 0)) return -Infinity;
+return Math.max(Math.log(w / bw), Math.log(h / bh)) / Math.LN2;
+}
 function _szSignClearFrame(w, h, boxes) {
 var pad = { top: 0, right: 0, bottom: 0, left: 0 };
 (boxes || []).forEach(function (r) {
@@ -8724,6 +8743,7 @@ var partBtn = document.getElementById('ocr-part');
 var wholeBtn = document.getElementById('ocr-whole');
 var showBtn = document.getElementById('ocr-show');
 var mapBtn = document.getElementById('ocr-map');
+var acts = document.getElementById('ocr-acts');
 var linesEl = document.getElementById('ocr-lines');
 var verdictEl = document.getElementById('ocr-verdict');
 var chooseBtn = document.getElementById('ocr-choose');
@@ -8879,14 +8899,15 @@ if (!fit) resetView();
 pickRow.hidden = true;
 againBtn.hidden = false;
 showLines(last.raw || last.lines);
-setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+setStatus(szT('search.searching', 'Searching…'), 'lines');
 input.value = last.query;
 document.getElementById('search-clear').style.display = 'block';
 forgetVerdict();
-var opts = signOpts(last.raw);
-map._searchSign(last.lines, opts).then(function () {
-if (opts.photo === photoSeq) sheet.setAttribute('data-sz-ocr', 'searched');
-});
+var opts = signOpts(last.raw), rs = readSeq;
+var done = function () {
+if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+};
+map._searchSign(last.lines, opts).then(done, done);
 }
 function pick() {
 forgetVerdict();
@@ -9105,16 +9126,19 @@ readPart(_szSignPartOf(_szSignVisible(view, f.w, f.h, fit, canvas.width, canvas.
 });
 wholeBtn.addEventListener('click', function () { if (photo) { resetView(); readPart(WHOLE); } });
 showBtn.addEventListener('click', function () { hide(); btn.focus({ preventScroll: true }); });
-var group = [], groupMarkers = [];
+var group = [], groupMarkers = [], groupBounds = null;
 function clearGroup() {
 groupMarkers.forEach(function (m) { m.remove(); });
 groupMarkers = [];
+if (groupBounds) { var mb = groupBounds; groupBounds = null; map.setMaxBounds(mb); }
 }
 function showGroup() {
 clearGroup();
 if (typeof searchMarker !== 'undefined' && searchMarker && searchMarker.getPopup() && searchMarker.getPopup().isOpen()) {
 searchMarker.togglePopup();
 }
+if (typeof _chipLoadSeq === 'number') _chipLoadSeq++;
+if (typeof clearFindResults === 'function') clearFindResults();
 var w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
 group.forEach(function (g) {
 var mk = new maplibregl.Marker({ color: '#ea580c' }).setLngLat([g.lon, g.lat]).addTo(map);
@@ -9149,6 +9173,11 @@ var pad = { top: clear.top + 50, bottom: clear.bottom + 8, left: clear.left + 20
 var opts = { duration: 1200, maxZoom: 16, padding: pad };
 var box = [[w, s], [e, n]], cam = null;
 try { cam = map.cameraForBounds(box, opts); } catch (err) { cam = null; }
+var mb = map.getMaxBounds && map.getMaxBounds();
+if (cam && mb && cam.zoom < _szInsideZoom(mb, cw, ch) - 0.01) {
+groupBounds = mb;
+map.setMaxBounds(null);
+}
 if (cam) map.fitBounds(box, opts);
 else map.flyTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 14, duration: 1200 });
 }
@@ -9280,6 +9309,13 @@ return { idx: i, lat: +it.a, lon: +it.o, name: szFirstName(_szShownNames(it, SZ_
 clearGroup();
 mapBtn.hidden = group.length < 2;
 mapBtn.lastChild.textContent = szT('controls.map', 'Map') + ' (' + group.length + ')';
+var weak = _szSignUnsure(kinds);
+verdictEl.classList.toggle('weak', weak);
+mapBtn.classList.toggle('primary', !mapBtn.hidden);
+showBtn.classList.toggle('primary', mapBtn.hidden && weak);
+if (!showBtn.hidden && !sheet.hidden) {
+requestAnimationFrame(function () { if (!sheet.hidden && acts.scrollIntoView) acts.scrollIntoView({ block: 'nearest' }); });
+}
 if (!kinds.length) { paint(lines); return true; }
 verdictEl.setAttribute('data-kind', kinds[0].several ? 'several' : kinds[0].kind);
 var r0 = found[0].item, big = r0.nn || r0.n, nameEl = document.createElement('span');
@@ -9391,7 +9427,7 @@ setStatus(szT('search.photo_none', 'No text found in the photo'), 'none');
 showZoomBar();
 return;
 }
-setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'lines');
+setStatus(szT('search.searching', 'Searching…'), 'lines');
 showZoomBar();
 showLines(lines);
 var tallest = Math.max.apply(null, lines.map(function (L) { return L.size; }));
@@ -9401,11 +9437,15 @@ input.value = biggest;
 document.getElementById('search-clear').style.display = 'block';
 var opts = signOpts(lines);
 return map._searchSign(weighted, opts).then(function (found) {
-if (opts.photo !== photoSeq || rs !== readSeq) return;
+if (rs !== readSeq) return;
+if (opts.photo !== photoSeq) {
+setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+return;
+}
 var query = (found[0] && found[0].signLine) || biggest;
 input.value = query;
 keep(weighted, query, lines);
-sheet.setAttribute('data-sz-ocr', 'searched');
+setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
 });
 }).catch(function (err) { failed(err, rs); });
 }
@@ -9457,7 +9497,7 @@ document.getElementById('ocr-close').addEventListener('click', function () {
 if (frame.hidden && last) reopen(); else discard();
 });
 input.addEventListener('input', forgetVerdict);
-document.getElementById('search-clear').addEventListener('click', forgetVerdict);
+document.getElementById('search-clear').addEventListener('click', discard);
 resultsEl.addEventListener('click', function (ev) {
 if (!sheet.hidden && ev.target && ev.target.closest && ev.target.closest('.search-result')) hide();
 });
