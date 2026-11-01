@@ -92,9 +92,19 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    number between its words whole ("خیابان ۱۵ خرداد", "Via 4 Novembre"). On
    a line most of whose words with letters are Cyrillic it must overlap one
    of those words instead, so a house number two rows tall beside a Moscow
-   plate's name does not glue the row under the name to it. A box of two
-   letters or more at least 1.5 times as tall as wide is a vertical line of
-   its own. A Cyrillic recognizer may give Latin or Greek letters that look
+   plate's name does not glue the row under the name to it. Framed with
+   more wall, that number may still sit low enough to join the row under
+   the name ("КОСЫГИНА" / "2 18 УЛИЦА"). A house number alone ("2", "7А",
+   "7/2") starting a line whose other words are all Cyrillic street types
+   (read as the search reads them, one letter misread at most) or numbers
+   then goes to a line above those words that starts where they do (within
+   half its tallest box), whose tallest box is at least 0.8 times their
+   tallest and at most 1⅔ times the number's height, wholly right of the
+   number and reaching below its top, not upright, of mostly Cyrillic
+   words, without numbers and with a Cyrillic word other than a type:
+   "2 КОСЫГИНА" / "18 УЛИЦА"; of several such lines, the lowest. A line
+   naming the street ("22 ВУЛИЦЯ ХРЕЩАТИК") keeps its number. A box of two letters or more at least 1.5 times as tall as
+   wide is a vertical line of its own. A Cyrillic recognizer may give Latin or Greek letters that look
    the same ("BYЛИЦЯ", "КОСbIГИНА"): in a word with Cyrillic letters, or a
    word of such look-alikes alone on a line most of whose words are
    Cyrillic, they are read as the Cyrillic ones; the search also looks for

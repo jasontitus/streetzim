@@ -116,6 +116,27 @@ function tokens(src) {
   return ast.tokens.map((t) => t.type + " " + t.value);
 }
 const srcScripts = inlineScripts(parts.map((p) => p.text).join(""));
+// A page's classic scripts share one global scope, where a second top-level
+// function or var of a name replaces the first for every caller, silently
+// (no-redeclare is off, above): each name is declared once per page.
+for (const [page, scripts] of [["index.html", srcScripts],
+  ["places.html", inlineScripts(readFileSync(join(VIEWER, "places.html"), "utf8"))],
+  ["routing-worker.js", [readFileSync(join(VIEWER, "routing-worker.js"), "utf8")]],
+  ["ocr-worker.js", [readFileSync(join(VIEWER, "ocr-worker.js"), "utf8")]]]) {
+  const seen = new Set();
+  for (const s of scripts) {
+    let body = [];
+    try { body = espree.parse(s, { ecmaVersion: "latest", sourceType: "script" }).body; } catch (e) { /* ESLint reported it */ }
+    for (const n of body) {
+      const names = n.type === "VariableDeclaration" ? n.declarations.map((d) => d.id.name).filter(Boolean)
+        : (n.type === "FunctionDeclaration" || n.type === "ClassDeclaration") ? [n.id.name] : [];
+      for (const name of names) {
+        if (seen.has(name)) { console.log(`${page}: ${name} is declared twice`); problems++; }
+        seen.add(name);
+      }
+    }
+  }
+}
 // The built file names itself (SZ_VIEWER_BUILD, tools/build_viewer.py); the parts leave it empty.
 const builtScripts = inlineScripts(readFileSync(join(VIEWER, "index.html"), "utf8")
   .replace(/var SZ_VIEWER_BUILD = '[0-9a-f]{8}';/, "var SZ_VIEWER_BUILD = '';"));

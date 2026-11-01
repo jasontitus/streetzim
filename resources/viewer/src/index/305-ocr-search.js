@@ -101,24 +101,17 @@ function _szSignLineGroups(items) {
       // "КОСЫГИНА" over "18 ◂ УЛИЦА") does not glue the rows together.
       // Elsewhere beside the line's outline, which keeps a tilted line with
       // a number between its words whole ("خیابان ۱۵ خرداد", "Via 4 Novembre").
-      var lettered = L.items.filter(function (o) { return SZ_SIGN_LETTER.test(o.text); });
-      var cyr = lettered.filter(function (o) { return /\p{Script=Cyrillic}/u.test(o.text); }).length * 2 > lettered.length;
-      var beside = (cyr ? lettered : [{ box: L }]).some(function (o) {
+      var beside = (_szSignCyrWords(L.items) || [{ box: L }]).some(function (o) {
         var overlap = Math.min(o.box.y + o.box.height, b.y + b.height) - Math.max(o.box.y, b.y);
         return overlap >= 0.5 * Math.min(o.box.height, b.height);
       });
       if (beside) line = L;
     }
-    if (!line) {
-      line = { x: b.x, y: b.y, width: b.width, height: b.height, items: [], vertical: vertical, tallest: b.height };
-      lines.push(line);
-    } else {
-      var x2 = Math.max(line.x + line.width, b.x + b.width), y2 = Math.max(line.y + line.height, b.y + b.height);
-      line.x = Math.min(line.x, b.x); line.y = Math.min(line.y, b.y);
-      line.width = x2 - line.x; line.height = y2 - line.y; line.tallest = Math.max(line.tallest, b.height);
-    }
+    if (!line) lines.push(line = { items: [], vertical: vertical });
     line.items.push(it);
+    _szSignOutline(line);
   });
+  _szSignHouseNumber(lines);
   return lines.sort(function (a, b) { return a.y - b.y; }).map(function (L) {
     var rtl = L.items.filter(function (it) { return SZ_SIGN_RTL[it.script]; }).length * 2 > L.items.length;
     L.items.sort(function (a, b) { return rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
@@ -132,6 +125,58 @@ function _szSignLineGroups(items) {
     return { text: cyrText, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
              size: L.vertical ? L.width : L.height, asRead: asRead !== cyrText ? asRead : '' };
   });
+}
+// A line's words with letters when most of them are Cyrillic.
+function _szSignCyrWords(items) {
+  var lettered = items.filter(function (o) { return SZ_SIGN_LETTER.test(o.text); });
+  return lettered.filter(function (o) { return /\p{Script=Cyrillic}/u.test(o.text); }).length * 2 > lettered.length ? lettered : null;
+}
+// A Moscow plate's house number beside the street's name, grouped with the
+// row under the name ("2 18 ◂ УЛИЦА" under "КОСЫГИНА": the plate framed with
+// more wall, its "2" a little low). A house number alone ("2", "7А", "7/2")
+// starting a row whose other words are all Cyrillic street types (one letter
+// misread at most, as the search reads them) or numbers goes to a line above
+// those words that starts where they do, at least 0.8 times as tall as their
+// tallest and at most 1⅔ times as tall as the number, wholly right of it,
+// reaching below its top, of mostly Cyrillic words without numbers with a
+// Cyrillic word other than a type: "2 КОСЫГИНА", "18 УЛИЦА". Of several such
+// lines, the nearest. A row naming the street, a second plate or a sign
+// beside, a type above the name, a district over it, small print and a
+// shop's board stay as read.
+function _szSignHouseNumber(lines) {
+  var words = function (items) {
+    return _szSignCyrillic(items.map(function (i) { return i.text; }).join(' ')).toLowerCase().replace(/ї/g, 'і')
+      .split(/[^\p{L}\d\/]+/u).filter(function (w) { return w; });
+  };
+  var types = Object.keys(SZ_SIGN_TYPES).filter(_szSignCyr);
+  var type = function (w) {
+    return types.indexOf(w) >= 0 || (Array.from(w).length >= 5 && types.some(function (t) { return Array.from(t).length >= 5 && _szSignOneEdit(t, w); }));
+  };
+  lines.forEach(function (B) {
+    var n = B.items.slice().sort(function (a, b) { return a.box.x - b.box.x; })[0], o = n.box;
+    var rest = B.items.filter(function (i) { return i !== n; }), rw = words(rest);
+    var at = function (k, f) { return Math[f].apply(null, rest.map(function (i) { return k(i.box); })); };
+    var x = at(function (b) { return b.x; }, 'min'), y = at(function (b) { return b.y; }, 'min'), h = at(function (b) { return b.height; }, 'max');
+    if (!/^\d+(\/\d+)?\p{L}?$/u.test(n.text.trim()) || !rw.length || !rw.every(function (w) { return /\d/.test(w) || type(w); })) return;
+    var A = lines.filter(function (a) {
+      var w = words(a.items);
+      return a !== B && !a.vertical && a.y < y && Math.abs(a.x - x) <= 0.5 * a.tallest && o.height >= 0.6 * a.tallest &&
+        a.tallest >= 0.8 * h && o.x + o.width <= a.x && o.y < a.y + a.height && _szSignCyrWords(a.items) &&
+        !/\d/.test(w.join('')) && w.some(function (v) { return _szSignCyr(v) && !type(v); });
+    }).sort(function (a, b) { return b.y - a.y; })[0];
+    if (!A) return;
+    B.items.splice(B.items.indexOf(n), 1);
+    A.items.push(n);
+    _szSignOutline(A); _szSignOutline(B);
+  });
+}
+// A line's outline round its boxes; its tallest box.
+function _szSignOutline(L) {
+  var m = function (f, k) { return Math[f].apply(null, L.items.map(function (i) { return k(i.box); })); };
+  L.x = m('min', function (b) { return b.x; }); L.y = m('min', function (b) { return b.y; });
+  L.width = m('max', function (b) { return b.x + b.width; }) - L.x;
+  L.height = m('max', function (b) { return b.y + b.height; }) - L.y;
+  L.tallest = m('max', function (b) { return b.height; });
 }
 // The lines the search looks for, each weighing as tall as its letters
 // against the sign's biggest; a line whose words of look-alike letters alone

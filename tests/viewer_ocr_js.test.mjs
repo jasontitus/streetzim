@@ -785,6 +785,83 @@ ok('the Russian and Ukrainian types are written as the search folds them', () =>
     for (const w of ws) assert.strictEqual(norm(w), w, w);
   }
 });
+ok('a Moscow plate framed with more wall: its house number, grouped with the row under the name, goes to the name', () => {
+  const _szCyr = (t) => L._szSignCyrillic(t);
+  const box = (text, x, y, w, h) => ({ text, box: { x, y, width: w, height: h }, confidence: 0.9 });
+  // as read with the plate framed with more wall: the "2" a little low, level with the row under the name
+  const read = [box('КОСЫГИНА', 647, 575, 552, 170), box('18 УЛИЦА', 656, 700, 410, 115), box('2', 408, 678, 133, 146)];
+  assert.deepStrictEqual(L._szSignLineGroups(read).map((x) => x.text), ['2 КОСЫГИНА', '18 УЛИЦА']);
+  // each line outlined round its boxes again
+  assert.deepStrictEqual(L._szSignLineGroups(read).map((x) => x.box), [{ x: 408, y: 575, width: 791, height: 249 }, { x: 656, y: 700, width: 410, height: 115 }]);
+  assert.strictEqual(kinds([addr('2 улица Косыгина', 55.70, 37.56)], [{ text: '2 КОСЫГИНА' }, { text: '18 УЛИЦА' }])[0].kind, 'address');
+  // read lower still, after the row's words
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], read[1], box('2', 408, 700, 133, 146)]).map((x) => x.text), ['2 КОСЫГИНА', '18 УЛИЦА']);
+  // the house number not read at all: the neighbour's "18", under the name, stays where it is
+  assert.deepStrictEqual(L._szSignLineGroups(read.slice(0, 2)).map((x) => x.text), ['КОСЫГИНА', '18 УЛИЦА']);
+  // a number overlapping the name across, not level with it, beside a line with a number, or not Cyrillic: nothing moves
+  const at = (t, x, y) => L._szSignLineGroups([box(t[0], 647, 575, 552, 170), box('18 УЛИЦА', 656, 700, 410, 115), box('2', x, y, 133, 146)]).map((v) => v.text);
+  assert.deepStrictEqual(at(['КОСЫГИНА'], 560, 678), ['КОСЫГИНА', '2 18 УЛИЦА']);
+  assert.deepStrictEqual(at(['КОСЫГИНА'], 408, 750), ['КОСЫГИНА', '2 18 УЛИЦА']);
+  assert.deepStrictEqual(at(['КОСЫГИНА 5'], 408, 678), ['КОСЫГИНА 5', '2 18 УЛИЦА']);
+  assert.deepStrictEqual(L._szSignLineGroups([box('MAIN', 647, 575, 552, 170), box('18 STREET', 656, 700, 410, 115), box('2', 408, 678, 133, 146)]).map((x) => x.text), ['MAIN', '2 18 STREET']);
+  // a house number with its letter or after a slash moves too
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], read[1], box('7А', 408, 678, 133, 146)]).map((x) => x.text), ['7А КОСЫГИНА', '18 УЛИЦА']);
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], read[1], box('7/2', 408, 678, 133, 146)]).map((x) => x.text), ['7/2 КОСЫГИНА', '18 УЛИЦА']);
+  // the number already beside the name stays there, not moved to the row under it, nor to a line above
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], box('2', 408, 640, 133, 146), box('УЛИЦА', 850, 700, 250, 115)]).map((x) => x.text), ['2 КОСЫГИНА', 'УЛИЦА']);
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], box('5', 1210, 580, 100, 160), box('2', 408, 640, 133, 146), box('УЛИЦА', 850, 700, 250, 115)]).map((x) => x.text), ['2 КОСЫГИНА 5', 'УЛИЦА']);
+  // nor to an upright word beside it
+  assert.deepStrictEqual(L._szSignLineGroups([box('ЛЕНИНА', 600, 560, 60, 200), box('2', 408, 678, 133, 146), box('18', 560, 690, 120, 130)]).map((x) => x.text), ['ЛЕНИНА', '2 18']);
+  // words read with a number are not a house number
+  assert.deepStrictEqual(L._szSignLineGroups([box('КОСЫГИНА', 760, 575, 552, 170), box('18 УЛИЦА', 408, 690, 300, 115), box('20', 780, 700, 100, 115)]).map((x) => x.text), ['КОСЫГИНА', '18 УЛИЦА 20']);
+  // a small number on a line of its own stays on it
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], read[1], box('2', 560, 640, 40, 40)]).map((x) => x.text), ['КОСЫГИНА', '2', '18 УЛИЦА']);
+  // the row may be the type alone, abbreviated or read with Latin look-alikes, or the neighbour's number alone;
+  // with two name lines above, the nearest
+  for (const row of ['УЛИЦА', 'УЛ.', 'YЛИЦA', '18']) {
+    assert.deepStrictEqual(L._szSignLineGroups([read[0], box(row, 656, 700, 300, 115), read[2]]).map((x) => x.text), ['2 КОСЫГИНА', _szCyr(row)], row);
+  }
+  assert.deepStrictEqual(L._szSignLineGroups([read[0], box('STREET', 656, 700, 300, 115), read[2]]).map((x) => x.text), ['КОСЫГИНА', '2 STREET']);
+  // read as the search reads types: ї as і, punctuation, one letter misread (of a long type only: "ВОЛ" is a name)
+  for (const [name, row] of [['ЛЕБЕДЄВА', 'ПРОЇЗД'], ['ЛЕБЕДЄВА', 'ПРОЇЗЛ'], ['КОСЫГИНА', 'УЛ,'], ['КОСЫГИНА', '18 УЛУЦА'], ['ВОЛ', 'УЛИЦА']]) {
+    assert.deepStrictEqual(L._szSignLineGroups([box(name, 647, 575, 552, 170), box(row, 656, 700, 300, 115), read[2]]).map((x) => x.text), [`2 ${name}`, row], row);
+  }
+  // a Kyiv plate: the name over the type, the number low beside the type
+  assert.deepStrictEqual(L._szSignLineGroups([box('ХРЕЩАТИК', 560, 490, 600, 150), box('ВУЛИЦЯ', 566, 620, 300, 100), box('22', 300, 600, 220, 160)]).map((x) => x.text), ['22 ХРЕЩАТИК', 'ВУЛИЦЯ']);
+  // small print between the name and the row is not the name
+  for (const y of [650, 684]) {
+    assert.deepStrictEqual(L._szSignLineGroups([...read, box('БЫВШ. ГУБКИНА', 650, y, 300, 40)]).map((x) => x.text).filter((t) => t !== 'БЫВШ. ГУБКИНА'), ['2 КОСЫГИНА', '18 УЛИЦА'], String(y));
+  }
+  assert.deepStrictEqual(L._szSignLineGroups([box('МОСКВА', 647, 400, 500, 100), box('КОСЫГИНА', 647, 520, 552, 100), box('18 УЛИЦА', 656, 640, 410, 115), box('2', 408, 480, 133, 260)]).map((x) => x.text), ['МОСКВА', '2 КОСЫГИНА', '18 УЛИЦА']);
+  // left as read: each line as without the move
+  for (const [layout, want] of [
+    // the type above the name, the number beside the name
+    [[box('УЛИЦА', 647, 560, 250, 90), box('КОСЫГИНА', 647, 660, 552, 160), box('2', 408, 600, 180, 230)], ['УЛИЦА', '2 КОСЫГИНА']],
+    [[box('ВУЛИЦЯ', 560, 420, 200, 60), box('ХРЕЩАТИК', 560, 490, 600, 150), box('KHRESHCHATYK STREET', 560, 650, 500, 50), box('22', 300, 430, 220, 260)], ['ВУЛИЦЯ', '22 ХРЕЩАТИК', 'KHRESHCHATYK STREET']],
+    // a line above naming only a type
+    [[box('ПРОСПЕКТ', 656, 560, 380, 130), read[1], read[2]], ['ПРОСПЕКТ', '2 18 УЛИЦА']],
+    // a line above naming only a type, beside a row with a number
+    [[box('УЛИЦА', 647, 560, 250, 90), box('2', 408, 600, 180, 230), box('КОСЫГИНА', 647, 660, 552, 160), box('18', 1210, 670, 100, 140)], ['УЛИЦА', '2 КОСЫГИНА 18']],
+    // a second plate or a sign beside the plate, not where the row starts
+    [[box('КОСЫГИНА', 647, 575, 552, 170), box('2', 408, 590, 180, 230), box('18 УЛИЦА', 656, 760, 410, 115), box('ГУБКИНА', 1500, 470, 400, 150)], ['ГУБКИНА', '2 КОСЫГИНА', '18 УЛИЦА']],
+    [[...read, box('АПТЕКА', 1300, 300, 900, 450)], ['АПТЕКА', '2 КОСЫГИНА', '18 УЛИЦА']],
+    [[box('ЦВЕТЫ', 300, 50, 400, 150), box('УЛ. ЛЕНИНА', 300, 230, 360, 70), box('8', 120, 285, 40, 70), box('(495)', 170, 285, 120, 70), box('123-45-67', 300, 290, 300, 70)], ['ЦВЕТЫ', 'УЛ. ЛЕНИНА', '8 (495) 123-45-67']],
+    // a row of neither a type nor a number: a shop's board
+    [[box('ПРОДУКТЫ', 400, 100, 600, 150), box('24', 200, 220, 120, 120), box('ЧАСА', 340, 230, 200, 110)], ['ПРОДУКТЫ', '24 ЧАСА']],
+    // the neighbours' small numbers by the type, the plate's own on the right
+    [[box('ЛЕНИНА', 300, 100, 450, 150), box('5', 800, 60, 200, 400), box('3', 100, 235, 70, 80), box('УЛИЦА', 300, 260, 250, 80), box('7', 650, 260, 70, 80)], ['5', 'ЛЕНИНА', '3 УЛИЦА 7']],
+    // the name under the row
+    [[box('18 УЛИЦА', 656, 575, 410, 115), box('2', 408, 560, 133, 146), box('КОСЫГИНА', 647, 700, 552, 170)], ['2 18 УЛИЦА', 'КОСЫГИНА']],
+    // a row naming the street, under a district or the city
+    [[box('ПЕЧЕРСЬКИЙ РАЙОН', 560, 400, 420, 70), box('ВУЛИЦЯ ХРЕЩАТИК', 560, 490, 700, 150), box('22', 300, 420, 220, 240)], ['ПЕЧЕРСЬКИЙ РАЙОН', '22 ВУЛИЦЯ ХРЕЩАТИК']],
+    [[box('М. КИЇВ', 560, 400, 250, 80), box('ВУЛИЦЯ', 560, 490, 260, 150), box('ХРЕЩАТИК', 840, 490, 500, 150), box('22', 300, 420, 220, 240)], ['М. КИЇВ', '22 ВУЛИЦЯ ХРЕЩАТИК']],
+    [[box('ГАГАРИНСКИЙ РАЙОН', 647, 500, 500, 80), box('УЛИЦА КОСЫГИНА', 647, 600, 700, 160), box('2', 408, 520, 180, 240)], ['ГАГАРИНСКИЙ РАЙОН', '2 УЛИЦА КОСЫГИНА']],
+    // a building's plaque: the row is no street type
+    [[box('ДОМ', 300, 100, 150, 100), box('5', 150, 170, 100, 120), box('КОРПУС', 270, 190, 250, 90), box('2', 540, 190, 60, 90)], ['ДОМ', '5 КОРПУС 2']],
+    // a line of mostly Latin words with one Cyrillic
+    [[box('COFFEE', 647, 575, 300, 170), box('HOUSE', 960, 575, 250, 170), box('КОФЕ', 1220, 575, 250, 170), box('18 УЛИЦА', 656, 700, 410, 115), box('2', 408, 678, 133, 146)], ['COFFEE HOUSE КОФЕ', '2 18 УЛИЦА']],
+  ]) assert.deepStrictEqual(L._szSignLineGroups(layout).map((x) => x.text), want, want.join(' / '));
+});
 ok('Russian and Ukrainian street signs: abbreviated types, the type on its own line, Ukrainian letters', () => {
   const st = (n, nn) => ({ n, nn, t: 'street', a: 50.39, o: 30.51 });
   assert.strictEqual(kinds([st('Krasylivska Street', 'Красилівська вулиця')], [{ text: 'ВУЛ. КРАСИЛИВСЬКА' }])[0].kind, 'street');
