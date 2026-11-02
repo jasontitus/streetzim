@@ -31,6 +31,8 @@ Fields set:
     streetzim_terrain    — Copernicus GLO-30 terrain tiles included
     streetzim_satellite  — Sentinel-2 satellite imagery included
     streetzim_wikidata   — Wikidata cache for POI enrichment
+    streetzim_photo_search — the sign reader (search with a photo, docs/ocr.md):
+                           map-config.json names its manifest (`ocr`)
 
 An explicit `--<flag>` only ever writes "yes": a feature we know nothing
 about must not be stamped absent. `--from-zim` DOES write "no", because
@@ -52,6 +54,7 @@ FEATURES = {
     "terrain":   "streetzim_terrain",
     "satellite": "streetzim_satellite",
     "wikidata":  "streetzim_wikidata",
+    "photo_search": "streetzim_photo_search",
 }
 
 # streetzim-meta.json key per feature. Order matches FEATURES for readability.
@@ -62,6 +65,8 @@ META_KEYS = {
     "satellite": "hasSatellite",
     "wikidata":  "hasWikidata",
 }
+# Features read from map-config.json instead (flags_from_zim), always yes or no.
+CONFIG_FEATURES = {"photo_search"}
 
 
 def flags_from_zim(path: str) -> dict:
@@ -78,6 +83,13 @@ def flags_from_zim(path: str) -> dict:
     for feature, key in META_KEYS.items():
         if key in meta:
             out[feature] = "yes" if meta[key] else "no"
+    # search with a photo: in map-config, not streetzim-meta (a map given the
+    # reader by repackage_zim.py --add-ocr keeps its meta)
+    try:
+        cfg = json.loads(bytes(archive.get_entry_by_path("map-config.json").get_item().content))
+        out["photo_search"] = "yes" if cfg.get("ocr") else "no"
+    except (KeyError, RuntimeError, ValueError):
+        pass
     return out
 
 
@@ -115,7 +127,7 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("items", nargs="+", help="one or more streetzim-* item IDs")
     p.add_argument("--from-zim", metavar="ZIM",
-                   help="read all five flags from this ZIM's streetzim-meta.json")
+                   help="read the flags from this ZIM (streetzim-meta.json, map-config.json)")
     for flag in FEATURES:
         p.add_argument(f"--{flag}", action="store_true", help=f"set {FEATURES[flag]}=yes")
     p.add_argument("--dry-run", action="store_true")

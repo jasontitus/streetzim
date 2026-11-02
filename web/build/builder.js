@@ -299,10 +299,14 @@
         if (reg.base && reg.base.url) reg.base.url = viaProxy(reg.base.url);
       } catch (e) { $('notice').textContent = e.message; reg.probe = null; delete reg.base.url; }
     }
+    // ?photo=1: only the maps with search with a photo (index.json "photo_search")
+    if (q.get('photo') === '1' && index.regions.some((r) => r.photo_search)) {
+      index.regions = index.regions.filter((r) => r.photo_search);
+    }
     index.regions.sort((a, b) => a.title.localeCompare(b.title));
     const sel = $('region');
     sel.innerHTML = '';
-    for (const reg of index.regions) sel.add(new Option(reg.title, reg.id));
+    for (const reg of index.regions) sel.add(new Option(reg.photo_search ? `${reg.title} · photo search` : reg.title, reg.id));
     const want = q.get('region');
     if (want && !index.regions.some((r) => r.id === want)) {
       $('notice').textContent = `No such region: “${want}”. Pick one from the list.`;
@@ -339,6 +343,7 @@
     const a = document.createElement('a');
     a.href = b.download; a.textContent = b.file; a.rel = 'noopener';
     $('baseInfo').append('Open your copy of ', a, ` (${fmtMB(b.size)}): only Wikipedia is downloaded, and the page checks that it is the right file.`);
+    if (region.photo_search) $('baseInfo').append(' This map has search with a photo: the camera button in its search box reads a sign.');
     // A newer map is on the map page (index.json "newer", web/generate.py): these recipes are
     // for the one before it until ship_packs.sh publishes new ones; a copy of the newer one
     // is not this file.

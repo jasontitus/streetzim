@@ -78,7 +78,8 @@ CARD_TEXT = {
 
 BADGE_LABELS = {
     "de": {"nav": "Routen & Navigation", "overture": "Ortsdetails",
-           "terrain": "3D-Gelände", "satellite": "Satellitenbilder", "wiki": "Wikipedia-Links"},
+           "terrain": "3D-Gelände", "satellite": "Satellitenbilder", "wiki": "Wikipedia-Links",
+           "photo": "Suche per Foto"},
 }
 
 DE_MONTHS = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.",
@@ -928,6 +929,7 @@ FEATURE_BADGES = [
     ("streetzim_terrain",   "3D Terrain",           "terrain"),
     ("streetzim_satellite", "Satellite",            "satellite"),
     ("streetzim_wikidata",  "Wikipedia links",      "wiki"),
+    ("streetzim_photo_search", "Photo search",      "photo"),
 ]
 
 

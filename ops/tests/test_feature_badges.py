@@ -54,7 +54,7 @@ stamp_mod = _load("stamp_item_metadata", ROOT / "cloud" / "stamp_item_metadata.p
 
 def test_every_badge_feature_has_a_meta_key():
     """A feature with no meta key could never be denied, only asserted."""
-    assert set(stamp_mod.FEATURES) == set(stamp_mod.META_KEYS), (
+    assert set(stamp_mod.FEATURES) == set(stamp_mod.META_KEYS) | stamp_mod.CONFIG_FEATURES, (
         "FEATURES and META_KEYS disagree; a feature without a meta key falls "
         "back to whatever the item already said")
 
@@ -148,3 +148,30 @@ def test_a_light_zim_yields_satellite_no_and_renders_no_badge(render):
     meta = json.loads(bytes(
         arc.get_entry_by_path("streetzim-meta.json").get_item().content))
     assert meta["hasSatellite"] is False
+
+
+def test_photo_search_is_read_from_map_config(tmp_path):
+    """streetzim_photo_search: yes when map-config names the sign reader's
+    manifest (`ocr`), no when it does not; streetzim-meta's flags as before."""
+    import json
+    import pytest
+    pytest.importorskip("libzim")
+    from libzim.writer import Creator, Hint, Item, StringProvider
+
+    class _I(Item):
+        def __init__(self, p, d):
+            super().__init__(); self._p, self._d = p, d
+        def get_path(self): return self._p
+        def get_title(self): return self._p
+        def get_mimetype(self): return "application/json"
+        def get_contentprovider(self): return StringProvider(self._d)
+        def get_hints(self): return {Hint.FRONT_ARTICLE: False}
+
+    def zim(name, cfg):
+        p = tmp_path / name
+        with Creator(str(p)) as c:
+            c.add_item(_I("streetzim-meta.json", json.dumps({"hasRouting": True}).encode()))
+            c.add_item(_I("map-config.json", json.dumps(cfg).encode()))
+        return str(p)
+    assert stamp_mod.flags_from_zim(zim("a.zim", {"ocr": "ocr/manifest.json"})) == {"routing": "yes", "photo_search": "yes"}
+    assert stamp_mod.flags_from_zim(zim("b.zim", {})) == {"routing": "yes", "photo_search": "no"}
