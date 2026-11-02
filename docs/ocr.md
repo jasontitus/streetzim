@@ -16,8 +16,14 @@ python create_osm_zim.py ... --ocr --ocr-scripts Thai,Latn   # choose the script
 
 It is off by default: it adds the text-recognition models to the ZIM (below).
 Older ZIMs show no button. In-place viewer patching cannot add the
-models (docs/viewer-slots.md), so a ZIM gets the reader only when it is
-built with the flag.
+models (docs/viewer-slots.md); a ZIM built without the flag gets them by
+a copy, every other entry as it was, the models chosen from its search
+records as a build chooses them, and a new UUID (minutes, not a rebuild):
+
+```
+python cloud/repackage_zim.py --add-ocr osm-greece-2026-10-23.zim osm-greece-2026-10-23b.zim
+python cloud/repackage_zim.py --add-ocr --ocr-scripts Grek,Latn SRC DST   # choose the scripts
+```
 
 ## What a map gets
 

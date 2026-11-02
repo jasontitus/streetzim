@@ -9,6 +9,9 @@ indexing. A repackage just re-emits the ZIM with targeted tweaks:
     in-browser fzstd port doesn't choke on GB-scale ZSTD clusters.
   * Stale embedded viewer HTML (`index.html`, `places.html`) is
     swapped for the current version from `resources/viewer/`.
+  * With --add-ocr, the sign reader (search with a photo, docs/ocr.md)
+    is added to a map built without it: its worker, runtime and the
+    models for the scripts of the map's names, and map-config's `ocr`.
 
 Everything else — search chunks, tiles, satellite, terrain,
 wikidata — is copied byte-for-byte from the source ZIM. Takes ~10–20
@@ -353,6 +356,48 @@ def _emit_upgraded_graph(creator, graph_bytes: bytes, *,
 _TILE_PREFIXES = ("tiles/", "satellite/", "terrain/")
 
 
+def _ocr_names(src, limit: int | None = None):
+    """Up to ``limit`` of the map's own-script names (``nn``, else ``n``)
+    from its search records (search-data/<prefix>.json), the prefixes
+    taken in a fixed shuffled order so the sample is not one end of the
+    alphabet."""
+    import hashlib
+    from streetzim.ocr import SAMPLE
+    limit = SAMPLE if limit is None else limit
+    try:
+        man = json.loads(bytes(src.get_entry_by_path("search-data/manifest.json").get_item().content))
+    except (KeyError, RuntimeError, ValueError):
+        return
+    n = 0
+    for k in sorted(man.get("chunks") or {}, key=lambda k: hashlib.md5(k.encode()).hexdigest()):
+        try:
+            recs = json.loads(bytes(src.get_entry_by_path(f"search-data/{k}.json").get_item().content))
+        except (KeyError, RuntimeError, ValueError):
+            continue
+        for rec in recs if isinstance(recs, list) else ():
+            name = isinstance(rec, dict) and (rec.get("nn") or rec.get("n"))
+            if isinstance(name, str) and name:
+                yield name
+                n += 1
+                if n >= limit:
+                    return
+
+
+def _ocr_plan(src, scripts: list[str] | None = None):
+    """The sign reader's models for the map in ``src``: those for
+    ``scripts`` (--ocr-scripts), else for the scripts of its names, as
+    streetzim.ocr.plan_for chooses them for a build."""
+    from streetzim import ocr as _ocr
+    counts, total = _ocr.count_scripts(_ocr_names(src))
+    plan = _ocr.choose_models(counts, total, scripts=scripts)
+    shares = ", ".join(f"{s} {100 * c / total:.0f}%" for s, c in counts.most_common(6)) if total else "none"
+    print(f"  OCR: names' scripts: {shares}; recognizers: {', '.join(plan.recognizers)}")
+    if plan.unread:
+        print(f"  OCR: no recognizer for {', '.join(plan.unread)}; "
+              f"signs in it are read only where they also carry Latin text")
+    return plan
+
+
 def repackage(src_path: str, dst_path: str,
               swap_viewer: bool = True,
               uncompress_graph: bool = True,
@@ -366,7 +411,9 @@ def repackage(src_path: str, dst_path: str,
               drop_llm_bundle: bool = True,
               chip_shard_target_bytes: int = CHIP_SHARD_TARGET_BYTES,
               map_center: tuple[float, float] | None = None,
-              map_zoom: int | None = None) -> int:
+              map_zoom: int | None = None,
+              add_ocr: bool = False,
+              ocr_scripts: list[str] | None = None) -> int:
     from libzim.reader import Archive
     from libzim.writer import (
         Creator, Item, StringProvider, FileProvider, Hint,
@@ -399,6 +446,14 @@ def repackage(src_path: str, dst_path: str,
           f"(0=disabled; 10 = 0.1° cells, 1 = 1° cells)")
     if refresh_terrain_dir:
         print(f"  refresh terrain tiles from: {refresh_terrain_dir}")
+
+    # The sign reader to add (--add-ocr): the models for the scripts of
+    # the map's names, as a build with --ocr chooses them, from its search
+    # records; its entries replace any the source has.
+    ocr_items: list[tuple[str, str, str, bytes]] = []
+    if add_ocr:
+        from streetzim import ocr as _ocr
+        ocr_items = _ocr.entries(_ocr_plan(src, ocr_scripts))
 
     # Collect viewer replacements (only for known paths — anything
     # else passes through from the source ZIM unchanged).
@@ -696,6 +751,8 @@ def repackage(src_path: str, dst_path: str,
                 continue
             item = entry.get_item()
             path = entry.path
+            if ocr_items and path.startswith("ocr/"):
+                continue   # the reader's entries are added below
             mime = item.mimetype
             size = item.size  # cheap — no content read
             title = entry.title or ""
@@ -722,6 +779,13 @@ def repackage(src_path: str, dst_path: str,
                     cfg["center"] = [map_center[0], map_center[1]]
                 if map_zoom is not None:
                     cfg["zoom"] = map_zoom
+                modified_content = json.dumps(cfg, indent=2).encode("utf-8")
+                size = len(modified_content)
+            if ocr_items and path == "map-config.json":
+                from streetzim.ocr import MANIFEST_ENTRY
+                cfg = json.loads((modified_content if modified_content is not None
+                                  else bytes(item.content)).decode("utf-8"))
+                cfg["ocr"] = MANIFEST_ENTRY
                 modified_content = json.dumps(cfg, indent=2).encode("utf-8")
                 size = len(modified_content)
             if rtl_plugin is not None and path == "map-config.json":
@@ -1245,6 +1309,12 @@ def repackage(src_path: str, dst_path: str,
             c.add_item(NewViewerItem(name, data, title, mime, is_front))
             added_missing += 1
             print(f"  added missing {name} from viewer set ({len(data)} B)")
+        for path, title, mime, data in ocr_items:
+            c.add_item(PassthroughItem(path, title, mime, data))
+            added_missing += 1
+        if ocr_items:
+            print(f"  added the sign reader: {len(ocr_items)} entries "
+                  f"({sum(len(x[3]) for x in ocr_items) / 1e6:.1f} MB)")
         if rtl_plugin is not None and not src.has_entry_by_path(rtl_path):
             c.add_item(PassthroughItem(rtl_path, "MapLibre RTL text plugin",
                                        "application/javascript", rtl_plugin))
@@ -1371,10 +1441,27 @@ def main() -> int:
                    help="Override map-config.json 'center'. Fixes regions "
                         "whose bbox centroid lands on empty water "
                         "(e.g. Hawaii). Format: '-157.5,21.0'.")
+    p.add_argument("--add-ocr", action="store_true",
+                   help="Add the sign reader (search with a photo, docs/ocr.md) with the "
+                        "models for the scripts of the map's names, as a build with --ocr")
+    p.add_argument("--ocr-scripts", metavar="LIST", default=None,
+                   help="With --add-ocr: the scripts to read, as ISO 15924 codes "
+                        "(comma-separated), instead of the names'")
     p.add_argument("--map-zoom", type=int, default=None, metavar="Z",
                    help="Override map-config.json 'zoom' to pair with "
                         "--map-center.")
     args = p.parse_args()
+    if args.ocr_scripts and not args.add_ocr:
+        p.error("--ocr-scripts goes with --add-ocr")
+    ocr_scripts = [x.strip() for x in args.ocr_scripts.split(",") if x.strip()] if args.ocr_scripts else None
+    if args.add_ocr:
+        from streetzim import ocr as _ocr
+        if ocr_scripts:
+            try:
+                _ocr.check_scripts(ocr_scripts)
+            except ValueError as e:
+                p.error(str(e))
+        _ocr.prefetch()   # the runtime and detector before the source is read
     if not args.no_swap_viewer:
         # Before the source is opened: a viewer past its slot fails in
         # seconds (cloud/viewer_slots.py).
@@ -1409,7 +1496,9 @@ def main() -> int:
                      drop_llm_bundle=not args.include_llm_bundle,
                      chip_shard_target_bytes=chip_shard_target_bytes,
                      map_center=map_center,
-                     map_zoom=args.map_zoom)
+                     map_zoom=args.map_zoom,
+                     add_ocr=args.add_ocr,
+                     ocr_scripts=ocr_scripts)
 
 
 if __name__ == "__main__":
