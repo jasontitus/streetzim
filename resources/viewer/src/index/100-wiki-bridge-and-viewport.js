@@ -595,6 +595,12 @@ function openWikiArticle(path, prefix, at) {
       var pt = at && isFinite(at.lat) && isFinite(at.lon) ? at : _wikiArticlePoint(path, prefix);
       var c = pt ? { lat: pt.lat, lng: pt.lon } : mp.getCenter();
       var z = Math.round((pt ? Math.max(mp.getZoom(), 15) : mp.getZoom()) * 100) / 100;
+      // where the map can be: a place by its box's edge is not the centre
+      // of a view the box allows (_szMaxBounds), and Back would land short
+      // of the stamp; the page is leaving, so the jump is not seen
+      if (pt) {
+        try { mp.jumpTo({ center: [c.lng, c.lat], zoom: z }); c = mp.getCenter(); } catch (err) {}
+      }
       var h = '#map=' + z + '/' + (Math.round(c.lat * 1e5) / 1e5)
             + '/' + (Math.round(c.lng * 1e5) / 1e5);
       if (pt) {
