@@ -311,6 +311,7 @@
  "search.sign_street_only": "መንገዱ ብቻ እንጂ አድራሻው አይደለም",
  "search.sign_area": "አካባቢ እንጂ ትክክለኛ ቦታ አይደለም",
  "search.sign_similar": "ትክክለኛ አይደለም፡ ምልክቱን ያረጋግጡ",
+ "search.sign_elsewhere": "በዚህ ካርታ ላይ የለም",
  "search.sign_same_name": "በምልክቱ ላይ ያለው ተመሳሳይ ስም",
  "search.sign_several": "ሌሎች ቦታዎችም ይህ ስም አላቸው፡ ምልክቱ የትኛው እንደሆነ አይናገርም",
  "search.placeholder": "ቦታዎችን፣ መንገዶችን፣ የሚጎበኙ ቦታዎችን ፈልግ…",

@@ -311,6 +311,7 @@
  "search.sign_street_only": "Djis e kaya, no e adrès",
  "search.sign_area": "Área, no un lugá eksakto",
  "search.sign_similar": "No ta eksakto: kontrolá e bòrchi",
+ "search.sign_elsewhere": "No ta riba e mapa aki",
  "search.sign_same_name": "Mesun nòmber ku riba e bòrchi",
  "search.sign_several": "Otro lugá tin e nòmber aki tambe: e bòrchi no ta bisa kua",
  "search.placeholder": "Buska lugá, kaya, POI...",

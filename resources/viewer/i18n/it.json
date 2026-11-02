@@ -311,6 +311,7 @@
  "search.sign_street_only": "Solo la strada, non l'indirizzo",
  "search.sign_area": "Area, non un luogo preciso",
  "search.sign_similar": "Non esatto: controlla il cartello",
+ "search.sign_elsewhere": "Non è su questa mappa",
  "search.sign_same_name": "Stesso nome del cartello",
  "search.sign_several": "Altri luoghi hanno questo nome: il cartello non dice quale",
  "search.placeholder": "Cerca luoghi, vie, punti di interesse...",

@@ -317,6 +317,7 @@
  "search.sign_street_only": "Jen ulice, ne adresa",
  "search.sign_area": "Oblast, ne přesné místo",
  "search.sign_similar": "Není přesné: zkontrolujte ceduli",
+ "search.sign_elsewhere": "Není na této mapě",
  "search.sign_same_name": "Stejný název jako na ceduli",
  "search.sign_several": "Tento název mají i jiná místa: cedule neříká které",
  "search.placeholder": "Hledat místa, ulice, body zájmu…",

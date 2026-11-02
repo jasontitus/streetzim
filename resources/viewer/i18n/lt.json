@@ -317,6 +317,7 @@
  "search.sign_street_only": "Tik gatvė, ne adresas",
  "search.sign_area": "Vietovė, ne tiksli vieta",
  "search.sign_similar": "Netikslu: patikrinkite ženklą",
+ "search.sign_elsewhere": "Nėra šiame žemėlapyje",
  "search.sign_same_name": "Toks pat pavadinimas kaip ženkle",
  "search.sign_several": "Šį pavadinimą turi ir kitos vietos: ženklas nesako, kuri",
  "search.placeholder": "Ieškoti vietų, gatvių, objektų...",

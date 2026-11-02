@@ -314,6 +314,7 @@
  "search.sign_street_only": "Doar strada, nu adresa",
  "search.sign_area": "Zonă, nu un loc exact",
  "search.sign_similar": "Nu este exact: verificați indicatorul",
+ "search.sign_elsewhere": "Nu este pe această hartă",
  "search.sign_same_name": "Același nume ca pe indicator",
  "search.sign_several": "Și alte locuri au acest nume: indicatorul nu spune care",
  "search.placeholder": "Caută locuri, străzi, puncte de interes…",

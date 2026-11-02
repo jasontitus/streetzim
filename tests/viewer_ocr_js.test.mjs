@@ -30,7 +30,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame, _szSignUnsure };')();
+  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame, _szSignUnsure, _szSignIOS, _szSignRoman, _szSignElsewhere };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
@@ -538,6 +538,7 @@ ok('Kiwix\'s Apple apps are told apart from browsers and from each other', () =>
   assert.strictEqual(L._szSignKiwixApp('zim:', linux), '');         // Kiwix desktop: Qt's picker works
   assert.strictEqual(L._szSignKiwixApp('https:', iphone), '');      // Safari, the /drive/ PWA
   assert.strictEqual(L._szSignKiwixApp('http:', mac), '');          // kiwix-serve in Safari
+  assert.deepStrictEqual([iphone, ipad, mac, linux].map(L._szSignIOS), [true, true, false, false]);
 });
 
 
@@ -568,6 +569,9 @@ await (async () => {
 const P = new Function(slice(HTML, '// BEGIN sign-pick', '// END sign-pick') + '\nreturn { _szSignPickMode };')();
 ok('the camera button offers the camera and the library on a phone, the library first in Kiwix on iOS', () => {
   assert.strictEqual(P._szSignPickMode('', true), 'both');        // a phone or tablet browser
+  assert.strictEqual(P._szSignPickMode('', true, true), 'picker');  // iOS's own menu at once: camera, library, files
+  assert.strictEqual(P._szSignPickMode('ios', true, true), 'library');  // but in Kiwix, whose Take Photo closes it
+  assert.strictEqual(P._szSignPickMode('mac', false, false), 'drop');
   assert.strictEqual(P._szSignPickMode('', false), 'picker');     // a desktop: the file picker at once
   assert.strictEqual(P._szSignPickMode('ios', true), 'library');  // Take Photo closes the Kiwix app
   assert.strictEqual(P._szSignPickMode('ios', false), 'library');
@@ -807,6 +811,94 @@ ok("the results that share the answer's name, for Map: the answer first, then ea
   // nothing found, or the answer alone
   assert.deepStrictEqual(L._szSignSameName([], W), []);
   assert.deepStrictEqual(L._szSignSameName([found[5]], W), [0]);
+});
+
+ok('street types abbreviated with a hyphen are the abbreviations the types know', () => {
+  assert.deepStrictEqual(W('Київ, пр-т Академіка Глушкова, 1'), W('Київ, просп Академіка Глушкова, 1'));
+  assert.deepStrictEqual(W('пр-кт Мира 5'), W('просп Мира 5'));
+  assert.deepStrictEqual(W('б-р Шевченка'), W('бульв Шевченка'));
+  assert.deepStrictEqual(W('пр-д Серебрякова'), W('проезд Серебрякова'));
+  assert.deepStrictEqual(W('пр-тест'), ['пр', 'тест']);              // a word that only begins so
+});
+
+ok('a town as written, in Latin as Ukraine and Russia write their places in English', () => {
+  assert.ok(L._szSignRoman('Київ').indexOf('kyiv') >= 0);
+  assert.ok(L._szSignRoman('м. Львів').indexOf('lviv') >= 0);         // the town word left out
+  assert.ok(L._szSignRoman('Одеса').indexOf('odesa') >= 0);
+  assert.ok(L._szSignRoman('Ялта').indexOf('yalta') >= 0);            // я first: ya
+  assert.strictEqual(L._szSignRoman('Євпаторія')[0], 'yevpatoriia');  // є first: ye (Ukrainian only)
+  assert.ok(L._szSignRoman('г. Москва').indexOf('moskva') >= 0);
+  assert.ok(L._szSignRoman('Kyiv').indexOf('kyiv') >= 0);             // Latin stays
+});
+
+ok('an address after its town and a comma is the address, the town told apart by the map\'s own', () => {
+  const rec = { n: '1 проспект Академіка Глушкова', t: 'addr', a: 50.374, o: 30.478, l: '' };
+  const sign = ['КНИЖКОВА', 'книжковий фестиваль', '24 - 27 КВІТНЯ', 'ВДНГ, вхід вільний', 'Київ, пр-т Академіка Глушкова, 1'];
+  const kindOn = (map, lines) => L._szSignKinds([{ item: rec }], lines.map((t) => ({ text: t, size: 10 })), W, [rec], map)[0].kind;
+  assert.strictEqual(kindOn('Kyiv', sign), 'address');               // the map of Kyiv: Київ is its own town
+  assert.strictEqual(kindOn('Kyiv', ['м. Київ, пр-т Академіка Глушкова, 1']), 'address');
+  assert.strictEqual(kindOn('Moscow', sign), 'similar');             // a town it cannot place: not claimed
+  assert.strictEqual(kindOn('Kyiv', ['Львів, пр-т Академіка Глушкова, 1']), 'similar');
+});
+
+ok('an address in a town the map knows nothing of is said to be elsewhere', () => {
+  const sign = ['книжковий фестиваль', 'ВДНГ, вхід вільний', 'Київ, пр-т Академіка Глушкова, 1'].map((t) => ({ text: t, size: 10 }));
+  const away = (map, records, lines) => L._szSignElsewhere(L._szSignPlate(lines || sign, W, map), records || [], W, []);
+  assert.strictEqual(away('Moscow', [{ n: 'Фестиваль', t: 'poi' }]), 'Київ');
+  assert.strictEqual(away('Kyiv'), '');                               // the map's own town
+  assert.strictEqual(away('Moscow', [{ n: 'Київ', t: 'poi' }]), '');  // the map names it: a shop called so
+  assert.strictEqual(away('Moscow', [], [{ text: 'ВДНГ, вхід вільний', size: 10 }]), '');   // no address after the comma
+  assert.strictEqual(away('Moscow', [], [{ text: 'Київ, 2026', size: 10 }]), '');            // a year, no street
+  const tver = [{ text: 'г. Москва, ул. Тверская, 7', size: 10 }];
+  assert.strictEqual(away('Moscow', [{ n: 'Москва-Сити', t: 'poi' }], tver), '');   // "Москва" named by a record
+  assert.strictEqual(away('Kazan', [], tver), 'Москва');
+  const kinds = L._szSignKinds([{ item: { n: 'Фестиваль', t: 'poi', a: 55.7, o: 37.6 } }], sign, W, [{ n: 'Фестиваль', t: 'poi' }], 'Moscow');
+  assert.strictEqual(kinds.away, 'Київ');
+  assert.strictEqual(L._szSignKinds([], sign, W, [], 'Kyiv').away, undefined);
+});
+
+ok('only a town is ever said to be elsewhere: a venue before the comma is not one', () => {
+  const away = (map, text, records) => L._szSignElsewhere(L._szSignPlate([{ text, size: 10 }], W, map), records || [], W, []);
+  // venues, a building: not towns
+  assert.strictEqual(away('Kyiv', 'ТРЦ Gulliver, Спортивна пл., 1'), '');
+  assert.strictEqual(away('Kyiv', 'Палац «Україна», вул. Велика Васильківська, 103'), '');
+  assert.strictEqual(away('Moscow', 'Театр им. Ермоловой, ул. Тверская, 7'), '');
+  assert.strictEqual(away('Boston', "Joe's Pizza, 12 Main Street"), '');
+  // a town named as one, wherever it sits; the country or the oblast before it is not the town
+  assert.strictEqual(away('Kyiv', 'Україна, м. Київ, вул. Хрещатик, 22'), '');
+  assert.strictEqual(away('Moscow', 'Україна, м. Київ, вул. Хрещатик, 22'), 'Київ');
+  assert.strictEqual(away('Ukraine', 'Київська обл., м. Бровари, вул. Київська, 3'), 'Бровари');
+  assert.strictEqual(away('Ukraine', 'Київська обл., м. Бровари, вул. Київська, 3', [{ n: 'Бровари', t: 'place' }]), '');
+  assert.strictEqual(away('Moscow', 'м.Київ, вул. Хрещатик, 22'), 'Київ');           // the mark glued on
+  assert.strictEqual(away('Kyiv', 'г. Киев, ул. Крещатик, 22'), '');                  // Kyiv in Russian: kyev, a letter off
+  assert.strictEqual(away('Kyiv', 'Київ, пр-т Академіка Глушкова, 1'), '');
+  assert.strictEqual(away('Moscow', 'Пушкіно, вул. Леніна, 5'), 'Пушкіно');            // п of the name, not the mark п.
+  assert.strictEqual(away('Moscow', 'м. Київ вул Хрещатик, 22'), '');                // a street in the marked part: no town read
+  // a street of the sign found (its name a line of its own): not said either
+  const street = { n: 'Хрещатик', t: 'street', a: 55.75, o: 37.6 };
+  const lines2 = [{ text: 'Хрещатик', size: 20 }, { text: 'Київ, вул. Хрещатик, 22', size: 10 }];
+  const k2 = L._szSignKinds([{ item: street }], lines2, W, [street], 'Moscow');
+  assert.strictEqual(k2[0].kind, 'street');
+  assert.strictEqual(k2.away, undefined);
+  // nothing said when an address or a street of the sign was found
+  const rec = { n: '22 вулиця Хрещатик', t: 'addr', a: 50.447, o: 30.522, l: '' };
+  const kyiv = { n: 'Київ', t: 'place', s: 'city', a: 50.45, o: 30.52 };
+  const kinds = L._szSignKinds([{ item: rec }], [{ text: 'м. Київ, вул. Хрещатик, 22', size: 10 }], W, [rec, kyiv], 'Ukraine');
+  assert.strictEqual(kinds[0].kind, 'address');
+  assert.strictEqual(kinds.away, undefined);
+});
+
+ok('the town before the comma is read only when the address came after it, and never over the address\'s own town', () => {
+  const kind = (map, text, rec, all) => L._szSignKinds([{ item: rec }], [{ text, size: 10 }], W, all || [rec], map)[0].kind;
+  // "Via Roma, 10": the street before the comma, not a town (Rome's box does not hold Milan)
+  const roma = { n: 'Roma', t: 'admin', a: 41.9, o: 12.5, bb: [12.3, 41.7, 12.7, 42.1] };
+  const via = { n: '10 Via Roma, Milano', t: 'addr', a: 45.46, o: 9.19, l: 'Milano' };
+  assert.strictEqual(kind('Italy', 'Via Roma, 10', via, [via, roma]), 'address');
+  // the map's own town on the sign does not stand for the address's own other town
+  const suburb = { n: '10 вулиця Шевченка, Вишневе', t: 'addr', a: 50.39, o: 30.37, l: 'Вишневе' };
+  assert.strictEqual(kind('Kyiv', 'Київ, вул. Шевченка, 10', suburb), 'similar');
+  const city = { n: '10 вулиця Шевченка', t: 'addr', a: 50.44, o: 30.5, l: '' };
+  assert.strictEqual(kind('Kyiv', 'Київ, вул. Шевченка, 10', city), 'address');
 });
 
 ok('an answer that may not be the sign\'s place is said, not offered', () => {

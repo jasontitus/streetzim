@@ -311,6 +311,7 @@
  "search.sign_street_only": "Ainult tänav, mitte aadress",
  "search.sign_area": "Piirkond, mitte täpne koht",
  "search.sign_similar": "Pole täpne: kontrollige silti",
+ "search.sign_elsewhere": "Pole sellel kaardil",
  "search.sign_same_name": "Sama nimi mis sildil",
  "search.sign_several": "Ka teistel kohtadel on see nimi: silt ei ütle, milline",
  "search.placeholder": "Otsi kohti, tänavaid, huvipunkte...",

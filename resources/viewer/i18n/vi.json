@@ -308,6 +308,7 @@
  "search.sign_street_only": "Chỉ con đường, không phải địa chỉ",
  "search.sign_area": "Khu vực, không phải vị trí chính xác",
  "search.sign_similar": "Không khớp chính xác: hãy xem biển",
+ "search.sign_elsewhere": "Không có trên bản đồ này",
  "search.sign_same_name": "Cùng tên như trên biển",
  "search.sign_several": "Nơi khác cũng có tên này: biển không nói là nơi nào",
  "search.placeholder": "Tìm địa điểm, đường phố, điểm quan tâm...",

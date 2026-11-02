@@ -317,6 +317,7 @@
  "search.sign_street_only": "Tylko ulica, nie adres",
  "search.sign_area": "Obszar, nie dokładne miejsce",
  "search.sign_similar": "Niedokładnie: sprawdź tablicę",
+ "search.sign_elsewhere": "Nie ma na tej mapie",
  "search.sign_same_name": "Ta sama nazwa co na tablicy",
  "search.sign_several": "Inne miejsca też tak się nazywają: tablica nie mówi, które",
  "search.placeholder": "Szukaj miejsc, ulic, obiektów...",

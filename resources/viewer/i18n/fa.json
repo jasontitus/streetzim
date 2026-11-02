@@ -312,6 +312,7 @@
  "search.sign_street_only": "فقط خیابان، نه نشانی",
  "search.sign_area": "منطقه، نه مکان دقیق",
  "search.sign_similar": "دقیقاً همان نیست: تابلو را بررسی کنید",
+ "search.sign_elsewhere": "در این نقشه نیست",
  "search.sign_same_name": "همان نامِ روی تابلو",
  "search.sign_several": "جاهای دیگری هم این نام را دارند: تابلو نمی‌گوید کدام",
  "search.placeholder": "جستجوی مکان‌ها، خیابان‌ها و جاذبه‌ها...",

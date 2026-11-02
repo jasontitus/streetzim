@@ -311,6 +311,7 @@
  "search.sign_street_only": "Kun gaden, ikke adressen",
  "search.sign_area": "Område, ikke et præcist sted",
  "search.sign_similar": "Ikke præcis: tjek skiltet",
+ "search.sign_elsewhere": "Ikke på dette kort",
  "search.sign_same_name": "Samme navn som på skiltet",
  "search.sign_several": "Andre steder hedder også sådan: skiltet siger ikke hvilket",
  "search.placeholder": "Søg efter steder, gader, interessepunkter...",

@@ -311,6 +311,7 @@
  "search.sign_street_only": "Kalea bakarrik, ez helbidea",
  "search.sign_area": "Eremua, ez leku zehatza",
  "search.sign_similar": "Ez da zehatza: egiaztatu seinalea",
+ "search.sign_elsewhere": "Ez dago mapa honetan",
  "search.sign_same_name": "Seinalean bezalako izen bera",
  "search.sign_several": "Beste leku batzuek ere izen hau dute: seinaleak ez du esaten zein",
  "search.placeholder": "Bilatu lekuak, kaleak, interesguneak...",

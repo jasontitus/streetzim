@@ -311,6 +311,7 @@
  "search.sign_street_only": "Урам бен, адрес яц",
  "search.sign_area": "Меттиг, нийса меттиг яц",
  "search.sign_similar": "Нийса яц: табличка хьажа",
+ "search.sign_elsewhere": "ХӀокху картан тӀехь яц",
  "search.sign_same_name": "Табличкан тӀехь йолу цӀе",
  "search.sign_several": "Кхечу меттигийн а ю и цӀе: табличко ца боху муьлха ю",
  "search.placeholder": "Меттигаш, урамаш, POI лаха...",

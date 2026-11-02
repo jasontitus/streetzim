@@ -311,6 +311,7 @@
  "search.sign_street_only": "Mo la via, betg l'adressa",
  "search.sign_area": "Regiun, betg in lieu exact",
  "search.sign_similar": "Betg exact: controllai la tavla",
+ "search.sign_elsewhere": "Betg sin questa charta",
  "search.sign_same_name": "Il medem num sco sin la tavla",
  "search.sign_several": "Er auters lieus han quest num: la tavla na di betg tgenin",
  "search.placeholder": "Tschertgar lieus, vias, POIs…",

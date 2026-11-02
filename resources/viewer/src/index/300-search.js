@@ -257,12 +257,22 @@ var SZ_SIGN_VARIANTS = { 'ي': 'ی', 'ى': 'ی', 'ك': 'ک', 'ڪ': 'ک', 'ہ': '
   }
 })();
 var SZ_SIGN_MIN = 0.75;   // similarity a name needs (one wrong letter in four)
+// Street types abbreviated with a hyphen on Ukrainian and Russian signs
+// ("Київ, пр-т Академіка Глушкова, 1"), as the abbreviations without one the
+// matcher and 305-ocr-search.js's SZ_SIGN_TYPES know: split at the hyphen
+// they were two words, "пр" and "т", and the line no address.
+var SZ_SIGN_ABBR = [[/(^|[^\p{L}])пр-к?т(?![\p{L}])/giu, '$1просп'], [/(^|[^\p{L}])б-р(?![\p{L}])/giu, '$1бульв'],
+                    [/(^|[^\p{L}])пр-з?д(?![\p{L}])/giu, '$1проезд']];
+function _szSignAbbr(t) {
+  for (var i = 0; i < SZ_SIGN_ABBR.length; i++) t = t.replace(SZ_SIGN_ABBR[i][0], SZ_SIGN_ABBR[i][1]);
+  return t;
+}
 
 // A name or line as the matcher compares it: folded as the search folds,
 // variants alike, letters, marks and digits only (no spaces: OCR splits
 // and joins words freely).
 function _szSignText(s, norm) {
-  var t = norm(String(s == null ? '' : s));
+  var t = _szSignAbbr(norm(String(s == null ? '' : s)));
   var out = '';
   for (var i = 0; i < t.length; i++) {
     var c = t[i];
@@ -277,7 +287,7 @@ function _szSignText(s, norm) {
 // part of a line that happens to spell another name ("طريق 105 702" holds
 // "105 702", another building, once its spaces are gone).
 function _szSignWords(s, norm) {
-  var t = norm(String(s == null ? '' : s)), out = '';
+  var t = _szSignAbbr(norm(String(s == null ? '' : s))), out = '';
   for (var i = 0; i < t.length; i++) {
     var c = t[i];
     out += Object.prototype.hasOwnProperty.call(SZ_SIGN_VARIANTS, c) ? SZ_SIGN_VARIANTS[c] : c;
@@ -389,7 +399,7 @@ function _szSignLines(texts, norm, max) {
     var words = String(raw).split(/\s+/).map(function (x) { return _szSignText(x, norm); })
       .filter(function (x) { return x; });
     var types = [];
-    var core = _szSignText(norm(String(raw)).replace(SZ_SIGN_LINE_TYPE, function (m, sp, w) { types.push(_szSignTypeOf(w)); return ' '; })
+    var core = _szSignText(_szSignAbbr(norm(String(raw))).replace(SZ_SIGN_LINE_TYPE, function (m, sp, w) { types.push(_szSignTypeOf(w)); return ' '; })
       .replace(/\p{Nd}+/gu, ' '), function (x) { return x; }).length;
     out.push({ raw: String(raw), text: t, words: words, bigrams: _szBigrams(t), weight: weight, core: core, types: types });
   }

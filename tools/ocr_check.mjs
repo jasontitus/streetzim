@@ -70,10 +70,14 @@ try {
   // iOS the camera tile is off (Take Photo closes the app) and the library
   // first; on macOS a note to drop or paste, no tiles (no picker opens).
   // The x lets it go.
-  for (const app of ['', 'ios', 'mac']) {
+  for (const app of ['', 'ios', 'mac', 'safari-ios']) {
     const got = await p.evaluate((a) => {
-      window.__szSignKiwixApp = a;
-      document.getElementById('search-photo').click();
+      window.__szSignKiwixApp = a === 'safari-ios' ? '' : a;
+      window.__szSignIOS = a === 'safari-ios' || a === 'ios';
+      // in a browser on iOS the button opens the file input itself (iOS's menu): seen here, not opened
+      const click0 = HTMLInputElement.prototype.click, direct = [];
+      HTMLInputElement.prototype.click = function () { direct.push(this.id); };
+      try { document.getElementById('search-photo').click(); } finally { HTMLInputElement.prototype.click = click0; }
       const sheet = document.getElementById('ocr-sheet');
       const take = document.getElementById('ocr-take'), choose = document.getElementById('ocr-choose');
       const shown = (el) => !el.closest('[hidden]') && el.getBoundingClientRect().width > 0;
@@ -81,22 +85,30 @@ try {
                   take: shown(take) ? (take.disabled ? 'off' : take.classList.contains('primary') ? 'first' : 'on') : 'none',
                   choose: shown(choose) ? (choose.classList.contains('primary') ? 'first' : 'on') : 'none',
                   photo: !document.getElementById('ocr-canvas').closest('[hidden]'),   // the photo's frame hides it
-                  again: !document.getElementById('ocr-again').hidden, opened: [] };
+                  again: !document.getElementById('ocr-again').hidden, opened: [], direct };
       // Which input each tile opens (the picker itself cannot open here).
       const click = HTMLInputElement.prototype.click;
       HTMLInputElement.prototype.click = function () {
         r.opened.push(this.id + (this.getAttribute('capture') ? '+' + this.getAttribute('capture') : ''));
       };
       try { take.click(); choose.click(); } finally { HTMLInputElement.prototype.click = click; }
-      document.getElementById('ocr-close').click();
+      if (!sheet.hidden) document.getElementById('ocr-close').click();
       window.__szSignKiwixApp = '';
+      window.__szSignIOS = null;
       return r;
     }, app);
+    if (app === 'safari-ios') {
+      // no tiles: iOS's own menu (Take Photo, Photo Library, Choose File) from the button
+      if (got.open || got.direct.join(',') !== 'search-photo-file') {
+        errs.push(`a browser on iOS: the camera button should open iOS's menu at once: ${JSON.stringify(got)}`);
+      }
+      continue;
+    }
     const want = { '': { state: 'choose', take: 'first', choose: 'on', opened: 'search-photo-take+environment,search-photo-file' },
                    ios: { state: 'pick', take: 'off', choose: 'first', opened: 'search-photo-file' },
                    mac: { state: 'drop', take: 'none', choose: 'none', opened: 'search-photo-file' } }[app];
     if (!(got.open && !got.photo && !got.again && got.state === want.state && got.take === want.take &&
-          got.choose === want.choose && got.opened.join(',') === want.opened)) {
+          got.choose === want.choose && got.opened.join(',') === want.opened && !got.direct.length)) {
       errs.push(`${app ? 'Kiwix ' + app : 'a phone browser'}: the camera's choice is not what it should be: ` +
                 JSON.stringify(got) + ', want ' + JSON.stringify(want));
     }
@@ -356,6 +368,34 @@ try {
         errs.push(`Map for "${sameName}": Map ${look.primary ? '' : 'not '}filled, ${look.h} px, ${look.seen ? 'in' : 'out of'} sight; Results ${look.results ? '' : 'not '}filled; the answer (${look.kind}) ${look.weak ? 'said' : 'offered'}`);
       }
       if (look.status === look.searching) errs.push(`"${sameName}": the sheet still says ${JSON.stringify(look.status)} with the search done`);
+      // a line tapped is searched alone as the sign, the photo kept: another line's
+      // answer, then the sign's line's again, its Map as for the whole photo
+      const tap = async (text) => {
+        const ok = await p.evaluate((t) => {
+          const chip = [...document.querySelectorAll('#ocr-lines .ocr-line')].find((b) => b.textContent === t);
+          if (chip) chip.click();
+          return !!chip;
+        }, text);
+        if (!ok) return null;
+        await p.waitForFunction(() => document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') === 'searched',
+          { timeout: 60000 }).catch(() => {});
+        return p.evaluate((t) => {
+          const m = document.getElementById('ocr-map');
+          return { sheet: !document.getElementById('ocr-sheet').hidden,
+                   lit: [...document.querySelectorAll('#ocr-lines .ocr-line.on')].map((b) => b.textContent),
+                   map: m.hidden ? 0 : +((m.textContent.match(/\((\d+)\)/) || [])[1] || 0),
+                   field: document.getElementById('search-input').value,
+                   verdict: !document.getElementById('ocr-verdict').hidden };
+        }, text);
+      };
+      const other = (await p.evaluate((t) => [...document.querySelectorAll('#ocr-lines .ocr-line')].map((b) => b.textContent)
+        .find((x) => x !== t && /\p{L}{4}/u.test(x)), sameName));
+      const t1 = other ? await tap(other) : null;
+      const t2 = await tap(sameName);
+      if (!t2 || !t2.sheet || t2.lit.join('|') !== sameName || t2.map !== m.n || !t2.verdict ||
+          (t1 && (!t1.sheet || t1.lit.join('|') !== other))) {
+        errs.push(`a line tapped (${JSON.stringify(other)}, then ${JSON.stringify(sameName)}): ${JSON.stringify([t1, t2])}`);
+      }
       await p.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       // The markers: each one's head and point under nothing floating over
       // the map (the search box and chips, the map's buttons and panels, the

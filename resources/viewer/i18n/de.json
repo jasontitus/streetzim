@@ -310,6 +310,7 @@
  "search.sign_street_only": "Nur die Straße, nicht die Adresse",
  "search.sign_area": "Gebiet, kein genauer Ort",
  "search.sign_similar": "Nicht genau gleich: bitte Schild prüfen",
+ "search.sign_elsewhere": "Nicht auf dieser Karte",
  "search.sign_same_name": "Gleicher Name wie auf dem Schild",
  "search.sign_several": "Auch andere Orte heißen so: Das Schild sagt nicht, welcher",
  "search.placeholder": "Orte, Straßen, POIs suchen …",

@@ -309,6 +309,7 @@
  "search.sign_street_only": "通りのみ、住所ではありません",
  "search.sign_area": "地域、正確な地点ではありません",
  "search.sign_similar": "完全一致ではありません：看板を確認してください",
+ "search.sign_elsewhere": "この地図にはありません",
  "search.sign_same_name": "看板と同じ名前",
  "search.sign_several": "同じ名前の場所がほかにもあります：看板からはどれか分かりません",
  "search.placeholder": "場所、道路、スポットを検索…",

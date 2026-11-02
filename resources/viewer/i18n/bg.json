@@ -311,6 +311,7 @@
  "search.sign_street_only": "Само улицата, не адресът",
  "search.sign_area": "Район, а не точно място",
  "search.sign_similar": "Не е точно: проверете табелата",
+ "search.sign_elsewhere": "Не е на тази карта",
  "search.sign_same_name": "Същото име като на табелата",
  "search.sign_several": "И други места имат това име: табелата не казва кое",
  "search.placeholder": "Търсене на места, улици, обекти…",

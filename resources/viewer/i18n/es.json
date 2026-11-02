@@ -311,6 +311,7 @@
  "search.sign_street_only": "Solo la calle, no la dirección",
  "search.sign_area": "Zona, no un lugar exacto",
  "search.sign_similar": "No es exacto: revise el letrero",
+ "search.sign_elsewhere": "No está en este mapa",
  "search.sign_same_name": "El mismo nombre que en el letrero",
  "search.sign_several": "Otros lugares se llaman igual: el letrero no dice cuál",
  "search.placeholder": "Buscar lugares y calles...",

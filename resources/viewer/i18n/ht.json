@@ -311,6 +311,7 @@
  "search.sign_street_only": "Lari a sèlman, pa adrès la",
  "search.sign_area": "Zòn, pa yon kote egzak",
  "search.sign_similar": "Pa egzak: tcheke pano a",
+ "search.sign_elsewhere": "Pa sou kat sa a",
  "search.sign_same_name": "Menm non ak sou pano a",
  "search.sign_several": "Lòt kote gen non sa a tou: pano a pa di kilès",
  "search.placeholder": "Chèche kote, lari, POI...",

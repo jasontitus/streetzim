@@ -311,6 +311,7 @@
  "search.sign_street_only": "Vain katu, ei osoite",
  "search.sign_area": "Alue, ei tarkka paikka",
  "search.sign_similar": "Ei täsmälleen sama: tarkista kyltti",
+ "search.sign_elsewhere": "Ei tällä kartalla",
  "search.sign_same_name": "Sama nimi kuin kyltissä",
  "search.sign_several": "Muillakin paikoilla on tämä nimi: kyltti ei kerro, mikä",
  "search.placeholder": "Hae paikkoja, katuja, kohteita...",

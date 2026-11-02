@@ -317,6 +317,7 @@
  "search.sign_street_only": "Samo ulica, ne naslov",
  "search.sign_area": "Območje, ne natančno mesto",
  "search.sign_similar": "Ni natančno: preverite napis",
+ "search.sign_elsewhere": "Ni na tem zemljevidu",
  "search.sign_same_name": "Enako ime kot na napisu",
  "search.sign_several": "To ime imajo tudi drugi kraji: napis ne pove, kateri",
  "search.placeholder": "Iskanje krajev, ulic, zanimivih točk...",

@@ -311,6 +311,7 @@
  "search.sign_street_only": "Allinnich de strjitte, net it adres",
  "search.sign_area": "Gebiet, gjin krekt plak",
  "search.sign_similar": "Net krekt: kontrolearje it boerd",
+ "search.sign_elsewhere": "Net op dizze kaart",
  "search.sign_same_name": "Deselde namme as op it boerd",
  "search.sign_several": "Oare plakken hjitte ek sa: it boerd seit net hokker",
  "search.placeholder": "Sykje plakken, strjitten, POI's...",

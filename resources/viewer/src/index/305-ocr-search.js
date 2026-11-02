@@ -337,7 +337,7 @@ function _szSignSameLine(line, ws) { return _szSignSame(line, ws) || _szSignSame
 // boxes stacked, no other line between them. A number elsewhere in the
 // photo, or on a sign with "speed", "limit", "km"..., may be a speed limit
 // ("40" beside "Road 1601", "25" under "SPEED LIMIT").
-function _szSignPlate(lines, words) {
+function _szSignPlate(lines, words, mapName) {
   var ls = (lines || []).map(function (L) { return L && typeof L === 'object' ? L : { text: L }; });
   var fold = function (list) { return [].concat.apply([], list.map(words)); };
   var types = {};
@@ -381,6 +381,19 @@ function _szSignPlate(lines, words) {
   plate.reads = ls.map(function (L) { return L.asRead ? plate.norm(words(L.asRead)) : null; });
   plate.texts = rows.map(function (r) { return r.text; });
   plate.sizes = rows.map(function (r) { return r.size; });
+  // A line that leads with its town, a comma after it and no digit in it
+  // ("Київ, пр-т Академіка Глушкова, 1", "м. Київ, вул. ..."), as Ukrainian
+  // and Russian addresses are written: the town (`heads`) and the rest
+  // (`tails`), null where there is none, so the rest can be the address
+  // and the town be told apart (_szSignTownOk).
+  plate.heads = rows.map(function (r) {
+    var c = r.text.indexOf(',');
+    return c > 0 && !/\d/.test(r.text.slice(0, c)) && words(r.text.slice(c + 1)).length ? plate.norm(words(r.text.slice(0, c))) : null;
+  });
+  plate.tails = rows.map(function (r, k) { return plate.heads[k] ? plate.norm(words(r.text.slice(r.text.indexOf(',') + 1))) : null; });
+  plate.headTexts = rows.map(function (r, k) { return plate.heads[k] ? r.text.slice(0, r.text.indexOf(',')) : null; });
+  // the map's own town (map-config's name, in Latin), for _szSignTownOk
+  plate.mapName = String(mapName || '').toLowerCase().replace(/[^\p{L}]/gu, '');
   // The street types the sign carries, in any line (a Russian plate's
   // "УЛИЦА" under its name).
   plate.signTypes = [];
@@ -477,22 +490,31 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   var p = _szSignAddressParts(rec, plate, words);
   if (!p) return 'drop';
   var named = p.rest.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); });
+  // the line holding the street and number (or, after its town and comma, its
+  // tail: `tailed`, whose town _szSignTownOk then reads)
+  var tailed = [];
   var onLine = function (rest) {
-    return plate.lines.filter(function (L) {
-      if (_szSignSameLine(L, rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(rest))) return true;
-      // the same Cyrillic type word elsewhere in the line ("ВУЛИЦЯ СЕРПОВА
-      // 12-А" for "12-А Серпова вулиця"; "УЛИЦА КОСЫГИНА 2" for "2 улица Косыгина")
-      var lt = L.filter(plate.isType), rt = rest.filter(plate.isType);
-      if (!lt.length || lt.join(' ') !== rt.join(' ') || !_szSignCyr(lt)) return false;
-      var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
-      return _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
+    return plate.lines.filter(function (L0, i) {
+      return [L0, (plate.tails || [])[i]].some(function (L, k) {
+        if (!L) return false;
+        var ok = _szSignSameLine(L, rest.concat(p.b)) || _szSignSameLine(L, p.b.concat(rest));
+        // the same Cyrillic type word elsewhere in the line ("ВУЛИЦЯ СЕРПОВА
+        // 12-А" for "12-А Серпова вулиця"; "УЛИЦА КОСЫГИНА 2" for "2 улица Косыгина")
+        var lt = L.filter(plate.isType), rt = rest.filter(plate.isType);
+        if (!ok && lt.length && lt.join(' ') === rt.join(' ') && _szSignCyr(lt)) {
+          var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
+          ok = _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
+        }
+        if (ok && k === 1 && tailed.indexOf(L0) < 0) tailed.push(L0);
+        return ok;
+      });
     })[0];
   };
   var bare = _szSignBare(p.rest, plate);
   var one = named && (onLine(p.rest) || (bare && onLine(bare)));
   if (one) {
     if (_szSignOtherBuilding(plate, p, [one], plate.sizes[plate.lines.indexOf(one)])) return 'similar';
-    return _szSignTownOk(rec, plate, words, [one], places, pois) ? 'address' : 'similar';
+    return _szSignTownOk(rec, plate, words, [one], places, pois, tailed.indexOf(one) >= 0 ? [one] : []) ? 'address' : 'similar';
   }
   // a Cyrillic street without its type, and no type anywhere on the sign
   // ("18 СЕРПОВА" for "18 Серпова вулиця"): which street of that name it is,
@@ -581,7 +603,7 @@ var SZ_SIGN_NEUTRAL = ['block', 'blk', 'مجمع', 'flat', 'apt', 'floor'];
 var SZ_SIGN_TOWN_END = /[市縣县區区町村郡省鎮镇鄉乡]$/;
 var SZ_SIGN_CONTACT = /@|www\.|https?:|\.(com|net|org|co)\b|\b(tel|fax|phone|mobile)\b|☎/i;
 var SZ_SIGN_PLACE_KM = { city: 8, town: 4, village: 2, suburb: 2, hamlet: 1, neighbourhood: 1, quarter: 1 };
-function _szSignTownOk(rec, plate, words, used, places, pois) {
+function _szSignTownOk(rec, plate, words, used, places, pois, heads) {
   var neutral = plate.neutral || (plate.neutral = [].concat.apply([], SZ_SIGN_NEUTRAL.map(words)));
   var han = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
   var fold = function (t) { return t.replace(/臺/g, '台'); };
@@ -599,7 +621,22 @@ function _szSignTownOk(rec, plate, words, used, places, pois) {
   var ownStreet = [].concat.apply([], ((pois && pois.streets) || []).filter(function (g) { return street && g.indexOf(street) >= 0; }));
   var confirmed = false, unknown = false;
   var conflict = plate.lines.some(function (L, i) {
-    if (used.indexOf(L) >= 0 || SZ_SIGN_CONTACT.test(String(plate.texts[i] || ''))) return false;
+    if (SZ_SIGN_CONTACT.test(String(plate.texts[i] || ''))) return false;
+    // the address's own line: only its town before the comma, when the address
+    // was found after it (`heads`; "Via Roma, 10" names its street there)
+    var raw = plate.texts[i];
+    if (used.indexOf(L) >= 0) {
+      if (!heads || heads.indexOf(L) < 0 || !plate.heads || !plate.heads[i]) return false;
+      L = plate.heads[i];
+      raw = plate.headTexts[i];
+    }
+    // the town the map is of, named in its own script ("Київ" on the map of Kyiv,
+    // whose index has no record of the city itself), when the address names no
+    // town of its own (then that is what the sign must name)
+    if (!town && _szSignMapTown(raw, plate.mapName)) {
+      confirmed = true;
+      return false;
+    }
     var named = L.filter(function (w) {
       return !_szSignIsNum(w) && !plate.isType(w) && plate.filler.indexOf(w) < 0 && neutral.indexOf(w) < 0;
     });
@@ -631,6 +668,42 @@ function _szSignTownOk(rec, plate, words, used, places, pois) {
     return false;
   });
   return !conflict && (confirmed || !unknown);
+}
+// A town as written on a sign in Latin letters, as Ukraine (2010) and
+// Russia (BGN) write their places in English: the Ukrainian and the Russian
+// form, lower case, letters only, town words ("м.", "г.", місто) left out
+// ("м. Київ" kyiv, "Львів" lviv, "Москва" moskva), to hold against the
+// name of the map's own town (map-config's name, in Latin).
+var SZ_SIGN_ROMAN_UK = { 'а': 'a', 'б': 'b', 'в': 'v', 'г': 'h', 'ґ': 'g', 'д': 'd', 'е': 'e', 'є': 'ie', 'ж': 'zh', 'з': 'z',
+  'и': 'y', 'і': 'i', 'ї': 'i', 'й': 'i', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's',
+  'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ь': '', 'ю': 'iu', 'я': 'ia' };
+var SZ_SIGN_ROMAN_UK_FIRST = { 'є': 'ye', 'ї': 'yi', 'й': 'y', 'ю': 'yu', 'я': 'ya' };
+var SZ_SIGN_ROMAN_RU = { 'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
+  'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f',
+  'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya' };
+var SZ_SIGN_TOWN_WORDS = ['м', 'г', 'місто', 'город', 'смт', 'пгт'];
+function _szSignRoman(s) {
+  var ws = String(s == null ? '' : s).toLowerCase().split(/[^\p{L}]+/u).filter(function (w) {
+    return w && SZ_SIGN_TOWN_WORDS.indexOf(w) < 0;
+  });
+  return [[SZ_SIGN_ROMAN_UK, SZ_SIGN_ROMAN_UK_FIRST], [SZ_SIGN_ROMAN_RU, {}]].map(function (m) {
+    return ws.map(function (w) {
+      return Array.from(w).map(function (ch, i) {
+        var t = i === 0 && Object.prototype.hasOwnProperty.call(m[1], ch) ? m[1] : m[0];
+        return Object.prototype.hasOwnProperty.call(t, ch) ? t[ch] : ch;
+      }).join('');
+    }).join('');
+  });
+}
+// Whether a town as written is the map's own (map-config's name, `mapName`,
+// folded to Latin letters): one of _szSignRoman's forms, or a letter from
+// it ("Киев" is kyev, Kyiv kyiv). An English exonym (Moscow, Москва moskva)
+// is not caught: the record lookups are what know it.
+function _szSignMapTown(raw, mapName) {
+  if (!mapName) return false;
+  return _szSignRoman(raw).some(function (r) {
+    return r === mapName || (Array.from(mapName).length >= 4 && _szSignOneEdit(mapName, r));
+  });
 }
 // The map's areas among the records found, for _szSignTownOk: their names
 // as folded words (臺 as 台) and their box or point.
@@ -755,8 +828,8 @@ function _szSignTooShort(name, words, exact) {
 // a name found once in the map is not the sign's place when the sign's own
 // is missing from the map or the reader misread it (a kebab shop 471 km
 // away, a road one character off), so the verdict says where it is instead.
-function _szSignKinds(matches, lines, words, all) {
-  var plate = _szSignPlate(lines, words);
+function _szSignKinds(matches, lines, words, all, mapName) {
+  var plate = _szSignPlate(lines, words, mapName);
   var records = all || matches.map(function (m) { return m.item; });
   var streets = _szSignStreets(plate, words, records), places = _szSignPlaces(records, words);
   var pois = _szSignPois(records, words);
@@ -803,7 +876,50 @@ function _szSignKinds(matches, lines, words, all) {
     });
     if (first.several && top.t === 'addr') out.forEach(function (k) { if (k.kind === 'address') k.several = true; });
   }
+  // the sign's address in a town the map may know nothing of (confirmed by a
+  // lookup before it is said): not when an address or a street of it was found
+  if (!out.some(function (k) { return k.kind === 'address' || k.kind === 'street'; })) {
+    var away = _szSignElsewhere(plate, records, words, places);
+    if (away) out.away = away;
+  }
   return out;
+}
+// The town an address of the sign is in, as written, when the map may know
+// nothing of it: a town named as one ("м. Київ", "г.Тула", "село Гора"),
+// else a lone word leading the address line ("Київ, пр-т Академіка
+// Глушкова, 1"; not a venue: "ТРЦ Gulliver, ...", "Палац «Україна», ..."),
+// and none of what was found names it: not the map's own town, no area of
+// that name, no record calling it so. '' else. The caller does not take it
+// for elsewhere before a lookup of that town in the map's search finds
+// nothing either (the photo's search fetches what its biggest lines name).
+var SZ_SIGN_TOWN_MARK = /^(м|г|с|смт|пгт|пос|п|д|село|селище|місто|город|посёлок|деревня)(?:\.\s*|\s+)(\p{L}[\p{L}'’ -]*)$/iu;
+function _szSignElsewhere(plate, records, words, places) {
+  var types = function (ws) { return ws.some(plate.isType); };
+  for (var i = 0; i < plate.lines.length; i++) {
+    var tail = plate.tails && plate.tails[i];
+    if (!tail || !tail.some(_szSignIsNum) || !types(tail)) continue;   // an address after the comma
+    var parts = String(plate.texts[i]).split(',').map(function (x) { return x.trim(); });
+    var town = '';
+    for (var k = 0; k < parts.length && !town; k++) {
+      var m = parts[k].match(SZ_SIGN_TOWN_MARK);
+      if (m && !/\d/.test(parts[k])) town = m[2].trim();
+    }
+    // else a lone word of letters leading the line, no type
+    if (!town && /^[\p{L}'’-]+$/u.test(parts[0]) && !types(words(parts[0]))) town = parts[0];
+    var key = words(town).join(' ');
+    if (!key || Array.from(key.replace(/ /g, '')).length < 3) continue;
+    if (_szSignMapTown(town, plate.mapName)) continue;
+    if ((places || []).some(function (p) { return p.keys.indexOf(key) >= 0 || p.keys.indexOf(key.replace(/ /g, '')) >= 0; })) continue;
+    if (_szSignNamedBy(records, key, words)) continue;
+    return town;
+  }
+  return '';
+}
+// Whether any of `records` names `key` (folded words) as whole words, in any of its names.
+function _szSignNamedBy(records, key, words) {
+  return (records || []).some(function (it) {
+    return it && _szSignNames(it).some(function (n) { return (' ' + words(n).join(' ') + ' ').indexOf(' ' + key + ' ') >= 0; });
+  });
 }
 // A record's names as folded words (an address's before its comma).
 function _szSignNameKeys(it, words) {
@@ -885,22 +1001,30 @@ function _szSignClearFrame(w, h, boxes) {
 // '' anywhere else.
 function _szSignKiwixApp(protocol, nav) {
   if (protocol !== 'zim:' || !nav) return '';
-  var ua = nav.userAgent || '';
-  if (/iPad|iPhone|iPod/.test(ua) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)) return 'ios';
-  if (/Macintosh|Mac OS X/.test(ua)) return 'mac';
+  if (_szSignIOS(nav)) return 'ios';
+  if (/Macintosh|Mac OS X/.test(nav.userAgent || '')) return 'mac';
   return '';
+}
+// An iPhone or iPad (iPadOS says it is a Mac, with a touch screen).
+function _szSignIOS(nav) {
+  return !!nav && (/iPad|iPhone|iPod/.test(nav.userAgent || '') || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1));
 }
 // END sign-env
 
 // BEGIN sign-pick
-// What the camera button offers, from sign-env's app and whether the
-// pointer is coarse (a finger): 'drop' in Kiwix for macOS, where no picker
-// opens; 'library' in Kiwix on iOS, where Take Photo closes the app (the
-// camera tile shows, off); 'both' on a phone or tablet, the camera at once
-// or a photo; 'picker' on a desktop, the file picker straight away.
-function _szSignPickMode(app, coarse) {
+// What the camera button offers, from sign-env's app, whether the pointer
+// is coarse (a finger) and whether it is an iPhone or iPad: 'drop' in Kiwix
+// for macOS, where no picker opens; 'library' in Kiwix on iOS, where Take
+// Photo closes the app (the camera tile shows, off, and a note says so);
+// 'picker' in a browser on iOS, whose own menu (Take Photo, Photo Library,
+// Choose File) opens straight away, the tiles would only come before it,
+// and on a desktop, the file picker at once; 'both' on another phone or
+// tablet (Android: its "Choose" opens the photo picker, no camera in it),
+// the camera at once or a photo.
+function _szSignPickMode(app, coarse, ios) {
   if (app === 'mac') return 'drop';
   if (app === 'ios') return 'library';
+  if (ios) return 'picker';
   return coarse ? 'both' : 'picker';
 }
 // END sign-pick
@@ -1165,8 +1289,8 @@ function initSignSearch(map, config) {
     btn.setAttribute('aria-label', btn.title);
   }
   // The camera button shows the photo, small: the way back to it.
-  function keep(lines, query, raw) {
-    last = { lines: lines, query: query, raw: raw };
+  function keep(lines, query, raw, one) {
+    last = { lines: lines, query: query, raw: raw, one: one || null };
     try {
       var t = document.createElement('canvas'), side = 96;
       var s = side / Math.min(canvas.width, canvas.height);
@@ -1189,15 +1313,25 @@ function initSignSearch(map, config) {
     // The tiles, opened since, emptied them: the lines read again, not the
     // search's joined ones ("366 116 طريق").
     showLines(last.raw || last.lines);
+    // a line tapped last: it again, lit, labelled as that line alone
+    if (last.one) {
+      [].forEach.call(linesEl.children, function (b) {
+        var on = b.textContent === last.one.text;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
     setStatus(szT('search.searching', 'Searching…'), 'lines');
     input.value = last.query;
     document.getElementById('search-clear').style.display = 'block';
     forgetVerdict();
-    var opts = signOpts(last.raw), rs = readSeq;
+    var opts = signOpts(last.one ? [last.one] : last.raw), rs = readSeq;
     // over, its answer shown or let go (the picker opened meanwhile): not
     // "Searching…" for good; a photo read since has its own status
     var done = function () {
-      if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+      return confirmAway(opts.photo).then(function () {
+        if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+      });
     };
     map._searchSign(last.lines, opts).then(done, done);
   }
@@ -1205,14 +1339,14 @@ function initSignSearch(map, config) {
   // Kiwix on iOS), the note to drop or paste in Kiwix on macOS, or the
   // file picker at once on a desktop.
   function pick() {
-    forgetVerdict();
     var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-    var mode = _szSignPickMode(kiwixApp(), coarse);
+    var mode = _szSignPickMode(kiwixApp(), coarse, window.__szSignIOS != null ? !!window.__szSignIOS : _szSignIOS(navigator));
     if (mode === 'picker') {
       file.value = '';
       file.click();
-      return;     // a read under way goes on: the picker may be cancelled
+      return;     // a read under way goes on, its answer kept: the picker may be cancelled
     }
+    forgetVerdict();
     readSeq++; loadSeq++;     // the tiles replace the sheet: no reading or photo of before shows under them
     sheet.hidden = false;
     frame.hidden = zoomHint.hidden = zoombar.hidden = showBtn.hidden = mapBtn.hidden = true;
@@ -1347,12 +1481,37 @@ function initSignSearch(map, config) {
     zoomHint.style.visibility = !touch || reading || !noPart ? 'hidden' : '';
     zoomHint.hidden = off || !touch;
   }
-  // A line tapped: its results, the sheet put away (the camera brings it back).
-  function searchLine(text) {
-    hide();
-    input.value = text;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    btn.focus({ preventScroll: true });
+  // A line tapped: that line alone searched as the sign, the photo kept: its
+  // answer (what it is, whether other places have its name), Map and Results
+  // as for the whole photo, the line outlined on the photo and lit among the
+  // lines. The reader picks the line that is the place and is told what it
+  // is, as for the photo's own answer.
+  var shownLines = [];
+  function searchLine(L, chip) {
+    var rs = ++readSeq;          // a search of the whole photo still going: its answer is not this one
+    forgetVerdict();
+    [].forEach.call(linesEl.children, function (b) {
+      b.classList.toggle('on', b === chip);
+      b.setAttribute('aria-pressed', b === chip ? 'true' : 'false');
+    });
+    setStatus(szT('search.searching', 'Searching…'), 'lines');
+    var one = [L], all = shownLines;
+    var weighted = _szSignWeighted(one, L.size).concat(_szSignAddress(one, L.size));
+    input.value = L.text;
+    document.getElementById('search-clear').style.display = 'block';
+    var opts = signOpts(one);
+    var done = function (found) {
+      if (rs !== readSeq) return;
+      if (found && opts.photo === photoSeq) {
+        var query = (found[0] && found[0].signLine) || L.text;
+        input.value = query;
+        keep(weighted, query, all, L);
+      }
+      return confirmAway(opts.photo).then(function () {
+        if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+      });
+    };
+    map._searchSign(weighted, opts).then(done, function () { done(null); });
   }
   var ptrs = {}, gesture = null, lastTap = null;
   function framePoint(e) {
@@ -1532,8 +1691,10 @@ function initSignSearch(map, config) {
     btn.focus({ preventScroll: true });
   });
   // The answer under the photo is the first result: a tap on it goes there,
-  // as its row in the list would.
+  // as its row in the list would. A town not on this map is no place here:
+  // the list instead.
   function pickFirst() {
+    if (verdictEl.getAttribute('data-kind') === 'elsewhere') { if (!showBtn.hidden) showBtn.click(); return; }   // inert without results
     var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
     if (row) { row.click(); btn.focus({ preventScroll: true }); }
   }
@@ -1620,9 +1781,46 @@ function initSignSearch(map, config) {
     if (k.kind === 'similar') return szT('search.sign_similar', 'Not an exact match: check the sign');
     return szT('search.sign_same_name', 'Same name as on the sign');
   }
+  // A town the photo's answer found may not be on this map (_szSignElsewhere):
+  // looked up in the map's search; when nothing there names it either, the
+  // answer says so: the town, big, as written, and "Not on this map", the
+  // results listed with their own labels, Map off. Resolves when done.
+  var awayCandidate = null;
+  function confirmAway(photo) {
+    var a = awayCandidate;
+    awayCandidate = null;
+    if (!a || a.photo !== photo || typeof map._queryPlaces !== 'function') return Promise.resolve();
+    var words = a.words;
+    return map._queryPlaces(a.town).then(function (got) {
+      if (photo !== photoSeq) return;
+      var key = words(a.town).join(' ');
+      if (_szSignNamedBy((got || []).map(function (m) { return m.item; }), key, words)) return;
+      verdictEl.innerHTML = '';
+      verdictEl.hidden = false;
+      verdictEl.setAttribute('data-kind', 'elsewhere');
+      verdictEl.classList.add('weak');
+      var townEl = document.createElement('span');
+      townEl.className = 'ocr-verdict-name';
+      townEl.dir = 'auto';
+      townEl.textContent = a.town;
+      verdictEl.appendChild(townEl);
+      var notHere = document.createElement('strong');
+      notHere.textContent = szT('search.sign_elsewhere', 'Not on this map');
+      verdictEl.appendChild(notHere);
+      verdictEl.setAttribute('aria-label', a.town + ' \u00b7 ' + notHere.textContent);
+      // nothing to go to: the list, when there is one
+      verdictEl.classList.toggle('inert', showBtn.hidden);
+      group = [];
+      clearGroup();
+      mapBtn.hidden = true;
+      showBtn.classList.toggle('primary', !showBtn.hidden);
+      paint(a.lines);
+    }, function () {});
+  }
   function signOpts(lines) {
     var photo = photoSeq, plate = null;
-    var plateOf = function (words) { return plate || (plate = _szSignPlate(lines, words)); };
+    var mapName = (config && config.name) || '';
+    var plateOf = function (words) { return plate || (plate = _szSignPlate(lines, words, mapName)); };
     return {
       photo: photo,
       admit: function (rec, words) {
@@ -1643,7 +1841,7 @@ function initSignSearch(map, config) {
       label: function (found, all, words) {
         if (photo !== photoSeq) return false;
         // Any address left that is not the plate's goes; the plate's comes first.
-        var kinds = _szSignKinds(found, lines, words, all);
+        var kinds = _szSignKinds(found, lines, words, all, mapName);
         var rank = function (k) { return k.kind === 'address' ? 0 : 1; };
         var order = found.map(function (m, i) { return i; })
           .filter(function (i) { return kinds[i].kind !== 'drop'; })
@@ -1652,7 +1850,7 @@ function initSignSearch(map, config) {
           var kept = order.map(function (i) { return found[i]; });
           found.length = 0;
           Array.prototype.push.apply(found, kept);
-          kinds = _szSignKinds(found, lines, words, all);
+          kinds = _szSignKinds(found, lines, words, all, mapName);
         }
         found.forEach(function (m, i) {
           var k = kinds[i];
@@ -1663,6 +1861,9 @@ function initSignSearch(map, config) {
         });
         verdictEl.innerHTML = '';
         verdictEl.hidden = !kinds.length;
+        verdictEl.classList.remove('inert');
+        // a town that may not be on this map: looked up before it is said (confirmAway)
+        awayCandidate = kinds.away ? { town: kinds.away, photo: photo, lines: lines, words: words } : null;
         showBtn.hidden = !found.length;
         showBtn.textContent = szT('find.results', 'Results') + ' (' + found.length + ') ' +
           (getComputedStyle(showBtn).direction === 'rtl' ? '\u2039' : '\u203a');
@@ -1759,13 +1960,14 @@ function initSignSearch(map, config) {
 
   function showLines(lines) {
     linesEl.innerHTML = '';
+    shownLines = lines;
     lines.forEach(function (L) {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'ocr-line';
       b.dir = 'auto';
       b.textContent = L.text;
-      b.addEventListener('click', function () { searchLine(L.text); });
+      b.addEventListener('click', function () { searchLine(L, b); });
       linesEl.appendChild(b);
     });
   }
@@ -1840,7 +2042,9 @@ function initSignSearch(map, config) {
         var query = (found[0] && found[0].signLine) || biggest;
         input.value = query;
         keep(weighted, query, lines);
-        setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+        return confirmAway(opts.photo).then(function () {
+          if (rs === readSeq) setStatus(szT('search.photo_lines', 'Text in the photo: tap a line to search for it'), 'searched');
+        });
       });
     }).catch(function (err) { failed(err, rs); });
   }

@@ -311,6 +311,7 @@
  "search.sign_street_only": "Na only di road, no be di address",
  "search.sign_area": "Na area, no be di exact place",
  "search.sign_similar": "E no match well: check di sign",
+ "search.sign_elsewhere": "E no dey for dis map",
  "search.sign_same_name": "Same name as wetin dey for di sign",
  "search.sign_several": "Oda places get dis name too: di sign no talk which one",
  "search.placeholder": "Sọch ples, strit, POI...",

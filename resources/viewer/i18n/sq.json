@@ -311,6 +311,7 @@
  "search.sign_street_only": "Vetëm rruga, jo adresa",
  "search.sign_area": "Zonë, jo vend i saktë",
  "search.sign_similar": "Jo e saktë: kontrolloni tabelën",
+ "search.sign_elsewhere": "Nuk është në këtë hartë",
  "search.sign_same_name": "I njëjti emër si në tabelë",
  "search.sign_several": "Edhe vende të tjera e kanë këtë emër: tabela nuk thotë cilin",
  "search.placeholder": "Kërko vende, rrugë, pika interesi...",

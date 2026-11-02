@@ -311,6 +311,7 @@
  "search.sign_street_only": "Csak az utca, nem a cím",
  "search.sign_area": "Terület, nem pontos hely",
  "search.sign_similar": "Nem pontos: ellenőrizze a táblát",
+ "search.sign_elsewhere": "Nincs ezen a térképen",
  "search.sign_same_name": "Ugyanaz a név, mint a táblán",
  "search.sign_several": "Más helyeknek is ez a neve: a tábla nem mondja meg, melyiknek",
  "search.placeholder": "Helyek, utcák, érdekes pontok keresése…",

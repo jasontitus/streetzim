@@ -67,8 +67,11 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
 1. **The photo.** On a phone or tablet the button opens a choice in the
    photo sheet: **Take a photo** (`<input type="file" accept="image/*"
    capture="environment">`: the camera straight away) or **Choose a photo**
-   (the same input without `capture`: the library or files). On a desktop
-   it opens the file picker at once. A photo can also be dropped
+   (the same input without `capture`: the library or files). In a browser
+   on an iPhone or iPad the button opens that input at once: iOS's own menu
+   (Take Photo, Photo Library, Choose File) has the camera in it, so the two
+   tiles only came before it (Kiwix on iOS keeps them: its Take Photo closes
+   the app, see below). On a desktop it opens the file picker at once. A photo can also be dropped
    anywhere on the page or pasted (an image pasted into a text field with
    text alongside stays text). The photo search takes the whole screen:
    the photo, scaled to at most 1600 px on its longest side, big in a frame
@@ -159,7 +162,10 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    put away: while the photo shows, no results or chips cover it. The search
    field holds the line the first one matched, as read: not the photo's
    other text (a status bar, a watermark). Tapping a line under the photo
-   runs an ordinary search for it, the photo put away. When more than one
+   searches that line alone as the sign, the photo kept: its answer, what
+   it is and whether other places have its name, with Map and Results as
+   for the whole photo; the line is lit and outlined on the photo. The
+   search field still runs an ordinary search for what is typed. When more than one
    result has the answer's name (as the rows show it: the name or its
    other script, not every translation; for an address, the same address
    before its place), **Map (n)** under the answer puts the photo and the
@@ -206,7 +212,17 @@ the lines as read (`_szSignKinds`, `_szSignAddressKind`, 305-ocr-search.js),
 not the search's fuzzy match, which also finds a name that is part of a
 line or a line glued to another. A right-to-left line may also match read
 backwards (a recognizer may give its words in visual order). Each result
-row says what it is, and the photo sheet says it of the first one:
+row says what it is, and the photo sheet says it of the first one.
+Ukrainian and Russian addresses lead with their town and a comma ("Київ,
+пр-т Академіка Глушкова, 1", "м. Київ, вул. ..."): such a line holds the
+address after the comma, and its town confirms the address when it is an
+area of the map that holds it or the map's own town (map-config's name,
+compared in Latin as Ukraine and Russia write their places in English,
+`_szSignRoman`: "Київ" is Kyiv, whose map has no record of the city
+itself). Street types abbreviated with a hyphen ("пр-т", "пр-кт" for
+проспект, "б-р" for бульвар, "пр-д" for проезд) are the abbreviations the
+types know: split at the hyphen they were two words and the line no
+address.
 
 | label | when |
 |---|---|
@@ -214,6 +230,7 @@ row says what it is, and the photo sheet says it of the first one:
 | Street only: no address N found | a street whose name is one line of the sign, when the sign has a building number beside a numbered street ("366" over "Road 116") or with 號, and that address was not found. Found, not "in the map": an address written another way may be missed. Most of Bahrain has no building addresses in any open data |
 | Street only, not the address | the same street when its address was found, or when the sign has a number line that may not be a building (a speed limit beside "Königstraße") |
 | Area, not an exact spot | a town, district or other area whose name is one line of the sign |
+| Not on this map (the town, big) | the sign gives an address after a town the map knows nothing of ("Київ, пр-т Академіка Глушкова, 1" on the map of Moscow): not the map's own town, no area of that name among what was found, and no record found that names it (the map of Moscow has the river and shops called "Москва"); the answer is that town as written, and Results lists what the search found, each row with its own label; tapping the answer opens them |
 | Same name as on the sign | anything else whose name (or own-script name, or another language's) is one line of the sign, on a sign with no number line (a street sign, a shop, a station), and is 3 letters or more (2 Chinese, Japanese or Korean characters: "KFC", "全家"; "MT" read whole from a logo is only to check) |
 | Not an exact match: check the sign | everything else: a name read inexactly, part of a line ("Grand Mosque" on "Al Noor Grand Mosque"), a line glued to another ("Road 1012" from "Road 101" and "2"), the line's words in another order, an address whose number may not be the building's (a "30" under "Schulweg": a speed limit?) |
 
@@ -305,7 +322,7 @@ vowel sign ை (drawn before its consonant) even on a clean sign:
 
 | reader | camera / photo |
 |---|---|
-| a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone, file picker on a desktop |
+| a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone (on an iPhone or iPad, iOS's own menu at once), file picker on a desktop |
 | Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera's choice shows Take a photo off, with a note saying why, and Choose a photo as the blue one (`_szSignPickMode`). The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
 | Kiwix for macOS | drop a photo on the map, or paste one with ⌘V. The app does not answer the web view's open-panel request (`WKUIDelegate` `runOpenPanelWith`, absent from kiwix-apple as of 2026-10-23), so the file picker never opens: the camera button first shows a note saying so (the `zim:` scheme on a Mac, `sign-env`). The fix belongs in the app |
 | Kiwix for Android | no: its WebView opens no file chooser, so the viewer hides the button there (an Android WebView's user agent says `; wv)`) |

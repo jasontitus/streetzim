@@ -317,6 +317,7 @@
  "search.sign_street_only": "Лише вулиця, не адреса",
  "search.sign_area": "Район, а не точне місце",
  "search.sign_similar": "Не точний збіг: звірте з табличкою",
+ "search.sign_elsewhere": "Немає на цій карті",
  "search.sign_same_name": "Та сама назва, що на табличці",
  "search.sign_several": "Так називаються й інші місця: з таблички не зрозуміло, яке",
  "search.placeholder": "Пошук місць, вулиць, об'єктів...",

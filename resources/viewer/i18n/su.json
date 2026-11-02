@@ -308,6 +308,7 @@
  "search.sign_street_only": "Ngan jalan, lain alamat",
  "search.sign_area": "Wewengkon, lain tempat pasti",
  "search.sign_similar": "Teu pasti: pariksa papan ngaran",
+ "search.sign_elsewhere": "Henteu aya dina peta ieu",
  "search.sign_same_name": "Ngaran anu sarua jeung dina papan ngaran",
  "search.sign_several": "Tempat séjén ogé boga ngaran ieu: papan ngaran henteu nyebutkeun anu mana",
  "search.placeholder": "Paluruh tempat, jalan, lokasi narik...",

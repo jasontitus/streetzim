@@ -308,6 +308,7 @@
  "search.sign_street_only": "เฉพาะถนน ไม่ใช่ที่อยู่",
  "search.sign_area": "เป็นพื้นที่ ไม่ใช่ตำแหน่งที่แน่นอน",
  "search.sign_similar": "ไม่ตรงทั้งหมด: โปรดดูป้าย",
+ "search.sign_elsewhere": "ไม่อยู่ในแผนที่นี้",
  "search.sign_same_name": "ชื่อเดียวกับบนป้าย",
  "search.sign_several": "ที่อื่นก็ใช้ชื่อนี้: ป้ายไม่ได้บอกว่าที่ใด",
  "search.placeholder": "ค้นหาสถานที่ ถนน จุดที่น่าสนใจ…",

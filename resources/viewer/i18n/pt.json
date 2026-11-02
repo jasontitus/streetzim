@@ -311,6 +311,7 @@
  "search.sign_street_only": "Só a rua, não o endereço",
  "search.sign_area": "Área, não um local exato",
  "search.sign_similar": "Não é exato: confira a placa",
+ "search.sign_elsewhere": "Não está neste mapa",
  "search.sign_same_name": "O mesmo nome da placa",
  "search.sign_several": "Outros lugares têm este nome: a placa não diz qual",
  "search.placeholder": "Pesquise lugares, ruas, pontos de interesse...",
