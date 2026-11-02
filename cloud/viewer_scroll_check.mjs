@@ -7,9 +7,12 @@
 //
 // Drives the viewer at a phone in portrait (390x664) and a small phone in
 // landscape (568x320): a Find chip, moving between results with the arrow
-// keys (each flies the map to the result, which brings up the button), taps
-// on result pins, typing a search while the button is up, and closing the
-// dropdown again. After each step it measures the page's scroll offsets,
+// keys (each flies the map to the result, which brings up the button once
+// the map has left the results' view; with all of them in view, as on a
+// landscape phone over one city, the map is zoomed in a little and back,
+// as a pinch would),
+// taps on result pins, typing a search while the button is up, and closing
+// the dropdown again. After each step it measures the page's scroll offsets,
 // the search box, the chip rail, the button, the result strip and the
 // dropdown. FAIL when:
 //   - the page is scrolled;
@@ -101,6 +104,18 @@ async function run(name, viewport) {
       await pg.waitForFunction(() => !!document.getElementById('find-search-area-btn'), null, { timeout: 15000 }).catch(() => {});
       await sleep(400);
       steps.push(await measure('between results'));
+      // the results all in view, moving between them leaves the map where it
+      // was and the button rightly stays away: zoomed in by more than the
+      // half level that brings it up (wherever the results lie), and back
+      if (!(await pg.$('#find-search-area-btn'))) {
+        const z = await pg.evaluate(() => window.__szMap.getZoom());
+        await pg.evaluate((z) => window.__szMap.jumpTo({ zoom: z + 0.6 }), z);
+        await pg.waitForFunction(() => !!document.getElementById('find-search-area-btn'), null, { timeout: 15000 }).catch(() => {});
+        await sleep(400);
+        steps.push(await measure('zoomed in'));
+        await pg.evaluate((z) => window.__szMap.jumpTo({ zoom: z }), z);
+        await sleep(600);
+      }
     }
     // pins in view, clicked as a tap would (their handlers are click handlers)
     const pins = await pg.$$eval('.maplibregl-marker', (els) => els.map((e, i) => {
