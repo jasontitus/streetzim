@@ -480,10 +480,8 @@ function placeSearchPin(map, lat, lon, name, enrich) {
   searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
     .setLngLat([lon, lat])
     .addTo(map);
-  if (!window.streetzimRouting ||
-      typeof window.streetzimRouting.open !== 'function') {
-    return searchMarker;
-  }
+  // the place's name and contacts, and Directions where the map routes
+  // (_szPlacePopupDOM leaves it out on a map built without routing)
   var box = _szPlacePopupDOM(lat, lon, name, enrich);
   var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
                                      closeOnClick: false,

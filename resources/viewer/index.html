@@ -4394,7 +4394,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '10e56846';
+var SZ_VIEWER_BUILD = 'd362600e';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -7139,10 +7139,6 @@ if (searchMarker) { searchMarker.remove(); searchMarker = null; }
 searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
 .setLngLat([lon, lat])
 .addTo(map);
-if (!window.streetzimRouting ||
-typeof window.streetzimRouting.open !== 'function') {
-return searchMarker;
-}
 var box = _szPlacePopupDOM(lat, lon, name, enrich);
 var popup = new maplibregl.Popup({ offset: 28, closeButton: true,
 closeOnClick: false,
