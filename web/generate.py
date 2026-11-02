@@ -1191,6 +1191,10 @@ def builder_link(builder, region_id, zim_filename, zim_md5, item_files=None):
 BUILDER_LIVE = {}
 # region id -> the live ZIM, where the builder still offers the one before it
 BUILDER_NEWER = {}
+# region id -> whether the builder's base map has search with a photo: the
+# item's streetzim_photo_search (cloud/stamp_item_metadata.py), for the live
+# ZIM, so only where the recipes are for that ZIM (not BUILDER_NEWER)
+BUILDER_PHOTO = {}
 
 
 # Every live map as the site's cards show it, for web/library/catalog.json
@@ -1310,13 +1314,15 @@ def write_library_catalog(library, versions, places=None, out_dir=None, m49=None
     return [m["id"] for m in maps]
 
 
-def write_build_index(live, recipes_dir=None, newer=None):
+def write_build_index(live, recipes_dir=None, newer=None, photo=None):
     """web/build/recipes/index.json: the published regions whose base
     archive.org serves (`live`: {region id: True}; builder_link), by title,
     each with "newer": the live ZIM where that is a newer one (`newer`) than
     the recipes' base. Written at every site build, so a pruned or
-    re-uploaded base leaves the builder page with the next deploy. Returns
-    the region ids listed."""
+    re-uploaded base leaves the builder page with the next deploy. Each
+    region in `photo` ({id: bool}) gets "photo_search": whether its base
+    map has search with a photo (the builder page marks it). Returns the
+    region ids listed."""
     recipes_dir = recipes_dir or build_recipes_dir()
     if not os.path.isdir(recipes_dir):
         return []
@@ -1330,6 +1336,8 @@ def write_build_index(live, recipes_dir=None, newer=None):
         if isinstance(r, dict) and r.get("id") == rid and r.get("menu") and live.get(rid):
             if (newer or {}).get(rid):
                 r["newer"] = newer[rid]
+            if rid in (photo or {}):
+                r["photo_search"] = bool(photo[rid])
             regions.append(r)
     regions.sort(key=lambda r: (str(r.get("title", "")).casefold(), r["id"]))
     idx = {"format": "streetzim-build-index/1", "generated": datetime.date.today().isoformat(),
@@ -1504,7 +1512,7 @@ def build_page():
         _write_page(archive_items, lang, sub)
     listed = []
     if os.path.isdir(build_recipes_dir()):
-        listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER)
+        listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER, photo=BUILDER_PHOTO)
         print(f"Builder page lists {len(listed)} regions whose base archive.org serves: {listed}")
     if os.path.isfile(os.path.join(library_dir(), "index.html")):
         n = write_library_catalog(LIBRARY, builder_versions() if listed else {})
@@ -1705,6 +1713,9 @@ def _write_page(archive_items, lang, sub):
                 ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
                                   (details or {}).get("files"))
                 BUILDER_LIVE[region["id"]] = BUILDER_LIVE.get(region["id"], False) or ok
+                if ok and (builder.get(region["id"]) or {}).get("file") == zim_filename:
+                    BUILDER_PHOTO[region["id"]] = str(((details or {}).get("metadata") or {})
+                                                      .get("streetzim_photo_search", "")).lower() == "yes"
                 if not ok:
                     print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, which archive.org "
                           f"no longer serves (live ZIM {zim_filename!r}) — off the builder page "

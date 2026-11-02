@@ -66,3 +66,16 @@ def test_the_build_index_is_written_under_a_temporary_name_of_its_own(tmp_path):
     assert gen.write_build_index({"greece": True}, str(rd)) == ["greece"]
     assert [r["id"] for r in json.loads((rd / "index.json").read_text())["regions"]] == ["greece"]
     assert (rd / "index.json").stat().st_mode & 0o777 == 0o644               # served: readable by all
+
+
+def test_the_build_index_marks_photo_search(tmp_path):
+    """photo ({id: bool}) becomes each listed region's "photo_search"; a region
+    not in it gets no key (the builder page shows no mark)."""
+    import json
+    rd = tmp_path / "recipes"
+    for rid in ("greece", "kyiv", "france"):
+        (rd / rid).mkdir(parents=True)
+        (rd / rid / "region.json").write_text(json.dumps({"id": rid, "title": rid, "menu": [{"lang": "de"}]}))
+    gen.write_build_index({"greece": True, "kyiv": True, "france": True}, str(rd), photo={"kyiv": True, "greece": False})
+    got = {r["id"]: r.get("photo_search") for r in json.loads((rd / "index.json").read_text())["regions"]}
+    assert got == {"greece": False, "kyiv": True, "france": None}
