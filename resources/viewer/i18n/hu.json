@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Csak az utca: a(z) {n} cím nem található",
  "search.sign_street_only": "Csak az utca, nem a cím",
  "search.sign_area": "Terület, nem pontos hely",
+ "search.sign_corner": "Utcasarok",
  "search.sign_similar": "Nem pontos: ellenőrizze a táblát",
  "search.sign_elsewhere": "Nincs ezen a térképen",
  "search.sign_same_name": "Ugyanaz a név, mint a táblán",

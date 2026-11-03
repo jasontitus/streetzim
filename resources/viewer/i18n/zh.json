@@ -309,6 +309,7 @@
  "search.sign_street_no_address": "仅为街道：未找到地址 {n}",
  "search.sign_street_only": "仅为街道，不是该地址",
  "search.sign_area": "一个区域，而非确切地点",
+ "search.sign_corner": "街角",
  "search.sign_similar": "并非完全一致：请核对标牌",
  "search.sign_elsewhere": "不在此地图上",
  "search.sign_same_name": "与标牌上的名称相同",

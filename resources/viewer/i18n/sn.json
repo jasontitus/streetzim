@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Mugwagwa chete: kero {n} haina kuwanikwa",
  "search.sign_street_only": "Mugwagwa chete, kwete kero",
  "search.sign_area": "Nharaunda, kwete nzvimbo chaiyo",
+ "search.sign_corner": "Kona yemugwagwa",
  "search.sign_similar": "Hazvina kunyatsoenderana: tarisa chikwangwani",
  "search.sign_elsewhere": "Hachisi pamepu iyi",
  "search.sign_same_name": "Zita rimwe chete neriri pachikwangwani",

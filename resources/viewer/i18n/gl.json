@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Só a rúa: non se atopou o enderezo {n}",
  "search.sign_street_only": "Só a rúa, non o enderezo",
  "search.sign_area": "Zona, non un lugar exacto",
+ "search.sign_corner": "Esquina",
  "search.sign_similar": "Non é exacto: comprobe o letreiro",
  "search.sign_elsewhere": "Non está neste mapa",
  "search.sign_same_name": "O mesmo nome que no letreiro",

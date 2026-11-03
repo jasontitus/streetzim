@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Bare gaten: ingen adresse {n} funnet",
  "search.sign_street_only": "Bare gaten, ikke adressen",
  "search.sign_area": "Område, ikke et nøyaktig sted",
+ "search.sign_corner": "Gatehjørne",
  "search.sign_similar": "Ikke nøyaktig: sjekk skiltet",
  "search.sign_elsewhere": "Ikke på dette kartet",
  "search.sign_same_name": "Samme navn som på skiltet",

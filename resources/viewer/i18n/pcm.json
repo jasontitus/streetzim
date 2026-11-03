@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Na only di road: we no find address {n}",
  "search.sign_street_only": "Na only di road, no be di address",
  "search.sign_area": "Na area, no be di exact place",
+ "search.sign_corner": "Kona for road",
  "search.sign_similar": "E no match well: check di sign",
  "search.sign_elsewhere": "E no dey for dis map",
  "search.sign_same_name": "Same name as wetin dey for di sign",

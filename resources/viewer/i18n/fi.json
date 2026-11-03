@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Vain katu: osoitetta {n} ei löytynyt",
  "search.sign_street_only": "Vain katu, ei osoite",
  "search.sign_area": "Alue, ei tarkka paikka",
+ "search.sign_corner": "Katujen kulma",
  "search.sign_similar": "Ei täsmälleen sama: tarkista kyltti",
  "search.sign_elsewhere": "Ei tällä kartalla",
  "search.sign_same_name": "Sama nimi kuin kyltissä",

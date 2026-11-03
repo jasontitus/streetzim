@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Nzila kaka: adresi {n} me monana ve",
  "search.sign_street_only": "Nzila kaka, adresi ve",
  "search.sign_area": "Ndambu ya ntoto, kisika ya kieleka ve",
+ "search.sign_corner": "Kizumba ya nzila",
  "search.sign_similar": "Ya kieleka ve: tala kidimbu",
  "search.sign_elsewhere": "Ke na kalati yai ve",
  "search.sign_same_name": "Zina mosi ti yina ya kele na kidimbu",

@@ -316,6 +316,7 @@
  "search.sign_street_no_address": "Samo ulica: naslova {n} ni bilo mogoče najti",
  "search.sign_street_only": "Samo ulica, ne naslov",
  "search.sign_area": "Območje, ne natančno mesto",
+ "search.sign_corner": "Vogal ulic",
  "search.sign_similar": "Ni natančno: preverite napis",
  "search.sign_elsewhere": "Ni na tem zemljevidu",
  "search.sign_same_name": "Enako ime kot na napisu",

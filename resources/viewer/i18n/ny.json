@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Msewu wokha: adilesi {n} sinapezeke",
  "search.sign_street_only": "Msewu wokha, osati adilesi",
  "search.sign_area": "Dera, osati malo enieni",
+ "search.sign_corner": "Ngodya ya msewu",
  "search.sign_similar": "Sizofanana ndendende: onani chikwangwani",
  "search.sign_elsewhere": "Sili pa mapu iyi",
  "search.sign_same_name": "Dzina lofanana ndi la pa chikwangwani",

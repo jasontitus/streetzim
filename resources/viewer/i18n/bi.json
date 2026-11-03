@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Rod nomo: i no faenem adres {n}",
  "search.sign_street_only": "Rod nomo, i no adres",
  "search.sign_area": "Eria, i no stret ples",
+ "search.sign_corner": "Kona blong rod",
  "search.sign_similar": "I no stret: jekem saen",
  "search.sign_elsewhere": "I no stap long map ia",
  "search.sign_same_name": "Sem nem olsem long saen",

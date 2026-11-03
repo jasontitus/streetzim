@@ -359,23 +359,168 @@ function _szSignSimilarity(name, line, lineBigrams) {
 // word by 305-ocr-search.js's SZ_SIGN_TYPES.
 var SZ_SIGN_RU_TYPES = 'улица|вулиця|переулок|провулок|проспект|бульвар|площадь|площа|шоссе|шосе|набережная|набережна|проезд|проізд|тупик|спуск|узвіз|аллея|алея';
 var SZ_SIGN_DROP_TYPE = new RegExp('(^|\\s)(' + SZ_SIGN_RU_TYPES + ')(?=\\s|$)', 'giu');
+// A US street-name blade gives the name without its type ("EMERSON", often
+// with the block's number: "EMERSON 1000"), or with it abbreviated
+// ("EMERSON ST"): a street is also looked for without its last word when
+// that is one of these (the map has "Emerson Street"), three Latin letters
+// or more left.
+var SZ_SIGN_EN_TYPES = 'street|avenue|road|drive|boulevard|lane|way|court|place|terrace|circle|parkway|highway|expressway';
+var SZ_SIGN_EN_DROP = new RegExp('\\s(' + SZ_SIGN_EN_TYPES + ')$', 'iu');
 var SZ_SIGN_LINE_TYPE = new RegExp('(^|[\\s.])(' + SZ_SIGN_RU_TYPES + '|ул|вул|пер|пров|просп|бульв|пл|наб)(?=[\\s.]|$)', 'giu');
+// Whether line L is a US blade of the street `name` (folded, no spaces)
+// whose type `gone` left out: its words the name's, then the type (as the
+// blade abbreviates it: "ST", "AVE") or the block's number or both, and
+// nothing else ("EMERSON 1000", "EMERSON ST", "EMERSON AVE 1000"). A word
+// alone ("PHARMACY", "HIGH") or a line with other words ("SCHOOL XING") is
+// no blade: a shop's word is not Pharmacy Lane.
+function _szSignBlade(L, name, gone) {
+  var ws = (L.words || []).slice(), num = false, type = null;
+  while (ws.length && /^\d+$/.test(ws[ws.length - 1])) { ws.pop(); num = true; }
+  if (ws.length > 1 && SZ_SIGN_EN_TYPE_OF[ws[ws.length - 1]]) type = SZ_SIGN_EN_TYPE_OF[ws.pop()];
+  while (ws.length && /^\d+$/.test(ws[ws.length - 1])) { ws.pop(); num = true; }
+  if (!ws.length || ws.join('') !== name) return false;
+  return type ? gone.indexOf(type) >= 0 : num;
+}
+var SZ_SIGN_EN_TYPE_OF = { street: 'street', st: 'street', avenue: 'avenue', ave: 'avenue', av: 'avenue',
+  road: 'road', rd: 'road', drive: 'drive', dr: 'drive', boulevard: 'boulevard', blvd: 'boulevard', lane: 'lane',
+  ln: 'lane', way: 'way', court: 'court', ct: 'court', place: 'place', pl: 'place', terrace: 'terrace', ter: 'terrace',
+  circle: 'circle', cir: 'circle', parkway: 'parkway', pkwy: 'parkway', highway: 'highway', hwy: 'highway',
+  expressway: 'expressway', expy: 'expressway' };
 function _szSignTypeOf(w) { w = String(w).toLowerCase(); return SZ_SIGN_TYPES[w] || w; }
+// Two street blades on one post name its corner ("ADDISON 200" over
+// "EMERSON 1000"): of the streets each line names whole (similarity 1), the
+// two of different lines nearest each other, within SZ_SIGN_CORNER_KM, the
+// first of them from the sign's bigger line. A street's records are its
+// pieces, so its piece at the corner is among them. `cands`: [{rec, line,
+// weight, sim, lat, lon}]; [rec, rec] or null.
+// Where two streets meet: of their lines (`a`, `b`: [[[lon, lat], ...], ...],
+// the map's own road shapes), the crossing nearest `near` ([lon, lat]);
+// else, where they come within SZ_CROSS_KM of each other (a T junction, a
+// gap in the shapes), the midpoint of their two nearest points; null when
+// neither. The search's points of a street are a few along it, not where
+// it meets another.
+var SZ_CROSS_KM = 0.04;
+function _szCrossing(a, b, near) {
+  var k = Math.cos(near[1] * Math.PI / 180), best = null, bestD = Infinity;
+  var dist2 = function (p, q) { var dx = (p[0] - q[0]) * k, dy = p[1] - q[1]; return dx * dx + dy * dy; };
+  (a || []).forEach(function (la) {
+    for (var i = 0; i + 1 < la.length; i++) {
+      (b || []).forEach(function (lb) {
+        for (var j = 0; j + 1 < lb.length; j++) {
+          var p = la[i], r = [la[i + 1][0] - p[0], la[i + 1][1] - p[1]];
+          var q = lb[j], s = [lb[j + 1][0] - q[0], lb[j + 1][1] - q[1]];
+          var den = r[0] * s[1] - r[1] * s[0];
+          if (!den) continue;
+          var t = ((q[0] - p[0]) * s[1] - (q[1] - p[1]) * s[0]) / den;
+          var u = ((q[0] - p[0]) * r[1] - (q[1] - p[1]) * r[0]) / den;
+          if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+          var x = [p[0] + t * r[0], p[1] + t * r[1]], d = dist2(x, near);
+          if (d < bestD) { bestD = d; best = x; }
+        }
+      });
+    }
+  });
+  if (best) return best;
+  var m = null, md = Infinity;
+  (a || []).forEach(function (la) { la.forEach(function (p) {
+    (b || []).forEach(function (lb) { lb.forEach(function (q) {
+      var d = dist2(p, q);
+      if (d < md) { md = d; m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; }
+    }); });
+  }); });
+  return m && Math.sqrt(md) * 111.2 <= SZ_CROSS_KM ? m : null;
+}
+var SZ_SIGN_CORNER_KM = 0.3;
+// A typed corner ("Addison & Emerson", "Main St and 1st"): its two parts,
+// each three letters or more, or null. "&", "@" and "/" with or without
+// spaces; "and", "at" between spaces.
+function _szCornerQuery(q) {
+  var m = /^(.+?)\s*[&@\/]\s*(.+)$/.exec(String(q || '').trim()) ||
+          /^(.+?)\s+(?:and|at)\s+(.+)$/i.exec(String(q || '').trim());
+  if (!m || /:\/\/|www\.|\.(com|org|net)\b/i.test(q)) return null;   // an address on the web
+  var ok = function (s) { return (s.match(/\p{L}/gu) || []).length >= 3; };
+  return ok(m[1]) && ok(m[2]) ? [m[1].trim(), m[2].trim()] : null;
+}
+// Whether a street's name begins with the typed part, word by word: its
+// words the name's first ones, the last typed word the start of a name
+// word or the abbreviation of its type ("emerson st" for "Emerson
+// Street"). `part` and `name` folded (normalizeText).
+function _szStreetStarts(name, part) {
+  var nw = String(name).split(/\s+/).filter(Boolean), pw = String(part).split(/\s+/).filter(Boolean);
+  if (!pw.length || pw.length > nw.length) return false;
+  for (var i = 0; i < pw.length; i++) {
+    var last = i === pw.length - 1;
+    if (pw[i] === nw[i]) continue;
+    if (last && (nw[i].indexOf(pw[i]) === 0 || SZ_SIGN_EN_TYPE_OF[pw[i]] === nw[i])) continue;
+    return false;
+  }
+  return true;
+}
+// The corners of streets `as` and `bs` (records): for each piece of `as`,
+// the nearest piece of `bs` within SZ_SIGN_CORNER_KM, one corner a place
+// (corners within 0.5 km of one already kept are the same, the nearer pair
+// kept), at the pair's midpoint: [{a, b, lat, lon, km}], nearest pairs first.
+function _szCorners(as, bs) {
+  var pt = function (r) { return [+r.a, +r.o]; };
+  var km = function (p, q) {
+    var dy = (p[0] - q[0]) * 111.2, dx = (p[1] - q[1]) * 111.2 * Math.cos(p[0] * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+  var pairs = [];
+  (as || []).forEach(function (a) {
+    var best = null, bk = SZ_SIGN_CORNER_KM;
+    (bs || []).forEach(function (b) {
+      if (a.n === b.n || (a.nn || a.n) === (b.nn || b.n) || !isFinite(+a.a) || !isFinite(+b.a)) return;
+      var d = km(pt(a), pt(b));
+      if (d <= bk) { bk = d; best = b; }
+    });
+    if (best) pairs.push({ a: a, b: best, lat: (+a.a + +best.a) / 2, lon: (+a.o + +best.o) / 2, km: bk });
+  });
+  pairs.sort(function (x, y) { return x.km - y.km; });
+  var out = [];
+  pairs.forEach(function (p) {
+    if (!out.some(function (o) { return km([o.lat, o.lon], [p.lat, p.lon]) < 0.5; })) out.push(p);
+  });
+  return out;
+}
+function _szSignCorner(cands) {
+  var c = (cands || []).filter(function (x) { return x && x.sim >= 1 && isFinite(x.lat) && isFinite(x.lon); });
+  var best = null, bestKm = SZ_SIGN_CORNER_KM;
+  for (var i = 0; i < c.length; i++) {
+    for (var j = i + 1; j < c.length; j++) {
+      // two blades: not one line, nor one blade read twice ("EMERSON", "EMERSON 1000")
+      var li = String(c[i].line || '').toLowerCase(), lj = String(c[j].line || '').toLowerCase();
+      if (li === lj || li.indexOf(lj) >= 0 || lj.indexOf(li) >= 0 || c[i].rec.n === c[j].rec.n) continue;
+      var dy = (c[i].lat - c[j].lat) * 111.2;
+      var dx = (c[i].lon - c[j].lon) * 111.2 * Math.cos(c[i].lat * Math.PI / 180);
+      var km = Math.sqrt(dx * dx + dy * dy);
+      if (km <= bestKm) { bestKm = km; best = (c[j].weight || 1) > (c[i].weight || 1) ? [c[j], c[i]] : [c[i], c[j]]; }
+    }
+  }
+  return best && [best[0].rec, best[1].rec];
+}
 function _szSignScore(rec, lines, norm) {
-  var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [];
+  var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [], blade = {};
   if (rec.t === 'street') forms.slice().forEach(function (f) {
     var gone = [];
     var t = String(f).replace(SZ_SIGN_DROP_TYPE, function (m, sp, w) { gone.push(_szSignTypeOf(w)); return ' '; })
       .replace(/\s+/g, ' ').trim();
     if (t !== f && (t.match(/\p{Script=Cyrillic}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
+    var en = [];
+    var u = String(f).replace(SZ_SIGN_EN_DROP, function (m, w) { en.push(SZ_SIGN_EN_TYPE_OF[String(w).toLowerCase()]); return ''; }).trim();
+    if (u !== f && (u.match(/\p{Script=Latin}/gu) || []).length >= 3 && forms.indexOf(u) < 0) {
+      forms.push(u); dropped.push(en); blade[forms.length - 1] = true;
+    }
   });
   var best = null, bestValue = 0;
   for (var f = 0; f < forms.length; f++) {
     var name = _szSignText(forms[f], function (x) { return x; });
+    if (!/\p{L}/u.test(name)) continue;   // a name of digits only ("1000") is no sign's place
     for (var l = 0; l < lines.length; l++) {
       var L = lines[l];
+      if (blade[f] && !_szSignBlade(L, name, dropped[f - own])) continue;
       if (name.length <= 5 && L.words && L.words.length > 1 && L.words.indexOf(name) < 0) continue;
-      if (f >= own && (name.length < 0.6 * (L.core != null ? L.core : L.text.length) ||
+      if (f >= own && !blade[f] && (name.length < 0.6 * (L.core != null ? L.core : L.text.length) ||
           (L.types || []).some(function (t) { return dropped[f - own].indexOf(t) < 0; }))) continue;
       var s = _szSignSimilarity(name, L.text, L.bigrams);
       if (s < SZ_SIGN_MIN) continue;
@@ -1361,8 +1506,48 @@ var SEARCH_SHARDS = (function () {
       resultsEl.style.display = 'none';
       return;
     }
-
+    // "Addison & Emerson": where the two streets meet (_szCorners), the
+    // nearest to the view first, beside what the words find
+    var cq = _szCornerQuery(query);
     var seq = ++searchSeq;
+    doSearchWords(query, seq, cq ? cornerRows(cq, seq) : null);
+  }
+  // The corner rows of a typed corner (_szCornerQuery's parts), up to 5, or
+  // none: streets whose names start with each part, by the leaves those
+  // words target.
+  function cornerRows(cq, seq) {
+    var streetsOf = function(part) {
+      var p = normalizeText(part);
+      return streamFilterChunks(getPrefixes(part), part).then(function(ms) {
+        return ms.filter(function(r) {
+          return r.t === 'street' && [r.n, r.nn].some(function(n) { return n && _szStreetStarts(normalizeText(n), p); });
+        });
+      });
+    };
+    return Promise.all([streetsOf(cq[0]), streetsOf(cq[1])]).then(function(ab) {
+      if (seq !== searchSeq) return [];
+      var c = map.getCenter(), k = Math.cos(c.lat * Math.PI / 180);
+      var deg = function(x) { var dx = (x.lon - c.lng) * k, dy = x.lat - c.lat; return Math.sqrt(dx * dx + dy * dy); };
+      return _szCorners(ab[0], ab[1]).sort(function(x, y) { return deg(x) - deg(y); }).slice(0, 5).map(function(x) {
+        return { item: { n: (x.a.nn || x.a.n) + ' & ' + (x.b.nn || x.b.n), t: 'street', a: x.lat, o: x.lon, corner: [x.a, x.b] },
+                 score: 0, dist: _szProximityLabel(deg(x) * 69, map._streetzimUnit) };
+      });
+    }, function() { return []; });
+  }
+
+  // `corners` (a promise of rows, or null): put before the words' results,
+  // or after them when one of those is named exactly what was typed
+  // ("Barnes & Noble" is a shop before it is two streets)
+  function doSearchWords(query, seq, corners) {
+    var render = function(rows) {
+      if (!corners) { renderResults(rows); return; }
+      corners.then(function(cs) {
+        if (seq !== searchSeq) return;
+        var q = normalizeText(query);
+        var named = rows.some(function(m) { return normalizeText(m.item.n || '') === q || normalizeText(m.item.nn || '') === q; });
+        renderResults((named ? rows.concat(cs) : cs.concat(rows)).slice(0, 15));
+      });
+    };
     var prefixes = getPrefixes(query);
     if (prefixes.length === 0) {
       renderResults([]);
@@ -1404,15 +1589,15 @@ var SEARCH_SHARDS = (function () {
         streamFilterChunks(getPrefixes(query, { noTargeting: true }), query)
           .then(function(more) {
             if (seq !== searchSeq) return;
-            renderResults(scoreResults(more, query));
+            render(scoreResults(more, query));
           })
           .catch(function() {
             // Show what targeting did find rather than leaving "Searching…".
-            if (seq === searchSeq) renderResults(scored);
+            if (seq === searchSeq) render(scored);
           });
         return;
       }
-      renderResults(scored);
+      render(scored);
     });
   }
 
@@ -1428,6 +1613,7 @@ var SEARCH_SHARDS = (function () {
     var idx = parseInt(el.getAttribute('data-idx'), 10);
     var match = (isFinite(idx) && lastSearchMatches[idx]) || null;
     var item = match && match.item ? match.item : null;
+    if (item && item.corner) { map._szGoCorner(item.corner[0], item.corner[1]); return; }
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
     var type = el.getAttribute('data-type');
@@ -1649,6 +1835,36 @@ var SEARCH_SHARDS = (function () {
   // only for the latest search, gives each its `signBadge` ({kind, text}),
   // the row's label; `records` is every record found. A label that answers
   // false (the photo was let go) leaves the list as it is.
+  // A corner (two street records, `ra` and `rb`): the map goes there and its
+  // pin says both names; once the tiles are in, the pin moves to where the
+  // two roads' shapes cross (_szCrossing), from the pieces' midpoint.
+  function roadLines(rec) {
+    var names = [rec.n, rec.nn].filter(Boolean), out = [], feats = [];
+    try { feats = map.querySourceFeatures('openmaptiles', { sourceLayer: 'transportation_name' }); } catch (e) {}
+    feats.forEach(function(f) {
+      var p = f.properties || {}, g = f.geometry;
+      if (!g || [p.name, p['name:latin'], p.name_en, p['name:en']].every(function(n) { return names.indexOf(n) < 0; })) return;
+      if (g.type === 'LineString') out.push(g.coordinates);
+      else if (g.type === 'MultiLineString') Array.prototype.push.apply(out, g.coordinates);
+    });
+    return out;
+  }
+  map._szGoCorner = function(ra, rb) {
+    var name = (ra.nn || ra.n) + ' & ' + (rb.nn || rb.n);
+    var est = [(+ra.o + +rb.o) / 2, (+ra.a + +rb.a) / 2];
+    resultsEl.style.display = 'none';
+    input.value = name;
+    input.blur();
+    _szFlyToClear(map, { center: est, zoom: 17, duration: 1500 });
+    placeSearchPin(map, est[1], est[0], name, null);
+    var mk = searchMarker;
+    map.once('idle', function() {
+      if (searchMarker !== mk || !mk) return;
+      var x = _szCrossing(roadLines(ra), roadLines(rb), est);
+      if (x) mk.setLngLat(x);   // the view stays: the reader may have moved it
+    });
+  };
+
   map._searchSign = function(texts, opts) {
     opts = opts || {};
     if (!manifest) return Promise.resolve([]);
@@ -1689,8 +1905,15 @@ var SEARCH_SHARDS = (function () {
     }
     return streamFilterChunks(prefixes, '', accept, hasDigits && !!opts.admit).then(function(found) {
       if (typeof opts.prune === 'function') found = opts.prune(found, words);
+      // two street blades: their corner first (_szSignCorner)
+      var corner = _szSignCorner(found.filter(function(r) { return r.t === 'street'; }).map(function(r) {
+        var sc = scores.get(r) || {};
+        return { rec: r, line: sc.line, weight: sc.weight, sim: sc.sim, lat: +r.a, lon: +r.o };
+      }));
       var scored = scoreResults(found, '', function(item) {
         var sc = scores.get(item) || { sim: 0, weight: 0, cover: 0 };
+        if (corner && item === corner[0]) return 1e6;
+        if (corner && item === corner[1]) return 1e6 - 1;
         // Similarity first, steeply: proximity multiplies by up to 10, and
         // an on-screen near miss (0.76) must not beat an exact name farther
         // away, while a close one (0.85) may. The sign's big text before
@@ -1703,6 +1926,7 @@ var SEARCH_SHARDS = (function () {
       });
       scored.forEach(function(m) {
         var sc = scores.get(m.item) || {};
+        if (corner && (m.item === corner[0] || m.item === corner[1])) m.signCorner = true;
         m.signLine = sc.line || '';
         m.signSim = sc.sim || 0;
       });

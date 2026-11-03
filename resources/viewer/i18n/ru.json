@@ -316,6 +316,7 @@
  "search.sign_street_no_address": "Только улица: адрес {n} не найден",
  "search.sign_street_only": "Только улица, не адрес",
  "search.sign_area": "Район, а не точное место",
+ "search.sign_corner": "Угол улиц",
  "search.sign_similar": "Не точное совпадение: сверьте с табличкой",
  "search.sign_elsewhere": "Нет на этой карте",
  "search.sign_same_name": "То же название, что на табличке",

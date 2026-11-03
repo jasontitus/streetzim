@@ -319,6 +319,7 @@
  "search.sign_street_no_address": "It-triq biss: l-indirizz {n} ma nstabx",
  "search.sign_street_only": "It-triq biss, mhux l-indirizz",
  "search.sign_area": "Żona, mhux post eżatt",
+ "search.sign_corner": "Kantuniera",
  "search.sign_similar": "Mhux eżatt: iċċekkja t-tabella",
  "search.sign_elsewhere": "Mhux fuq din il-mappa",
  "search.sign_same_name": "L-istess isem bħal fuq it-tabella",

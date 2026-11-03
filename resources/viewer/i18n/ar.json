@@ -323,6 +323,7 @@
  "search.sign_street_no_address": "الشارع فقط: لم يُعثر على العنوان {n}",
  "search.sign_street_only": "الشارع فقط، لا العنوان",
  "search.sign_area": "منطقة، لا موقع محدد",
+ "search.sign_corner": "تقاطع شارعين",
  "search.sign_similar": "ليس تطابقًا دقيقًا: راجع اللافتة",
  "search.sign_elsewhere": "ليس على هذه الخريطة",
  "search.sign_same_name": "الاسم نفسه كما على اللافتة",

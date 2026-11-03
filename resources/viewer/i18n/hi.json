@@ -311,6 +311,7 @@
  "search.sign_street_no_address": "केवल सड़क: पता {n} नहीं मिला",
  "search.sign_street_only": "केवल सड़क, पता नहीं",
  "search.sign_area": "क्षेत्र, सटीक जगह नहीं",
+ "search.sign_corner": "सड़कों का कोना",
  "search.sign_similar": "सटीक मेल नहीं: बोर्ड जाँचें",
  "search.sign_elsewhere": "इस नक्शे पर नहीं है",
  "search.sign_same_name": "बोर्ड पर लिखा वही नाम",

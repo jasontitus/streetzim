@@ -319,6 +319,7 @@
  "search.sign_street_no_address": "An tsráid amháin: níor aimsíodh seoladh {n}",
  "search.sign_street_only": "An tsráid amháin, ní an seoladh",
  "search.sign_area": "Limistéar, ní áit bheacht",
+ "search.sign_corner": "Cúinne sráide",
  "search.sign_similar": "Ní meaitseáil bheacht é: seiceáil an comhartha",
  "search.sign_elsewhere": "Níl sé ar an léarscáil seo",
  "search.sign_same_name": "An t-ainm céanna leis an gcomhartha",

@@ -313,6 +313,7 @@
  "search.sign_street_no_address": "Samo ulica: adresa {n} nije pronađena",
  "search.sign_street_only": "Samo ulica, ne adresa",
  "search.sign_area": "Područje, a ne točno mjesto",
+ "search.sign_corner": "Ugao ulica",
  "search.sign_similar": "Nije točno: provjerite natpis",
  "search.sign_elsewhere": "Nije na ovoj karti",
  "search.sign_same_name": "Isto ime kao na natpisu",

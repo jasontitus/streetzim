@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "Ngan jalan: alamat {n} teu kapendak",
  "search.sign_street_only": "Ngan jalan, lain alamat",
  "search.sign_area": "Wewengkon, lain tempat pasti",
+ "search.sign_corner": "Juru jalan",
  "search.sign_similar": "Teu pasti: pariksa papan ngaran",
  "search.sign_elsewhere": "Henteu aya dina peta ieu",
  "search.sign_same_name": "Ngaran anu sarua jeung dina papan ngaran",

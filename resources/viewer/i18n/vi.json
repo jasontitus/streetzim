@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "Chỉ con đường: không tìm thấy địa chỉ {n}",
  "search.sign_street_only": "Chỉ con đường, không phải địa chỉ",
  "search.sign_area": "Khu vực, không phải vị trí chính xác",
+ "search.sign_corner": "Góc phố",
  "search.sign_similar": "Không khớp chính xác: hãy xem biển",
  "search.sign_elsewhere": "Không có trên bản đồ này",
  "search.sign_same_name": "Cùng tên như trên biển",

@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Ke alanui wale nō: ʻaʻole i loaʻa ka helu wahi {n}",
  "search.sign_street_only": "Ke alanui wale nō, ʻaʻole ka helu wahi",
  "search.sign_area": "He ʻāpana ʻāina, ʻaʻole he wahi pololei",
+ "search.sign_corner": "Kihi alanui",
  "search.sign_similar": "ʻAʻole pololei: e nānā i ka hōʻailona",
  "search.sign_elsewhere": "ʻAʻole ma kēia palapala ʻāina",
  "search.sign_same_name": "Ka inoa like me ka mea ma ka hōʻailona",

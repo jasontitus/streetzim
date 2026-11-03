@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "ጽርግያ ጥራይ፡ ኣድራሻ {n} ኣይተረኽበን",
  "search.sign_street_only": "ጽርግያ ጥራይ፡ ኣድራሻ ኣይኮነን",
  "search.sign_area": "ከባቢ እምበር ልክዕ ቦታ ኣይኮነን",
+ "search.sign_corner": "ኩርናዕ መንገዲ",
  "search.sign_similar": "ልክዕ ኣይኮነን፡ ነቲ ምልክት ኣረጋግጹ",
  "search.sign_elsewhere": "ኣብዚ ካርታ የለን",
  "search.sign_same_name": "ከምቲ ኣብ ምልክት ዘሎ ሓደ ስም",

@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Kalye lang: walang nakitang address {n}",
  "search.sign_street_only": "Kalye lang, hindi ang address",
  "search.sign_area": "Lugar, hindi eksaktong puwesto",
+ "search.sign_corner": "Kanto ng kalye",
  "search.sign_similar": "Hindi eksakto: tingnan ang karatula",
  "search.sign_elsewhere": "Wala sa mapang ito",
  "search.sign_same_name": "Kaparehong pangalan ng nasa karatula",

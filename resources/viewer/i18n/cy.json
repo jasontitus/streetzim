@@ -322,6 +322,7 @@
  "search.sign_street_no_address": "Y stryd yn unig: dim cyfeiriad {n} wedi'i ganfod",
  "search.sign_street_only": "Y stryd yn unig, nid y cyfeiriad",
  "search.sign_area": "Ardal, nid union fan",
+ "search.sign_corner": "Cornel stryd",
  "search.sign_similar": "Nid yw'n union: gwiriwch yr arwydd",
  "search.sign_elsewhere": "Nid yw ar y map hwn",
  "search.sign_same_name": "Yr un enw ag ar yr arwydd",

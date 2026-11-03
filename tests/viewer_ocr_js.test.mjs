@@ -26,7 +26,7 @@ const M = new Function(
   slice(HTML, 'var SZ_SIGN_TYPES = {', '\nvar SZ_SIGN_FILLER') +      // the street types, 305-ocr-search.js's
   slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   slice(HTML, '// BEGIN sign-match', '// END sign-match') +
-  '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
+  '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignCorner, _szCrossing, _szCornerQuery, _szStreetStarts, _szCorners, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
@@ -55,6 +55,101 @@ ok('edits within: the fewest edits that find a name in a line', () => {
   assert.strictEqual(M._szEditsWithin('abc', 'xxabcxx'), 0);
   assert.strictEqual(M._szEditsWithin('abc', 'xxabxx'), 1);
   assert.strictEqual(M._szEditsWithin('abcd', 'ab'), 2);
+});
+
+ok('a US street-name blade: the name without its type, the block number beside it, no name of digits', () => {
+  // "EMERSON 1000" is Emerson Street's blade, its block's number beside it
+  assert.strictEqual(score({ n: 'Emerson Street', t: 'street' }, ['EMERSON 1000']), 1);
+  assert.strictEqual(score({ n: 'Addison Avenue', t: 'street' }, ['ADDISON 200']), 1);
+  // the type abbreviated on the blade must be the street's own
+  assert.strictEqual(score({ n: 'Emerson Street', t: 'street' }, ['EMERSON ST']), 1);
+  assert.strictEqual(score({ n: 'Emerson Street', t: 'street' }, ['EMERSON ST 1000']), 1);
+  // a word alone, or a line with other words, is no blade: a shop's word is not "Pharmacy Lane"
+  for (const [n, line] of [['Pharmacy Lane', 'PHARMACY'], ['High Street', 'HIGH'], ['Church Street', 'CHURCH'],
+                           ['School Street', 'SCHOOL XING'], ['Elm Street', 'HELMS 100'], ['Emerson Street', 'EMERSON'],
+                           ['Park Avenue', 'PARKING 200'], ['Main Road', 'MAIN ST']]) {
+    assert.ok(score({ n, t: 'street' }, [line]) < M.SZ_SIGN_MIN, `${n} for ${line}`);
+  }
+  // a title is no type: "DR SMITH" is not Dr Smith Drive's blade, nor "ST PETERSBURG" a street's
+  assert.ok(score({ n: 'Dr Smith Drive', t: 'street' }, ['DR SMITH']) < M.SZ_SIGN_MIN);
+  assert.ok(score({ n: 'Emerson Avenue', t: 'street' }, ['EMERSON ST']) < M.SZ_SIGN_MIN);
+  // only the last word, a type, and only a street: "Milky Way Drive" is not "Milky"
+  assert.ok(score({ n: 'Milky Way Drive', t: 'street' }, ['MILKY']) < M.SZ_SIGN_MIN);
+  assert.ok(score({ n: 'Emerson Street', t: 'poi' }, ['EMERSON']) < M.SZ_SIGN_MIN);
+  assert.ok(score({ n: 'Ab Street', t: 'street' }, ['AB']) < M.SZ_SIGN_MIN);        // two letters left: too short
+  // a place named only by digits is no sign's place ("1000" on the blade)
+  assert.strictEqual(score({ n: '1000', t: 'poi' }, ['EMERSON 1000']), 0);
+  assert.strictEqual(score({ n: '200', t: 'poi' }, ['200']), 0);
+});
+
+ok("two street blades: their corner, the nearest pieces of the two streets, first", () => {
+  const st = (n, line, lat, lon, extra) => ({ rec: { n, t: 'street' }, line, sim: 1, weight: 1, lat, lon, ...extra });
+  const pieces = [
+    st('Emerson Street', 'EMERSON 1000', 37.4452, -122.1637), st('Emerson Street', 'EMERSON 1000', 37.4400, -122.1553),
+    st('Addison Avenue', 'ADDISON 200', 37.4405, -122.1560), st('Addison Avenue', 'ADDISON 200', 37.4500, -122.1700)];
+  const got = M._szSignCorner(pieces);
+  assert.deepStrictEqual(got.map((r) => r.n), ['Emerson Street', 'Addison Avenue']);
+  assert.strictEqual(got[0], pieces[1].rec);                         // the piece at the corner
+  // the bigger blade's street first
+  const big = M._szSignCorner([{ ...pieces[1], weight: 0.6 }, pieces[2]]);
+  assert.deepStrictEqual(big.map((r) => r.n), ['Addison Avenue', 'Emerson Street']);
+  // no corner: streets far apart, one line only, a near miss, a street with itself
+  assert.strictEqual(M._szSignCorner([pieces[0], pieces[3]]), null);
+  assert.strictEqual(M._szSignCorner([pieces[1], { ...pieces[2], line: 'EMERSON 1000' }]), null);
+  assert.strictEqual(M._szSignCorner([pieces[1], { ...pieces[2], sim: 0.9 }]), null);
+  assert.strictEqual(M._szSignCorner([pieces[0], pieces[1]]), null);
+  assert.strictEqual(M._szSignCorner([]), null);
+  // one blade read twice ("EMERSON" and "EMERSON 1000"): no corner of Emerson Street and Emerson Court
+  assert.strictEqual(M._szSignCorner([{ ...pieces[1], line: 'EMERSON' }, { ...pieces[2], line: 'EMERSON 1000', rec: { n: 'Emerson Court', t: 'street' } }]), null);
+});
+
+ok("where two streets meet: their shapes' crossing nearest the guess, a T junction's nearest points", () => {
+  const near = [-122.1558, 37.4403];
+  // Emerson (NW-SE) crosses Addison (SW-NE) at 37.44050, -122.15580
+  const emerson = [[[-122.1570, 37.4415], [-122.1546, 37.4395]]];
+  const addison = [[[-122.1568, 37.4397], [-122.1548, 37.4413]]];
+  const x = M._szCrossing(emerson, addison, near);
+  assert.ok(Math.abs(x[0] - -122.15580) < 2e-5 && Math.abs(x[1] - 37.44050) < 2e-5, JSON.stringify(x));
+  // two crossings (a street that bends back): the one nearest the guess
+  const back = [[[-122.1570, 37.4415], [-122.1546, 37.4395], [-122.1530, 37.4410], [-122.1510, 37.4390]]];
+  const long = [[[-122.1568, 37.4397], [-122.1500, 37.4405]]];
+  const two = M._szCrossing(back, long, [-122.1515, 37.4400]);
+  assert.ok(two[0] > -122.153, JSON.stringify(two));
+  // a T junction that stops a few metres short: the midpoint of the two nearest points
+  const t = M._szCrossing([[[-122.1560, 37.4400], [-122.1560, 37.4410]]], [[[-122.1561, 37.4399], [-122.1580, 37.4399]]], near);
+  assert.ok(t && Math.abs(t[1] - 37.43995) < 1e-6, JSON.stringify(t));
+  // apart, or nothing found: no crossing
+  assert.strictEqual(M._szCrossing([[[-122.1560, 37.4400], [-122.1560, 37.4410]]], [[[-122.1600, 37.4399], [-122.1620, 37.4399]]], near), null);
+  assert.strictEqual(M._szCrossing([], addison, near), null);
+});
+
+ok('a typed corner: "Addison & Emerson", its streets by their first words, their corners one a place', () => {
+  assert.deepStrictEqual(M._szCornerQuery('Addison & Emerson'), ['Addison', 'Emerson']);
+  assert.deepStrictEqual(M._szCornerQuery('main st and 1st ave'), ['main st', '1st ave']);
+  assert.deepStrictEqual(M._szCornerQuery('Addison/Emerson'), ['Addison', 'Emerson']);
+  assert.deepStrictEqual(M._szCornerQuery('Castro at Market'), ['Castro', 'Market']);
+  for (const q of ['Johnson & Johnson Co', 'Barnes', 'AT&T', 'B & B', 'Mand', 'Sandwich']) {
+    const got = M._szCornerQuery(q);
+    assert.ok(q === 'Johnson & Johnson Co' ? got : got === null, q);   // "AT&T", "B & B": parts too short
+  }
+  for (const q of ['http://foo.com/bar', 'www.example.com/a', 'shop.com & more']) assert.strictEqual(M._szCornerQuery(q), null, q);
+  assert.ok(M._szStreetStarts('emerson street', 'emerson'));
+  assert.ok(M._szStreetStarts('emerson street', 'emerson st'));
+  assert.ok(M._szStreetStarts('emerson street', 'emer'));
+  assert.ok(!M._szStreetStarts('emerson street', 'emerson ave'));
+  assert.ok(!M._szStreetStarts('north emerson street', 'emerson'));
+  assert.ok(!M._szStreetStarts('emerson', 'emerson street'));
+  const r = (n, a, o) => ({ n, t: 'street', a, o });
+  const em = [r('Emerson Street', 37.4400, -122.1553), r('Emerson Street', 37.4452, -122.1637), r('Emerson Street', 37.7829, -122.4482)];
+  const ad = [r('Addison Avenue', 37.4405, -122.1560), r('Addison Avenue', 37.4410, -122.1563), r('Addison Street', 37.7838, -122.4485)];
+  const cs = M._szCorners(em, ad);
+  assert.strictEqual(cs.length, 2);                                   // Palo Alto, and San Francisco's pair
+  assert.ok(cs.every((c) => c.km <= 0.3));
+  assert.strictEqual(cs[0].a, em[0]); assert.strictEqual(cs[0].b, ad[0]);   // the nearest pair first
+  assert.deepStrictEqual(M._szCorners(em, [r('Addison Avenue', 37.5, -122.3)]), []);
+  // one street's pieces under two names (its own and the shown one) are no corner
+  assert.deepStrictEqual(M._szCorners([{ n: 'Emerson St', nn: 'Emerson Street', t: 'street', a: 37.44, o: -122.155 }],
+                                      [{ n: 'Emerson Street', t: 'street', a: 37.4401, o: -122.1551 }]), []);
 });
 
 // What a photo's results are (_szSignKinds): never more certain than they
@@ -729,7 +824,7 @@ ok('the Russian and Ukrainian rules leave other scripts alone', () => {
   // a number in small print beside it is still another building's
   const sized = (rows) => rows.map(([text, size]) => ({ text, size }));
   assert.strictEqual(kinds([en('28 Main Street')], sized([['28 MAIN STREET', 100], ['32', 40]]))[0].kind, 'similar');
-  // the search drops only Russian and Ukrainian types
+  // the search drops a Russian or Ukrainian type anywhere, an English one only on a US blade (below)
   assert.ok(score({ n: 'Main Street', t: 'street' }, ['MAIN']) < score({ n: 'Main', t: 'street' }, ['MAIN']));
 });
 ok('a tilted line with a number between its words stays whole in every script but a Cyrillic one', () => {

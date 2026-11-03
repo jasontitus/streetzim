@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Μόνο ο δρόμος: δεν βρέθηκε διεύθυνση {n}",
  "search.sign_street_only": "Μόνο ο δρόμος, όχι η διεύθυνση",
  "search.sign_area": "Περιοχή, όχι ακριβές σημείο",
+ "search.sign_corner": "Γωνία δρόμων",
  "search.sign_similar": "Όχι ακριβές: ελέγξτε την πινακίδα",
  "search.sign_elsewhere": "Δεν είναι σε αυτόν τον χάρτη",
  "search.sign_same_name": "Ίδιο όνομα με την πινακίδα",

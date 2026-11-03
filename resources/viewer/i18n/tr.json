@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Yalnızca sokak: {n} adresi bulunamadı",
  "search.sign_street_only": "Yalnızca sokak, adres değil",
  "search.sign_area": "Bölge, tam bir yer değil",
+ "search.sign_corner": "Sokak köşesi",
  "search.sign_similar": "Tam eşleşme değil: tabelayı kontrol edin",
  "search.sign_elsewhere": "Bu haritada yok",
  "search.sign_same_name": "Tabeladakiyle aynı ad",

@@ -308,6 +308,7 @@
  "search.sign_street_no_address": "도로만: 주소 {n}을(를) 찾지 못했습니다",
  "search.sign_street_only": "도로만, 주소 아님",
  "search.sign_area": "지역, 정확한 지점 아님",
+ "search.sign_corner": "길모퉁이",
  "search.sign_similar": "정확히 일치하지 않음: 표지판을 확인하세요",
  "search.sign_elsewhere": "이 지도에 없습니다",
  "search.sign_same_name": "표지판과 같은 이름",

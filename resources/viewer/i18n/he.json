@@ -313,6 +313,7 @@
  "search.sign_street_no_address": "רק הרחוב: הכתובת {n} לא נמצאה",
  "search.sign_street_only": "רק הרחוב, לא הכתובת",
  "search.sign_area": "אזור, לא מקום מדויק",
+ "search.sign_corner": "פינת רחובות",
  "search.sign_similar": "לא התאמה מדויקת: בדקו את השלט",
  "search.sign_elsewhere": "לא במפה הזאת",
  "search.sign_same_name": "אותו שם כמו על השלט",

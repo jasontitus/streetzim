@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Vetëm rruga: adresa {n} nuk u gjet",
  "search.sign_street_only": "Vetëm rruga, jo adresa",
  "search.sign_area": "Zonë, jo vend i saktë",
+ "search.sign_corner": "Qoshe rruge",
  "search.sign_similar": "Jo e saktë: kontrolloni tabelën",
  "search.sign_elsewhere": "Nuk është në këtë hartë",
  "search.sign_same_name": "I njëjti emër si në tabelë",

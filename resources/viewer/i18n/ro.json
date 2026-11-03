@@ -313,6 +313,7 @@
  "search.sign_street_no_address": "Doar strada: adresa {n} nu a fost găsită",
  "search.sign_street_only": "Doar strada, nu adresa",
  "search.sign_area": "Zonă, nu un loc exact",
+ "search.sign_corner": "Colț de stradă",
  "search.sign_similar": "Nu este exact: verificați indicatorul",
  "search.sign_elsewhere": "Nu este pe această hartă",
  "search.sign_same_name": "Același nume ca pe indicator",

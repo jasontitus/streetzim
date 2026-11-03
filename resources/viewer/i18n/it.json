@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Solo la strada: nessun indirizzo {n} trovato",
  "search.sign_street_only": "Solo la strada, non l'indirizzo",
  "search.sign_area": "Area, non un luogo preciso",
+ "search.sign_corner": "Angolo di strada",
  "search.sign_similar": "Non esatto: controlla il cartello",
  "search.sign_elsewhere": "Non è su questa mappa",
  "search.sign_same_name": "Stesso nome del cartello",

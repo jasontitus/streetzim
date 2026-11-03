@@ -278,7 +278,10 @@ function _szSignAddress(lines, tallest) {
 // Kyiv signs say it), as the search folds them (ї as і: "проізд").
 var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', str: 'street', avenue: 'avenue', ave: 'avenue',
                       av: 'avenue', lane: 'lane', ln: 'lane', drive: 'drive', dr: 'drive', boulevard: 'boulevard',
-                      blvd: 'boulevard', way: 'way', 'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة',
+                      blvd: 'boulevard', way: 'way', court: 'court', ct: 'court', place: 'place',
+                      terrace: 'terrace', ter: 'terrace', circle: 'circle', cir: 'circle', parkway: 'parkway',
+                      pkwy: 'parkway', highway: 'highway', hwy: 'highway', expressway: 'expressway', expy: 'expressway',
+                      'طريق': 'road', 'ممر': 'lane', 'شارع': 'شارع', 'جادة': 'جادة',
                       'улица': 'улица', 'ул': 'улица', 'вулиця': 'улица', 'вул': 'улица',
                       'переулок': 'переулок', 'пер': 'переулок', 'провулок': 'переулок', 'пров': 'переулок',
                       'проспект': 'проспект', 'просп': 'проспект', 'бульвар': 'бульвар', 'бульв': 'бульвар',
@@ -1693,8 +1696,15 @@ function initSignSearch(map, config) {
   // The answer under the photo is the first result: a tap on it goes there,
   // as its row in the list would. A town not on this map is no place here:
   // the list instead.
+  var cornerPair = null;   // the corner the answer names, when it is one
   function pickFirst() {
     if (verdictEl.getAttribute('data-kind') === 'elsewhere') { if (!showBtn.hidden) showBtn.click(); return; }   // inert without results
+    if (verdictEl.getAttribute('data-kind') === 'corner' && cornerPair && typeof map._szGoCorner === 'function') {
+      hide();
+      map._szGoCorner(cornerPair[0], cornerPair[1]);
+      btn.focus({ preventScroll: true });
+      return;
+    }
     var row = resultsEl.querySelector('.search-result:not([data-sz-pending])');
     if (row) { row.click(); btn.focus({ preventScroll: true }); }
   }
@@ -1773,6 +1783,7 @@ function initSignSearch(map, config) {
   var photoSeq = 0;
   function signLabel(k) {
     if (k.kind === 'address') return szT('search.sign_address', 'Exact address');
+    if (k.kind === 'corner') return szT('search.sign_corner', 'Street corner');
     if (k.kind === 'street' && k.building) {
       return szT('search.sign_street_no_address', 'Street only: no address {n} found', { n: k.building });
     }
@@ -1852,6 +1863,21 @@ function initSignSearch(map, config) {
           Array.prototype.push.apply(found, kept);
           kinds = _szSignKinds(found, lines, words, all, mapName);
         }
+        // Two street blades on one post: the first two are their corner
+        // (map._searchSign's _szSignCorner), the spot the photo was taken.
+        // Before an address the blades' numbers would make: those are blocks
+        // ("EMERSON ST 1000" is the 1000 block, not house 1000).
+        var cornerAt = found.map(function (m, i) { return m.signCorner ? i : -1; }).filter(function (i) { return i >= 0; });
+        var corner = cornerAt.length === 2;
+        if (corner && (cornerAt[0] !== 0 || cornerAt[1] !== 1)) {
+          var pair = cornerAt.map(function (i) { return found[i]; });
+          var rest = found.filter(function (m) { return !m.signCorner; });
+          found.length = 0;
+          Array.prototype.push.apply(found, pair.concat(rest));
+          kinds = _szSignKinds(found, lines, words, all, mapName);
+        }
+        if (corner) kinds[0] = kinds[1] = { kind: 'corner' };
+        cornerPair = corner ? [found[0].item, found[1].item] : null;
         found.forEach(function (m, i) {
           var k = kinds[i];
           // An address found in several places is not the one: said on its row too.
@@ -1872,6 +1898,7 @@ function initSignSearch(map, config) {
           var it = found[i].item;
           return { idx: i, lat: +it.a, lon: +it.o, name: szFirstName(_szShownNames(it, SZ_LANG2)[0] || it.n || '') };
         }).filter(function (g) { return isFinite(g.lat) && isFinite(g.lon); });
+        if (corner) group = [];    // one spot: the answer goes there
         clearGroup();
         mapBtn.hidden = group.length < 2;
         mapBtn.lastChild.textContent = szT('controls.map', 'Map') + ' (' + group.length + ')';
@@ -1895,10 +1922,11 @@ function initSignSearch(map, config) {
         var r0 = found[0].item, big = r0.nn || r0.n, nameEl = document.createElement('span');
         nameEl.className = 'ocr-verdict-name';
         nameEl.dir = 'auto';
+        if (corner) big += ' & ' + (found[1].item.nn || found[1].item.n);
         nameEl.textContent = big;
         verdictEl.appendChild(nameEl);
         verdictEl.setAttribute('aria-label', big + ' \u00b7 ' + signLabel(kinds[0]));
-        var other = [r0.n, r0.nl].filter(function (n) { return n && n !== big; })[0];
+        var other = [r0.n, r0.nl].filter(function (n) { return n && n !== (r0.nn || r0.n); })[0];
         if (other) {
           var otherEl = document.createElement('span');
           otherEl.className = 'ocr-verdict-where';
@@ -1911,7 +1939,8 @@ function initSignSearch(map, config) {
         // 2 улица Косыгина, not "18 ◂ УЛИЦА").
         // Whole words: "12" is not in "1234"; a right-to-left line read in
         // visual order also backwards.
-        var sl = ' ' + words(String(found[0].signLine || '')).join(' ') + ' ', pl = plateOf(words);
+        var sl = ' ' + words(String(found[0].signLine || '') + (corner ? ' \u2029 ' + (found[1].signLine || '') : '')).join(' ') + ' ',
+          pl = plateOf(words);
         var inSl = function (t) {
           var ws = words(t || '');
           return ws.length > 0 && (sl.indexOf(' ' + ws.join(' ') + ' ') >= 0 || sl.indexOf(' ' + ws.reverse().join(' ') + ' ') >= 0);

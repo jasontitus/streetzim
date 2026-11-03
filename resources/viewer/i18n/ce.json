@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Урам бен: {n} адрес ца карийна",
  "search.sign_street_only": "Урам бен, адрес яц",
  "search.sign_area": "Меттиг, нийса меттиг яц",
+ "search.sign_corner": "Урамийн сонаш",
  "search.sign_similar": "Нийса яц: табличка хьажа",
  "search.sign_elsewhere": "ХӀокху картан тӀехь яц",
  "search.sign_same_name": "Табличкан тӀехь йолу цӀе",

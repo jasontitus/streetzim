@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "Jalan sahaja: alamat {n} tidak ditemui",
  "search.sign_street_only": "Jalan sahaja, bukan alamat",
  "search.sign_area": "Kawasan, bukan tempat tepat",
+ "search.sign_corner": "Simpang jalan",
  "search.sign_similar": "Tidak tepat: semak papan tanda",
  "search.sign_elsewhere": "Tiada dalam peta ini",
  "search.sign_same_name": "Nama yang sama seperti pada papan tanda",

@@ -316,6 +316,7 @@
  "search.sign_street_no_address": "Tik gatvė: adreso {n} nerasta",
  "search.sign_street_only": "Tik gatvė, ne adresas",
  "search.sign_area": "Vietovė, ne tiksli vieta",
+ "search.sign_corner": "Gatvių kampas",
  "search.sign_similar": "Netikslu: patikrinkite ženklą",
  "search.sign_elsewhere": "Nėra šiame žemėlapyje",
  "search.sign_same_name": "Toks pat pavadinimas kaip ženkle",

@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Само улицата: адрес {n} не е намерен",
  "search.sign_street_only": "Само улицата, не адресът",
  "search.sign_area": "Район, а не точно място",
+ "search.sign_corner": "Ъгъл на улици",
  "search.sign_similar": "Не е точно: проверете табелата",
  "search.sign_elsewhere": "Не е на тази карта",
  "search.sign_same_name": "Същото име като на табелата",

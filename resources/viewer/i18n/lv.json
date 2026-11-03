@@ -313,6 +313,7 @@
  "search.sign_street_no_address": "Tikai iela: adrese {n} nav atrasta",
  "search.sign_street_only": "Tikai iela, nevis adrese",
  "search.sign_area": "Apgabals, nevis precīza vieta",
+ "search.sign_corner": "Ielu stūris",
  "search.sign_similar": "Nav precīzi: pārbaudiet zīmi",
  "search.sign_elsewhere": "Nav šajā kartē",
  "search.sign_same_name": "Tāds pats nosaukums kā uz zīmes",

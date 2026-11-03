@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Yalnız küçə: {n} ünvanı tapılmadı",
  "search.sign_street_only": "Yalnız küçə, ünvan deyil",
  "search.sign_area": "Ərazi, dəqiq yer deyil",
+ "search.sign_corner": "Küçə tini",
  "search.sign_similar": "Dəqiq deyil: lövhəni yoxlayın",
  "search.sign_elsewhere": "Bu xəritədə yoxdur",
  "search.sign_same_name": "Lövhədəki ilə eyni ad",

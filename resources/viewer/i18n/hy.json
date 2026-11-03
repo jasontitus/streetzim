@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Միայն փողոցը. {n} հասցեն չգտնվեց",
  "search.sign_street_only": "Միայն փողոցը, ոչ թե հասցեն",
  "search.sign_area": "Տարածք, ոչ թե ճշգրիտ վայր",
+ "search.sign_corner": "Փողոցների անկյուն",
  "search.sign_similar": "Ճշգրիտ չէ. ստուգեք ցուցանակը",
  "search.sign_elsewhere": "Այս քարտեզի վրա չէ",
  "search.sign_same_name": "Նույն անունը, ինչ ցուցանակին",

@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Umgwaqo kuphela: ikheli {n} alitholakalanga",
  "search.sign_street_only": "Umgwaqo kuphela, hhayi ikheli",
  "search.sign_area": "Indawo ebanzi, hhayi indawo eqondile",
+ "search.sign_corner": "Ikhona lomgwaqo",
  "search.sign_similar": "Akufani ncamashi: hlola uphawu",
  "search.sign_elsewhere": "Akukho kule mephu",
  "search.sign_same_name": "Igama elifanayo nelisophawini",

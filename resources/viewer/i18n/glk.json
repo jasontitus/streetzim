@@ -311,6 +311,7 @@
  "search.sign_street_no_address": "فقط خیابان: نشانی {n} پیدا نوبوست",
  "search.sign_street_only": "فقط خیابان، نه نشانی",
  "search.sign_area": "منطقه، نه جا دقیق",
+ "search.sign_corner": "کوچه سر",
  "search.sign_similar": "دقیقاً هۊ نیه: تابلو بیدینید",
  "search.sign_elsewhere": "اي نقشه سر نيه",
  "search.sign_same_name": "هۊ نام کی تابلو سر نیویشته",

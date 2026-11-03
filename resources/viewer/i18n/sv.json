@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Bara gatan: ingen adress {n} hittades",
  "search.sign_street_only": "Bara gatan, inte adressen",
  "search.sign_area": "Område, inte en exakt plats",
+ "search.sign_corner": "Gathörn",
  "search.sign_similar": "Inte exakt: kontrollera skylten",
  "search.sign_elsewhere": "Inte på den här kartan",
  "search.sign_same_name": "Samma namn som på skylten",

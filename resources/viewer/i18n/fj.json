@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Na gaunisala ga: sega ni kunei na iyatuvanua {n}",
  "search.sign_street_only": "Na gaunisala ga, sega na iyatuvanua",
  "search.sign_area": "Na yasana, sega ni vanua dodonu",
+ "search.sign_corner": "Tutuna ni gaunisala",
  "search.sign_similar": "Sega ni dodonu: raica na ivakatakilakila",
  "search.sign_elsewhere": "E sega ena mape oqo",
  "search.sign_same_name": "Na yaca vata ga kei na ivakatakilakila",

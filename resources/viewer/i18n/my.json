@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "လမ်းသာ- လိပ်စာ {n} ကို မတွေ့ပါ",
  "search.sign_street_only": "လမ်းသာ၊ လိပ်စာ မဟုတ်ပါ",
  "search.sign_area": "ဧရိယာ၊ တိကျသောနေရာ မဟုတ်ပါ",
+ "search.sign_corner": "လမ်းထောင့်",
  "search.sign_similar": "အတိအကျ မကိုက်ညီပါ- ဆိုင်းဘုတ်ကို စစ်ပါ",
  "search.sign_elsewhere": "ဤမြေပုံပေါ်တွင် မရှိပါ",
  "search.sign_same_name": "ဆိုင်းဘုတ်ပေါ်ရှိ အမည်နှင့် တူသည်",

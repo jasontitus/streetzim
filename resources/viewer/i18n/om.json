@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Daandii qofa: teessoon {n} hin argamne",
  "search.sign_street_only": "Daandii qofa, teessoo miti",
  "search.sign_area": "Naannoo, bakka sirrii miti",
+ "search.sign_corner": "Golee daandii",
  "search.sign_similar": "Sirrii miti: mallattoo ilaali",
  "search.sign_elsewhere": "Kaartaa kana irratti hin jiru",
  "search.sign_same_name": "Maqaa mallattoo irra jiru wajjin tokko",

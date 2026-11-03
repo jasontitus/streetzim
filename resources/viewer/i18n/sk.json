@@ -316,6 +316,7 @@
  "search.sign_street_no_address": "Len ulica: adresa {n} sa nenašla",
  "search.sign_street_only": "Len ulica, nie adresa",
  "search.sign_area": "Oblasť, nie presné miesto",
+ "search.sign_corner": "Roh ulíc",
  "search.sign_similar": "Nie je presné: skontrolujte tabuľu",
  "search.sign_elsewhere": "Nie je na tejto mape",
  "search.sign_same_name": "Rovnaký názov ako na tabuli",

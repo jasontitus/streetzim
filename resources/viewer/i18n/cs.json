@@ -316,6 +316,7 @@
  "search.sign_street_no_address": "Jen ulice: adresa {n} nenalezena",
  "search.sign_street_only": "Jen ulice, ne adresa",
  "search.sign_area": "Oblast, ne přesné místo",
+ "search.sign_corner": "Roh ulic",
  "search.sign_similar": "Není přesné: zkontrolujte ceduli",
  "search.sign_elsewhere": "Není na této mapě",
  "search.sign_same_name": "Stejný název jako na ceduli",

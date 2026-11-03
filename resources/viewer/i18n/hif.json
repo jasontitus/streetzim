@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Khaali sadak: address {n} nahi mila",
  "search.sign_street_only": "Khaali sadak, address nahi",
  "search.sign_area": "Ilaaka, sahi jagah nahi",
+ "search.sign_corner": "Rasta ke kona",
  "search.sign_similar": "Bilkul sahi nahi: board check karo",
  "search.sign_elsewhere": "Ii naksa pe nahi hai",
  "search.sign_same_name": "Board pe likha wahi naam",

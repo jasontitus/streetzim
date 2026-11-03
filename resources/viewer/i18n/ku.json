@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Tenê kolan: navnîşana {n} nehat dîtin",
  "search.sign_street_only": "Tenê kolan, ne navnîşan",
  "search.sign_area": "Herêm, ne cihekî rast",
+ "search.sign_corner": "Quncika kolanê",
  "search.sign_similar": "Ne rast e: tabelayê kontrol bike",
  "search.sign_elsewhere": "Ne li ser vê nexşeyê ye",
  "search.sign_same_name": "Heman nav wek li ser tabelayê",

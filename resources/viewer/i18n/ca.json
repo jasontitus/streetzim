@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Només el carrer: no s'ha trobat l'adreça {n}",
  "search.sign_street_only": "Només el carrer, no l'adreça",
  "search.sign_area": "Zona, no un lloc exacte",
+ "search.sign_corner": "Cantonada",
  "search.sign_similar": "No és exacte: comproveu el rètol",
  "search.sign_elsewhere": "No és en aquest mapa",
  "search.sign_same_name": "El mateix nom que al rètol",

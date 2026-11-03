@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Ainult tänav: aadressi {n} ei leitud",
  "search.sign_street_only": "Ainult tänav, mitte aadress",
  "search.sign_area": "Piirkond, mitte täpne koht",
+ "search.sign_corner": "Tänavanurk",
  "search.sign_similar": "Pole täpne: kontrollige silti",
  "search.sign_elsewhere": "Pole sellel kaardil",
  "search.sign_same_name": "Sama nimi mis sildil",

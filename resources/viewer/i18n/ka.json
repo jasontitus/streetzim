@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "მხოლოდ ქუჩა: მისამართი {n} ვერ მოიძებნა",
  "search.sign_street_only": "მხოლოდ ქუჩა და არა მისამართი",
  "search.sign_area": "ტერიტორია, არა ზუსტი ადგილი",
+ "search.sign_corner": "ქუჩების კუთხე",
  "search.sign_similar": "ზუსტი არ არის: შეამოწმეთ აბრა",
  "search.sign_elsewhere": "ამ რუკაზე არ არის",
  "search.sign_same_name": "იგივე სახელი, რაც აბრაზე",

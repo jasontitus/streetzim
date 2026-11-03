@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Rue seulement : aucune adresse {n} trouvée",
  "search.sign_street_only": "Rue seulement, pas l'adresse",
  "search.sign_area": "Zone, pas un lieu précis",
+ "search.sign_corner": "Angle de rue",
  "search.sign_similar": "Pas une correspondance exacte : vérifiez le panneau",
  "search.sign_elsewhere": "Pas sur cette carte",
  "search.sign_same_name": "Même nom que sur le panneau",

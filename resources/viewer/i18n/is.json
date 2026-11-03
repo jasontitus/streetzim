@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Aðeins gatan: heimilisfang {n} fannst ekki",
  "search.sign_street_only": "Aðeins gatan, ekki heimilisfangið",
  "search.sign_area": "Svæði, ekki nákvæmur staður",
+ "search.sign_corner": "Götuhorn",
  "search.sign_similar": "Ekki nákvæmt: athugaðu skiltið",
  "search.sign_elsewhere": "Ekki á þessu korti",
  "search.sign_same_name": "Sama nafn og á skiltinu",

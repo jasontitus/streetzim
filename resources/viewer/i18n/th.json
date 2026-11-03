@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "เฉพาะถนน: ไม่พบที่อยู่ {n}",
  "search.sign_street_only": "เฉพาะถนน ไม่ใช่ที่อยู่",
  "search.sign_area": "เป็นพื้นที่ ไม่ใช่ตำแหน่งที่แน่นอน",
+ "search.sign_corner": "หัวมุมถนน",
  "search.sign_similar": "ไม่ตรงทั้งหมด: โปรดดูป้าย",
  "search.sign_elsewhere": "ไม่อยู่ในแผนที่นี้",
  "search.sign_same_name": "ชื่อเดียวกับบนป้าย",

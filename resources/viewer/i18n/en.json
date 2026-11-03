@@ -313,6 +313,7 @@
  "search.searching": "Searching…",
  "search.sign_address": "Exact address",
  "search.sign_area": "Area, not an exact spot",
+ "search.sign_corner": "Street corner",
  "search.sign_elsewhere": "Not on this map",
  "search.sign_same_name": "Same name as on the sign",
  "search.sign_several": "Other places have this name: the sign doesn't say which",

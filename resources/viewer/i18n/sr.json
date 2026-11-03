@@ -314,6 +314,7 @@
  "search.sign_street_no_address": "Само улица: адреса {n} није пронађена",
  "search.sign_street_only": "Само улица, не адреса",
  "search.sign_area": "Подручје, а не тачно место",
+ "search.sign_corner": "Угао улица",
  "search.sign_similar": "Није тачно: проверите натпис",
  "search.sign_elsewhere": "Није на овој мапи",
  "search.sign_same_name": "Исто име као на натпису",

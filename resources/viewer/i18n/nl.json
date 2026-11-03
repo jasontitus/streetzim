@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Alleen de straat: geen adres {n} gevonden",
  "search.sign_street_only": "Alleen de straat, niet het adres",
  "search.sign_area": "Gebied, geen precieze plek",
+ "search.sign_corner": "Straathoek",
  "search.sign_similar": "Niet exact: controleer het bord",
  "search.sign_elsewhere": "Niet op deze kaart",
  "search.sign_same_name": "Dezelfde naam als op het bord",

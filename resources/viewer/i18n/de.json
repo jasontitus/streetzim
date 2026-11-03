@@ -309,6 +309,7 @@
  "search.sign_street_no_address": "Nur die Straße: keine Adresse {n} gefunden",
  "search.sign_street_only": "Nur die Straße, nicht die Adresse",
  "search.sign_area": "Gebiet, kein genauer Ort",
+ "search.sign_corner": "Straßenecke",
  "search.sign_similar": "Nicht genau gleich: bitte Schild prüfen",
  "search.sign_elsewhere": "Nicht auf dieser Karte",
  "search.sign_same_name": "Gleicher Name wie auf dem Schild",

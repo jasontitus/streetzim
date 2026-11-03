@@ -307,6 +307,7 @@
  "search.sign_street_no_address": "Naanị okporo ụzọ: ahụghị adreesị {n}",
  "search.sign_street_only": "Naanị okporo ụzọ, ọ bụghị adreesị",
  "search.sign_area": "Mpaghara, ọ bụghị ebe kpọmkwem",
+ "search.sign_corner": "Nkuku okporo ụzọ",
  "search.sign_similar": "Ọ bụghị kpọmkwem: lelee akara ahụ",
  "search.sign_elsewhere": "Ọ nọghị na map a",
  "search.sign_same_name": "Otu aha dị ka nke dị n'akara ahụ",

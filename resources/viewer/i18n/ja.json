@@ -308,6 +308,7 @@
  "search.sign_street_no_address": "通りのみ：住所 {n} は見つかりません",
  "search.sign_street_only": "通りのみ、住所ではありません",
  "search.sign_area": "地域、正確な地点ではありません",
+ "search.sign_corner": "交差点の角",
  "search.sign_similar": "完全一致ではありません：看板を確認してください",
  "search.sign_elsewhere": "この地図にはありません",
  "search.sign_same_name": "看板と同じ名前",

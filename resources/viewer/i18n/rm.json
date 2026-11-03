@@ -310,6 +310,7 @@
  "search.sign_street_no_address": "Mo la via: nagina adressa {n} chattada",
  "search.sign_street_only": "Mo la via, betg l'adressa",
  "search.sign_area": "Regiun, betg in lieu exact",
+ "search.sign_corner": "Cantun da via",
  "search.sign_similar": "Betg exact: controllai la tavla",
  "search.sign_elsewhere": "Betg sin questa charta",
  "search.sign_same_name": "Il medem num sco sin la tavla",
