@@ -274,6 +274,18 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
     return side
 
 
+def sampleable(t: str, full_text: bool = False) -> bool:
+    """A title the indexes can hold, for the gate to sample. One of marks
+    alone (a Thailand record named "ัีีั": vowel signs with no consonant)
+    folds to nothing, so no title index holds it; full text holds no folded
+    word over Xapian's 64-byte term limit (one unspaced Thai name of 22
+    letters or more)."""
+    f = fold(t)
+    if not any(c.isalnum() for c in f):
+        return False
+    return not full_text or all(len(w.encode()) <= 64 for w in re.findall(r"\w+", f))
+
+
 def gate(out: str, base: str, packs: list[str]) -> dict:
     """The search pack's own check, written to OUT.gate.json: libzim opens it,
     it has both indexes, a page of the base and of every pack is found by
@@ -281,7 +293,8 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
     base by its own title. The base's samples come from all its pages (a
     place's page first) and redirects, not its front listing, which a
     published base leaves empty: a gate that sampled from it checked nothing
-    of the base."""
+    of the base. A sample is one the indexes can hold (sampleable); a
+    source with none fails."""
     from libzim.reader import Archive
     from libzim.search import Query, Searcher
     from libzim.suggestion import SuggestionSearcher
@@ -297,7 +310,7 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
         for i in (z.iter_u32_blob(*v1) if v1 else []):
             d = z.dirent_at(i)
             t = d.title.decode("utf-8", "replace")
-            if d.ns == ord("C") and d.is_redirect == redirect and len(t) >= 4:
+            if d.ns == ord("C") and d.is_redirect == redirect and len(t) >= 4 and sampleable(t, True):
                 return d.path.decode("utf-8", "replace"), t
         return None
 
@@ -305,7 +318,7 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
         hm, best = html_mimes(z), None
         for d in z.iter_dirents():
             p, t = d.path.decode("utf-8", "replace"), d.title.decode("utf-8", "replace")
-            if d.ns != ord("C") or d.is_redirect != redirect or len(t) < 4:
+            if d.ns != ord("C") or d.is_redirect != redirect or len(t) < 4 or not sampleable(t):
                 continue
             if redirect:
                 if final_target(z, d, hm) is not None:
@@ -323,6 +336,8 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
             else (("page", first(z, False)), ("redirect", None))
         for kind, sample in samples:
             if sample is None:
+                if kind == "page":
+                    problems.append(f"{os.path.basename(src)}: no title to sample")
                 continue
             p, t = sample
             sug = list(SuggestionSearcher(a).suggest(t).getResults(0, 20)) if a.has_title_index else []

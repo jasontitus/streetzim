@@ -182,7 +182,10 @@ def test_a_title_libzim_cannot_index_is_not_required_by_full_text(sr: SimpleName
     lpzims.write_pack(th, "th", sr.uuid, articles=[("อัลฟา", "อัลฟา"),
                                                   ("ท่าอากาศยานนานาชาติเจนีวา", "ท่าอากาศยานนานาชาติเจนีวา")])
     out = tmp_path / "osm_testland_search-de-th_2026-10-13_v.zim"
-    index_pack.build(str(sr.base), [str(sr.packs["de"]), str(th)], "th", "testland", str(out), None, log=lambda m: None)
+    side = index_pack.build(str(sr.base), [str(sr.packs["de"]), str(th)], "th", "testland", str(out), None,
+                            log=lambda m: None)
+    # the pack's own gate samples the title full text can hold, not the long one listed first
+    assert side["gate"]["ok"] and side["gate"]["found"][th.name]["title"] == "อัลฟา", side["gate"]
     merged = tmp_path / "m.zim"
     assert tool("merge_zim.py", sr.base, sr.packs["de"], th, "--index", out, "-o", merged, "--lang", "th",
                 "--region", "testland").returncode == 0
@@ -591,3 +594,31 @@ def test_a_title_another_pack_crowds_off_full_text_is_not_sampled(tmp_path: Path
     g = json.loads(r.stdout.strip().splitlines()[-1])
     assert r.returncode == 0 and g["pass"] and g["crowded"] == ["Omega"], g
     assert [x["title"] for x in g["rows"]] == ["Alpha Stadt", "Beta Gipfel"], g
+
+
+def test_the_gate_samples_a_title_with_a_letter(tmp_path: Path) -> None:
+    """Thailand's first search page is named "ัีีั" (vowel signs, no
+    consonant), which folds to nothing: no title index holds it. The search
+    pack's gate samples the next page rather than failing every pack."""
+    from tests.langpack import lpzims
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base, pages=[("search/-1.html", "ัีีั", ""), ("search/-2.html", "Ratchaburi", "")])
+    de = tmp_path / f"osm_testland_wiki-de_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(de, "de", u)
+    out = tmp_path / "osm_testland_search-de_2026-10-13_m.zim"
+    side = index_pack.build(str(base), [str(de)], "de", "testland", str(out), None, log=lambda m: None)
+    assert side["gate"]["ok"], side["gate"]
+    assert side["gate"]["found"][base.name]["title"] == "Ratchaburi", side["gate"]
+
+
+def test_the_gate_fails_a_pack_with_no_title_to_sample(tmp_path: Path) -> None:
+    """A source the gate cannot sample is a problem, not skipped: a pack whose
+    only article is named with marks alone passed with nothing checked."""
+    from tests.langpack import lpzims
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    u = lpzims.write_base(base)
+    th = tmp_path / f"osm_testland_wiki-th_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(th, "th", u, articles=[("x", "ัีีั")])
+    out = tmp_path / "osm_testland_search-th_2026-10-13_n.zim"
+    side = index_pack.build(str(base), [str(th)], "th", "testland", str(out), None, log=lambda m: None)
+    assert not side["gate"]["ok"] and f"{th.name}: no title to sample" in side["gate"]["problems"], side["gate"]
