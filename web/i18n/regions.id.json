@@ -1,0 +1,318 @@
+{
+ "europe": {
+  "title": "Eropa",
+  "description": "Britania Raya, Irlandia, Prancis, Spanyol, Portugal, Jerman, Italia, Belanda, Belgia, Swiss, Austria, Polandia, Yunani, Swedia, Norwegia, Finlandia, Denmark, negara-negara Baltik, Ukraina, Georgia, Armenia, Azerbaijan, Siprus, dan puluhan negara lainnya."
+ },
+ "united-states": {
+  "title": "Amerika Serikat",
+  "description": "Amerika Serikat daratan — ke-48 negara bagian yang bersebelahan dan Washington, D.C."
+ },
+ "south-america": {
+  "title": "Amerika Selatan",
+  "description": "Daratan Amerika Selatan — Kolombia, Venezuela, Guyana, Suriname, Guyana Prancis, Ekuador, Peru, Bolivia, Paraguay, Uruguay, Chili, Amazon, Andes, Gurun Atacama, dan Patagonia. (Brasil dan Argentina tersedia sebagai ZIM tersendiri.)"
+ },
+ "africa": {
+  "title": "Afrika",
+  "description": "Seluruh Afrika — Aljazair, Mesir, Etiopia, Kenya, Maroko, Nigeria, Afrika Selatan, Tanzania, dan lebih dari 40 negara lainnya."
+ },
+ "indian-subcontinent": {
+  "title": "Anak Benua India",
+  "description": "India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, dan Maladewa."
+ },
+ "china": {
+  "title": "China",
+  "description": "China — Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi’an, Wuhan, Hangzhou, Hong Kong, dan Makau, ditambah Tembok Besar, Sungai Yangtze, Dataran Tinggi Tibet, dan Gurun Gobi."
+ },
+ "russia": {
+  "title": "Rusia",
+  "description": "Rusia — Moskwa, Sankt-Peterburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; Sungai Volga, Pegunungan Ural, Kaukasus, Danau Baikal; Jalur Kereta Api Trans-Siberia dari Laut Baltik hingga Laut Jepang."
+ },
+ "australia-nz": {
+  "title": "Australia dan Selandia Baru",
+  "description": "Australia dan Selandia Baru — Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, Great Barrier Reef, Outback, dan Pegunungan Alpen Selatan."
+ },
+ "southeast-asia": {
+  "title": "Asia Tenggara",
+  "description": "Thailand, Vietnam, Myanmar, Kamboja, Laos, Malaysia, Singapura, Indonesia, Filipina, Brunei, dan Timor Leste — Bangkok, Hanoi, Kota Ho Chi Minh, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Kalimantan, Delta Mekong, dan Laut China Selatan."
+ },
+ "thailand": {
+  "title": "Thailand",
+  "description": "Thailand — Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen, dan Hat Yai, beserta pulau-pulau di Laut Andaman dan Teluk Thailand."
+ },
+ "canada": {
+  "title": "Kanada",
+  "description": "Seluruh Kanada — Toronto, Montreal, Vancouver, Calgary, Ottawa, Kota Quebec, Edmonton, Halifax, Pegunungan Rocky, Banff, Danau-Danau Besar, Provinsi Maritim, serta Yukon dan Wilayah Barat Laut."
+ },
+ "west-asia": {
+  "title": "Asia Barat",
+  "description": "Turki, Suriah, Lebanon, Israel, Palestina, Yordania, Irak, Iran, Kuwait, Arab Saudi, Bahrain, Qatar, Uni Emirat Arab, Oman, Yaman, serta sebagian Mesir, Afganistan, dan Pakistan."
+ },
+ "central-asia": {
+  "title": "Asia Tengah",
+  "description": "Asia Tengah — Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kirgizstan, Afganistan, dan Kaukasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, Pegunungan Pamir, dan Jalur Sutra."
+ },
+ "korea-mongolia": {
+  "title": "Korea dan Mongolia",
+  "description": "Semenanjung Korea dan Mongolia — Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; Gurun Gobi, Pegunungan Khangai, Zona Demiliterisasi (DMZ), dan pesisir Laut Jepang."
+ },
+ "caucasus": {
+  "title": "Kaukasus",
+  "description": "Kaukasus — Georgia, Armenia, dan Azerbaijan, beserta Kaukasus di Rusia bagian selatan dan Turki bagian timur. Tbilisi, Yerevan, Baku, Batumi, Pegunungan Kaukasus Besar, Gunung Elbrus, Danau Sevan, dan pesisir Laut Kaspia."
+ },
+ "pacific-islands": {
+  "title": "Kepulauan Pasifik",
+  "description": "Papua Nugini, Fiji, Kepulauan Solomon, Vanuatu, Kaledonia Baru, Palau, Mikronesia, Kepulauan Marshall, Nauru, Tuvalu, dan Kepulauan Gilbert di Kiribati — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa, dan Majuro."
+ },
+ "west-africa": {
+  "title": "Afrika Barat",
+  "description": "Nigeria, Ghana, Pantai Gading, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, dan Niger — Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, dan pesisir Teluk Guinea."
+ },
+ "southern-africa": {
+  "title": "Afrika Bagian Selatan",
+  "description": "Afrika Selatan, Namibia, Botswana, Zimbabwe, Mozambik, Zambia, Malawi, Lesotho, dan Eswatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, Gurun Kalahari, Taman Nasional Kruger, dan wilayah Cape."
+ },
+ "east-africa": {
+  "title": "Afrika Timur",
+  "description": "Kenya, Tanzania, Uganda, Etiopia, Rwanda, Burundi, Somalia, dan Sudan Selatan — Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Gunung Kilimanjaro, Serengeti, dan Danau Victoria."
+ },
+ "central-america-caribbean": {
+  "title": "Amerika Tengah dan Karibia",
+  "description": "Amerika Tengah dan Karibia — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nikaragua, Kosta Rika, Panama, Kuba, Jamaika, Hispaniola, Kepulauan Cayman, Puerto Riko, Antillen Kecil, dan Bahama bagian selatan."
+ },
+ "himalayas": {
+  "title": "Himalaya",
+  "description": "Pegunungan Himalaya, Karakoram, Hindu Kush, dan Pamir — Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, lembah Sungai Indus dan Brahmaputra. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kangchenjunga, dan Annapurna."
+ },
+ "baltics": {
+  "title": "Negara-Negara Baltik",
+  "description": "Estonia, Latvia, dan Lituania — Tallinn, Riga, Vilnius, dan pesisir Laut Baltik."
+ },
+ "brazil": {
+  "title": "Brasil",
+  "description": "Seluruh Brasil — São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, Amazon, Pantanal, Air Terjun Iguaçu, dan pesisir Atlantik."
+ },
+ "argentina": {
+  "title": "Argentina",
+  "description": "Argentina — Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, padang rumput Pampas, Andes, Patagonia, dan Tierra del Fuego."
+ },
+ "mexico": {
+  "title": "Meksiko",
+  "description": "Seluruh Meksiko — Kota Meksiko, Guadalajara, Monterrey, Puebla, Tijuana, Cancún dan Riviera Maya, Oaxaca, Semenanjung Yucatán, Baja California, Sierra Madre, serta pesisir Pasifik dan Teluk Meksiko."
+ },
+ "ukraine": {
+  "title": "Ukraina, Moldova, dan Rusia Barat",
+  "description": "Seluruh Ukraina dan Moldova (termasuk Krimea), ditambah wilayah perbatasan Rusia bagian barat — Volgograd, Rostov, Sochi, Krasnodar, pesisir Laut Hitam, dan kaki Pegunungan Kaukasus."
+ },
+ "japan": {
+  "title": "Jepang",
+  "description": "Jepang — keempat pulau utama (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, dan Kepulauan Ryukyu. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, dan banyak lagi."
+ },
+ "iran": {
+  "title": "Iran",
+  "description": "Iran — dari Laut Kaspia hingga Teluk Persia, termasuk Teheran, Isfahan, Shiraz, dan Masyhad."
+ },
+ "bahrain": {
+  "title": "Bahrain",
+  "description": "Bahrain — Manama, Muharraq, Riffa, Isa Town, Jalan Lintas Raja Fahd, dan Kepulauan Hawar; cari jalan atau papan nama toko dengan foto."
+ },
+ "egypt": {
+  "title": "Mesir",
+  "description": "Mesir — Kairo, Aleksandria, Giza, Luxor, Aswan, Lembah Nil, Semenanjung Sinai, dan pesisir Laut Merah."
+ },
+ "switzerland": {
+  "title": "Swiss dan Pegunungan Alpen",
+  "description": "Swiss dan Pegunungan Alpen di sekitarnya — Zürich, Jenewa, Bern, Basel, Lausanne, Luzern, Lugano, St. Moritz, Zermatt dan Matterhorn, Interlaken dan Jungfrau, ditambah Chamonix dan Mont Blanc, Aosta, Danau Como, Liechtenstein, Danau Konstanz, dan Tirol bagian barat."
+ },
+ "switzerland-light": {
+  "title": "Swiss dan Pegunungan Alpen (Ringan)",
+  "description": "Versi Swiss yang lebih kecil untuk perangkat terbatas dan koneksi lambat — cakupan dan pencarian sama dengan versi lengkap, tetapi tanpa citra satelit dan detail peta vektor dibatasi satu tingkat zoom lebih rendah (z13, bukan z14). 1,4 GB, bukan 2,1 GB. Jalan, tempat, alamat, rute, medan, dan Wikipedia tidak berubah; peta hanya berhenti makin tajam pada skala denah bangunan."
+ },
+ "iceland": {
+  "title": "Islandia",
+  "description": "Islandia — Reykjavík, Akureyri, Jalan Lingkar (Ring Road), Þingvellir, Geysir, Air Terjun Gullfoss, Vík, Laguna Jökulsárlón, Semenanjung Snæfellsnes, Vestfirðir, dan Gletser Vatnajökull."
+ },
+ "turkey": {
+  "title": "Turki",
+  "description": "Turki — Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Kapadokia, Pamukkale, Efesus, Selat Bosporus, pesisir Laut Aegea, dan Dataran Tinggi Anatolia."
+ },
+ "south-korea": {
+  "title": "Korea Selatan",
+  "description": "Korea Selatan — Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Pulau Jeju, Zona Demiliterisasi (DMZ), Gunung Seorak, dan Gunung Halla."
+ },
+ "taiwan": {
+  "title": "Taiwan",
+  "description": "Taiwan — Taipei, Taipei Baru, Taichung, Kaohsiung, Tainan, Taoyuan, Hsinchu, Keelung, Hualien; Ngarai Taroko, Danau Sun Moon, Alishan, Yushan, Kenting, serta Kepulauan Penghu, Kinmen, Matsu, Pulau Lüdao, dan Pulau Lanyu."
+ },
+ "east-coast-us": {
+  "title": "Pantai Timur Amerika Serikat",
+  "description": "Pantai Timur Amerika Serikat dari Maine hingga Florida — New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, dan seluruh pesisir timur."
+ },
+ "midwest-us": {
+  "title": "Amerika Serikat Bagian Barat Tengah",
+  "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Dakota Utara, Dakota Selatan, Nebraska, dan Kansas."
+ },
+ "west-coast-us": {
+  "title": "Pantai Barat Amerika Serikat",
+  "description": "Pantai Barat Amerika Serikat: Washington, Oregon, dan California — Seattle, Portland, San Francisco, Los Angeles, San Diego, dan semua tempat di antaranya."
+ },
+ "central-us": {
+  "title": "Amerika Serikat Bagian Tengah",
+  "description": "Wilayah Pegunungan Barat dan sekitarnya — Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, dan New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, dan Pegunungan Rocky."
+ },
+ "california": {
+  "title": "California",
+  "description": "Seluruh California — dari perbatasan Oregon hingga Meksiko, dari pesisir Pasifik hingga Sierra Nevada."
+ },
+ "hawaii": {
+  "title": "Hawaii",
+  "description": "Kepulauan Hawaii — Honolulu, Hilo, Kahului; O‘ahu, Maui, Hawai‘i (Pulau Besar), Kaua‘i, Moloka‘i, dan Lāna‘i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, dan pesisir Nā Pali."
+ },
+ "alaska": {
+  "title": "Alaska",
+  "description": "Alaska — Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, Pegunungan Brooks, Kepulauan Aleut, Inside Passage, Prince William Sound, Sungai Yukon, dan Arktik."
+ },
+ "new-york-state": {
+  "title": "Negara Bagian New York",
+  "description": "Seluruh Negara Bagian New York — Kota New York, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, Lembah Hudson, Pegunungan Catskill, Pegunungan Adirondack, Finger Lakes, Air Terjun Niagara, dan Thousand Islands."
+ },
+ "florida": {
+  "title": "Florida",
+  "description": "Seluruh Florida — Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; Everglades, Florida Keys, Tanjung Canaveral, pesisir Atlantik dan Teluk Meksiko, serta Walt Disney World."
+ },
+ "carolinas": {
+  "title": "Carolina Utara dan Selatan",
+  "description": "Carolina Utara dan Carolina Selatan — Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, dan Asheville; Pegunungan Blue Ridge dan Great Smoky, Research Triangle, serta Outer Banks dan pesisir Atlantik."
+ },
+ "nyc-metro": {
+  "title": "Metropolitan New York",
+  "description": "Kawasan metropolitan tiga negara bagian di sekitar New York — Manhattan, Brooklyn, Queens, Bronx, Staten Island, Long Island, Westchester, New Jersey bagian utara, dan Connecticut bagian barat daya."
+ },
+ "chicago-metro": {
+  "title": "Metropolitan Chicago",
+  "description": "Chicago Raya — kota Chicago dan County Cook, DuPage, Lake, Will, Kane, McHenry, ditambah Indiana bagian barat laut dan Wisconsin bagian tenggara di sepanjang Danau Michigan."
+ },
+ "greater-la": {
+  "title": "Los Angeles Raya",
+  "description": "Kawasan metropolitan Los Angeles — LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, dan Inland Empire, ditambah Pulau Catalina dan Kepulauan Channel."
+ },
+ "texas": {
+  "title": "Texas",
+  "description": "Texas, AS — dari Pesisir Teluk hingga Rio Grande, termasuk Houston, Dallas, San Antonio, Austin, Fort Worth, dan El Paso."
+ },
+ "colorado": {
+  "title": "Colorado",
+  "description": "Negara bagian Pegunungan Rocky — Denver, Aspen, Vail, Taman Nasional Rocky Mountain, dan Garis Pemisah Benua."
+ },
+ "silicon-valley": {
+  "title": "Silicon Valley",
+  "description": "Kawasan Teluk San Francisco — San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, dan Semenanjung San Francisco."
+ },
+ "taipei": {
+  "title": "Taipei",
+  "description": "Taipei — Kota Taipei dan pusat Taipei Baru: Ximending, Zhongshan, Xinyi dan Taipei 101, Beitou, Tamsui, Banqiao, Xindian, dan Yangmingshan; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "osaka": {
+  "title": "Osaka",
+  "description": "Osaka — pusat kota Osaka: Umeda, Namba dan Dotonbori, Shinsaibashi, Tennoji, Kastil Osaka, Shin-Osaka, dan kawasan teluk; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "tehran": {
+  "title": "Teheran",
+  "description": "Teheran — Kota Teheran: Menara Azadi, Grand Bazaar dan Istana Golestan, Jalan Valiasr, Tajrish dan kawasan utara, Universitas Teheran; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "cairo": {
+  "title": "Kairo",
+  "description": "Kairo — Kairo dan Giza: Lapangan Tahrir dan Museum Mesir, Kairo Islam dan Jalan Al-Muizz, Khan el-Khalili, Zamalek, Heliopolis, dan piramida Giza; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "athens": {
+  "title": "Athena",
+  "description": "Athena — Athena dan Piraeus: Akropolis, Plaka dan Monastiraki, Syntagma, Kolonaki, Exarchia, dan Pelabuhan Piraeus; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "moscow": {
+  "title": "Moskwa",
+  "description": "Moskwa — Moskwa di dalam jalan lingkar: Kremlin dan Lapangan Merah, Tverskaya, Arbat, Zamoskvorechye, Bukit Vorobyovy, dan Universitas Negeri Moskwa; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "kyiv": {
+  "title": "Kyiv",
+  "description": "Kyiv — Kyiv di kedua tepi Sungai Dnipro: Maidan Nezalezhnosti, Khreshchatyk, Katedral Santa Sofia, Podil, Biara Pechersk Lavra, dan tepi kiri; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "seoul": {
+  "title": "Seoul",
+  "description": "Seoul — Seoul: Gyeongbokgung dan Insadong, Myeongdong, Itaewon, Hongdae, Sungai Han, Gangnam, dan Jamsil; cari papan nama jalan atau nama toko dengan foto."
+ },
+ "washington-dc": {
+  "title": "Washington, D.C.",
+  "description": "Washington, D.C. — ibu kota Amerika Serikat dan kawasan metropolitan di sekitarnya."
+ },
+ "hispaniola": {
+  "title": "Hispaniola",
+  "description": "Pulau Hispaniola di Karibia — Haiti dan Republik Dominika."
+ },
+ "france": {
+  "title": "Prancis",
+  "description": "Prancis — Paris, Lyon, Marseille, Toulouse, Bordeaux, Nice, Strasbourg; Pegunungan Alpen, Pirenia, lembah Loire dan Rhône, Korsika."
+ },
+ "germany": {
+  "title": "Jerman",
+  "description": "Jerman — Berlin, Hamburg, München, Köln, Frankfurt, Stuttgart; Sungai Rhein dan Donau, Hutan Hitam, Pegunungan Alpen Bayern, pesisir Laut Baltik dan Laut Utara."
+ },
+ "italy": {
+  "title": "Italia",
+  "description": "Italia — Roma, Milan, Napoli, Turin, Firenze, Venesia, Bologna; Pegunungan Alpen dan Dolomit, Apennina, Sisilia, dan Sardinia."
+ },
+ "poland": {
+  "title": "Polandia",
+  "description": "Polandia — Warsawa, Kraków, Łódź, Wrocław, Poznań, Gdańsk; pesisir Laut Baltik, danau-danau Masuria, Pegunungan Tatra."
+ },
+ "greece": {
+  "title": "Yunani",
+  "description": "Yunani — Athena, Thessaloniki, Patras, Heraklion; Peloponnesos, Kreta, Kepulauan Kiklades dan Dodekanesa, Gunung Olimpus."
+ },
+ "britain-ireland": {
+  "title": "Britania Raya dan Irlandia",
+  "description": "Kepulauan Britania — London, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; Dataran Tinggi Skotlandia, Snowdonia, Lake District, dan Wild Atlantic Way."
+ },
+ "iberia": {
+  "title": "Semenanjung Iberia",
+  "description": "Spanyol, Portugal, dan Andorra — Madrid, Barcelona, Valencia, Sevilla, Lisboa, Porto; Pirenia, Meseta, Algarve, Kepulauan Balears."
+ },
+ "benelux": {
+  "title": "Benelux",
+  "description": "Belanda, Belgia, dan Luksemburg — Amsterdam, Rotterdam, Den Haag, Brussel, Antwerpen, Gent, Kota Luksemburg; Randstad, Ardennes, pesisir Laut Utara."
+ },
+ "nordics": {
+  "title": "Negara-Negara Nordik",
+  "description": "Norwegia, Swedia, Finlandia, dan Denmark — Oslo, Stockholm, Helsinki, Kopenhagen, Bergen, Göteborg; fjord, Lapland, kepulauan di Laut Baltik."
+ },
+ "austria-czech": {
+  "title": "Austria, Ceko, dan Slowakia",
+  "description": "Austria, Ceko, dan Slowakia — Wina, Praha, Bratislava, Brno, Salzburg, Graz, Innsbruck; Pegunungan Alpen Timur, Bohemia, Pegunungan Tatra."
+ },
+ "balkans": {
+  "title": "Semenanjung Balkan",
+  "description": "Slovenia, Kroasia, Bosnia, Serbia, Montenegro, Albania, Makedonia Utara, dan Kosovo — Beograd, Zagreb, Sarajevo, Ljubljana, Split, Tirana; pesisir Dalmatia, Pegunungan Alpen Dinara."
+ },
+ "carpathians": {
+  "title": "Rumania, Hungaria, dan Bulgaria",
+  "description": "Rumania, Hungaria, dan Bulgaria — Bukares, Budapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; Pegunungan Karpatia, Delta Donau, pesisir Laut Hitam."
+ },
+ "africa-light": {
+  "title": "Afrika (Ringan)",
+  "description": "Seluruh Afrika tanpa citra satelit dan dibatasi hingga zoom 13 — cakupan sama dengan peta Afrika, dengan ukuran unduhan sekitar separuhnya. Dibuat untuk koneksi lambat dan perangkat yang lebih kecil."
+ },
+ "north-africa": {
+  "title": "Afrika Utara",
+  "description": "Maroko, Aljazair, Tunisia, Libya, Mauritania, dan Sahara Barat — Casablanca, Aljir, Tunis, Tripoli, Marrakesh, Fez; Pegunungan Atlas, pesisir Laut Tengah, Sahara bagian utara."
+ },
+ "horn-of-africa": {
+  "title": "Tanduk Afrika",
+  "description": "Etiopia, Somalia, Eritrea, Djibouti, Sudan Selatan, dan Kenya bagian utara — Addis Ababa, Mogadishu, Asmara, Kota Djibouti, Juba; Dataran Tinggi Etiopia, Lembah Retakan Besar, pesisir Laut Merah."
+ },
+ "central-africa": {
+  "title": "Afrika Tengah",
+  "description": "RD Kongo, Kamerun, Chad, Republik Afrika Tengah, Gabon, Kongo, Guinea Khatulistiwa, Angola, dan Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; Lembah Kongo, Retakan Albertine."
+ },
+ "east-polynesia": {
+  "title": "Polinesia Timur",
+  "description": "Polinesia Prancis, Kepulauan Cook, serta Kepulauan Austral dan Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; atol dan pulau vulkanik yang tersebar sepanjang 3.000 km di Pasifik Selatan."
+ }
+}

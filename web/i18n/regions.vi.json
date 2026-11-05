@@ -1,0 +1,318 @@
+{
+ "europe": {
+  "title": "Châu Âu",
+  "description": "Vương quốc Anh, Ireland, Pháp, Tây Ban Nha, Bồ Đào Nha, Đức, Ý, Hà Lan, Bỉ, Thụy Sĩ, Áo, Ba Lan, Hy Lạp, Thụy Điển, Na Uy, Phần Lan, Đan Mạch, các nước Baltic, Ukraina, Gruzia, Armenia, Azerbaijan, Síp và hàng chục quốc gia khác."
+ },
+ "united-states": {
+  "title": "Mỹ",
+  "description": "Lục địa Mỹ — toàn bộ 48 bang liền kề và Washington, D.C."
+ },
+ "south-america": {
+  "title": "Nam Mỹ",
+  "description": "Lục địa Nam Mỹ — Colombia, Venezuela, Guyana, Suriname, Guyane thuộc Pháp, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, rừng Amazon, dãy Andes, sa mạc Atacama và Patagonia. (Brazil và Argentina có tệp ZIM riêng.)"
+ },
+ "africa": {
+  "title": "Châu Phi",
+  "description": "Toàn bộ châu Phi — Algérie, Ai Cập, Ethiopia, Kenya, Maroc, Nigeria, Nam Phi, Tanzania và hơn 40 quốc gia khác."
+ },
+ "indian-subcontinent": {
+  "title": "Tiểu lục địa Ấn Độ",
+  "description": "Ấn Độ, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan và Maldives."
+ },
+ "china": {
+  "title": "Trung Quốc",
+  "description": "Trung Quốc — Bắc Kinh, Thượng Hải, Quảng Châu, Thâm Quyến, Thành Đô, Trùng Khánh, Tây An, Vũ Hán, Hàng Châu, Hồng Kông và Ma Cao, cùng Vạn Lý Trường Thành, sông Dương Tử, cao nguyên Tây Tạng và sa mạc Gobi."
+ },
+ "russia": {
+  "title": "Nga",
+  "description": "Nga — Moskva, Sankt-Peterburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; sông Volga, dãy Ural, dãy Kavkaz, hồ Baikal; tuyến đường sắt xuyên Siberia từ biển Baltic đến biển Nhật Bản."
+ },
+ "australia-nz": {
+  "title": "Úc và New Zealand",
+  "description": "Úc và New Zealand — Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, rạn san hô Great Barrier, vùng hoang mạc Outback và dãy Alps phía Nam."
+ },
+ "southeast-asia": {
+  "title": "Đông Nam Á",
+  "description": "Thái Lan, Việt Nam, Myanmar, Campuchia, Lào, Malaysia, Singapore, Indonesia, Philippines, Brunei và Đông Timor — Bangkok, Hà Nội, Thành phố Hồ Chí Minh, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, Đồng bằng sông Cửu Long và Biển Đông."
+ },
+ "thailand": {
+  "title": "Thái Lan",
+  "description": "Thái Lan — Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen và Hat Yai, cùng các đảo trên biển Andaman và vịnh Thái Lan."
+ },
+ "canada": {
+  "title": "Canada",
+  "description": "Toàn bộ Canada — Toronto, Montréal, Vancouver, Calgary, Ottawa, thành phố Québec, Edmonton, Halifax, dãy Rocky, Banff, Ngũ Đại Hồ, các tỉnh duyên hải Maritime, cùng Yukon và Các Lãnh thổ Tây Bắc."
+ },
+ "west-asia": {
+  "title": "Tây Á",
+  "description": "Thổ Nhĩ Kỳ, Syria, Liban, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Ả Rập Xê Út, Bahrain, Qatar, UAE, Oman, Yemen và một phần Ai Cập, Afghanistan, Pakistan."
+ },
+ "central-asia": {
+  "title": "Trung Á",
+  "description": "Trung Á — Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan và vùng Kavkaz. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, dãy Pamir và Con đường tơ lụa."
+ },
+ "korea-mongolia": {
+  "title": "Hàn Quốc, Triều Tiên và Mông Cổ",
+  "description": "Bán đảo Triều Tiên và Mông Cổ — Seoul, Busan, Daegu, Incheon, Bình Nhưỡng, Ulaanbaatar, Darkhan; sa mạc Gobi, dãy núi Khangai, khu phi quân sự (DMZ) và vùng ven biển Nhật Bản."
+ },
+ "caucasus": {
+  "title": "Kavkaz",
+  "description": "Vùng Kavkaz — Gruzia, Armenia và Azerbaijan, cùng vùng Kavkaz ở miền nam nước Nga và miền đông Thổ Nhĩ Kỳ. Tbilisi, Yerevan, Baku, Batumi, dãy Đại Kavkaz, núi Elbrus, hồ Sevan và bờ biển Caspi."
+ },
+ "pacific-islands": {
+  "title": "Quần đảo Thái Bình Dương",
+  "description": "Papua New Guinea, Fiji, Quần đảo Solomon, Vanuatu, Nouvelle-Calédonie, Palau, Micronesia, Quần đảo Marshall, Nauru, Tuvalu và quần đảo Gilbert của Kiribati — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa và Majuro."
+ },
+ "west-africa": {
+  "title": "Tây Phi",
+  "description": "Nigeria, Ghana, Bờ Biển Ngà, Sénégal, Mali, Burkina Faso, Guinée, Bénin, Togo, Sierra Leone, Liberia và Niger — Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou và bờ biển vịnh Guinea."
+ },
+ "southern-africa": {
+  "title": "Miền Nam châu Phi",
+  "description": "Nam Phi, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho và Eswatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, sa mạc Kalahari, vườn quốc gia Kruger và vùng Cape."
+ },
+ "east-africa": {
+  "title": "Đông Phi",
+  "description": "Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia và Nam Sudan — Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, núi Kilimanjaro, Serengeti và hồ Victoria."
+ },
+ "central-america-caribbean": {
+  "title": "Trung Mỹ và Caribe",
+  "description": "Trung Mỹ và vùng Caribe — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, đảo Hispaniola, Quần đảo Cayman, Puerto Rico, quần đảo Tiểu Antilles và miền nam Bahamas."
+ },
+ "himalayas": {
+  "title": "Dãy Himalaya",
+  "description": "Dãy Himalaya, Karakoram, Hindu Kush và Pamir — Nepal, Bhutan, Tây Tạng, Sikkim, Ladakh, Kashmir, các thung lũng sông Ấn và sông Brahmaputra. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kangchenjunga và Annapurna."
+ },
+ "baltics": {
+  "title": "Các nước Baltic",
+  "description": "Estonia, Latvia và Litva — Tallinn, Riga, Vilnius và bờ biển Baltic."
+ },
+ "brazil": {
+  "title": "Brazil",
+  "description": "Toàn bộ Brazil — São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, rừng Amazon, Pantanal, thác Iguaçu và bờ biển Đại Tây Dương."
+ },
+ "argentina": {
+  "title": "Argentina",
+  "description": "Argentina — Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, đồng cỏ Pampas, dãy Andes, Patagonia và Tierra del Fuego."
+ },
+ "mexico": {
+  "title": "Mexico",
+  "description": "Toàn bộ Mexico — Thành phố Mexico, Guadalajara, Monterrey, Puebla, Tijuana, Cancún và Riviera Maya, Oaxaca, bán đảo Yucatán, Baja California, dãy Sierra Madre, cùng cả bờ biển Thái Bình Dương lẫn bờ vịnh Mexico."
+ },
+ "ukraine": {
+  "title": "Ukraina, Moldova và miền Tây nước Nga",
+  "description": "Toàn bộ Ukraina và Moldova (kể cả Krym), cùng vùng biên giới phía tây nước Nga — Volgograd, Rostov, Sochi, Krasnodar, bờ Biển Đen và vùng chân núi Kavkaz."
+ },
+ "japan": {
+  "title": "Nhật Bản",
+  "description": "Nhật Bản — cả bốn đảo chính (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa và quần đảo Ryukyu. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima và nhiều nơi khác."
+ },
+ "iran": {
+  "title": "Iran",
+  "description": "Iran — từ biển Caspi đến vịnh Ba Tư, gồm Tehran, Isfahan, Shiraz và Mashhad."
+ },
+ "bahrain": {
+  "title": "Bahrain",
+  "description": "Bahrain — Manama, Muharraq, Riffa, Isa Town, cầu King Fahd và quần đảo Hawar; tìm đường phố hay biển hiệu cửa hàng bằng ảnh chụp."
+ },
+ "egypt": {
+  "title": "Ai Cập",
+  "description": "Ai Cập — Cairo, Alexandria, Giza, Luxor, Aswan, thung lũng sông Nile, bán đảo Sinai và bờ Biển Đỏ."
+ },
+ "switzerland": {
+  "title": "Thụy Sĩ và dãy Alps",
+  "description": "Thụy Sĩ và vùng núi Alps xung quanh — Zürich, Genève, Bern, Basel, Lausanne, Luzern, Lugano, St. Moritz, Zermatt và đỉnh Matterhorn, Interlaken và đỉnh Jungfrau, cùng Chamonix và Mont Blanc, Aosta, hồ Como, Liechtenstein, hồ Constance và miền tây Tirol."
+ },
+ "switzerland-light": {
+  "title": "Thụy Sĩ và dãy Alps (bản nhẹ)",
+  "description": "Bản Thụy Sĩ gọn nhẹ cho thiết bị cấu hình hạn chế và kết nối chậm — cùng phạm vi và tính năng tìm kiếm như bản đầy đủ, nhưng không có ảnh vệ tinh và chi tiết bản đồ vector dừng sớm hơn một mức thu phóng (z13 thay vì z14). 1,4 GB thay vì 2,1 GB. Đường phố, địa điểm, địa chỉ, chỉ đường, địa hình và Wikipedia vẫn giữ nguyên; chỉ là bản đồ không nét thêm khi phóng tới mức thấy đường viền từng tòa nhà."
+ },
+ "iceland": {
+  "title": "Iceland",
+  "description": "Iceland — Reykjavík, Akureyri, đường vành đai Ring Road, Þingvellir, Geysir, thác Gullfoss, Vík, phá băng Jökulsárlón, bán đảo Snæfellsnes, vùng Vestfirðir và sông băng Vatnajökull."
+ },
+ "turkey": {
+  "title": "Thổ Nhĩ Kỳ",
+  "description": "Thổ Nhĩ Kỳ — Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Cappadocia, Pamukkale, Ephesus, eo biển Bosphorus, bờ biển Aegea và cao nguyên Anatolia."
+ },
+ "south-korea": {
+  "title": "Hàn Quốc",
+  "description": "Hàn Quốc — Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, đảo Jeju, khu phi quân sự (DMZ), núi Seorak và núi Halla."
+ },
+ "taiwan": {
+  "title": "Đài Loan",
+  "description": "Đài Loan — Đài Bắc, Tân Bắc, Đài Trung, Cao Hùng, Đài Nam, Đào Viên, Tân Trúc, Cơ Long, Hoa Liên; hẻm núi Taroko, hồ Nhật Nguyệt, A Lý Sơn, Ngọc Sơn, Khẩn Đinh, cùng các đảo Bành Hồ, Kim Môn, Mã Tổ, Lục Đảo và Lan Tự."
+ },
+ "east-coast-us": {
+  "title": "Bờ Đông nước Mỹ",
+  "description": "Bờ Đông nước Mỹ từ Maine đến Florida — New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami và toàn bộ dải duyên hải phía đông."
+ },
+ "midwest-us": {
+  "title": "Miền Trung Tây nước Mỹ",
+  "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Bắc Dakota, Nam Dakota, Nebraska và Kansas."
+ },
+ "west-coast-us": {
+  "title": "Bờ Tây nước Mỹ",
+  "description": "Bờ Tây nước Mỹ: Washington, Oregon và California — Seattle, Portland, San Francisco, Los Angeles, San Diego và mọi nơi ở giữa."
+ },
+ "central-us": {
+  "title": "Miền Trung nước Mỹ",
+  "description": "Vùng núi miền Tây và khu vực lân cận — Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona và New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon và dãy Rocky."
+ },
+ "california": {
+  "title": "California",
+  "description": "Toàn bộ California — từ ranh giới bang Oregon đến Mexico, từ bờ biển Thái Bình Dương đến dãy Sierra Nevada."
+ },
+ "hawaii": {
+  "title": "Hawaii",
+  "description": "Quần đảo Hawaii — Honolulu, Hilo, Kahului; O‘ahu, Maui, Hawai‘i (Đảo Lớn), Kaua‘i, Moloka‘i và Lāna‘i; Mauna Kea, Mauna Loa, Haleakalā, Trân Châu Cảng và bờ biển Nā Pali."
+ },
+ "alaska": {
+  "title": "Alaska",
+  "description": "Alaska — Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, dãy Brooks, quần đảo Aleut, thủy lộ Inside Passage, vịnh Prince William, sông Yukon và vùng Bắc Cực."
+ },
+ "new-york-state": {
+  "title": "Bang New York",
+  "description": "Toàn bộ bang New York — Thành phố New York, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, thung lũng Hudson, dãy Catskill, dãy Adirondack, vùng Finger Lakes, thác Niagara và quần đảo Thousand Islands."
+ },
+ "florida": {
+  "title": "Florida",
+  "description": "Toàn bộ Florida — Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; vùng Everglades, quần đảo Florida Keys, mũi Canaveral, bờ biển Đại Tây Dương và vịnh Mexico, cùng Walt Disney World."
+ },
+ "carolinas": {
+  "title": "Bắc và Nam Carolina",
+  "description": "Bắc Carolina và Nam Carolina — Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington và Asheville; dãy Blue Ridge và Great Smoky, Tam giác Nghiên cứu (Research Triangle), Outer Banks và bờ biển Đại Tây Dương."
+ },
+ "nyc-metro": {
+  "title": "Vùng đô thị New York",
+  "description": "Vùng đô thị ba bang quanh New York — Manhattan, Brooklyn, Queens, Bronx, Staten Island, Long Island, Westchester, bắc New Jersey và tây nam Connecticut."
+ },
+ "chicago-metro": {
+  "title": "Vùng đô thị Chicago",
+  "description": "Đại Chicago — thành phố Chicago và các quận Cook, DuPage, Lake, Will, Kane, McHenry, cùng tây bắc Indiana và đông nam Wisconsin dọc hồ Michigan."
+ },
+ "greater-la": {
+  "title": "Đại Los Angeles",
+  "description": "Vùng đô thị Los Angeles — LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Quận Cam và Inland Empire, cùng đảo Catalina và quần đảo Channel."
+ },
+ "texas": {
+  "title": "Texas",
+  "description": "Texas, Mỹ — từ bờ vịnh Mexico đến sông Rio Grande, gồm Houston, Dallas, San Antonio, Austin, Fort Worth và El Paso."
+ },
+ "colorado": {
+  "title": "Colorado",
+  "description": "Bang của dãy Rocky — Denver, Aspen, Vail, Vườn quốc gia Rocky Mountain và Đường phân thủy lục địa."
+ },
+ "silicon-valley": {
+  "title": "Thung lũng Silicon",
+  "description": "Vùng vịnh San Francisco — San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose và bán đảo San Francisco."
+ },
+ "taipei": {
+  "title": "Đài Bắc",
+  "description": "Đài Bắc — thành phố Đài Bắc và trung tâm Tân Bắc: Tây Môn Đinh, Trung Sơn, Tín Nghĩa và tòa tháp Đài Bắc 101, Bắc Đầu, Đạm Thủy, Bản Kiều, Tân Điếm và Dương Minh Sơn; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "osaka": {
+  "title": "Osaka",
+  "description": "Osaka — trung tâm Osaka: Umeda, Namba và Dotonbori, Shinsaibashi, Tennoji, lâu đài Osaka, Shin-Osaka và khu vịnh; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "tehran": {
+  "title": "Tehran",
+  "description": "Tehran — thành phố Tehran: tháp Azadi, khu chợ Grand Bazaar và cung điện Golestan, đại lộ Valiasr, Tajrish và khu phía bắc, Đại học Tehran; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "cairo": {
+  "title": "Cairo",
+  "description": "Cairo — Cairo và Giza: quảng trường Tahrir và Bảo tàng Ai Cập, khu Cairo Hồi giáo và phố Al-Muizz, chợ Khan el-Khalili, Zamalek, Heliopolis và các kim tự tháp Giza; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "athens": {
+  "title": "Athena",
+  "description": "Athena — Athena và Piraeus: đồi Acropolis, Plaka và Monastiraki, quảng trường Syntagma, Kolonaki, Exarchia và cảng Piraeus; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "moscow": {
+  "title": "Moskva",
+  "description": "Moskva — Moskva bên trong đường vành đai: điện Kremlin và Quảng trường Đỏ, phố Tverskaya, Arbat, Zamoskvorechye, đồi Chim Sẻ và Đại học Quốc gia Moskva; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "kyiv": {
+  "title": "Kyiv",
+  "description": "Kyiv — Kyiv ở cả hai bờ sông Dnipro: Quảng trường Độc lập (Maidan Nezalezhnosti), phố Khreshchatyk, nhà thờ chính tòa Thánh Sophia, Podil, tu viện Pechersk Lavra và tả ngạn; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "seoul": {
+  "title": "Seoul",
+  "description": "Seoul — Seoul: cung Gyeongbokgung và Insadong, Myeongdong, Itaewon, Hongdae, sông Hán, Gangnam và Jamsil; tìm biển tên đường hay tên cửa hàng bằng ảnh chụp."
+ },
+ "washington-dc": {
+  "title": "Washington, D.C.",
+  "description": "Washington, D.C. — thủ đô nước Mỹ và vùng đô thị xung quanh."
+ },
+ "hispaniola": {
+  "title": "Hispaniola",
+  "description": "Đảo Hispaniola ở vùng Caribe — Haiti và Cộng hòa Dominica."
+ },
+ "france": {
+  "title": "Pháp",
+  "description": "Pháp — Paris, Lyon, Marseille, Toulouse, Bordeaux, Nice, Strasbourg; dãy Alps, dãy Pyrénées, thung lũng sông Loire và sông Rhône, đảo Corse."
+ },
+ "germany": {
+  "title": "Đức",
+  "description": "Đức — Berlin, Hamburg, München, Köln, Frankfurt, Stuttgart; sông Rhein và sông Danube, Rừng Đen, dãy Alps vùng Bayern, bờ biển Baltic và biển Bắc."
+ },
+ "italy": {
+  "title": "Ý",
+  "description": "Ý — Roma, Milano, Napoli, Torino, Firenze, Venezia, Bologna; dãy Alps và Dolomites, dãy Apennini, Sicilia và Sardegna."
+ },
+ "poland": {
+  "title": "Ba Lan",
+  "description": "Ba Lan — Warszawa, Kraków, Łódź, Wrocław, Poznań, Gdańsk; bờ biển Baltic, vùng hồ Masuria, dãy Tatra."
+ },
+ "greece": {
+  "title": "Hy Lạp",
+  "description": "Hy Lạp — Athena, Thessaloniki, Patras, Heraklion; bán đảo Peloponnese, đảo Crete, quần đảo Cyclades và Dodecanese, núi Olympus."
+ },
+ "britain-ireland": {
+  "title": "Anh và Ireland",
+  "description": "Quần đảo Anh — London, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; vùng cao nguyên Scotland, Snowdonia, Lake District và cung đường Wild Atlantic Way."
+ },
+ "iberia": {
+  "title": "Bán đảo Iberia",
+  "description": "Tây Ban Nha, Bồ Đào Nha và Andorra — Madrid, Barcelona, Valencia, Sevilla, Lisboa, Porto; dãy Pyrénées, cao nguyên Meseta, vùng Algarve, quần đảo Baleares."
+ },
+ "benelux": {
+  "title": "Benelux",
+  "description": "Hà Lan, Bỉ và Luxembourg — Amsterdam, Rotterdam, Den Haag, Bruxelles, Antwerpen, Gent, thành phố Luxembourg; vùng Randstad, vùng Ardennes, bờ biển Bắc."
+ },
+ "nordics": {
+  "title": "Bắc Âu",
+  "description": "Na Uy, Thụy Điển, Phần Lan và Đan Mạch — Oslo, Stockholm, Helsinki, Copenhagen, Bergen, Göteborg; các vịnh hẹp fjord, Lapland, các quần đảo trên biển Baltic."
+ },
+ "austria-czech": {
+  "title": "Áo, Séc và Slovakia",
+  "description": "Áo, Séc và Slovakia — Viên, Praha, Bratislava, Brno, Salzburg, Graz, Innsbruck; dãy Alps phía Đông, Bohemia, dãy Tatra."
+ },
+ "balkans": {
+  "title": "Bán đảo Balkan",
+  "description": "Slovenia, Croatia, Bosnia, Serbia, Montenegro, Albania, Bắc Macedonia và Kosovo — Beograd, Zagreb, Sarajevo, Ljubljana, Split, Tirana; bờ biển Dalmatia, dãy Alps Dinaric."
+ },
+ "carpathians": {
+  "title": "Romania, Hungary và Bulgaria",
+  "description": "Romania, Hungary và Bulgaria — Bucharest, Budapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; dãy Karpat, châu thổ sông Danube, bờ Biển Đen."
+ },
+ "africa-light": {
+  "title": "Châu Phi (bản nhẹ)",
+  "description": "Toàn bộ châu Phi, không có ảnh vệ tinh và giới hạn ở mức thu phóng 13 — cùng phạm vi như bản Châu Phi nhưng dung lượng tải về chỉ khoảng một nửa. Dành cho kết nối chậm và thiết bị nhỏ."
+ },
+ "north-africa": {
+  "title": "Bắc Phi",
+  "description": "Maroc, Algérie, Tunisia, Libya, Mauritanie và Tây Sahara — Casablanca, Alger, Tunis, Tripoli, Marrakech, Fès; dãy Atlas, bờ biển Địa Trung Hải, miền bắc sa mạc Sahara."
+ },
+ "horn-of-africa": {
+  "title": "Sừng châu Phi",
+  "description": "Ethiopia, Somalia, Eritrea, Djibouti, Nam Sudan và miền bắc Kenya — Addis Ababa, Mogadishu, Asmara, thành phố Djibouti, Juba; cao nguyên Ethiopia, thung lũng Tách giãn Lớn, bờ Biển Đỏ."
+ },
+ "central-africa": {
+  "title": "Trung Phi",
+  "description": "CHDC Congo, Cameroon, Tchad, Cộng hòa Trung Phi, Gabon, Congo, Guinea Xích Đạo, Angola và Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; lưu vực sông Congo, khe nứt Albertine."
+ },
+ "east-polynesia": {
+  "title": "Đông Polynesia",
+  "description": "Polynésie thuộc Pháp, Quần đảo Cook, cùng quần đảo Austral và Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; các đảo san hô vòng và đảo núi lửa trải dài 3.000 km ở Nam Thái Bình Dương."
+ }
+}

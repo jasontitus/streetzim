@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Regenerate web/index.html from Archive.org.
+"""Regenerate the site's pages from Archive.org.
 
 Queries Archive.org for all items with identifiers starting with "streetzim-",
-merges with the REGIONS registry, and outputs a fresh index.html from
-web/template.html. Then (optionally) runs `firebase deploy`.
+merges with the REGIONS registry, and writes, in English and every language
+of web/i18n/: the home page (web/index.html, web/<lang>/index.html, from
+web/template.html), a page per map (web/maps/<id>/, web/<lang>/maps/<id>/,
+from web/map_template.html), web/site.css and web/sitemap.xml. Then
+(optionally) runs `firebase deploy`.
 
 Usage:
     python3 web/generate.py          # generate only
@@ -11,9 +14,11 @@ Usage:
 """
 import argparse
 import datetime
+import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,138 +48,123 @@ TIERS = [
 ]
 
 
-# Page languages: (code, name in that language, path under web/). A region
-# with "language" set is listed on that language's page only (default "en").
-# The German page is the English template with PAGE_TEXT's replacements, so
-# a template edit that drops one of their English strings stops the build
-# (rather than leaving English on the German page).
-LANGUAGES = [("en", "English", ""), ("de", "Deutsch", "de/")]
+# Page languages. English is the template's language, at /. Every language
+# with a translation in web/i18n/ has its own pages: site.<lang>.json (the
+# page text, keyed as site.en.json; tools/check_site_i18n.py checks one) and
+# regions.<lang>.json (the maps' names and descriptions). Each language has a
+# home page at /<lang>/ (English: /) and a page per map at /<lang>/maps/<id>/
+# (English: /maps/<id>/). A region with "language" set is a map made in that
+# language: listed on that language's home page only, with no map page.
+I18N_DIR = os.path.join(SCRIPT_DIR, "i18n")
 SITE_URL = "https://streetzim.web.app/"
+RTL_LANGS = {"ar", "fa", "he", "ur"}
+_I18N = {}
 
-TIER_LABELS = {
-    "de": {
-        "continent": "Kontinente & Großregionen",
-        "multi-country": "Mehrere Länder",
-        "country": "Einzelne Länder",
-        "us-region": "Vereinigte Staaten — Teilregionen",
-        "local": "Bundesstaaten, Städte & Inseln",
-    },
-}
 
-CARD_TEXT = {
-    "en": {"download": "Download", "preview": "Preview", "info": "Info",
-           "updated": "Updated", "building": "building",
-           "preview_title": "Look at this map in your browser, streamed from archive.org",
-           "languages": "Build in another language",
-           "languages_title": "This map with its labels and Wikipedia in another language, "
-                              "assembled in your browser"},
-    "de": {"download": "Herunterladen", "preview": "Vorschau", "info": "Info",
-           "updated": "Stand", "building": "in Arbeit",
-           "preview_title": "Diese Karte im Browser ansehen, direkt von archive.org",
-           "languages": "In einer anderen Sprache",
-           "languages_title": "Diese Karte mit Beschriftung und Wikipedia in einer anderen Sprache, "
-                              "im Browser zusammengestellt"},
-}
+def _i18n_file(kind, lang):
+    key = (kind, lang)
+    if key not in _I18N:
+        path = os.path.join(I18N_DIR, f"{kind}.{lang}.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError(f"{path}: not a JSON object")
+        _I18N[key] = {k: v for k, v in data.items() if not k.startswith("_")}
+    return _I18N[key]
 
-BADGE_LABELS = {
-    "de": {"nav": "Routen & Navigation", "overture": "Ortsdetails",
-           "terrain": "3D-Gelände", "satellite": "Satellitenbilder", "wiki": "Wikipedia-Links",
-           "photo": "Suche per Foto"},
-}
 
-DE_MONTHS = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.",
-             "Sept.", "Okt.", "Nov.", "Dez."]
+def site_text(lang):
+    """One language's page text: site.<lang>.json over site.en.json. A key
+    a translation lacks (one added after it was made) stays English."""
+    en = _i18n_file("site", "en")
+    if lang == "en":
+        return en
+    tr = _i18n_file("site", lang)
+    missing = sorted(set(en) - set(tr))
+    if missing and ("missing", lang) not in _I18N:
+        _I18N[("missing", lang)] = missing
+        print(f"  [{lang}] {len(missing)} strings not translated yet, in English: {missing[:8]}")
+    return {**en, **tr}
 
-# English template string -> German. Each must occur exactly once.
-PAGE_TEXT = {
-    "de": [
-        ('<html lang="en">', '<html lang="de">'),
-        ("<title>StreetZim — Offline Maps for Kiwix</title>",
-         "<title>StreetZim — Offline-Karten für Kiwix</title>"),
-        ('content="Free, fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia info — works without an internet connection on iOS, Android, Mac, Windows, and Linux."',
-         'content="Kostenlose, vollständig offline nutzbare OpenStreetMap-Karten für Kiwix. Vektorkarten, Satellitenbilder, 3D-Gelände und Wikipedia — ohne Internetverbindung auf iOS, Android, Mac, Windows und Linux."'),
-        ("Fully offline OpenStreetMap maps for the Kiwix reader. Vector tiles, satellite imagery, 3D terrain, and Wikipedia &mdash; no internet connection required.",
-         "Vollständig offline nutzbare OpenStreetMap-Karten für Kiwix. Vektorkarten, Satellitenbilder, 3D-Gelände und Wikipedia &mdash; ganz ohne Internetverbindung."),
-        ('<span class="badge">Free &amp; Open Source</span>', '<span class="badge">Kostenlos &amp; Open Source</span>'),
-        ("<h2>Download a map</h2>", "<h2>Karte herunterladen</h2>"),
-        ('<p>Pick a region below, install <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>, and open the .zim file. Hosted on the Internet Archive — each download includes a torrent.</p>',
-         '<p>Wählen Sie unten eine Region, installieren Sie <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a> und öffnen Sie die .zim-Datei. Die Karten liegen beim Internet Archive. Auf Deutsch gibt es bisher nur diese Karte; alle anderen Regionen finden Sie auf der <a href="/">englischen Seite</a>.</p>'),
-        ("Badges on each card show what's inside:", "Die Symbole bei jedem Eintrag zeigen, was enthalten ist:"),
-        ('<span class="map-badge badge-nav">Routing &amp; Directions</span> offline turn-by-turn,',
-         '<span class="map-badge badge-nav">Routen &amp; Navigation</span> Routen zu Fuß, mit dem Rad und dem Auto, offline,'),
-        ('<span class="map-badge badge-overture">Rich place info</span> websites, phones &amp; socials from Overture,',
-         '<span class="map-badge badge-overture">Ortsdetails</span> Websites und Telefonnummern aus Overture,'),
-        ('<span class="map-badge badge-terrain">3D Terrain</span> Copernicus elevation,',
-         '<span class="map-badge badge-terrain">3D-Gelände</span> Höhendaten von Copernicus,'),
-        ('<span class="map-badge badge-satellite">Satellite</span> Sentinel-2 imagery,',
-         '<span class="map-badge badge-satellite">Satellitenbilder</span> von Sentinel-2,'),
-        ('<span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs.',
-         '<span class="map-badge badge-wiki">Wikipedia-Links</span> Artikel und Wikidata-Fakten.'),
-        ("Last updated: {{UPDATED}} · build", "Zuletzt aktualisiert: {{UPDATED}} · Build"),
-        ('placeholder="Filter maps — try “france”, “alps”, “coast”…"', 'placeholder="Karten filtern — z. B. „Alpen“, „Genf“…"'),
-        ('aria-label="Filter the list of maps"', 'aria-label="Kartenliste filtern"'),
-        ("(shown + ' of ' + total)", "(shown + ' von ' + total)"),
-        ("<h2>What is it?</h2>", "<h2>Was ist StreetZim?</h2>"),
-        ('<p class="lead">StreetZim packages OpenStreetMap data &mdash; entire countries or continents &mdash; into a single ZIM file you can open in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a>. It works completely offline: no servers, no API calls, no internet required after the initial download.</p>',
-         '<p class="lead">StreetZim packt OpenStreetMap-Daten &mdash; ganze Länder oder Kontinente &mdash; in eine einzige ZIM-Datei, die Sie in <a href="https://kiwix.org" target="_blank" rel="noopener">Kiwix</a> öffnen. Alles funktioniert offline: keine Server, keine Online-Abfragen, nach dem Herunterladen kein Internet nötig.</p>'),
-        ("<p>Unlike traditional offline map apps that ship raster tiles, StreetZim uses <strong>vector tiles rendered client-side</strong> with MapLibre GL JS. The result: smooth pan, zoom, rotation, and even 3D terrain &mdash; all from a single file on your device.</p>",
-         "<p>Anders als Offline-Karten-Apps mit Rasterkacheln nutzt StreetZim <strong>Vektorkacheln, die direkt auf dem Gerät gezeichnet werden</strong> (MapLibre GL JS). Das Ergebnis: flüssiges Verschieben, Zoomen, Drehen und sogar 3D-Gelände &mdash; alles aus einer Datei auf Ihrem Gerät.</p>"),
-        ("<h4>Vector Maps</h4>", "<h4>Vektorkarten</h4>"),
-        ("<p>Smooth, sharp street-level maps with the OpenMapTiles schema, rendered live by MapLibre.</p>",
-         "<p>Scharfe Karten bis auf Straßenebene im OpenMapTiles-Schema, live gezeichnet von MapLibre.</p>"),
-        ("<h4>Satellite Imagery</h4>", "<h4>Satellitenbilder</h4>"),
-        ("<p>10-meter resolution Sentinel-2 cloudless imagery for the entire mapped region.</p>",
-         "<p>Wolkenfreie Sentinel-2-Bilder mit 10 Metern Auflösung für die ganze Region.</p>"),
-        ("<h4>3D Terrain</h4>", "<h4>3D-Gelände</h4>"),
-        ("<p>Hillshade and 3D elevation from the Copernicus GLO-30 global DEM.</p>",
-         "<p>Schummerung und 3D-Höhen aus dem Copernicus-Höhenmodell GLO-30.</p>"),
-        ("<p>Tap any city, mountain, or landmark for its Wikipedia article and key facts.</p>",
-         "<p>Tippen Sie auf eine Stadt, einen Berg oder eine Sehenswürdigkeit, um den Wikipedia-Artikel und die wichtigsten Fakten zu sehen.</p>"),
-        ("<h4>Full-Text Search</h4>", "<h4>Volltextsuche</h4>"),
-        ("<p>Search across millions of place names, streets, parks, peaks, airports, and POIs.</p>",
-         "<p>Suche in Millionen von Ortsnamen, Straßen, Parks, Gipfeln, Flughäfen und Sehenswürdigkeiten.</p>"),
-        ("<h4>Truly Offline</h4>", "<h4>Wirklich offline</h4>"),
-        ("<p>Just one .zim file. No accounts, no telemetry, no network. Open and go.</p>",
-         "<p>Nur eine .zim-Datei. Kein Konto, kein Tracking, kein Netz. Öffnen und loslegen.</p>"),
-        ("<h2>How to Use</h2>", "<h2>So geht&rsquo;s</h2>"),
-        ("<h4>Install Kiwix</h4>", "<h4>Kiwix installieren</h4>"),
-        ('<p>Free reader for iOS, Android, Mac, Windows, and Linux. Get it at <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>. '
-         'On Windows and Linux, open maps in the <a href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Kiwix PWA</a> for now: Kiwix Desktop 2.5 shows them blank, and its fix is only in the <a href="https://download.kiwix.org/nightly/" target="_blank" rel="noopener">nightly builds</a> so far.</p>',
-         '<p>Kostenloser Reader für iOS, Android, Mac, Windows und Linux, erhältlich auf <a href="https://kiwix.org" target="_blank" rel="noopener">kiwix.org</a>. '
-         'Unter Windows und Linux öffnen Sie die Karten vorerst in der <a href="https://pwa.kiwix.org/" target="_blank" rel="noopener">Kiwix-PWA</a>: Kiwix Desktop 2.5 zeigt sie leer an, und die Korrektur steckt bisher nur in den <a href="https://download.kiwix.org/nightly/" target="_blank" rel="noopener">Nightly-Builds</a>.</p>'),
-        ("<h4>Download a map</h4>", "<h4>Karte herunterladen</h4>"),
-        ("<p>Pick a region above and download the .zim file (or grab the torrent for faster speeds).</p>",
-         "<p>Wählen Sie oben eine Region und laden Sie die .zim-Datei herunter.</p>"),
-        ("<h4>Open in Kiwix</h4>", "<h4>In Kiwix öffnen</h4>"),
-        ("<p>Open the .zim file in the Kiwix app. That&rsquo;s it &mdash; the map runs entirely offline.</p>",
-         "<p>Öffnen Sie die .zim-Datei in der Kiwix-App. Das war&rsquo;s &mdash; die Karte läuft komplett offline.</p>"),
-        ("<h2>Data Sources &amp; Licenses</h2>", "<h2>Datenquellen &amp; Lizenzen</h2>"),
-        ("<p>StreetZim is built entirely from open data. Each map ZIM bundles content from these sources:</p>",
-         "<p>StreetZim besteht ausschließlich aus offenen Daten. Jede Karte enthält Inhalte aus diesen Quellen:</p>"),
-        ("<li><strong>Map data:</strong> &copy; OpenStreetMap contributors, available under the",
-         "<li><strong>Kartendaten:</strong> &copy; OpenStreetMap-Mitwirkende, verfügbar unter der"),
-        ("<li><strong>Tile schema:</strong>", "<li><strong>Kachelschema:</strong>"),
-        ("<li><strong>Satellite imagery:</strong>", "<li><strong>Satellitenbilder:</strong>"),
-        ("non-commercial use only.</li>", "nur für nichtkommerzielle Nutzung.</li>"),
-        ("<li><strong>Elevation:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, provided under the COPERNICUS programme by the European Union and ESA.</li>",
-         "<li><strong>Höhendaten:</strong> Copernicus GLO-30 DEM &mdash; &copy; DLR / Airbus, bereitgestellt im COPERNICUS-Programm von Europäischer Union und ESA.</li>"),
-        ('<li><strong>Place info:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) and <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA 3.0).</li>',
-         '<li><strong>Ortsinformationen:</strong> <a href="https://www.wikidata.org/" target="_blank" rel="noopener">Wikidata</a> (CC0) und <a href="https://de.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA).</li>'),
-        ("<li><strong>Tool code:</strong>", "<li><strong>Programmcode:</strong>"),
-        ("<h2>Open Source Projects</h2>", "<h2>Open-Source-Projekte</h2>"),
-        ("<p>StreetZim relies on the Kiwix reader apps to open .zim files. Each client is open source and developed on GitHub:</p>",
-         "<p>StreetZim nutzt die Kiwix-Apps zum Öffnen der .zim-Dateien. Alle sind Open Source und werden auf GitHub entwickelt:</p>"),
-        ("StreetZim is an open source project. Source on", "StreetZim ist ein Open-Source-Projekt. Quellcode auf"),
-        (". Maps hosted on the", ". Karten gehostet beim"),
-        ('title="Kiwix on the App Store"', 'title="Kiwix im App Store"'),
-        ('title="Kiwix on Google Play"', 'title="Kiwix bei Google Play"'),
-        ('title="Kiwix on the Mac App Store"', 'title="Kiwix im Mac App Store"'),
-        ("Kiwix for iOS &amp; macOS", "Kiwix für iOS &amp; macOS"),
-        ("Kiwix for Android", "Kiwix für Android"),
-        ("Kiwix PWA (Windows &amp; Linux)", "Kiwix-PWA (Windows &amp; Linux)"),
-        ("&mdash; MIT License.", "&mdash; MIT-Lizenz."),
-    ],
-}
+
+def t(lang, key, **values):
+    """A page string (HTML) with its {placeholders} filled."""
+    s = site_text(lang)[key]
+    for k, v in values.items():
+        s = s.replace("{" + k + "}", str(v))
+    return s
+
+
+def t_attr(lang, key, **values):
+    """A page string inside an attribute value (double-quoted)."""
+    return t(lang, key, **values).replace('"', "&quot;")
+
+
+def _check_translations(lang):
+    """Stop on a translation whose markup, placeholders or required text
+    differ from the English (tools/check_site_i18n.py): its HTML goes into the
+    pages as it is. A key or map it lacks is fine (it stays English)."""
+    spec = importlib.util.spec_from_file_location(
+        "check_site_i18n", os.path.join(PROJECT_DIR, "tools", "check_site_i18n.py"))
+    chk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(chk)
+    problems = chk.check_site(_i18n_file("site", "en"), _i18n_file("site", lang), f"site.{lang}.json")
+    problems = [p for p in problems if not p.endswith((": missing", ": not in site.en.json"))]
+    if problems:
+        raise ValueError(f"web/i18n/site.{lang}.json: " + "; ".join(problems[:5])
+                         + " (tools/check_site_i18n.py)")
+
+
+def site_languages():
+    """[(code, name in that language, path under web/)]: English first, then
+    each language with both translation files, by code (each checked:
+    _check_translations)."""
+    out = [("en", site_text("en")["lang_name"], "")]
+    try:
+        names = sorted(os.listdir(I18N_DIR))
+    except OSError:
+        names = []
+    for n in names:
+        m = re.fullmatch(r"site\.([a-z]{2,3})\.json", n)
+        if m and m.group(1) != "en" and os.path.isfile(os.path.join(I18N_DIR, f"regions.{m.group(1)}.json")):
+            _check_translations(m.group(1))
+            out.append((m.group(1), site_text(m.group(1))["lang_name"], f"{m.group(1)}/"))
+    return out
+
+
+LANGUAGES = site_languages()
+
+
+def region_text(lang, region):
+    """A map's (title, description HTML) in a language: regions.<lang>.json
+    (plain text), else the English of REGIONS."""
+    if lang != "en" and region.get("language", "en") == "en":
+        tr = _i18n_file("regions", lang).get(region["id"])
+        if isinstance(tr, dict) and tr.get("title") and tr.get("description"):
+            return tr["title"], escape(tr["description"], quote=False)
+    return region["title"], region["description"]
+
+
+def fmt_size(lang, n):
+    """human_size in a language: its decimal separator and units."""
+    s = human_size(n)
+    if lang == "en":
+        return s
+    num, _, unit = s.partition(" ")
+    unit = {"GB": t(lang, "unit_gb"), "MB": t(lang, "unit_mb")}.get(unit, unit)
+    return num.replace(".", t(lang, "decimal_sep")) + " " + unit
+
+
+def fmt_date(lang, iso, human=None):
+    """A date (YYYY-MM-DD) as a language writes it; English: `human`."""
+    d = datetime.date.fromisoformat(iso)
+    if lang == "en" and human:
+        return human
+    return t(lang, "date_format", day=d.day, month=site_text(lang)["months"][d.month - 1], year=d.year)
+
 
 REGIONS = [
     # ── Continents & continent-scale regions ─────────────────────────
@@ -946,11 +936,13 @@ def render_feature_badges(item_meta, lang="en"):
         return ""
     pills = []
     for key, label, css in FEATURE_BADGES:
-        label = BADGE_LABELS.get(lang, {}).get(css, label)
+        # English: the label as here; another language: its site.<lang>.json
+        # badge_<css> (HTML, as the page key's badges)
+        label = escape(label) if lang == "en" else t(lang, f"badge_{css}")
         val = str(item_meta.get(key, "")).lower()
         if val == "yes":
             pills.append(
-                f'<span class="map-badge badge-{css}">{escape(label)}</span>'
+                f'<span class="map-badge badge-{css}">{label}</span>'
             )
     if not pills:
         return ""
@@ -1350,8 +1342,14 @@ def write_build_index(live, recipes_dir=None, newer=None, photo=None):
     return [r["id"] for r in regions]
 
 
+def card_text(lang):
+    """A card's button labels and titles in a language (site.<lang>.json card_*)."""
+    return {k: t(lang, "card_" + k) for k in ("download", "preview", "preview_title", "info", "updated",
+                                             "building", "languages", "languages_title")}
+
+
 def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
-                     build_date=None, preview=False, lang="en", build_page=False, fresh=None):
+                     build_date=None, preview=False, lang="en", build_page=False, fresh=None, map_page=None):
     """Render a map card with active download/torrent/details buttons.
 
     `torrent_ok=False` drops the Torrent button: the committed .torrent
@@ -1368,8 +1366,10 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
     `fresh` (fresh_viewer): Download is the map with today's viewer, which
     the build worker serves; data-fallback names archive.org's file, which
     the page downloads instead when the worker cannot serve it (template.html).
+
+    `map_page`: the map's own page (write_map_pages), which its title links to.
     """
-    tx = CARD_TEXT[lang]
+    tx = card_text(lang)
     item_id = f"streetzim-{region['id']}"
     zim_file = region["zim_file"]
     zim_file_attr = escape(urllib.parse.quote(zim_file), quote=True)
@@ -1398,9 +1398,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
     date_html = ""
     if build_date:
         iso, human = build_date
-        if lang == "de":
-            d = datetime.date.fromisoformat(iso)
-            human = f"{d.day}. {DE_MONTHS[d.month - 1]} {d.year}"
+        human = fmt_date(lang, iso, human)
         date_html = (f'\n        <div class="map-card-date">{tx["updated"]} '
                      f'<time datetime="{iso}">{escape(human)}</time></div>')
     torrent_html = (
@@ -1409,6 +1407,9 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
         if torrent_ok else ""
     )
     archive_url = f"https://archive.org/download/{item_id}/{zim_file_attr}"
+    title_html = escape(region["title"])
+    if map_page:
+        title_html = f'<a href="{escape(map_page, quote=True)}">{title_html}</a>'
     if fresh:
         download_html = (
             f'<a class="btn btn-primary" href="{escape(fresh["url"], quote=True)}" data-fallback="{archive_url}" '
@@ -1419,7 +1420,7 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
             f'data-track="download" data-region="{region["id"]}" data-title="{title_attr}">{tx["download"]}</a>')
     return f"""      <div class="map-card">
         <div class="map-card-head">
-          <div class="map-card-title">{escape(region["title"])}</div>
+          <div class="map-card-title">{title_html}</div>
           <div class="map-card-size">{size_label}</div>
         </div>{date_html}
         <p class="map-card-desc">{region["description"]}</p>{badges_html}
@@ -1432,12 +1433,13 @@ def render_live_card(region, size_label, item_meta=None, torrent_ok=True,
 
 def render_upcoming_card(region, lang="en"):
     """Render a dimmed card for regions that haven't been uploaded yet."""
+    title, desc = region_text(lang, region)
     return f"""      <div class="map-card upcoming">
         <div class="map-card-head">
-          <div class="map-card-title">{escape(region["title"])}</div>
-          <div class="map-card-size">{CARD_TEXT[lang]["building"]}</div>
+          <div class="map-card-title">{escape(title)}</div>
+          <div class="map-card-size">{t(lang, "card_building")}</div>
         </div>
-        <p class="map-card-desc">{region["description"]}</p>
+        <p class="map-card-desc">{desc}</p>
       </div>"""
 
 
@@ -1508,8 +1510,20 @@ def build_page():
         print(f"note: in regions.tsv but not yet on the site (not shipped "
               f"yet, fine): {unshipped}")
 
+    preview = bool(preview_proxy_url())
+    print("Preview buttons: " + ("on (proxy " + preview_proxy_url() + ")" if preview
+          else "off (no proxy in web/drive/preview-config.js)"))
+    # The builder page streams through the same proxy.
+    builder = build_page_regions() if preview else {}
+    print(f"Builder links: {len(builder)} regions published in web/build/recipes/"
+          + ("" if preview else " (off: no proxy)"))
+    maps = collect_maps(archive_items, builder, preview)
     for lang, _name, sub in LANGUAGES:
-        _write_page(archive_items, lang, sub)
+        _write_page(maps, lang, sub, preview, builder_on=bool(builder))
+    write_map_pages(maps, preview, builder_on=bool(builder))
+    remove_dropped_languages()
+    write_site_css()
+    write_sitemap(maps)
     listed = []
     if os.path.isdir(build_recipes_dir()):
         listed = write_build_index(BUILDER_LIVE, newer=BUILDER_NEWER, photo=BUILDER_PHOTO)
@@ -1519,216 +1533,354 @@ def build_page():
         print(f"Library catalog: {len(n)} maps")
 
 
-def render_lang_picker(lang):
-    """The language links at the top of each page (the current one marked)."""
+def _sub(lang):
+    """A language's path under web/ ("" for English, "de/")."""
+    return "" if lang == "en" else f"{lang}/"
+
+
+def render_lang_picker(lang, path=""):
+    """The language links at the top of each page (the current one marked):
+    the same page (`path` after the language's folder, "" for its home page)
+    in every language."""
     links = []
     for code, name, sub in LANGUAGES:
         cur = ' aria-current="page"' if code == lang else ""
-        links.append(f'<a href="/{sub}" hreflang="{code}" lang="{code}"{cur}>{escape(name)}</a>')
-    return ('    <nav class="lang-picker" aria-label="Language / Sprache">'
-            + "".join(links) + "</nav>")
+        links.append(f'<a href="/{sub}{path}" hreflang="{code}" lang="{code}"{cur}>{escape(name)}</a>')
+    # Folded: 22 names take seven rows of a phone's screen. The links stay in
+    # the page (search engines follow them), shown when it is opened.
+    return (f'    <details class="lang-menu"><summary>{escape(site_text(lang)["lang_name"])}</summary>\n'
+            f'    <nav class="lang-picker" aria-label="{t_attr(lang, "lang_picker_aria")}">'
+            + "".join(links) + "</nav></details>")
 
 
-def render_hreflang():
-    """<link rel=alternate hreflang> for every page language."""
-    return "\n".join(f'<link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}">'
-                     for code, _name, sub in LANGUAGES)
+def render_head_links(lang, path="", title="", description=""):
+    """The <head> links of a page (`path` after the language's folder): its
+    canonical URL, <link rel=alternate hreflang> for every language and
+    x-default (English), and Open Graph title, description and URL."""
+    url = f"{SITE_URL}{_sub(lang)}{path}"
+    out = [f'<link rel="canonical" href="{url}">']
+    out += [f'<link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}{path}">' for code, _n, sub in LANGUAGES]
+    out.append(f'<link rel="alternate" hreflang="x-default" href="{SITE_URL}{path}">')
+    out.append('<meta property="og:type" content="website">')
+    out.append('<meta property="og:site_name" content="StreetZim">')
+    out.append(f'<meta property="og:url" content="{url}">')
+    if title:
+        out.append(f'<meta property="og:title" content="{title}">')
+    if description:
+        out.append(f'<meta property="og:description" content="{description}">')
+    return "\n".join(out)
 
 
-def _write_page(archive_items, lang, sub):
-    """Render and write the page for one language (web/<sub>index.html)."""
-    # Group regions by tier, preserving in-list order within each tier.
-    by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
-    for region in REGIONS:
-        if region.get("language", "en") == lang:
-            by_tier[region["tier"]].append(region)
-    # Alphabetical within each tier. Previously this was hand-maintained
-    # list order, so a new entry landed wherever it was pasted and finding
-    # a country meant reading the whole section.
-    def _sort_key(r):
-        t = re.sub(r"&[a-z]+;", " ", r["title"]).strip().lower()
-        return t
-    for tid in by_tier:
-        by_tier[tid].sort(key=_sort_key)
+# The English strings a page in another language replaces with its own (the
+# map list's intro and step 2 say what its downloads are: the map in that language).
+LANG_VARIANTS = {"maps_intro": "maps_intro_lang", "step2_p": "step2_p_lang"}
 
-    cards = []
-    live_count = 0
-    upcoming_count = 0
-    preview = bool(preview_proxy_url())
-    print("Preview buttons: " + ("on (proxy " + preview_proxy_url() + ")" if preview
-          else "off (no proxy in web/drive/preview-config.js)"))
-    # The builder page streams through the same proxy.
-    builder = build_page_regions() if preview else {}
-    print(f"Builder links: {len(builder)} regions published in web/build/recipes/"
-          + ("" if preview else " (off: no proxy)"))
-    # Track items where archive.org's metadata fetch failed even
-    # after retries. We KNOW these items exist (they showed up in
-    # the search results) — a failure here means transient network
-    # issue, not a missing item. Refuse to render the page so the
-    # deploy doesn't ship a card with a broken (undated canonical)
-    # URL like the 2026-05-10 California incident
-    # (osm-california.zim 404 because the dated filename didn't make
-    # it into the card).
+
+def fill_text(template, lang, **values):
+    """{{t:key}} (HTML) and {{a:key}} (inside an attribute) in a template, in a language."""
+    def one(m):
+        key = m.group(2)
+        if lang != "en":
+            key = LANG_VARIANTS.get(key, key)
+        return t_attr(lang, key, **values) if m.group(1) == "a" else t(lang, key, **values)
+    return re.sub(r"\{\{([ta]):([a-z0-9_]+)\}\}", one, template)
+
+
+def _dir_attr(lang):
+    return ' dir="rtl"' if lang in RTL_LANGS else ""
+
+
+def _int(v):
+    # archive.org occasionally reports size as None / "" for a file still
+    # being processed; a bare int() here aborted the whole build.
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _zim_sort_key(f):
+    """A listed ZIM's place among an item's files: dated ones over undated,
+    newest date first, size only to break ties among same-date uploads.
+    Rebuilds can shrink a ZIM (Overture deduping trims OSM duplicates); size
+    alone stale-stuck a 5.5 GB April-13 ZIM over a fresh 210 MB April-22 one.
+    A single-letter same-day re-roll suffix (b, c, d...) sorts after the plain
+    date: `2026-04-26 < 2026-04-26b < 2026-04-26c`; without [a-z]? the c file
+    read as undated and the plain one won on size."""
+    name = f.get("name", "")
+    m = re.search(r'-(\d{4}-\d{2}(?:-\d{2})?[a-z]?)\.zim$', name)
+    if m:
+        # (dated=1, date_str, size). YYYY-MM < YYYY-MM-DD lexicographically.
+        return (1, m.group(1), _int(f.get("size")))
+    return (0, "", _int(f.get("size")))
+
+
+def collect_maps(archive_items, builder, preview=False):
+    """Every region of REGIONS as the pages show it, read from archive.org
+    once for all the languages: [{"region" (its "zim_file" the live one),
+    "live", "size", "meta" (the item's metadata), "torrent_ok", "built"
+    ((iso, human) or None), "fresh", "archive_url", "build_ok"}]. Fills
+    LIBRARY and the BUILDER_* tables. Exits (2) when an item's metadata could
+    not be read: a card with an undated canonical URL (the 2026-05-10
+    California "page not found") is worse than no deploy."""
+    out = []
+    # Items whose metadata fetch failed even after retries. We KNOW these
+    # exist (they showed up in the search results): a transient network
+    # issue, not a missing item.
     failed_metadata = []
+    for region in REGIONS:
+        e = {"region": region, "live": False}
+        out.append(e)
+        if not archive_items.get(region["id"]):
+            continue
+        # The ZIM's name + size from archive.org: names are dated
+        # (osm-europe-2026-04.zim), so found in the listing, not hardcoded.
+        details = fetch_item_details(f"streetzim-{region['id']}")
+        if details is None:
+            failed_metadata.append(region["id"])
+            continue
+        zim_size = zim_filename = zim_file_meta = None
+        if details:
+            zim_files = [f for f in details.get("files", [])
+                         if f.get("name", "").endswith(".zim") and "history/" not in f.get("name", "")]
+            if zim_files:
+                best = max(zim_files, key=_zim_sort_key)
+                zim_filename = best.get("name")
+                zim_file_meta = best
+                zim_size = _int(best.get("size")) or None
+        if not zim_filename:
+            # Item exists (dark / just created / mid-upload) but lists no
+            # .zim yet. Rendering it live linked the undated osm-<id>.zim,
+            # which never exists on a dated item (2026-05-10 California).
+            print(f"  {region['id']}: no .zim in item listing yet, treating as upcoming")
+            continue
+        region = {**region, "zim_file": zim_filename}
+        e["region"] = region
+        if zim_size is None:
+            zim_size = _int(archive_items[region["id"]].get("item_size")) or None
+        if not zim_size or zim_size <= 0:
+            # The file is still uploading / being processed: upcoming, so the
+            # page doesn't show "0 MB" until the upload finalizes.
+            print(f"  {region['id']}: file not yet finalized, treating as upcoming")
+            continue
+        # The Torrent button must point at the same file as the Download
+        # button. Torrents are regenerated separately and drift behind
+        # rebuilds; a stale one seeds a ZIM the keep-2 cleanup will delete.
+        torrent_name = torrent_file_name(region["id"])
+        torrent_ok = torrent_name == zim_filename
+        if not torrent_ok:
+            print(f"  {region['id']}: torrent names {torrent_name!r} but the "
+                  f"live ZIM is {zim_filename!r} — omitting Torrent button "
+                  f"(regenerate with cloud/generate_all_torrents.py)")
+        item_id = f"streetzim-{region['id']}"
+        md5 = (zim_file_meta or {}).get("md5")
+        fresh = fresh_viewer(region["id"], zim_filename, md5)
+        archive_url = f"https://archive.org/download/{item_id}/{urllib.parse.quote(zim_filename)}"
+        built = zim_build_date(zim_filename, zim_file_meta)
+        meta = (details or {}).get("metadata") if details else None
+        build_ok = builder_link(builder, region["id"], zim_filename, md5, (details or {}).get("files"))
+        e.update(live=True, size=zim_size, meta=meta, torrent_ok=torrent_ok, built=built, fresh=fresh,
+                 archive_url=archive_url, build_ok=build_ok)
+        LIBRARY[region["id"]] = {
+            "id": region["id"], "title": region["title"], "description": plain_text(region["description"]),
+            "tier": region["tier"], "language": region.get("language", "en"),
+            "file": zim_filename, "size": zim_size, "date": built[0] if built else None,
+            "download": fresh["url"] if fresh else archive_url,
+            "fallback": archive_url if fresh else None,
+            "details": f"https://archive.org/details/{item_id}",
+            "torrent": f"/torrents/{region['id']}.torrent" if torrent_ok else None,
+            "preview": ("/drive/?zim=" + urllib.parse.quote(f"https://archive.org/download/{item_id}/{zim_filename}", safe=":/"))
+                       if preview else None}
+        if region["id"] in builder:
+            BUILDER_LIVE[region["id"]] = BUILDER_LIVE.get(region["id"], False) or build_ok
+            if build_ok and (builder.get(region["id"]) or {}).get("file") == zim_filename:
+                BUILDER_PHOTO[region["id"]] = str((meta or {}).get("streetzim_photo_search", "")).lower() == "yes"
+            if not build_ok:
+                print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, which archive.org "
+                      f"no longer serves (live ZIM {zim_filename!r}) — off the builder page "
+                      f"(run ops/langpack/ship_packs.sh)")
+            elif builder[region["id"]]["file"] != zim_filename:
+                BUILDER_NEWER[region["id"]] = zim_filename
+                print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]['file']}, still on "
+                      f"archive.org beside the live {zim_filename!r}: kept on the builder page until new ones")
+    if failed_metadata:
+        print(f"\nERROR: {len(failed_metadata)} item(s) failed metadata "
+              f"fetch even after retries: {failed_metadata}", file=sys.stderr)
+        print("Refusing to write site — re-run when archive.org's "
+              "metadata API is reachable.", file=sys.stderr)
+        sys.exit(2)
+    return out
 
-    # Walk tiers in display order, emitting a header before each
-    # non-empty group's cards.
-    flat_iter = []
+
+def _on_page(region, lang):
+    """Whether a language's home page lists a region: English lists the
+    English maps; another language those (in its words) and the maps made in it."""
+    rl = region.get("language", "en")
+    return rl == lang or (lang != "en" and rl == "en")
+
+
+_VERSIONS = {}
+
+
+def lang_versions(region_id, recipes_dir=None, origin=None):
+    """The region's language versions on the builder page, from its recipes
+    (web/build/recipes/<id>/region.json): {lang: {"size", "url" (the build
+    worker's download of the whole file, when it can serve it: its segment
+    index <lang>.ws.json published, on the site's worker), "builder" (the
+    builder page, building it in the browser), "torrent" (or None), "built"
+    (the date of the map it was made from, (iso, human), or None)}}."""
+    recipes_dir = recipes_dir or build_recipes_dir()
+    key = (recipes_dir, region_id)
+    if key in _VERSIONS:
+        return _VERSIONS[key]
+    out = {}
+    d = os.path.join(recipes_dir, region_id)
+    origin = merged_origin() if origin is None else origin
+    try:
+        with open(os.path.join(d, "region.json"), encoding="utf-8") as f:
+            r = json.load(f)
+        menu = r.get("menu") or []
+        base_file = str((r.get("base") or {}).get("file") or "")
+    except (OSError, ValueError, AttributeError):
+        menu, base_file = [], ""
+    for m in menu:
+        if not isinstance(m, dict) or not re.fullmatch(r"[a-z]{2,3}", str(m.get("lang", ""))):
+            continue
+        lang = m["lang"]
+        url = str(m.get("webseed") or "")
+        u = urllib.parse.urlsplit(url)
+        if not (origin and f"{u.scheme}://{u.netloc}" == origin and not u.query and not u.fragment
+                and u.path.startswith(f"/merged/{region_id}/{lang}/") and u.path.endswith(".zim")
+                and os.path.isfile(os.path.join(d, f"{lang}.ws.json"))):
+            url = ""
+        out[lang] = {
+            "size": _int(m.get("size")),
+            "built": zim_build_date(base_file) if base_file else None,
+            "url": url,
+            "builder": f"/build/?region={urllib.parse.quote(region_id)}&lang={lang}&go=1",
+            "torrent": (f"/build/recipes/{region_id}/{lang}.torrent"
+                        if os.path.isfile(os.path.join(d, f"{lang}.torrent")) else None)}
+    _VERSIONS[key] = out
+    return out
+
+
+def _version(e, lang):
+    """A live map's version in a language (lang_versions), or None."""
+    return lang_versions(e["region"]["id"]).get(lang) if e.get("build_ok") else None
+
+
+def _original(e):
+    """(href, fallback or None) of a live map's own file: the build worker's
+    copy with today's viewer where there is one (fresh_viewer), archive.org's
+    file as its fallback; else archive.org's."""
+    if e["fresh"]:
+        return e["fresh"]["url"], e["archive_url"]
+    return e["archive_url"], None
+
+
+def _a(href, label, cls, fallback=None, title=None, track=None, rid="", name="", lang=None):
+    attrs = [f'class="btn {cls}"', f'href="{escape(href, quote=True)}"']
+    if fallback:
+        attrs.append(f'data-fallback="{escape(fallback, quote=True)}"')
+    if track:
+        attrs.append(f'data-track="{track}" data-region="{rid}" data-title="{escape(name, quote=True)}"')
+    if lang:
+        attrs.append(f'data-lang="{lang}"')
+    if title:
+        attrs.append(f'title="{title}"')
+    return f'<a {" ".join(attrs)}>{label}</a>'
+
+
+def _preview_href(e):
+    return "/drive/?zim=" + urllib.parse.quote(
+        f"https://archive.org/download/streetzim-{e['region']['id']}/{e['region']['zim_file']}", safe=":/")
+
+
+def render_lang_card(e, lang, preview=False, builder_on=True):
+    """An English map's card on another language's home page: the map in that
+    language (lang_versions: the build worker's file, the builder page when it
+    cannot serve it), the original file beside it; without a version in the
+    language, the original and a note saying so. The title links to the
+    map's page in the language."""
+    region = e["region"]
+    rid = region["id"]
+    name, desc = region_text(lang, region)
+    v = _version(e, lang)
+    page = f"/{_sub(lang)}maps/{rid}/"
+    href, fb = _original(e)
+    date_html = ""
+    if e["built"]:
+        iso, human = e["built"]
+        date_html = (f'\n        <div class="map-card-date">{t(lang, "card_updated")} '
+                     f'<time datetime="{iso}">{escape(fmt_date(lang, iso, human))}</time></div>')
+    links = []
+    note = ""
+    if v:
+        links.append(_a(v["url"] or v["builder"], t(lang, "card_download_lang"), "btn-primary",
+                        fallback=v["builder"] if v["url"] else None, title=t_attr(lang, "card_download_lang_title"),
+                        track="download_lang", rid=rid, name=name, lang=lang))
+        links.append(_a(href, t(lang, "card_original"), "btn-secondary", fallback=fb,
+                        title=t_attr(lang, "card_original_title"), track="download", rid=rid, name=name))
+    else:
+        links.append(_a(href, t(lang, "card_download"), "btn-primary", fallback=fb, track="download", rid=rid, name=name))
+        if builder_on:
+            note = f'\n        <p class="map-card-note">{t(lang, "card_no_lang")}</p>'
+    if preview:
+        links.append(_a(_preview_href(e), t(lang, "card_preview"), "btn-secondary",
+                        title=t_attr(lang, "card_preview_title"), track="preview", rid=rid, name=name))
+    links.append(f'<a class="btn btn-secondary" href="{page}">{t(lang, "card_map_page")}</a>')
+    size = fmt_size(lang, v["size"] if v and v["size"] else e["size"])
+    return f"""      <div class="map-card">
+        <div class="map-card-head">
+          <div class="map-card-title"><a href="{page}">{escape(name)}</a></div>
+          <div class="map-card-size">{size}</div>
+        </div>{date_html}
+        <p class="map-card-desc">{desc}</p>{render_feature_badges(e["meta"], lang)}{note}
+        <div class="map-card-links">
+          {"".join(links)}
+        </div>
+      </div>"""
+
+
+def _write_page(maps, lang, sub, preview=False, builder_on=True):
+    """Render and write one language's home page (web/<sub>index.html). An
+    English map whose name in the language is that of a map made in it (the
+    German "Schweiz und die Alpen") is listed once, as the map made in it; its
+    page in the language (/<lang>/maps/<id>/) still offers its version."""
+    def title_key(e):
+        return re.sub(r"&[a-z]+;", " ", region_text(lang, e["region"])[0]).strip().casefold()
+    by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
+    native = {region_text(lang, e["region"])[0] for e in maps
+              if lang != "en" and e["region"].get("language", "en") == lang}
+    for e in maps:
+        if not _on_page(e["region"], lang):
+            continue
+        if e["region"].get("language", "en") != lang and region_text(lang, e["region"])[0] in native:
+            print(f"  [{lang}] {e['region']['id']}: listed as the map made in {lang} of the same name")
+            continue
+        by_tier[e["region"]["tier"]].append(e)
+    cards = []
+    live_count = upcoming_count = 0
     for tier_id, tier_label in TIERS:
-        regions_in_tier = by_tier.get(tier_id) or []
-        if not regions_in_tier:
+        group = sorted(by_tier.get(tier_id) or [], key=title_key)
+        if not group:
             continue
-        flat_iter.append(("__header__", TIER_LABELS.get(lang, {}).get(tier_id, tier_label)))
-        for r in regions_in_tier:
-            flat_iter.append(("region", r))
-
-    for kind, payload in flat_iter:
-        if kind == "__header__":
-            cards.append(render_tier_header(payload))
-            continue
-        region = payload
-        item = archive_items.get(region["id"])
-        if item:
-            # Get the actual ZIM file name + size from Archive.org metadata.
-            # Filenames are now dated (e.g. osm-europe-2026-04.zim) so we
-            # find the .zim file dynamically rather than hardcoding.
-            details = fetch_item_details(f"streetzim-{region['id']}")
-            zim_size = None
-            zim_filename = None
-            zim_file_meta = None
-            if details is None:
-                # Metadata fetch failed despite retries. Track and
-                # raise after the loop so we don't silently ship a
-                # broken-URL card.
-                failed_metadata.append(region["id"])
-                continue
-            if details:
-                # Find the .zim file (may be dated like osm-europe-2026-04.zim
-                # or undated like osm-europe.zim). Pick the largest .zim.
-                zim_files = [f for f in details.get("files", [])
-                             if f.get("name", "").endswith(".zim")
-                             and "history/" not in f.get("name", "")]
-                if zim_files:
-                    # Prefer dated filenames (e.g. osm-europe-2026-04-22.zim)
-                    # over undated (osm-europe.zim). Among dated, pick the
-                    # NEWEST by embedded date, not the largest — rebuilds
-                    # can shrink a ZIM (e.g. when Overture deduping trims
-                    # OSM duplicates). Old size-based tie-breaker was
-                    # stale-stickying: a 5.5 GB April-13 ZIM beat a fresh
-                    # 210 MB April-22 one because of byte size alone.
-                    # Size only breaks ties among same-date uploads.
-                    import re as _re
-                    def _int(v):
-                        # archive.org occasionally reports size as
-                        # None / "" for a file still being processed;
-                        # a bare int() here aborted the whole build.
-                        try:
-                            return int(v or 0)
-                        except (TypeError, ValueError):
-                            return 0
-                    def _sort_key(f):
-                        name = f.get("name", "")
-                        # Match dated filenames optionally followed by a
-                        # single-letter "same-day re-roll" suffix (b, c, d…).
-                        # `2026-04-26 < 2026-04-26b < 2026-04-26c` by
-                        # lexicographic compare, so the suffix wins as
-                        # intended. Without the [a-z]? part, the c suffix
-                        # didn't match the regex and the script treated
-                        # the file as undated — letting the no-suffix
-                        # version win on size alone.
-                        m = _re.search(
-                            r'-(\d{4}-\d{2}(?:-\d{2})?[a-z]?)\.zim$', name)
-                        if m:
-                            # (dated=1, date_str, size). Lexicographic
-                            # comparison is correct: YYYY-MM < YYYY-MM-DD
-                            # because the shorter prefix sorts first.
-                            return (1, m.group(1), _int(f.get("size")))
-                        return (0, "", _int(f.get("size")))
-                    best = max(zim_files, key=_sort_key)
-                    zim_filename = best.get("name")
-                    zim_file_meta = best
-                    zim_size = _int(best.get("size")) or None
-            if not zim_filename:
-                # Item exists (dark / just created / mid-upload) but
-                # lists no .zim yet. The old path fell through to
-                # item_size (>0 from _meta.xml alone) and rendered a
-                # live card linking the undated osm-<id>.zim, which
-                # never exists on a dated item — the 2026-05-10
-                # California incident.
-                print(f"  {region['id']}: no .zim in item listing yet, treating as upcoming")
+        cards.append(render_tier_header(tier_label if lang == "en"
+                                        else t(lang, "tier_" + tier_id.replace("-", "_"))))
+        for e in group:
+            region = e["region"]
+            if not e["live"]:
                 cards.append(render_upcoming_card(region, lang))
                 upcoming_count += 1
                 continue
-            # Override the static zim_file with what's actually on Archive.org
-            region = {**region, "zim_file": zim_filename}
-            if zim_size is None:
-                try:
-                    zim_size = int(item.get("item_size", 0))
-                except (TypeError, ValueError):
-                    zim_size = None
-            if not zim_size or zim_size <= 0:
-                # Item exists on Archive.org but the file is still uploading /
-                # being processed — treat as upcoming so the page doesn't
-                # show "0 MB" until the upload finalizes.
-                print(f"  {region['id']}: file not yet finalized, treating as upcoming")
-                cards.append(render_upcoming_card(region, lang))
-                upcoming_count += 1
-                continue
-            # The Torrent button must point at the same file as the
-            # Download button. Torrents are regenerated separately
-            # (cloud/generate_all_torrents.py) and drift behind
-            # rebuilds; a stale one seeds a ZIM the keep-2 cleanup on
-            # archive.org will soon delete.
-            torrent_name = torrent_file_name(region["id"])
-            torrent_ok = torrent_name == zim_filename
-            if not torrent_ok:
-                print(f"  {region['id']}: torrent names {torrent_name!r} but the "
-                      f"live ZIM is {zim_filename!r} — omitting Torrent button "
-                      f"(regenerate with cloud/generate_all_torrents.py)")
-            built = zim_build_date(zim_filename, zim_file_meta)
-            item_id = f"streetzim-{region['id']}"
-            fresh = fresh_viewer(region["id"], zim_filename, (zim_file_meta or {}).get("md5"))
-            archive_url = f"https://archive.org/download/{item_id}/{urllib.parse.quote(zim_filename)}"
-            LIBRARY[region["id"]] = {
-                "id": region["id"], "title": region["title"], "description": plain_text(region["description"]),
-                "tier": region["tier"], "language": region.get("language", "en"),
-                "file": zim_filename, "size": zim_size, "date": built[0] if built else None,
-                "download": fresh["url"] if fresh else archive_url,
-                "fallback": archive_url if fresh else None,
-                "details": f"https://archive.org/details/{item_id}",
-                "torrent": f"/torrents/{region['id']}.torrent" if torrent_ok else None,
-                "preview": ("/drive/?zim=" + urllib.parse.quote(f"https://archive.org/download/{item_id}/{zim_filename}", safe=":/"))
-                           if preview else None}
-            cards.append(render_live_card(
-                region, (human_size(zim_size).replace(".", ",") if lang == "de"
-                         else human_size(zim_size)),
-                item_meta=(details or {}).get("metadata") if details else None,
-                torrent_ok=torrent_ok,
-                build_date=zim_build_date(zim_filename, zim_file_meta),
-                preview=preview, lang=lang,
-                build_page=builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
-                                        (details or {}).get("files")),
-                fresh=fresh))
-            if region["id"] in builder:
-                ok = builder_link(builder, region["id"], zim_filename, (zim_file_meta or {}).get("md5"),
-                                  (details or {}).get("files"))
-                BUILDER_LIVE[region["id"]] = BUILDER_LIVE.get(region["id"], False) or ok
-                if ok and (builder.get(region["id"]) or {}).get("file") == zim_filename:
-                    BUILDER_PHOTO[region["id"]] = str(((details or {}).get("metadata") or {})
-                                                      .get("streetzim_photo_search", "")).lower() == "yes"
-                if not ok:
-                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]}, which archive.org "
-                          f"no longer serves (live ZIM {zim_filename!r}) — off the builder page "
-                          f"(run ops/langpack/ship_packs.sh)")
-                elif builder[region["id"]]["file"] != zim_filename:
-                    BUILDER_NEWER[region["id"]] = zim_filename
-                    print(f"  {region['id']}: the builder's recipes are for {builder[region['id']]['file']}, still on "
-                          f"archive.org beside the live {zim_filename!r}: kept on the builder page until new ones")
             live_count += 1
-        else:
-            cards.append(render_upcoming_card(region, lang))
-            upcoming_count += 1
-
+            if lang != "en" and region.get("language", "en") == "en":
+                cards.append(render_lang_card(e, lang, preview, builder_on))
+                continue
+            cards.append(render_live_card(
+                region, fmt_size(lang, e["size"]), item_meta=e["meta"], torrent_ok=e["torrent_ok"],
+                build_date=e["built"], preview=preview, lang=lang, build_page=e["build_ok"], fresh=e["fresh"],
+                map_page=f"/maps/{region['id']}/" if lang == "en" and region.get("language", "en") == "en" else None))
     print(f"[{lang}] Rendered {live_count} live, {upcoming_count} upcoming")
 
     # An empty-but-200 search response (archive.org index hiccup) would
@@ -1740,37 +1892,19 @@ def _write_page(archive_items, lang, sub):
               file=sys.stderr)
         sys.exit(2)
 
-    # Refuse to write the page if any item had an unrecoverable
-    # metadata fetch. Better to fail the deploy than ship a card
-    # with the undated canonical URL (which doesn't exist on
-    # archive.org since we always upload dated filenames).
-    # cf. 2026-05-10 California "page not found" incident.
-    if failed_metadata:
-        print(
-            f"\nERROR: {len(failed_metadata)} item(s) failed metadata "
-            f"fetch even after retries: {failed_metadata}",
-            file=sys.stderr,
-        )
-        print(
-            "Refusing to write site — re-run when archive.org's "
-            "metadata API is reachable.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
     with open(TEMPLATE_PATH, encoding="utf-8") as f:
         template = f.read()
-
-    for en_text, local_text in PAGE_TEXT.get(lang, []):
-        if template.count(en_text) != 1:
-            raise ValueError(f"[{lang}] the template has {template.count(en_text)} "
-                             f"copies of {en_text[:60]!r}, not 1: update PAGE_TEXT")
-        template = template.replace(en_text, local_text)
     updated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    html = template.replace("{{MAPS}}", "\n".join(cards))
+    html = fill_text(template, lang, updated=updated, wikipedia=f"https://{lang}.wikipedia.org/")
+    html = html.replace("{{LANG}}", lang).replace("{{DIR}}", _dir_attr(lang))
     html = html.replace("{{LANG_PICKER}}", render_lang_picker(lang))
-    html = html.replace("{{HREFLANG}}", render_hreflang())
-    html = html.replace("{{UPDATED}}", updated)
+    html = html.replace("{{HEAD_LINKS}}", render_head_links(
+        lang, "", t_attr(lang, "html_title"), t_attr(lang, "meta_description")))
+    rest = html.replace("{{MAPS}}", "")
+    if "{{" in rest:
+        raise ValueError(f"[{lang}] the page has an unfilled placeholder: "
+                         f"{rest[rest.index('{{'):rest.index('{{') + 60]!r}")
+    html = html.replace("{{MAPS}}", "\n".join(cards))
     check_filter_css(html)
 
     # Explicit UTF-8: the template and region descriptions carry
@@ -1781,6 +1915,188 @@ def _write_page(archive_items, lang, sub):
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Wrote {out_path}")
+
+
+MAP_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "map_template.html")
+
+
+def template_parts(path=None):
+    """What the map pages share with the home page (template.html): its
+    stylesheet, its analytics script and its download-fallback script."""
+    with open(path or TEMPLATE_PATH, encoding="utf-8") as f:
+        tpl = f.read()
+    css = re.search(r"<style>\n(.*?)</style>", tpl, re.S)
+    analytics = re.search(r'<script type="module">.*?</script>', tpl, re.S)
+    fallback = [m.group(0) for m in re.finditer(r"<script>.*?</script>", tpl, re.S) if "a[data-fallback]" in m.group(0)]
+    if not (css and analytics and len(fallback) == 1):
+        raise ValueError("template.html: its <style>, analytics <script type=module> or download-fallback "
+                         "<script> (a[data-fallback]) is not where write_map_pages looks for it")
+    return {"css": css.group(1), "analytics": analytics.group(0), "fallback": fallback[0]}
+
+
+def write_site_css():
+    """web/site.css: the home page's stylesheet, for the map pages."""
+    path = os.path.join(SCRIPT_DIR, "site.css")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(template_parts()["css"])
+
+
+def render_kiwix_guide(lang):
+    """How to install Kiwix and open a map in it, per platform."""
+    def steps(*keys):
+        return "<ol>" + "".join(f"<li>{t(lang, k)}</li>" for k in keys) + "</ol>"
+    return (f'<h2>{t(lang, "kg_h2")}</h2>\n<div class="kiwix-guide">\n'
+            f'<h3>{t(lang, "kg_android_h3")}</h3>{steps("kg_android_1", "kg_android_2", "kg_android_3")}\n'
+            f'<h3>{t(lang, "kg_ios_h3")}</h3>{steps("kg_ios_1", "kg_ios_2", "kg_ios_3")}\n'
+            f'<h3>{t(lang, "kg_mac_h3")}</h3><p>{t(lang, "kg_mac_1")}</p>\n'
+            f'<h3>{t(lang, "kg_pc_h3")}</h3><p>{t(lang, "kg_pc_1")}</p>\n'
+            f'<p>{t(lang, "kg_offline")}</p>\n</div>')
+
+
+def render_map_page(e, lang, template, parts, preview=False, builder_on=True):
+    """A live English map's own page in a language (/<lang>/maps/<id>/). Its
+    main download: in English the map's own file (as the home page's card);
+    in another language the map in that language (lang_versions), the own
+    file beside it. Each download has its torrent beside it and the date of
+    the data it was made from."""
+    region = e["region"]
+    rid = region["id"]
+    name, desc = region_text(lang, region)
+    ename = escape(name)
+    v = _version(e, lang) if lang != "en" else None
+    if v and not v["size"]:
+        v = None
+    href, fb = _original(e)
+    body = [f'<p class="lead">{t(lang, "mp_lead", name=ename)}</p>', f"<p>{desc}</p>",
+            f'<h2>{t(lang, "mp_download_h2")}</h2>', '<div class="map-dl">']
+
+    def when(built):
+        if not built:
+            return ""
+        iso, human = built
+        return t(lang, "mp_updated", date=f'<time datetime="{iso}">{escape(fmt_date(lang, iso, human))}</time>') + " "
+
+    def torrent(url):
+        return ('<div class="more">' + _a(url, t(lang, "mp_dl_torrent"), "btn-secondary", track="torrent",
+                                          rid=rid, name=name) + "</div>") if url else ""
+    if v:
+        body.append(_a(v["url"] or v["builder"], t(lang, "mp_dl_lang", size=fmt_size(lang, v["size"])), "btn-primary",
+                       fallback=v["builder"] if v["url"] else None, track="download_lang", rid=rid, name=name, lang=lang))
+        body.append(f'<p>{when(v["built"])}{t(lang, "mp_dl_lang_note")}</p>{torrent(v["torrent"])}')
+    elif lang != "en" and builder_on:
+        body.append(f'<p>{t(lang, "card_no_lang")}</p>')
+    own = (t(lang, "card_download") + f' ({fmt_size(lang, e["size"])})' if lang == "en"
+           else t(lang, "mp_dl_original", size=fmt_size(lang, e["size"])))
+    body.append(_a(href, own, "btn-secondary" if v else "btn-primary", fallback=fb, track="download", rid=rid, name=name))
+    body.append(f'<p>{when(e["built"])}{t(lang, "mp_dl_original_note")}</p>'
+                f'{torrent(f"/torrents/{rid}.torrent" if e["torrent_ok"] else None)}')
+    more = []
+    if preview:
+        more.append(_a(_preview_href(e), t(lang, "mp_dl_preview"), "btn-secondary", track="preview", rid=rid, name=name))
+    if lang == "en" and e.get("build_ok"):
+        more.append(_a(f"/build/?region={urllib.parse.quote(rid)}", t(lang, "card_languages"), "btn-secondary",
+                       title=t_attr(lang, "card_languages_title"), track="build", rid=rid, name=name))
+    if more:
+        body.append('<div class="more">' + "".join(more) + "</div>")
+    body.append(f'<p>{t(lang, "mp_space_note")}</p>')
+    body.append("</div>")
+    feats = [t(lang, "mp_feat_search")] + [
+        t(lang, f"mp_feat_{css}") for key, _l, css in FEATURE_BADGES
+        if str((e["meta"] or {}).get(key, "")).lower() == "yes"]
+    body.append(f'<h2>{t(lang, "mp_inside_h2")}</h2>')
+    body.append('<ul class="map-feats">' + "".join(f"<li>{f}</li>" for f in feats) + "</ul>")
+    body.append(render_kiwix_guide(lang))
+    others = [f'<li><a href="/{sub}maps/{rid}/" hreflang="{code}" lang="{code}">{escape(lname)}</a></li>'
+              for code, lname, sub in LANGUAGES if code != lang]
+    body.append(f'<h2>{t(lang, "mp_other_langs_h2")}</h2>')
+    body.append('<ul class="other-langs">' + "".join(others) + "</ul>")
+    path = f"maps/{rid}/"
+    title = t_attr(lang, "mp_html_title", name=ename)
+    # the description promises the map in the language: only where there is that version
+    description = t_attr(lang, "mp_meta_description" if v or lang == "en" else "mp_lead", name=ename)
+    html = template
+    for k, val in (("{{LANG}}", lang), ("{{DIR}}", _dir_attr(lang)), ("{{TITLE}}", title),
+                   ("{{DESCRIPTION}}", description), ("{{HEAD_LINKS}}", render_head_links(lang, path, title, description)),
+                   ("{{ANALYTICS}}", parts["analytics"]), ("{{LANG_PICKER}}", render_lang_picker(lang, path)),
+                   ("{{HOME}}", f"/{_sub(lang)}"), ("{{ALL_MAPS}}", t(lang, "mp_all_maps")),
+                   ("{{H1}}", t(lang, "mp_h1", name=ename)), ("{{FOOTER}}", t(lang, "footer")),
+                   ("{{FALLBACK}}", parts["fallback"])):
+        html = html.replace(k, val)
+    if "{{" in html.replace("{{BODY}}", ""):
+        rest = html.replace("{{BODY}}", "")
+        raise ValueError(f"[{lang}] {rid}: the map page has an unfilled placeholder: "
+                         f"{rest[rest.index('{{'):rest.index('{{') + 60]!r}")
+    return html.replace("{{BODY}}", "\n".join(body))
+
+
+def write_map_pages(maps, preview=False, builder_on=True):
+    """A page per live English map in every language: web/maps/<id>/ and
+    web/<lang>/maps/<id>/. A folder for a map no longer in REGIONS goes; one
+    for a map not live just now stays (an archive.org hiccup must not take
+    its pages down)."""
+    with open(MAP_TEMPLATE_PATH, encoding="utf-8") as f:
+        template = f.read()
+    parts = template_parts()
+    live = [e for e in maps if e["live"] and e["region"].get("language", "en") == "en"]
+    known = {r["id"] for r in REGIONS if r.get("language", "en") == "en"}
+    n = 0
+    for lang, _name, sub in LANGUAGES:
+        root = os.path.join(SCRIPT_DIR, sub, "maps")
+        for e in live:
+            d = os.path.join(root, e["region"]["id"])
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "index.html"), "w", encoding="utf-8") as f:
+                f.write(render_map_page(e, lang, template, parts, preview, builder_on))
+            n += 1
+        try:
+            names = os.listdir(root)
+        except OSError:
+            names = []
+        for old in names:
+            p = os.path.join(root, old)
+            if old not in known and os.path.isfile(os.path.join(p, "index.html")):
+                shutil.rmtree(p)
+                print(f"  [{lang}] removed the page of {old} (no longer in REGIONS)")
+    print(f"Map pages: {len(live)} maps in {len(LANGUAGES)} languages ({n} pages)")
+
+
+def remove_dropped_languages():
+    """The pages of a language no longer in web/i18n/: web/<code>/ holding
+    only what this script writes there (index.html, maps/) goes; anything
+    else in it keeps the folder."""
+    keep = {code for code, _n, _s in LANGUAGES}
+    for code in sorted(os.listdir(SCRIPT_DIR)):
+        d = os.path.join(SCRIPT_DIR, code)
+        if (re.fullmatch(r"[a-z]{2,3}", code) and code not in keep and os.path.isdir(d)
+                and not os.path.islink(d) and os.path.isfile(os.path.join(d, "index.html"))
+                and set(os.listdir(d)) <= {"index.html", "maps"}):
+            shutil.rmtree(d)
+            print(f"  removed web/{code}/ (no translation in web/i18n/)")
+
+
+def write_sitemap(maps):
+    """web/sitemap.xml: every language's home page and map pages, each with
+    its versions in the other languages (xhtml:link) and, for a map page,
+    the date of the map's data (lastmod)."""
+    pages = [("", None)] + [(f"maps/{e['region']['id']}/", (e["built"] or (None,))[0])
+                            for e in maps if e["live"] and e["region"].get("language", "en") == "en"]
+    out = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">']
+    for path, lastmod in pages:
+        alts = [f'    <xhtml:link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}{path}"/>'
+                for code, _n, sub in LANGUAGES]
+        alts.append(f'    <xhtml:link rel="alternate" hreflang="x-default" href="{SITE_URL}{path}"/>')
+        for _code, _n, sub in LANGUAGES:
+            out.append("  <url>")
+            out.append(f"    <loc>{SITE_URL}{sub}{path}</loc>")
+            if lastmod:
+                out.append(f"    <lastmod>{lastmod}</lastmod>")
+            out += alts
+            out.append("  </url>")
+    out.append("</urlset>")
+    with open(os.path.join(SCRIPT_DIR, "sitemap.xml"), "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    print(f"Sitemap: {len(pages) * len(LANGUAGES)} pages")
 
 
 def deploy():

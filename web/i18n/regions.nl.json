@@ -1,0 +1,318 @@
+{
+ "europe": {
+  "title": "Europa",
+  "description": "Verenigd Koninkrijk, Ierland, Frankrijk, Spanje, Portugal, Duitsland, Italië, Nederland, België, Zwitserland, Oostenrijk, Polen, Griekenland, Zweden, Noorwegen, Finland, Denemarken, de Baltische staten, Oekraïne, Georgië, Armenië, Azerbeidzjan, Cyprus en nog tientallen andere landen."
+ },
+ "united-states": {
+  "title": "Verenigde Staten",
+  "description": "De Verenigde Staten zonder Alaska en Hawaï — alle 48 aaneengesloten staten en Washington D.C."
+ },
+ "south-america": {
+  "title": "Zuid-Amerika",
+  "description": "Het vasteland van Zuid-Amerika — Colombia, Venezuela, Guyana, Suriname, Frans-Guyana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chili, de Amazone, de Andes, de Atacama en Patagonië. (Brazilië en Argentinië hebben elk een eigen ZIM-bestand.)"
+ },
+ "africa": {
+  "title": "Afrika",
+  "description": "Heel Afrika — Algerije, Egypte, Ethiopië, Kenia, Marokko, Nigeria, Zuid-Afrika, Tanzania en meer dan 40 andere landen."
+ },
+ "indian-subcontinent": {
+  "title": "Indisch subcontinent",
+  "description": "India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan en de Malediven."
+ },
+ "china": {
+  "title": "China",
+  "description": "China — Peking, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi’an, Wuhan, Hangzhou, Hongkong en Macau, plus de Chinese Muur, de Jangtsekiang, het Tibetaans Plateau en de Gobi."
+ },
+ "russia": {
+  "title": "Rusland",
+  "description": "Rusland — Moskou, Sint-Petersburg, Novosibirsk, Jekaterinenburg, Kazan, Nizjni Novgorod, Sotsji, Vladivostok; de Wolga, de Oeral, de Kaukasus, het Baikalmeer; de Trans-Siberische spoorlijn van de Oostzee tot de Japanse Zee."
+ },
+ "australia-nz": {
+  "title": "Australië en Nieuw-Zeeland",
+  "description": "Australië en Nieuw-Zeeland — Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, het Great Barrier Reef, de outback en de Zuidelijke Alpen."
+ },
+ "southeast-asia": {
+  "title": "Zuidoost-Azië",
+  "description": "Thailand, Vietnam, Myanmar, Cambodja, Laos, Maleisië, Singapore, Indonesië, de Filipijnen, Brunei en Oost-Timor — Bangkok, Hanoi, Ho Chi Minhstad, Yangon, Kuala Lumpur, Jakarta, Manilla, Bali, Borneo, de Mekongdelta en de Zuid-Chinese Zee."
+ },
+ "thailand": {
+  "title": "Thailand",
+  "description": "Thailand — Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen en Hat Yai, met de eilanden in de Andamanse Zee en de Golf van Thailand."
+ },
+ "canada": {
+  "title": "Canada",
+  "description": "Heel Canada — Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec, Edmonton, Halifax, de Rocky Mountains, Banff, de Grote Meren, de Maritieme Provincies en Yukon en de Northwest Territories."
+ },
+ "west-asia": {
+  "title": "West-Azië",
+  "description": "Turkije, Syrië, Libanon, Israël, Palestina, Jordanië, Irak, Iran, Koeweit, Saudi-Arabië, Bahrein, Qatar, de Verenigde Arabische Emiraten, Oman, Jemen en delen van Egypte, Afghanistan en Pakistan."
+ },
+ "central-asia": {
+  "title": "Centraal-Azië",
+  "description": "Centraal-Azië — Kazachstan, Oezbekistan, Turkmenistan, Tadzjikistan, Kirgizië, Afghanistan en de Kaukasus. Almaty, Tasjkent, Bisjkek, Asjchabad, Doesjanbe, Kabul, de Pamir en de Zijderoute."
+ },
+ "korea-mongolia": {
+  "title": "Korea en Mongolië",
+  "description": "Het Koreaans Schiereiland en Mongolië — Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darchan; de Gobi, het Changaigebergte, de gedemilitariseerde zone en de kust van de Japanse Zee."
+ },
+ "caucasus": {
+  "title": "Kaukasus",
+  "description": "De Kaukasus — Georgië, Armenië en Azerbeidzjan, met de Russische Noord-Kaukasus en Oost-Turkije. Tbilisi, Jerevan, Bakoe, Batoemi, de Grote Kaukasus, de Elbroes, het Sevanmeer en de kust van de Kaspische Zee."
+ },
+ "pacific-islands": {
+  "title": "Eilanden in de Stille Oceaan",
+  "description": "Papoea-Nieuw-Guinea, Fiji, de Salomonseilanden, Vanuatu, Nieuw-Caledonië, Palau, Micronesië, de Marshalleilanden, Nauru, Tuvalu en de Gilberteilanden van Kiribati — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa en Majuro."
+ },
+ "west-africa": {
+  "title": "West-Afrika",
+  "description": "Nigeria, Ghana, Ivoorkust, Senegal, Mali, Burkina Faso, Guinee, Benin, Togo, Sierra Leone, Liberia en Niger — Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou en de kust van de Golf van Guinee."
+ },
+ "southern-africa": {
+  "title": "Zuidelijk Afrika",
+  "description": "Zuid-Afrika, Namibië, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho en Eswatini — Johannesburg, Kaapstad, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, de Kalahari, het Krugerpark en de Kaap."
+ },
+ "east-africa": {
+  "title": "Oost-Afrika",
+  "description": "Kenia, Tanzania, Oeganda, Ethiopië, Rwanda, Burundi, Somalië en Zuid-Soedan — Nairobi, Dar es Salaam, Addis Abeba, Kampala, Kigali, Mombassa, Zanzibar, de Kilimanjaro, de Serengeti en het Victoriameer."
+ },
+ "central-america-caribbean": {
+  "title": "Midden-Amerika en het Caribisch gebied",
+  "description": "Midden-Amerika en het Caribisch gebied — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, de Kaaimaneilanden, Puerto Rico, de Kleine Antillen en de zuidelijke Bahama’s."
+ },
+ "himalayas": {
+  "title": "Himalaya",
+  "description": "De Himalaya, de Karakoram, de Hindoekoesj en de Pamir — Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kasjmir, de dalen van de Indus en de Brahmaputra. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, de Mount Everest, de K2, de Kangchenjunga en de Annapurna."
+ },
+ "baltics": {
+  "title": "Baltische staten",
+  "description": "Estland, Letland en Litouwen — Tallinn, Riga, Vilnius en de Oostzeekust."
+ },
+ "brazil": {
+  "title": "Brazilië",
+  "description": "Heel Brazilië — São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, de Amazone, de Pantanal, de Iguaçuwatervallen en de Atlantische kust."
+ },
+ "argentina": {
+  "title": "Argentinië",
+  "description": "Argentinië — Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, de pampa’s, de Andes, Patagonië en Vuurland."
+ },
+ "mexico": {
+  "title": "Mexico",
+  "description": "Heel Mexico — Mexico-Stad, Guadalajara, Monterrey, Puebla, Tijuana, Cancún en de Riviera Maya, Oaxaca, het schiereiland Yucatán, Baja California, de Sierra Madre en zowel de Pacifische kust als de Golfkust."
+ },
+ "ukraine": {
+  "title": "Oekraïne, Moldavië en West-Rusland",
+  "description": "Oekraïne en Moldavië volledig (inclusief de Krim), plus het westelijke grensgebied van Rusland — Wolgograd, Rostov aan de Don, Sotsji, Krasnodar, de Zwarte Zeekust en de uitlopers van de Kaukasus."
+ },
+ "japan": {
+  "title": "Japan",
+  "description": "Japan — alle vier de hoofdeilanden (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa en de Riukiu-eilanden. Tokio, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima en meer."
+ },
+ "iran": {
+  "title": "Iran",
+  "description": "Iran — van de Kaspische Zee tot de Perzische Golf, met Teheran, Isfahan, Shiraz en Mashhad."
+ },
+ "bahrain": {
+  "title": "Bahrein",
+  "description": "Bahrein — Manama, Muharraq, Riffa, Isa Town, de Koning Fahdbrug en de Hawar-eilanden; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "egypt": {
+  "title": "Egypte",
+  "description": "Egypte — Caïro, Alexandrië, Gizeh, Luxor, Aswan, de Nijlvallei, het Sinaï-schiereiland en de kust van de Rode Zee."
+ },
+ "switzerland": {
+  "title": "Zwitserland en de Alpen",
+  "description": "Zwitserland en de omliggende Alpen — Zürich, Genève, Bern, Bazel, Lausanne, Luzern, Lugano, St. Moritz, Zermatt en de Matterhorn, Interlaken en de Jungfrau, plus Chamonix en de Mont Blanc, Aosta, het Comomeer, Liechtenstein, het Bodenmeer en het westen van Tirol."
+ },
+ "switzerland-light": {
+  "title": "Zwitserland en de Alpen (Light)",
+  "description": "Een kleinere Zwitserland-kaart voor apparaten met weinig ruimte en trage verbindingen — dezelfde dekking en zoekfunctie als de volledige versie, maar zonder satellietbeelden en met kaartdetail tot één zoomniveau minder (z13 in plaats van z14). 1,4 GB in plaats van 2,1 GB. Straten, plaatsen, adressen, routes, terrein en Wikipedia blijven gelijk; de kaart wordt alleen niet scherper op het niveau van gebouwomtrekken."
+ },
+ "iceland": {
+  "title": "IJsland",
+  "description": "IJsland — Reykjavík, Akureyri, de Ringweg, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, de Westfjorden en de Vatnajökull."
+ },
+ "turkey": {
+  "title": "Turkije",
+  "description": "Turkije — Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Cappadocië, Pamukkale, Efeze, de Bosporus, de Egeïsche kust en het Anatolisch Plateau."
+ },
+ "south-korea": {
+  "title": "Zuid-Korea",
+  "description": "Zuid-Korea — Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, het eiland Jeju, de gedemilitariseerde zone, Seoraksan en Hallasan."
+ },
+ "taiwan": {
+  "title": "Taiwan",
+  "description": "Taiwan — Taipei, Nieuw-Taipei, Taichung, Kaohsiung, Tainan, Taoyuan, Hsinchu, Keelung, Hualien; de Tarokokloof, het Zon-Maanmeer, Alishan, Yushan, Kenting en de eilanden Penghu, Kinmen, Matsu, Groen Eiland en Orchideeëneiland."
+ },
+ "east-coast-us": {
+  "title": "Oostkust van de VS",
+  "description": "De Amerikaanse oostkust van Maine tot Florida — New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami en de hele Atlantische kust."
+ },
+ "midwest-us": {
+  "title": "Midwesten van de VS",
+  "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska en Kansas."
+ },
+ "west-coast-us": {
+  "title": "Westkust van de VS",
+  "description": "De Amerikaanse westkust: Washington, Oregon en Californië — Seattle, Portland, San Francisco, Los Angeles, San Diego en alles daartussen."
+ },
+ "central-us": {
+  "title": "Centrale VS",
+  "description": "De bergstaten in het westen en omgeving — Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona en New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, de Grand Canyon en de Rocky Mountains."
+ },
+ "california": {
+  "title": "Californië",
+  "description": "Heel Californië — van de grens met Oregon tot Mexico, van de kust van de Stille Oceaan tot de Sierra Nevada."
+ },
+ "hawaii": {
+  "title": "Hawaï",
+  "description": "De Hawaïaanse eilanden — Honolulu, Hilo, Kahului; O‘ahu, Maui, Hawai‘i (Big Island), Kaua‘i, Moloka‘i en Lāna‘i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor en de Nā Pali-kust."
+ },
+ "alaska": {
+  "title": "Alaska",
+  "description": "Alaska — Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, de Brooks Range, de Aleoeten, de Inside Passage, de Prince William Sound, de Yukon en het Noordpoolgebied."
+ },
+ "new-york-state": {
+  "title": "Staat New York",
+  "description": "De hele staat New York — New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, de Hudsonvallei, de Catskills, de Adirondacks, de Finger Lakes, de Niagarawatervallen en de Thousand Islands."
+ },
+ "florida": {
+  "title": "Florida",
+  "description": "Heel Florida — Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; de Everglades, de Keys, Cape Canaveral, de Atlantische kust en de Golfkust, en Walt Disney World."
+ },
+ "carolinas": {
+  "title": "Noord- en Zuid-Carolina",
+  "description": "Noord- en Zuid-Carolina — Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington en Asheville; de Blue Ridge Mountains en de Great Smoky Mountains, de Research Triangle, de Outer Banks en de Atlantische kust."
+ },
+ "nyc-metro": {
+  "title": "Regio New York",
+  "description": "De metropoolregio New York in drie staten — Manhattan, Brooklyn, Queens, de Bronx, Staten Island, Long Island, Westchester, het noorden van New Jersey en het zuidwesten van Connecticut."
+ },
+ "chicago-metro": {
+  "title": "Regio Chicago",
+  "description": "Groot-Chicago — de stad en de county’s Cook, DuPage, Lake, Will, Kane en McHenry, plus het noordwesten van Indiana en het zuidoosten van Wisconsin langs het Michiganmeer."
+ },
+ "greater-la": {
+  "title": "Groot-Los Angeles",
+  "description": "De metropoolregio Los Angeles — LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County en het Inland Empire, plus Santa Catalina en de Kanaaleilanden."
+ },
+ "texas": {
+  "title": "Texas",
+  "description": "Texas, VS — van de Golfkust tot de Rio Grande, met Houston, Dallas, San Antonio, Austin, Fort Worth en El Paso."
+ },
+ "colorado": {
+  "title": "Colorado",
+  "description": "De staat van de Rocky Mountains — Denver, Aspen, Vail, Rocky Mountain National Park en de Continental Divide."
+ },
+ "silicon-valley": {
+  "title": "Silicon Valley",
+  "description": "De San Francisco Bay Area — San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose en het schiereiland."
+ },
+ "taipei": {
+  "title": "Taipei",
+  "description": "Taipei — de stad Taipei en het hart van Nieuw-Taipei: Ximending, Zhongshan, Xinyi en Taipei 101, Beitou, Tamsui, Banqiao, Xindian en Yangmingshan; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "osaka": {
+  "title": "Osaka",
+  "description": "Osaka — het centrum van Osaka: Umeda, Namba en Dotonbori, Shinsaibashi, Tennoji, het kasteel van Osaka, Shin-Osaka en de baai; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "tehran": {
+  "title": "Teheran",
+  "description": "Teheran — de stad Teheran: de Azaditoren, de Grote Bazaar en het Golestanpaleis, de Valiasrstraat, Tajrish en het noorden, de Universiteit van Teheran; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "cairo": {
+  "title": "Caïro",
+  "description": "Caïro — Caïro en Gizeh: het Tahrirplein en het Egyptisch Museum, islamitisch Caïro en de Al-Muizzstraat, Khan el-Khalili, Zamalek, Heliopolis en de piramides van Gizeh; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "athens": {
+  "title": "Athene",
+  "description": "Athene — Athene en Piraeus: de Akropolis, Plaka en Monastiraki, Syntagma, Kolonaki, Exarchia en de haven van Piraeus; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "moscow": {
+  "title": "Moskou",
+  "description": "Moskou — Moskou binnen de ringweg: het Kremlin en het Rode Plein, de Tverskaja, de Arbat, Zamoskvoretsje, de Mussenheuvels en de Staatsuniversiteit van Moskou; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "kyiv": {
+  "title": "Kyiv",
+  "description": "Kyiv (Kiev) — de stad aan beide oevers van de Dnipro: het Onafhankelijkheidsplein (Majdan), de Chresjtsjatyk, de Sofiakathedraal, Podil, het Holenklooster en de linkeroever; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "seoul": {
+  "title": "Seoul",
+  "description": "Seoul — Gyeongbokgung en Insadong, Myeongdong, Itaewon, Hongdae, de rivier de Han, Gangnam en Jamsil; zoek met een foto van een straatnaambord of winkelbord."
+ },
+ "washington-dc": {
+  "title": "Washington D.C.",
+  "description": "Washington D.C. — de Amerikaanse hoofdstad en de regio eromheen."
+ },
+ "hispaniola": {
+  "title": "Hispaniola",
+  "description": "Het Caribische eiland Hispaniola — Haïti en de Dominicaanse Republiek."
+ },
+ "france": {
+  "title": "Frankrijk",
+  "description": "Frankrijk — Parijs, Lyon, Marseille, Toulouse, Bordeaux, Nice, Straatsburg; de Alpen, de Pyreneeën, de dalen van de Loire en de Rhône, Corsica."
+ },
+ "germany": {
+  "title": "Duitsland",
+  "description": "Duitsland — Berlijn, Hamburg, München, Keulen, Frankfurt, Stuttgart; de Rijn en de Donau, het Zwarte Woud, de Beierse Alpen, de Oostzee- en de Noordzeekust."
+ },
+ "italy": {
+  "title": "Italië",
+  "description": "Italië — Rome, Milaan, Napels, Turijn, Florence, Venetië, Bologna; de Alpen en de Dolomieten, de Apennijnen, Sicilië en Sardinië."
+ },
+ "poland": {
+  "title": "Polen",
+  "description": "Polen — Warschau, Krakau, Łódź, Wrocław, Poznań, Gdańsk; de Oostzeekust, de Mazurische meren, de Tatra."
+ },
+ "greece": {
+  "title": "Griekenland",
+  "description": "Griekenland — Athene, Thessaloniki, Patras, Heraklion; de Peloponnesos, Kreta, de Cycladen en de Dodekanesos, de Olympus."
+ },
+ "britain-ireland": {
+  "title": "Groot-Brittannië en Ierland",
+  "description": "De Britse Eilanden — Londen, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; de Schotse Hooglanden, Snowdonia, het Lake District, de Wild Atlantic Way."
+ },
+ "iberia": {
+  "title": "Iberisch Schiereiland",
+  "description": "Spanje, Portugal en Andorra — Madrid, Barcelona, Valencia, Sevilla, Lissabon, Porto; de Pyreneeën, de Meseta, de Algarve, de Balearen."
+ },
+ "benelux": {
+  "title": "Benelux",
+  "description": "Nederland, België en Luxemburg — Amsterdam, Rotterdam, Den Haag, Brussel, Antwerpen, Gent, Luxemburg-Stad; de Randstad, de Ardennen, de Noordzeekust."
+ },
+ "nordics": {
+  "title": "Scandinavië en Finland",
+  "description": "Noorwegen, Zweden, Finland en Denemarken — Oslo, Stockholm, Helsinki, Kopenhagen, Bergen, Göteborg; de fjorden, Lapland, de scherenkusten van de Oostzee."
+ },
+ "austria-czech": {
+  "title": "Oostenrijk, Tsjechië en Slowakije",
+  "description": "Oostenrijk, Tsjechië en Slowakije — Wenen, Praag, Bratislava, Brno, Salzburg, Graz, Innsbruck; de Oostelijke Alpen, Bohemen, de Tatra."
+ },
+ "balkans": {
+  "title": "Balkan",
+  "description": "Slovenië, Kroatië, Bosnië, Servië, Montenegro, Albanië, Noord-Macedonië en Kosovo — Belgrado, Zagreb, Sarajevo, Ljubljana, Split, Tirana; de Dalmatische kust, de Dinarische Alpen."
+ },
+ "carpathians": {
+  "title": "Roemenië, Hongarije en Bulgarije",
+  "description": "Roemenië, Hongarije en Bulgarije — Boekarest, Boedapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; de Karpaten, de Donaudelta, de Zwarte Zeekust."
+ },
+ "africa-light": {
+  "title": "Afrika (Light)",
+  "description": "Heel Afrika zonder satellietbeelden en tot zoomniveau 13 — dezelfde dekking als Afrika, met ongeveer de helft van de downloadgrootte. Bedoeld voor tragere verbindingen en kleinere apparaten."
+ },
+ "north-africa": {
+  "title": "Noord-Afrika",
+  "description": "Marokko, Algerije, Tunesië, Libië, Mauritanië en de Westelijke Sahara — Casablanca, Algiers, Tunis, Tripoli, Marrakesh, Fez; het Atlasgebergte, de Middellandse Zeekust, de noordelijke Sahara."
+ },
+ "horn-of-africa": {
+  "title": "Hoorn van Afrika",
+  "description": "Ethiopië, Somalië, Eritrea, Djibouti, Zuid-Soedan en het noorden van Kenia — Addis Abeba, Mogadishu, Asmara, Djibouti-stad, Juba; de Ethiopische Hooglanden, de Riftvallei, de kust van de Rode Zee."
+ },
+ "central-africa": {
+  "title": "Centraal-Afrika",
+  "description": "DR Congo, Kameroen, Tsjaad, de Centraal-Afrikaanse Republiek, Gabon, Congo-Brazzaville, Equatoriaal-Guinea, Angola en Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; het Congobekken, de westelijke Riftvallei."
+ },
+ "east-polynesia": {
+  "title": "Oost-Polynesië",
+  "description": "Frans-Polynesië, de Cookeilanden, de Australeilanden en de Tuamotu-archipel — Papeete, Bora Bora, Mo‘orea, Rarotonga; atollen en vulkanische eilanden verspreid over 3000 km van de zuidelijke Stille Oceaan."
+ }
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}"{{DIR}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<meta name="description" content="{{DESCRIPTION}}">
+{{HEAD_LINKS}}
+<link rel="stylesheet" href="/site.css">
+{{ANALYTICS}}
+</head>
+<body>
+
+<header>
+  <div class="container">
+{{LANG_PICKER}}
+    <p class="crumbs"><a href="{{HOME}}">StreetZim</a> › <a href="{{HOME}}#maps">{{ALL_MAPS}}</a></p>
+    <h1>{{H1}}</h1>
+  </div>
+</header>
+
+<section>
+  <div class="container map-page">
+{{BODY}}
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    {{FOOTER}}
+  </div>
+</footer>
+{{FALLBACK}}
+</body>
+</html>

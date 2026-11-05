@@ -1,0 +1,321 @@
+{
+ "_notes": {
+  "about": "Names and one-line descriptions of the StreetZim maps. Translate the title as a native speaker would name the region (Kyiv in Ukrainian: Київ; Britain & Ireland in German: Großbritannien und Irland). Use the usual names for the places in the descriptions. Plain text: no HTML."
+ },
+ "europe": {
+  "title": "Europe",
+  "description": "United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more."
+ },
+ "united-states": {
+  "title": "United States",
+  "description": "Continental United States — all 48 contiguous states and Washington, D.C."
+ },
+ "south-america": {
+  "title": "South America",
+  "description": "Continental South America — Colombia, Venezuela, Guyana, Suriname, French Guiana, Ecuador, Peru, Bolivia, Paraguay, Uruguay, Chile, the Amazon, the Andes, the Atacama, and Patagonia. (Brazil and Argentina ship as their own dedicated ZIMs.)"
+ },
+ "africa": {
+  "title": "Africa",
+  "description": "All of Africa — Algeria, Egypt, Ethiopia, Kenya, Morocco, Nigeria, South Africa, Tanzania, and 40+ more countries."
+ },
+ "indian-subcontinent": {
+  "title": "Indian Subcontinent",
+  "description": "India, Pakistan, Bangladesh, Sri Lanka, Nepal, Bhutan, and the Maldives."
+ },
+ "china": {
+  "title": "China",
+  "description": "China — Beijing, Shanghai, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi’an, Wuhan, Hangzhou, Hong Kong, and Macau, plus the Great Wall, the Yangtze, the Tibetan Plateau, and the Gobi."
+ },
+ "russia": {
+  "title": "Russia",
+  "description": "Russia — Moscow, Saint Petersburg, Novosibirsk, Yekaterinburg, Kazan, Nizhny Novgorod, Sochi, Vladivostok; the Volga, the Urals, the Caucasus, Lake Baikal; the Trans-Siberian Railway from the Baltic to the Sea of Japan."
+ },
+ "australia-nz": {
+  "title": "Australia & New Zealand",
+  "description": "Australia and New Zealand — Sydney, Melbourne, Brisbane, Perth, Auckland, Wellington, the Great Barrier Reef, Outback, and Southern Alps."
+ },
+ "southeast-asia": {
+  "title": "Southeast Asia",
+  "description": "Thailand, Vietnam, Myanmar, Cambodia, Laos, Malaysia, Singapore, Indonesia, the Philippines, Brunei, and Timor-Leste — Bangkok, Hanoi, Ho Chi Minh City, Yangon, Kuala Lumpur, Jakarta, Manila, Bali, Borneo, the Mekong Delta, and the South China Sea."
+ },
+ "thailand": {
+  "title": "Thailand",
+  "description": "Thailand — Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen and Hat Yai, with the islands of the Andaman Sea and the Gulf of Thailand."
+ },
+ "canada": {
+  "title": "Canada",
+  "description": "All of Canada — Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories."
+ },
+ "west-asia": {
+  "title": "West Asia",
+  "description": "Turkey, Syria, Lebanon, Israel, Palestine, Jordan, Iraq, Iran, Kuwait, Saudi Arabia, Bahrain, Qatar, UAE, Oman, Yemen, and parts of Egypt, Afghanistan, and Pakistan."
+ },
+ "central-asia": {
+  "title": "Central Asia",
+  "description": "Central Asia — Kazakhstan, Uzbekistan, Turkmenistan, Tajikistan, Kyrgyzstan, Afghanistan, and the Caucasus. Almaty, Tashkent, Bishkek, Ashgabat, Dushanbe, Kabul, the Pamirs, and the Silk Road."
+ },
+ "korea-mongolia": {
+  "title": "Korea & Mongolia",
+  "description": "The Korean Peninsula and Mongolia — Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast."
+ },
+ "caucasus": {
+  "title": "Caucasus",
+  "description": "The Caucasus — Georgia, Armenia, and Azerbaijan, with the southern Russian Caucasus and eastern Turkey. Tbilisi, Yerevan, Baku, Batumi, the Greater Caucasus range, Mount Elbrus, Lake Sevan, and the Caspian coast."
+ },
+ "pacific-islands": {
+  "title": "Pacific Islands",
+  "description": "Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Palau, Micronesia, the Marshall Islands, Nauru, Tuvalu, and Kiribati’s Gilbert Islands — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa, and Majuro."
+ },
+ "west-africa": {
+  "title": "West Africa",
+  "description": "Nigeria, Ghana, Côte d'Ivoire, Senegal, Mali, Burkina Faso, Guinea, Benin, Togo, Sierra Leone, Liberia, and Niger — Lagos, Accra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou, and the Gulf of Guinea coast."
+ },
+ "southern-africa": {
+  "title": "Southern Africa",
+  "description": "South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho, and Eswatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, the Kalahari, Kruger, and the Cape."
+ },
+ "east-africa": {
+  "title": "East Africa",
+  "description": "Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia, and South Sudan — Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Mount Kilimanjaro, the Serengeti, and Lake Victoria."
+ },
+ "central-america-caribbean": {
+  "title": "Central America & Caribbean",
+  "description": "Central America and the Caribbean — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, Cayman Islands, Puerto Rico, the Lesser Antilles, and the southern Bahamas."
+ },
+ "himalayas": {
+  "title": "Himalayas",
+  "description": "The Himalayas, Karakoram, Hindu Kush, and Pamir — Nepal, Bhutan, Tibet, Sikkim, Ladakh, Kashmir, the Indus and Brahmaputra valleys. Kathmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kanchenjunga, and Annapurna."
+ },
+ "baltics": {
+  "title": "Baltics",
+  "description": "Estonia, Latvia, and Lithuania — Tallinn, Riga, Vilnius, and the Baltic Sea coast."
+ },
+ "brazil": {
+  "title": "Brazil",
+  "description": "All of Brazil — São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, the Amazon, Pantanal, Iguaçu Falls, and the Atlantic coast."
+ },
+ "argentina": {
+  "title": "Argentina",
+  "description": "Argentina — Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, the Pampas, the Andes, Patagonia, and Tierra del Fuego."
+ },
+ "mexico": {
+  "title": "Mexico",
+  "description": "All of Mexico — Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún and the Riviera Maya, Oaxaca, the Yucatán Peninsula, Baja California, the Sierra Madre, and both the Pacific and Gulf coasts."
+ },
+ "ukraine": {
+  "title": "Ukraine, Moldova & Western Russia",
+  "description": "Ukraine and Moldova in full (including Crimea), plus the western Russian frontier — Volgograd, Rostov, Sochi, Krasnodar, the Black Sea coast, and the Caucasus foothills."
+ },
+ "japan": {
+  "title": "Japan",
+  "description": "Japan — all four main islands (Honshu, Hokkaido, Kyushu, Shikoku), Okinawa, and the Ryukyu archipelago. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroshima, and more."
+ },
+ "iran": {
+  "title": "Iran",
+  "description": "Iran — from the Caspian Sea to the Persian Gulf, including Tehran, Isfahan, Shiraz, and Mashhad."
+ },
+ "bahrain": {
+  "title": "Bahrain",
+  "description": "Bahrain — Manama, Muharraq, Riffa, Isa Town, the King Fahd Causeway and the Hawar Islands; search a street or shop sign with a photo."
+ },
+ "egypt": {
+  "title": "Egypt",
+  "description": "Egypt — Cairo, Alexandria, Giza, Luxor, Aswan, the Nile Valley, Sinai Peninsula, and the Red Sea coast."
+ },
+ "switzerland": {
+  "title": "Switzerland & the Alps",
+  "description": "Switzerland and the surrounding Alps — Zürich, Geneva, Bern, Basel, Lausanne, Lucerne, Lugano, St. Moritz, Zermatt and the Matterhorn, Interlaken and the Jungfrau, plus Chamonix and Mont Blanc, Aosta, Lake Como, Liechtenstein, Lake Constance and western Tirol."
+ },
+ "switzerland-light": {
+  "title": "Switzerland & the Alps (Light)",
+  "description": "A smaller Switzerland for constrained devices and slow connections — same coverage and search as the full build, but without satellite imagery and with vector map detail capped one zoom level shallower (z13 instead of z14). 1.4 GB instead of 2.1 GB. Streets, places, addresses, routing, terrain and Wikipedia are unchanged; the map simply stops sharpening at building-footprint scale."
+ },
+ "iceland": {
+  "title": "Iceland",
+  "description": "Iceland — Reykjavík, Akureyri, the Ring Road, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, the Westfjords, and Vatnajökull."
+ },
+ "turkey": {
+  "title": "Turkey",
+  "description": "Turkey — Istanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Cappadocia, Pamukkale, Ephesus, the Bosporus, the Aegean coast, and the Anatolian plateau."
+ },
+ "south-korea": {
+  "title": "South Korea",
+  "description": "South Korea — Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan."
+ },
+ "taiwan": {
+  "title": "Taiwan",
+  "description": "Taiwan — Taipei, New Taipei, Taichung, Kaohsiung, Tainan, Taoyuan, Hsinchu, Keelung, Hualien; Taroko Gorge, Sun Moon Lake, Alishan, Yushan, Kenting, and the islands of Penghu, Kinmen, Matsu, Green Island, and Orchid Island."
+ },
+ "east-coast-us": {
+  "title": "East Coast US",
+  "description": "U.S. East Coast from Maine to Florida — New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami, and the entire Eastern Seaboard."
+ },
+ "midwest-us": {
+  "title": "Midwest United States",
+  "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas."
+ },
+ "west-coast-us": {
+  "title": "West Coast US",
+  "description": "U.S. West Coast: Washington, Oregon, and California — Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between."
+ },
+ "central-us": {
+  "title": "Central US",
+  "description": "The Mountain West and surrounds — Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona, and New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Grand Canyon, and the Rockies."
+ },
+ "california": {
+  "title": "California",
+  "description": "All of California — from the Oregon border to Mexico, the Pacific coast to the Sierra Nevada."
+ },
+ "hawaii": {
+  "title": "Hawaii",
+  "description": "The Hawaiian Islands — Honolulu, Hilo, Kahului; O‘ahu, Maui, Hawai‘i (Big Island), Kaua‘i, Moloka‘i, and Lāna‘i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor, and the Nā Pali coast."
+ },
+ "alaska": {
+  "title": "Alaska",
+  "description": "Alaska — Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, the Brooks Range, the Aleutians, the Inside Passage, Prince William Sound, the Yukon, and the Arctic."
+ },
+ "new-york-state": {
+  "title": "New York State",
+  "description": "All of New York State — New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, the Hudson Valley, the Catskills, the Adirondacks, the Finger Lakes, Niagara Falls, and the Thousand Islands."
+ },
+ "florida": {
+  "title": "Florida",
+  "description": "All of Florida — Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; the Everglades, the Keys, Cape Canaveral, the Atlantic and Gulf coasts, and Walt Disney World."
+ },
+ "carolinas": {
+  "title": "The Carolinas",
+  "description": "North and South Carolina — Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington, and Asheville; the Blue Ridge and Great Smoky Mountains, the Research Triangle, and the Outer Banks and Atlantic coast."
+ },
+ "nyc-metro": {
+  "title": "New York Metro",
+  "description": "The NYC tri-state metropolitan area — Manhattan, Brooklyn, Queens, the Bronx, Staten Island, Long Island, Westchester, northern New Jersey, and southwestern Connecticut."
+ },
+ "chicago-metro": {
+  "title": "Chicago Metro",
+  "description": "Greater Chicago — the city and Cook, DuPage, Lake, Will, Kane, McHenry counties, plus northwest Indiana and southeast Wisconsin along Lake Michigan."
+ },
+ "greater-la": {
+  "title": "Greater Los Angeles",
+  "description": "The Los Angeles metropolitan area — LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County, and the Inland Empire, plus Catalina Island and the Channel Islands."
+ },
+ "texas": {
+  "title": "Texas",
+  "description": "Texas, USA — from the Gulf Coast to the Rio Grande, including Houston, Dallas, San Antonio, Austin, Fort Worth, and El Paso."
+ },
+ "colorado": {
+  "title": "Colorado",
+  "description": "The Rocky Mountain state — Denver, Aspen, Vail, Rocky Mountain National Park, and the Continental Divide."
+ },
+ "silicon-valley": {
+  "title": "Silicon Valley",
+  "description": "San Francisco Bay Area — San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose, and the Peninsula."
+ },
+ "taipei": {
+  "title": "Taipei",
+  "description": "Taipei — Taipei City and the heart of New Taipei: Ximending, Zhongshan, Xinyi and Taipei 101, Beitou, Tamsui, Banqiao, Xindian and Yangmingshan; search a street sign or shop name with a photo."
+ },
+ "osaka": {
+  "title": "Osaka",
+  "description": "Osaka — central Osaka: Umeda, Namba and Dotonbori, Shinsaibashi, Tennoji, Osaka Castle, Shin-Osaka and the bay; search a street sign or shop name with a photo."
+ },
+ "tehran": {
+  "title": "Tehran",
+  "description": "Tehran — Tehran city: Azadi Tower, the Grand Bazaar and Golestan Palace, Valiasr Street, Tajrish and the north, the University of Tehran; search a street sign or shop name with a photo."
+ },
+ "cairo": {
+  "title": "Cairo",
+  "description": "Cairo — Cairo and Giza: Tahrir Square and the Egyptian Museum, Islamic Cairo and Al-Muizz Street, Khan el-Khalili, Zamalek, Heliopolis and the pyramids of Giza; search a street sign or shop name with a photo."
+ },
+ "athens": {
+  "title": "Athens",
+  "description": "Athens — Athens and Piraeus: the Acropolis, Plaka and Monastiraki, Syntagma, Kolonaki, Exarchia and the port of Piraeus; search a street sign or shop name with a photo."
+ },
+ "moscow": {
+  "title": "Moscow",
+  "description": "Moscow — Moscow inside the ring road: the Kremlin and Red Square, Tverskaya, Arbat, Zamoskvorechye, Sparrow Hills and Moscow State University; search a street sign or shop name with a photo."
+ },
+ "kyiv": {
+  "title": "Kyiv",
+  "description": "Kyiv — Kyiv on both banks of the Dnipro: Maidan Nezalezhnosti, Khreshchatyk, St Sophia's, Podil, the Pechersk Lavra and the left bank; search a street sign or shop name with a photo."
+ },
+ "seoul": {
+  "title": "Seoul",
+  "description": "Seoul — Seoul: Gyeongbokgung and Insadong, Myeongdong, Itaewon, Hongdae, the Han River, Gangnam and Jamsil; search a street sign or shop name with a photo."
+ },
+ "washington-dc": {
+  "title": "Washington, D.C.",
+  "description": "Washington, D.C. — the U.S. capital and surrounding metro area."
+ },
+ "hispaniola": {
+  "title": "Hispaniola",
+  "description": "The Caribbean island of Hispaniola — Haiti and the Dominican Republic."
+ },
+ "france": {
+  "title": "France",
+  "description": "France — Paris, Lyon, Marseille, Toulouse, Bordeaux, Nice, Strasbourg; the Alps, the Pyrenees, the Loire and Rhône valleys, Corsica."
+ },
+ "germany": {
+  "title": "Germany",
+  "description": "Germany — Berlin, Hamburg, Munich, Cologne, Frankfurt, Stuttgart; the Rhine and Danube, the Black Forest, the Bavarian Alps, the Baltic and North Sea coasts."
+ },
+ "italy": {
+  "title": "Italy",
+  "description": "Italy — Rome, Milan, Naples, Turin, Florence, Venice, Bologna; the Alps and Dolomites, the Apennines, Sicily and Sardinia."
+ },
+ "poland": {
+  "title": "Poland",
+  "description": "Poland — Warsaw, Kraków, Łódź, Wrocław, Poznań, Gdańsk; the Baltic coast, the Masurian lakes, the Tatras."
+ },
+ "greece": {
+  "title": "Greece",
+  "description": "Greece — Athens, Thessaloniki, Patras, Heraklion; the Peloponnese, Crete, the Cyclades and Dodecanese, Mount Olympus."
+ },
+ "britain-ireland": {
+  "title": "Britain & Ireland",
+  "description": "The British Isles — London, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; the Highlands, Snowdonia, the Lake District, the Wild Atlantic Way."
+ },
+ "iberia": {
+  "title": "Iberia",
+  "description": "Spain, Portugal & Andorra — Madrid, Barcelona, Valencia, Seville, Lisbon, Porto; the Pyrenees, the Meseta, the Algarve, the Balearics."
+ },
+ "benelux": {
+  "title": "Benelux",
+  "description": "Netherlands, Belgium & Luxembourg — Amsterdam, Rotterdam, The Hague, Brussels, Antwerp, Ghent, Luxembourg City; the Randstad, the Ardennes, the North Sea coast."
+ },
+ "nordics": {
+  "title": "Nordics",
+  "description": "Norway, Sweden, Finland & Denmark — Oslo, Stockholm, Helsinki, Copenhagen, Bergen, Gothenburg; the fjords, Lapland, the Baltic archipelagos."
+ },
+ "austria-czech": {
+  "title": "Austria, Czechia & Slovakia",
+  "description": "Austria, Czechia & Slovakia — Vienna, Prague, Bratislava, Brno, Salzburg, Graz, Innsbruck; the Eastern Alps, Bohemia, the Tatras."
+ },
+ "balkans": {
+  "title": "Balkans",
+  "description": "Slovenia, Croatia, Bosnia, Serbia, Montenegro, Albania, North Macedonia & Kosovo — Belgrade, Zagreb, Sarajevo, Ljubljana, Split, Tirana; the Dalmatian coast, the Dinaric Alps."
+ },
+ "carpathians": {
+  "title": "Romania, Hungary & Bulgaria",
+  "description": "Romania, Hungary & Bulgaria — Bucharest, Budapest, Sofia, Cluj-Napoca, Plovdiv, Timișoara; the Carpathians, the Danube delta, the Black Sea coast."
+ },
+ "africa-light": {
+  "title": "Africa (Light)",
+  "description": "The whole of Africa without satellite imagery and capped at zoom 13 — the same coverage as Africa in roughly half the download. Built for slower connections and smaller devices."
+ },
+ "north-africa": {
+  "title": "North Africa",
+  "description": "Morocco, Algeria, Tunisia, Libya, Mauritania & Western Sahara — Casablanca, Algiers, Tunis, Tripoli, Marrakesh, Fes; the Atlas mountains, the Mediterranean coast, the northern Sahara."
+ },
+ "horn-of-africa": {
+  "title": "Horn of Africa",
+  "description": "Ethiopia, Somalia, Eritrea, Djibouti, South Sudan & northern Kenya — Addis Ababa, Mogadishu, Asmara, Djibouti City, Juba; the Ethiopian highlands, the Rift Valley, the Red Sea coast."
+ },
+ "central-africa": {
+  "title": "Central Africa",
+  "description": "DR Congo, Cameroon, Chad, Central African Republic, Gabon, Congo, Equatorial Guinea, Angola & Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; the Congo basin, the Albertine Rift."
+ },
+ "east-polynesia": {
+  "title": "East Polynesia",
+  "description": "French Polynesia, the Cook Islands & the Austral and Tuamotu archipelagos — Papeete, Bora Bora, Mo‘orea, Rarotonga; atolls and volcanic islands across 3,000 km of the South Pacific."
+ }
+}

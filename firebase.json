@@ -17,6 +17,8 @@
       "generate.py",
       "stats.py",
       "template.html",
+      "map_template.html",
+      "i18n/**",
       "watch-and-deploy.sh",
       "watch-and-deploy.log",
       "drive/viewer/.version"

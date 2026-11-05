@@ -95,3 +95,14 @@ htmlcov/
 
 # Written by web/generate.py at every site build (the library page reads it).
 /web/library/catalog.json
+
+# Written by web/generate.py at every site build: the pages in each language
+# (web/<lang>/, from web/i18n/), every map's page (web/maps/, web/<lang>/maps/)
+# and the stylesheet they share.
+/web/maps/
+/web/[a-z][a-z]/
+/web/[a-z][a-z][a-z]/
+!/web/de/
+/web/de/maps/
+/web/site.css
+/web/sitemap.xml

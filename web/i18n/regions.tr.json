@@ -1,0 +1,318 @@
+{
+ "europe": {
+  "title": "Avrupa",
+  "description": "Birleşik Krallık, İrlanda, Fransa, İspanya, Portekiz, Almanya, İtalya, Hollanda, Belçika, İsviçre, Avusturya, Polonya, Yunanistan, İsveç, Norveç, Finlandiya, Danimarka, Baltık ülkeleri, Ukrayna, Gürcistan, Ermenistan, Azerbaycan, Kıbrıs ve onlarca ülke daha."
+ },
+ "united-states": {
+  "title": "Amerika Birleşik Devletleri",
+  "description": "ABD anakarası — bitişik 48 eyaletin tamamı ve Washington, D.C."
+ },
+ "south-america": {
+  "title": "Güney Amerika",
+  "description": "Güney Amerika anakarası — Kolombiya, Venezuela, Guyana, Surinam, Fransız Guyanası, Ekvador, Peru, Bolivya, Paraguay, Uruguay, Şili, Amazon, And Dağları, Atacama ve Patagonya. (Brezilya ve Arjantin ayrı ZIM dosyaları olarak sunulur.)"
+ },
+ "africa": {
+  "title": "Afrika",
+  "description": "Afrika'nın tamamı — Cezayir, Mısır, Etiyopya, Kenya, Fas, Nijerya, Güney Afrika, Tanzanya ve 40'tan fazla ülke daha."
+ },
+ "indian-subcontinent": {
+  "title": "Hint Altkıtası",
+  "description": "Hindistan, Pakistan, Bangladeş, Sri Lanka, Nepal, Butan ve Maldivler."
+ },
+ "china": {
+  "title": "Çin",
+  "description": "Çin — Pekin, Şanghay, Guangzhou, Shenzhen, Chengdu, Chongqing, Xi’an, Wuhan, Hangzhou, Hong Kong ve Makao; ayrıca Çin Seddi, Yangtze Nehri, Tibet Platosu ve Gobi Çölü."
+ },
+ "russia": {
+  "title": "Rusya",
+  "description": "Rusya — Moskova, Sankt-Peterburg, Novosibirsk, Yekaterinburg, Kazan, Nijniy Novgorod, Soçi, Vladivostok; Volga, Ural Dağları, Kafkasya, Baykal Gölü; Baltık'tan Japon Denizi'ne uzanan Trans-Sibirya Demiryolu."
+ },
+ "australia-nz": {
+  "title": "Avustralya ve Yeni Zelanda",
+  "description": "Avustralya ve Yeni Zelanda — Sidney, Melbourne, Brisbane, Perth, Auckland, Wellington, Büyük Set Resifi, Outback ve Güney Alpleri."
+ },
+ "southeast-asia": {
+  "title": "Güneydoğu Asya",
+  "description": "Tayland, Vietnam, Myanmar, Kamboçya, Laos, Malezya, Singapur, Endonezya, Filipinler, Brunei ve Doğu Timor — Bangkok, Hanoi, Ho Chi Minh Kenti, Yangon, Kuala Lumpur, Cakarta, Manila, Bali, Borneo, Mekong Deltası ve Güney Çin Denizi."
+ },
+ "thailand": {
+  "title": "Tayland",
+  "description": "Tayland — Bangkok, Chiang Mai, Phuket, Pattaya, Ayutthaya, Khon Kaen ve Hat Yai; Andaman Denizi ve Tayland Körfezi'ndeki adalarla birlikte."
+ },
+ "canada": {
+  "title": "Kanada",
+  "description": "Kanada'nın tamamı — Toronto, Montreal, Vancouver, Calgary, Ottawa, Québec, Edmonton, Halifax, Rocky Dağları, Banff, Büyük Göller, Atlantik eyaletleri, Yukon ve Kuzeybatı Toprakları."
+ },
+ "west-asia": {
+  "title": "Batı Asya",
+  "description": "Türkiye, Suriye, Lübnan, İsrail, Filistin, Ürdün, Irak, İran, Kuveyt, Suudi Arabistan, Bahreyn, Katar, BAE, Umman, Yemen ile Mısır, Afganistan ve Pakistan'ın bazı bölümleri."
+ },
+ "central-asia": {
+  "title": "Orta Asya",
+  "description": "Orta Asya — Kazakistan, Özbekistan, Türkmenistan, Tacikistan, Kırgızistan, Afganistan ve Kafkasya. Almatı, Taşkent, Bişkek, Aşkabat, Duşanbe, Kabil, Pamir Dağları ve İpek Yolu."
+ },
+ "korea-mongolia": {
+  "title": "Kore ve Moğolistan",
+  "description": "Kore Yarımadası ve Moğolistan — Seul, Busan, Daegu, Incheon, Pyongyang, Ulan Batur, Darhan; Gobi Çölü, Hangay Dağları, Askerden Arındırılmış Bölge (DMZ) ve Japon Denizi kıyısı."
+ },
+ "caucasus": {
+  "title": "Kafkasya",
+  "description": "Kafkasya — Gürcistan, Ermenistan ve Azerbaycan ile Rusya'nın güneyindeki Kafkasya ve Doğu Anadolu. Tiflis, Erivan, Bakü, Batum, Büyük Kafkas Dağları, Elbruz Dağı, Sevan Gölü ve Hazar kıyısı."
+ },
+ "pacific-islands": {
+  "title": "Pasifik Adaları",
+  "description": "Papua Yeni Gine, Fiji, Solomon Adaları, Vanuatu, Yeni Kaledonya, Palau, Mikronezya, Marshall Adaları, Nauru, Tuvalu ve Kiribati'nin Gilbert Adaları — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa ve Majuro."
+ },
+ "west-africa": {
+  "title": "Batı Afrika",
+  "description": "Nijerya, Gana, Fildişi Sahili, Senegal, Mali, Burkina Faso, Gine, Benin, Togo, Sierra Leone, Liberya ve Nijer — Lagos, Akra, Abidjan, Dakar, Abuja, Bamako, Ouagadougou ve Gine Körfezi kıyısı."
+ },
+ "southern-africa": {
+  "title": "Afrika'nın Güneyi",
+  "description": "Güney Afrika, Namibya, Botsvana, Zimbabve, Mozambik, Zambiya, Malavi, Lesotho ve Esvatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, Kalahari, Kruger ve Ümit Burnu çevresi."
+ },
+ "east-africa": {
+  "title": "Doğu Afrika",
+  "description": "Kenya, Tanzanya, Uganda, Etiyopya, Ruanda, Burundi, Somali ve Güney Sudan — Nairobi, Darüsselam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Kilimanjaro Dağı, Serengeti ve Victoria Gölü."
+ },
+ "central-america-caribbean": {
+  "title": "Orta Amerika ve Karayipler",
+  "description": "Orta Amerika ve Karayipler — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nikaragua, Kosta Rika, Panama, Küba, Jamaika, Hispaniola, Cayman Adaları, Porto Riko, Küçük Antiller ve güney Bahamalar."
+ },
+ "himalayas": {
+  "title": "Himalayalar",
+  "description": "Himalayalar, Karakurum, Hindukuş ve Pamir — Nepal, Butan, Tibet, Sikkim, Ladakh, Keşmir, İndus ve Brahmaputra vadileri. Katmandu, Pokhara, Lhasa, Thimphu, Leh, Hunza, Everest, K2, Kançenjunga ve Annapurna."
+ },
+ "baltics": {
+  "title": "Baltık Ülkeleri",
+  "description": "Estonya, Letonya ve Litvanya — Tallinn, Riga, Vilnius ve Baltık Denizi kıyısı."
+ },
+ "brazil": {
+  "title": "Brezilya",
+  "description": "Brezilya'nın tamamı — São Paulo, Rio de Janeiro, Brasília, Salvador, Belo Horizonte, Fortaleza, Manaus, Amazon, Pantanal, Iguaçu Şelaleleri ve Atlantik kıyısı."
+ },
+ "argentina": {
+  "title": "Arjantin",
+  "description": "Arjantin — Buenos Aires, Córdoba, Rosario, Mendoza, Bariloche, Pampalar, And Dağları, Patagonya ve Ateş Toprakları."
+ },
+ "mexico": {
+  "title": "Meksika",
+  "description": "Meksika'nın tamamı — Mexico City, Guadalajara, Monterrey, Puebla, Tijuana, Cancún ve Riviera Maya, Oaxaca, Yucatán Yarımadası, Aşağı Kaliforniya, Sierra Madre ile hem Pasifik hem de Meksika Körfezi kıyıları."
+ },
+ "ukraine": {
+  "title": "Ukrayna, Moldova ve Batı Rusya",
+  "description": "Kırım dahil Ukrayna ve Moldova'nın tamamı, ayrıca Rusya'nın batı sınır bölgesi — Volgograd, Rostov, Soçi, Krasnodar, Karadeniz kıyısı ve Kafkas Dağları'nın etekleri."
+ },
+ "japan": {
+  "title": "Japonya",
+  "description": "Japonya — dört ana adanın tamamı (Honşu, Hokkaido, Kyuşu, Şikoku), Okinawa ve Ryukyu Takımadaları. Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Fukuoka, Hiroşima ve daha fazlası."
+ },
+ "iran": {
+  "title": "İran",
+  "description": "İran — Hazar Denizi'nden Basra Körfezi'ne; Tahran, İsfahan, Şiraz ve Meşhed dahil."
+ },
+ "bahrain": {
+  "title": "Bahreyn",
+  "description": "Bahreyn — Manama, Muharrak, Rifa, İsa Kenti, Kral Fahd Geçidi ve Havar Adaları; bir sokağı ya da dükkân tabelasını fotoğrafla arayın."
+ },
+ "egypt": {
+  "title": "Mısır",
+  "description": "Mısır — Kahire, İskenderiye, Gize, Luksor, Asvan, Nil Vadisi, Sina Yarımadası ve Kızıldeniz kıyısı."
+ },
+ "switzerland": {
+  "title": "İsviçre ve Alpler",
+  "description": "İsviçre ve çevresindeki Alpler — Zürih, Cenevre, Bern, Basel, Lozan, Luzern, Lugano, St. Moritz, Zermatt ve Matterhorn, Interlaken ve Jungfrau; ayrıca Chamonix ve Mont Blanc, Aosta, Como Gölü, Lihtenştayn, Konstanz Gölü ve batı Tirol."
+ },
+ "switzerland-light": {
+  "title": "İsviçre ve Alpler (Hafif)",
+  "description": "Kısıtlı cihazlar ve yavaş bağlantılar için daha küçük bir İsviçre — tam sürümle aynı kapsam ve arama, ancak uydu görüntüsü yok ve vektör harita ayrıntısı bir yakınlaştırma düzeyi aşağıda sınırlanıyor (z14 yerine z13). 2,1 GB yerine 1,4 GB. Sokaklar, yerler, adresler, rota, arazi ve Wikipedia aynı kalır; harita yalnızca bina ana hatları ölçeğinde daha fazla netleşmez."
+ },
+ "iceland": {
+  "title": "İzlanda",
+  "description": "İzlanda — Reykjavík, Akureyri, Çevre Yolu, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, Batı Fiyortları ve Vatnajökull."
+ },
+ "turkey": {
+  "title": "Türkiye",
+  "description": "Türkiye — İstanbul, Ankara, İzmir, Bursa, Antalya, Konya, Gaziantep, Trabzon, Kapadokya, Pamukkale, Efes, İstanbul Boğazı, Ege kıyıları ve Anadolu platosu."
+ },
+ "south-korea": {
+  "title": "Güney Kore",
+  "description": "Güney Kore — Seul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Adası, DMZ, Seoraksan ve Hallasan."
+ },
+ "taiwan": {
+  "title": "Tayvan",
+  "description": "Tayvan — Taipei, Yeni Taipei, Taichung, Kaohsiung, Tainan, Taoyuan, Hsinchu, Keelung, Hualien; Taroko Kanyonu, Güneş Ay Gölü, Alishan, Yushan, Kenting ile Penghu, Kinmen, Matsu, Yeşil Ada ve Orkide Adası."
+ },
+ "east-coast-us": {
+  "title": "ABD Doğu Kıyısı",
+  "description": "Maine'den Florida'ya ABD Doğu Kıyısı — New York, Boston, Philadelphia, Washington D.C., Atlanta, Miami ve tüm Atlantik sahili."
+ },
+ "midwest-us": {
+  "title": "ABD Orta Batı",
+  "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Kuzey Dakota, Güney Dakota, Nebraska ve Kansas."
+ },
+ "west-coast-us": {
+  "title": "ABD Batı Kıyısı",
+  "description": "ABD Batı Kıyısı: Washington, Oregon ve Kaliforniya — Seattle, Portland, San Francisco, Los Angeles, San Diego ve aradaki her yer."
+ },
+ "central-us": {
+  "title": "Orta ABD",
+  "description": "Dağlık Batı ve çevresi — Utah, Colorado, Wyoming, Montana, Idaho, Nevada, Arizona ve New Mexico. Salt Lake City, Denver, Phoenix, Albuquerque, Yellowstone, Büyük Kanyon ve Rocky Dağları."
+ },
+ "california": {
+  "title": "Kaliforniya",
+  "description": "Kaliforniya'nın tamamı — Oregon sınırından Meksika'ya, Pasifik kıyısından Sierra Nevada'ya."
+ },
+ "hawaii": {
+  "title": "Hawaii",
+  "description": "Hawaii Adaları — Honolulu, Hilo, Kahului; O‘ahu, Maui, Hawai‘i (Büyük Ada), Kaua‘i, Moloka‘i ve Lāna‘i; Mauna Kea, Mauna Loa, Haleakalā, Pearl Harbor ve Nā Pali kıyısı."
+ },
+ "alaska": {
+  "title": "Alaska",
+  "description": "Alaska — Anchorage, Fairbanks, Juneau, Sitka, Ketchikan, Nome, Barrow; Denali, Brooks Sıradağları, Aleut Adaları, Inside Passage, Prince William Körfezi, Yukon ve Arktik."
+ },
+ "new-york-state": {
+  "title": "New York Eyaleti",
+  "description": "New York Eyaleti'nin tamamı — New York City, Albany, Buffalo, Rochester, Syracuse, Yonkers; Long Island, Hudson Vadisi, Catskill Dağları, Adirondack Dağları, Finger Lakes, Niagara Şelalesi ve Thousand Islands."
+ },
+ "florida": {
+  "title": "Florida",
+  "description": "Florida'nın tamamı — Miami, Orlando, Tampa, Jacksonville, St. Petersburg, Tallahassee, Fort Lauderdale; Everglades, Florida Keys, Cape Canaveral, Atlantik ve Meksika Körfezi kıyıları ve Walt Disney World."
+ },
+ "carolinas": {
+  "title": "Karolinalar",
+  "description": "Kuzey ve Güney Karolina — Charlotte, Raleigh, Durham, Greensboro, Winston-Salem, Columbia, Charleston, Myrtle Beach, Wilmington ve Asheville; Blue Ridge ve Great Smoky Dağları, Research Triangle, Outer Banks ve Atlantik kıyısı."
+ },
+ "nyc-metro": {
+  "title": "New York Metropol Bölgesi",
+  "description": "New York'un üç eyalete yayılan metropol bölgesi — Manhattan, Brooklyn, Queens, Bronx, Staten Island, Long Island, Westchester, kuzey New Jersey ve güneybatı Connecticut."
+ },
+ "chicago-metro": {
+  "title": "Chicago Metropol Bölgesi",
+  "description": "Büyük Chicago — şehir ile Cook, DuPage, Lake, Will, Kane ve McHenry ilçeleri; ayrıca Michigan Gölü boyunca kuzeybatı Indiana ve güneydoğu Wisconsin."
+ },
+ "greater-la": {
+  "title": "Büyük Los Angeles",
+  "description": "Los Angeles metropol bölgesi — LA, Long Beach, Anaheim, Santa Monica, Pasadena, Riverside, San Bernardino, Orange County ve Inland Empire; ayrıca Catalina Adası ve Channel Adaları."
+ },
+ "texas": {
+  "title": "Teksas",
+  "description": "Teksas, ABD — Meksika Körfezi kıyısından Rio Grande'ye; Houston, Dallas, San Antonio, Austin, Fort Worth ve El Paso dahil."
+ },
+ "colorado": {
+  "title": "Colorado",
+  "description": "Rocky Dağları eyaleti — Denver, Aspen, Vail, Rocky Mountain Ulusal Parkı ve Kıtasal Su Ayrımı."
+ },
+ "silicon-valley": {
+  "title": "Silikon Vadisi",
+  "description": "San Francisco Körfez Bölgesi — San Francisco, Oakland, Palo Alto, Mountain View, Stanford, Cupertino, San Jose ve Yarımada."
+ },
+ "taipei": {
+  "title": "Taipei",
+  "description": "Taipei — Taipei şehri ve Yeni Taipei'nin merkezi: Ximending, Zhongshan, Xinyi ve Taipei 101, Beitou, Tamsui, Banqiao, Xindian ve Yangmingshan; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "osaka": {
+  "title": "Osaka",
+  "description": "Osaka — Osaka merkezi: Umeda, Namba ve Dotonbori, Shinsaibashi, Tennoji, Osaka Kalesi, Shin-Osaka ve körfez; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "tehran": {
+  "title": "Tahran",
+  "description": "Tahran — Tahran şehri: Azadi Kulesi, Kapalıçarşı ve Gülistan Sarayı, Veliasr Caddesi, Tecriş ve kuzey semtleri, Tahran Üniversitesi; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "cairo": {
+  "title": "Kahire",
+  "description": "Kahire — Kahire ve Gize: Tahrir Meydanı ve Mısır Müzesi, İslami Kahire ve Muiz Caddesi, Han el-Halili, Zamalek, Heliopolis ve Gize piramitleri; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "athens": {
+  "title": "Atina",
+  "description": "Atina — Atina ve Pire: Akropolis, Plaka ve Monastiraki, Sintagma, Kolonaki, Eksarhia ve Pire limanı; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "moscow": {
+  "title": "Moskova",
+  "description": "Moskova — çevre yolunun içindeki Moskova: Kremlin ve Kızıl Meydan, Tverskaya, Arbat, Zamoskvoreçye, Serçe Tepeleri ve Moskova Devlet Üniversitesi; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "kyiv": {
+  "title": "Kiev",
+  "description": "Kiev — Dinyeper'in iki yakasında Kiev: Bağımsızlık Meydanı (Maydan), Kreşçatik, Ayasofya Katedrali, Podil, Peçersk Lavrası ve sol yaka; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "seoul": {
+  "title": "Seul",
+  "description": "Seul — Gyeongbokgung Sarayı ve Insadong, Myeongdong, Itaewon, Hongdae, Han Nehri, Gangnam ve Jamsil; bir sokak tabelasını ya da dükkân adını fotoğrafla arayın."
+ },
+ "washington-dc": {
+  "title": "Washington, D.C.",
+  "description": "Washington, D.C. — ABD'nin başkenti ve çevresindeki metropol bölgesi."
+ },
+ "hispaniola": {
+  "title": "Hispaniola",
+  "description": "Karayipler'deki Hispaniola adası — Haiti ve Dominik Cumhuriyeti."
+ },
+ "france": {
+  "title": "Fransa",
+  "description": "Fransa — Paris, Lyon, Marsilya, Toulouse, Bordeaux, Nice, Strazburg; Alpler, Pireneler, Loire ve Rhône vadileri, Korsika."
+ },
+ "germany": {
+  "title": "Almanya",
+  "description": "Almanya — Berlin, Hamburg, Münih, Köln, Frankfurt, Stuttgart; Ren ve Tuna, Kara Orman, Bavyera Alpleri, Baltık ve Kuzey Denizi kıyıları."
+ },
+ "italy": {
+  "title": "İtalya",
+  "description": "İtalya — Roma, Milano, Napoli, Torino, Floransa, Venedik, Bologna; Alpler ve Dolomitler, Apeninler, Sicilya ve Sardinya."
+ },
+ "poland": {
+  "title": "Polonya",
+  "description": "Polonya — Varşova, Krakov, Łódź, Wrocław, Poznań, Gdańsk; Baltık kıyısı, Mazurya gölleri, Tatra Dağları."
+ },
+ "greece": {
+  "title": "Yunanistan",
+  "description": "Yunanistan — Atina, Selanik, Patras, Heraklion; Mora Yarımadası, Girit, Kiklad ve Onikiada adaları, Olimpos Dağı."
+ },
+ "britain-ireland": {
+  "title": "Britanya ve İrlanda",
+  "description": "Britanya Adaları — Londra, Manchester, Birmingham, Glasgow, Edinburgh, Dublin, Cardiff, Belfast; İskoç Dağlık Bölgesi, Snowdonia, Göller Bölgesi, Wild Atlantic Way."
+ },
+ "iberia": {
+  "title": "İber Yarımadası",
+  "description": "İspanya, Portekiz ve Andorra — Madrid, Barselona, Valensiya, Sevilla, Lizbon, Porto; Pireneler, Meseta, Algarve, Balear Adaları."
+ },
+ "benelux": {
+  "title": "Benelüks",
+  "description": "Hollanda, Belçika ve Lüksemburg — Amsterdam, Rotterdam, Lahey, Brüksel, Anvers, Gent, Lüksemburg şehri; Randstad, Ardenler, Kuzey Denizi kıyısı."
+ },
+ "nordics": {
+  "title": "İskandinav Ülkeleri",
+  "description": "Norveç, İsveç, Finlandiya ve Danimarka — Oslo, Stockholm, Helsinki, Kopenhag, Bergen, Göteborg; fiyortlar, Laponya, Baltık takımadaları."
+ },
+ "austria-czech": {
+  "title": "Avusturya, Çekya ve Slovakya",
+  "description": "Avusturya, Çekya ve Slovakya — Viyana, Prag, Bratislava, Brno, Salzburg, Graz, Innsbruck; Doğu Alpler, Bohemya, Tatra Dağları."
+ },
+ "balkans": {
+  "title": "Balkanlar",
+  "description": "Slovenya, Hırvatistan, Bosna, Sırbistan, Karadağ, Arnavutluk, Kuzey Makedonya ve Kosova — Belgrad, Zagreb, Saraybosna, Ljubljana, Split, Tiran; Dalmaçya kıyısı, Dinar Alpleri."
+ },
+ "carpathians": {
+  "title": "Romanya, Macaristan ve Bulgaristan",
+  "description": "Romanya, Macaristan ve Bulgaristan — Bükreş, Budapeşte, Sofya, Cluj-Napoca, Filibe, Temeşvar; Karpatlar, Tuna Deltası, Karadeniz kıyısı."
+ },
+ "africa-light": {
+  "title": "Afrika (Hafif)",
+  "description": "Uydu görüntüsü olmadan ve 13. yakınlaştırma düzeyiyle sınırlı tüm Afrika — Afrika haritasıyla aynı kapsam, yaklaşık yarı indirme boyutunda. Daha yavaş bağlantılar ve daha küçük cihazlar için hazırlandı."
+ },
+ "north-africa": {
+  "title": "Kuzey Afrika",
+  "description": "Fas, Cezayir, Tunus, Libya, Moritanya ve Batı Sahra — Kazablanka, Cezayir, Tunus, Trablus, Marakeş, Fes; Atlas Dağları, Akdeniz kıyısı, kuzey Sahra."
+ },
+ "horn-of-africa": {
+  "title": "Afrika Boynuzu",
+  "description": "Etiyopya, Somali, Eritre, Cibuti, Güney Sudan ve kuzey Kenya — Addis Ababa, Mogadişu, Asmara, Cibuti şehri, Juba; Etiyopya yaylaları, Rift Vadisi, Kızıldeniz kıyısı."
+ },
+ "central-africa": {
+  "title": "Orta Afrika",
+  "description": "Kongo Demokratik Cumhuriyeti, Kamerun, Çad, Orta Afrika Cumhuriyeti, Gabon, Kongo, Ekvator Ginesi, Angola ve Zambiya — Kinşasa, Luanda, Duala, Yaounde, Ncamena, Lusaka; Kongo Havzası, Albertine Rifti."
+ },
+ "east-polynesia": {
+  "title": "Doğu Polinezya",
+  "description": "Fransız Polinezyası, Cook Adaları ile Austral ve Tuamotu takımadaları — Papeete, Bora Bora, Moorea, Rarotonga; Güney Pasifik'te 3.000 km'ye yayılan atoller ve volkanik adalar."
+ }
+}
