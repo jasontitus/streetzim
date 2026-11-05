@@ -50,7 +50,7 @@ refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
 on rust-built sources).
 
 Usage:
-    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips]
+    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips] [--maplibre]
         [--reshard-search | --rebuild-search [--allow-total-mismatch]
                             [--add-admin-areas REGION.osm.pbf [--bbox W,S,E,N]
                              [--wikidata-title-cache JSON] [--allow-no-admin-areas]]
@@ -756,6 +756,33 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
     return pages_path, n_pages
 
 
+def maplibre_entries() -> dict[str, tuple[str, bytes, str]]:
+    """--maplibre: path -> (mimetype, bytes, title) of the vendored MapLibre
+    (maplibre-gl.js and .css), maplibre-gl-legacy.js and every script font
+    with its licence, each checked against the lock file. A map built before
+    2026-11 has MapLibre 5 and none of the others; a ZIM cannot gain entries
+    in place, so this is how one gets them (a new file with a new UUID)."""
+    from streetzim import viewer_assets as va
+    try:
+        ml = va.vendored("maplibre-gl")
+        legacy = va.vendored(va.MAPLIBRE_LEGACY)
+        fonts = va.vendored(va.SCRIPT_FONTS)
+    except va.IntegrityError as e:
+        raise SystemExit(str(e)) from None
+    out = {
+        "maplibre-gl.js": ("application/javascript", ml["maplibre-gl.js"].read_bytes(), "MapLibre GL JS"),
+        "maplibre-gl.css": ("text/css", ml["maplibre-gl.css"].read_bytes(), "MapLibre GL CSS"),
+        va.MAPLIBRE_LEGACY_ENTRY: ("application/javascript",
+                                   legacy[va.MAPLIBRE_LEGACY_ENTRY].read_bytes(), "MapLibre GL JS 5"),
+    }
+    for name, path in sorted(fonts.items()):
+        if name.endswith(".otf"):
+            out[name] = ("font/otf", path.read_bytes(), name[:-4])
+    out[va.SCRIPT_FONTS_LICENCE] = ("text/plain", fonts["OFL.txt"].read_bytes(),
+                                    "Noto Sans font licence")
+    return out
+
+
 def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      reshard_search: bool = False,
                      rebuild_search: bool = False,
@@ -767,7 +794,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      xapianbuilder_bin: str | None = None,
                      kiwix_poi_pages: bool = False,
                      wikidata_title_cache: str | None = None,
-                     allow_no_admin_areas: bool = False) -> int:
+                     allow_no_admin_areas: bool = False,
+                     maplibre: bool = False) -> int:
     from libzim.reader import Archive
 
     if add_admin_areas and not rebuild_search:
@@ -923,6 +951,11 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
             continue
         replacements[name] = viewer_page(name, VIEWER_DIR, src_cfg)
         print(f"  will swap {name} ← {p} ({len(replacements[name])} B)")
+    # --maplibre: the vendored MapLibre, its MapLibre 5 fallback and the
+    # script fonts, as a build writes them (docs/viewer-supply-chain.md).
+    extras = maplibre_entries() if maplibre else {}
+    for name, (_mime, data, _title) in extras.items():
+        print(f"  will {'swap' if src.has_entry_by_path(name) else 'add'} {name} ({len(data)} B)")
 
     # Resolve the source's main page (typically a redirect chain ending
     # at index.html). Streetzim-pack needs an explicit main path.
@@ -1130,6 +1163,14 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                         dropped_search_files += 1
                     continue
 
+                if path in extras:
+                    e_mime, e_data, e_title = extras[path]
+                    c.add_item(_Item(path, e_mime, title=e_title, data=e_data,
+                                     compress=True, namespace=None))
+                    replaced_paths.add(path)
+                    swapped += 1
+                    continue
+
                 if path in replacements:
                     c.add_item(_Item(path, mime, title=title,
                                      data=_pad_to_slot(path, replacements[path]),
@@ -1173,6 +1214,11 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     kept += 1
                 del data
 
+            for path, (e_mime, e_data, e_title) in extras.items():
+                if path not in replaced_paths:
+                    c.add_item(_Item(path, e_mime, title=e_title, data=e_data,
+                                     compress=True, namespace=None))
+                    swapped += 1
             for path, data in replacements.items():
                 if path in replaced_paths:
                     continue
@@ -1575,8 +1621,13 @@ def main() -> int:
                          "differ from the source manifest's total (e.g. a ZIM "
                          "whose addresses derive_zim stripped). Otherwise that "
                          "is an error.")
+    ap.add_argument("--maplibre", action="store_true",
+                    help="also swap in the vendored MapLibre (maplibre-gl.js/.css) and add "
+                         "maplibre-gl-legacy.js and the script fonts, as a build since "
+                         "2026-11 writes them")
     args = ap.parse_args()
     return swap_viewer_rust(args.src, args.dst,
+                            maplibre=args.maplibre,
                             reshard_chips=args.reshard_chips,
                             reshard_search=args.reshard_search,
                             rebuild_search=args.rebuild_search,
