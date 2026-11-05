@@ -2,6 +2,8 @@
 # Populate web/drive/viewer/ with the bits the Firebase PWA needs:
 #   - resources/viewer/index.html        (canonical viewer — unmodified)
 #   - maplibre-gl.js + .css               (the vendored copy the ZIM builder uses)
+#   - maplibre-gl-legacy.js               (MapLibre 5, for engines MapLibre 6 cannot run in)
+#   - NotoSans*-Regular.otf               (the script fonts the style's font-faces name)
 #   - fzstd.js                            (zstd decoder for ZIM clusters)
 #
 # The PWA's service worker caches these as the "shell" on install; after
@@ -61,6 +63,13 @@ for asset in maplibre-gl.js maplibre-gl.css; do
   cp "resources/vendor/maplibre-gl/$asset" "$OUT/$asset"
   echo "  maplibre     → $OUT/$asset"
 done
+cp "resources/vendor/maplibre-gl-legacy/maplibre-gl-legacy.js" "$OUT/maplibre-gl-legacy.js"
+echo "  maplibre 5   → $OUT/maplibre-gl-legacy.js"
+rm -f "$OUT"/NotoSans*-Regular.otf
+for font in resources/vendor/noto-script-fonts/NotoSans*-Regular.otf; do
+  cp "$font" "$OUT/"
+done
+echo "  script fonts → $OUT/ ($(ls resources/vendor/noto-script-fonts/NotoSans*-Regular.otf | wc -l) files)"
 
 # 3. Download fzstd (MIT) for ZSTD cluster decompression. Lives one dir
 #    up from the viewer — only the service worker consumes it, not the

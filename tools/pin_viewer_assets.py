@@ -3,7 +3,9 @@
 (resources/viewer-assets.lock.json; docs/viewer-supply-chain.md).
 
     python tools/pin_viewer_assets.py --check              # offline; CI runs it
-    python tools/pin_viewer_assets.py --maplibre 5.24.0    # vendor another MapLibre
+    python tools/pin_viewer_assets.py --maplibre 6.16.0    # vendor another MapLibre
+    python tools/pin_viewer_assets.py --maplibre-legacy 5.23.0  # the fallback MapLibre 5
+    python tools/pin_viewer_assets.py --script-fonts       # re-pin the Noto script fonts
     python tools/pin_viewer_assets.py --rtl-text 0.3.0     # vendor the RTL text plugin
     python tools/pin_viewer_assets.py --fonts              # re-pin the glyph ranges
     python tools/pin_viewer_assets.py --prefetch DIR       # fill a cache (Docker image)
@@ -11,9 +13,17 @@
     python tools/pin_viewer_assets.py --prefetch-ocr DIR   # its runtime and models, cached
 
 --maplibre downloads the npm tarball, checks it against the sha512 the npm
-registry publishes for that version, and writes dist/maplibre-gl.js,
+registry publishes for that version, and writes maplibre-gl.js,
 dist/maplibre-gl.css and LICENSE.txt to resources/vendor/maplibre-gl/ with
-their SHA-256s in the lock file. --rtl-text does the same for
+their SHA-256s in the lock file. MapLibre 6 is published only as an ES
+module and a module worker; maplibre-gl.js is both of them as one classic
+script (classic_maplibre below), so the viewer loads it as it always has
+and its worker starts from a blob: URL wherever the page runs.
+--maplibre-legacy vendors a MapLibre 5 as it is published (dist/maplibre-gl.js,
+as resources/vendor/maplibre-gl-legacy/maplibre-gl-legacy.js), for web
+engines MapLibre 6 does not run in. --script-fonts downloads the Noto Sans
+fonts of SCRIPT_FONTS from a commit of notofonts/notofonts.github.io into
+resources/vendor/noto-script-fonts/ and pins them. --rtl-text does the same for
 @mapbox/mapbox-gl-rtl-text (dist/mapbox-gl-rtl-text.js and LICENSE.md, to
 resources/vendor/mapbox-gl-rtl-text/). --fonts downloads every range of every
 fontstack from the font CDN and records its SHA-256 (null for a range the
@@ -48,6 +58,7 @@ import base64
 import hashlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -67,9 +78,11 @@ from streetzim.glyph_fallback import is_glyph_pbf  # noqa: E402
 NPM_REGISTRY = "https://registry.npmjs.org"
 # lock-file key -> (npm package, licence, {tarball member: vendored file name})
 NPM_PACKAGES: dict[str, tuple[str, str, dict[str, str]]] = {
-    "maplibre-gl": ("maplibre-gl", "BSD-3-Clause (LICENSE.txt)", {
-        "package/dist/maplibre-gl.js": "maplibre-gl.js",
-        "package/dist/maplibre-gl.css": "maplibre-gl.css",
+    # MapLibre 5, the last UMD build, for engines MapLibre 6 cannot run in
+    # (no WebGL2 or no class static blocks: before Safari 16.4 / Chrome 94).
+    # MapLibre 6 itself is pinned by pin_maplibre, which converts it.
+    va.MAPLIBRE_LEGACY: ("maplibre-gl", "BSD-3-Clause (LICENSE.txt)", {
+        "package/dist/maplibre-gl.js": va.MAPLIBRE_LEGACY_ENTRY,
         "package/LICENSE.txt": "LICENSE.txt",
     }),
     va.RTL_TEXT_PLUGIN: ("@mapbox/mapbox-gl-rtl-text",
@@ -214,6 +227,197 @@ def _npm_tarball(package: str, version: str) -> tuple[bytes, dict[str, str]]:
     check_npm_integrity(tgz, meta["dist"]["integrity"])
     return tgz, {"version": version, "tarball": meta["dist"]["tarball"],
                  "integrity": meta["dist"]["integrity"]}
+
+
+MAPLIBRE_LICENCE = "BSD-3-Clause (LICENSE.txt)"
+# What the conversion replaces `import.meta.url` with. MapLibre reads it
+# only to find its worker next to the module, and the converted file sets
+# the worker itself.
+_SCRIPT_URL = "__maplibreScriptUrl"
+_EXPORT = re.compile(r"export\s*\{([^{}]*)\}\s*;?\s*(//# sourceMappingURL=\S*\s*)?\Z")
+_NAME = re.compile(r"[A-Za-z_$][\w$]*\Z")
+
+
+def _split_export(src: str, what: str) -> tuple[str, list[tuple[str, str]]]:
+    """The module's code without its closing `export {...}` (and source-map
+    comment), and that statement's (local, exported) names."""
+    m = _EXPORT.search(src)
+    if not m:
+        raise SystemExit(f"{what}: no export statement at the end; the conversion "
+                         "needs updating for this MapLibre")
+    pairs: list[tuple[str, str]] = []
+    for item in m.group(1).split(","):
+        if not item.strip():
+            continue
+        local, _, exported = (x.strip() for x in item.strip().partition(" as "))
+        exported = exported or local
+        if not _NAME.match(local) or not _NAME.match(exported):
+            raise SystemExit(f"{what}: cannot read the export {item.strip()!r}")
+        pairs.append((local, exported))
+    return src[:m.start()], pairs
+
+
+def node_check(js: str, what: str) -> None:
+    """Parse ``js`` as a classic script with node (a .cjs file): an import,
+    an export, `import.meta` or a top-level await left in it fails here, not
+    in a reader's browser."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "check.cjs"
+        f.write_text(js, encoding="utf-8")
+        r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(f"{what} does not parse as a classic script:\n{r.stderr[-2000:]}")
+
+
+def classic_maplibre(main: str, worker: str, version: str) -> str:
+    """MapLibre 6's ES module (dist/maplibre-gl.mjs) and module worker
+    (dist/maplibre-gl-worker.mjs) as one classic script that sets
+    `globalThis.maplibregl`, as the UMD build of MapLibre 5 did.
+
+    The module runs in a strict function instead of a module scope; its
+    `export` becomes the object `maplibregl` (the same names), and
+    `import.meta.url` the URL of the script. The worker carries no import
+    and exports only itself, so without that export it runs as a module or
+    a classic worker alike; it is embedded as a string and started from a
+    blob: URL (setWorkerUrl), so it loads wherever the page does: in Kiwix
+    apps a module script or a worker at a zim: or content: URL may not.
+    Nothing else changes, byte for byte."""
+    body, exports = _split_export(main, "maplibre-gl.mjs")
+    names = [e for _, e in exports]
+    if "setWorkerUrl" not in names or len(set(names)) != len(names):
+        raise SystemExit("maplibre-gl.mjs: unexpected exports (no setWorkerUrl, or a name twice)")
+    if _SCRIPT_URL in body or "import.meta" in worker:
+        raise SystemExit("unexpected source: the conversion's names are taken, or the "
+                         "worker reads import.meta")
+    body = body.replace("import.meta.url", _SCRIPT_URL)
+    if "import.meta" in body:
+        raise SystemExit("maplibre-gl.mjs uses import.meta beyond import.meta.url")
+    worker_body, worker_exports = _split_export(worker, "maplibre-gl-worker.mjs")
+    if [e for _, e in worker_exports] != ["default"]:
+        raise SystemExit(f"maplibre-gl-worker.mjs exports {worker_exports}, not only a default")
+    node_check(worker_body, "the worker")
+    api = ",\n".join(f"  {json.dumps(e)}: {loc}" for loc, e in exports)
+    out = (
+        f"/* MapLibre GL JS {version}, BSD-3-Clause (LICENSE.txt): dist/maplibre-gl.mjs and\n"
+        " * dist/maplibre-gl-worker.mjs of the npm package as one classic script, written by\n"
+        " * tools/pin_viewer_assets.py (classic_maplibre). */\n"
+        "(function () {\n\"use strict\";\n"
+        f"var {_SCRIPT_URL} = (typeof document !== \"undefined\" && document.currentScript &&\n"
+        "  document.currentScript.src) || (typeof location !== \"undefined\" ? location.href : \"\");\n"
+        + body.rstrip() + "\n"
+        f"var __maplibreApi = {{\n{api}\n}};\n"
+        "__maplibreApi.setWorkerUrl(URL.createObjectURL(new Blob([" + json.dumps(worker_body)
+        + "], { type: \"text/javascript\" })));\n"
+        "globalThis.maplibregl = __maplibreApi;\n"
+        "})();\n")
+    node_check(out, "maplibre-gl.js")
+    return out
+
+
+def pin_maplibre(version: str) -> None:
+    """Vendor MapLibre GL JS ``version`` (6 or later) from its npm tarball,
+    checked against the registry's sha512, converted by classic_maplibre."""
+    if int(version.split(".")[0]) < 6:
+        raise SystemExit("--maplibre takes MapLibre 6 or later; a MapLibre 5 is "
+                         "--maplibre-legacy")
+    tgz, source = _npm_tarball("maplibre-gl", version)
+    members: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tar:
+        for member in ("package/dist/maplibre-gl.mjs", "package/dist/maplibre-gl-worker.mjs",
+                       "package/dist/maplibre-gl.css", "package/LICENSE.txt"):
+            f = tar.extractfile(member)
+            if f is None:
+                raise SystemExit(f"{member} not in {source['tarball']}")
+            members[member.rsplit("/", 1)[1]] = f.read()
+    out_dir = va.VENDOR / "maplibre-gl"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = {
+        "maplibre-gl.js": classic_maplibre(members["maplibre-gl.mjs"].decode("utf-8"),
+                                           members["maplibre-gl-worker.mjs"].decode("utf-8"),
+                                           version).encode("utf-8"),
+        "maplibre-gl.css": members["maplibre-gl.css"],
+        "LICENSE.txt": members["LICENSE.txt"],
+    }
+    files: dict[str, str] = {}
+    for fname, data in written.items():
+        (out_dir / fname).write_bytes(data)
+        files[fname] = va.sha256_hex(data)
+        print(f"  {fname}: {len(data):,} bytes, sha256 {files[fname]}")
+    for stale in sorted(set(p.name for p in out_dir.iterdir()) - set(written)):
+        (out_dir / stale).unlink()
+        print(f"  removed {stale}")
+    lock = read_lock_or_empty()
+    lock["maplibre-gl"] = {
+        "version": version,
+        "licence": MAPLIBRE_LICENCE,
+        "tarball": source["tarball"],
+        "integrity": source["integrity"],
+        "converted": "dist/maplibre-gl.mjs + dist/maplibre-gl-worker.mjs -> maplibre-gl.js "
+                     "(tools/pin_viewer_assets.py classic_maplibre)",
+        "files": files,
+    }
+    write_lock(lock)
+    print(f"vendored maplibre-gl {version} in {out_dir.relative_to(ROOT)}; "
+          "run scripts/sync-drive-viewer.sh for the website copy")
+
+
+# Noto Sans fonts for scripts MapLibre 6 draws from a font file (the
+# style's font-faces, 130-lowzoom-lakes.js): the complex scripts of India
+# and Sri Lanka, which no glyph range can carry (a letter's shape depends on
+# its neighbours), and two simple ones Open Sans lacks. Unhinted OpenType
+# (CFF), the smallest build Noto publishes. The viewer's table (SZ_SCRIPT_FONTS)
+# names the same files and Unicode ranges; tests/test_script_fonts.py
+# keeps the two equal.
+SCRIPT_FONTS_COMMIT = "ac9cdcd317b3c34c7578f609189c963c7eeff3c5"
+SCRIPT_FONTS_BASE = ("https://raw.githubusercontent.com/notofonts/notofonts.github.io/"
+                     f"{SCRIPT_FONTS_COMMIT}/fonts")
+SCRIPT_FONTS: dict[str, list[str]] = {
+    "Devanagari": ["U+0900-097F", "U+1CD0-1CFF", "U+A8E0-A8FF"],
+    "Bengali": ["U+0980-09FF"],
+    "Gurmukhi": ["U+0A00-0A7F"],
+    "Gujarati": ["U+0A80-0AFF"],
+    "Oriya": ["U+0B00-0B7F"],
+    "Tamil": ["U+0B80-0BFF"],
+    "Telugu": ["U+0C00-0C7F"],
+    "Kannada": ["U+0C80-0CFF"],
+    "Malayalam": ["U+0D00-0D7F"],
+    "Sinhala": ["U+0D80-0DFF", "U+111E0-111FF"],
+    "OlChiki": ["U+1C50-1C7F"],
+    "MeeteiMayek": ["U+ABC0-ABFF", "U+AAE0-AAFF"],
+}
+
+
+def script_font_file(script: str) -> str:
+    return f"NotoSans{script}-Regular.otf"
+
+
+def pin_script_fonts() -> None:
+    out_dir = va.VENDOR / va.SCRIPT_FONTS
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, str] = {}
+
+    def write(fname: str, data: bytes) -> None:
+        (out_dir / fname).write_bytes(data)
+        files[fname] = va.sha256_hex(data)
+        print(f"  {fname}: {len(data):,} bytes, sha256 {files[fname]}")
+
+    for script in SCRIPT_FONTS:
+        fname = script_font_file(script)
+        data = va.fetch(f"{SCRIPT_FONTS_BASE}/NotoSans{script}/unhinted/otf/{fname}")
+        if data[:4] != b"OTTO":
+            raise SystemExit(f"{fname}: not an OpenType (CFF) font")
+        write(fname, data)
+    write("OFL.txt", (va.VENDOR / "noto-sans" / "OFL.txt").read_bytes())
+    lock = read_lock_or_empty()
+    lock[va.SCRIPT_FONTS] = {
+        "version": f"notofonts/notofonts.github.io@{SCRIPT_FONTS_COMMIT}",
+        "licence": "Noto Sans, SIL Open Font License 1.1 (OFL.txt)",
+        "base_url": SCRIPT_FONTS_BASE,
+        "ranges": {script_font_file(s): r for s, r in SCRIPT_FONTS.items()},
+        "files": files,
+    }
+    write_lock(lock)
+    print(f"vendored {len(SCRIPT_FONTS)} Noto Sans script fonts in {out_dir.relative_to(ROOT)}")
 
 
 def pin_ocr_engine() -> None:
@@ -430,11 +634,6 @@ def pin_npm(name: str, version: str) -> None:
     print(f"vendored {package} {version} in {out_dir.relative_to(ROOT)}")
 
 
-def pin_maplibre(version: str) -> None:
-    pin_npm("maplibre-gl", version)
-    print("run scripts/sync-drive-viewer.sh for the website copy")
-
-
 def _pin_ranges(base_url: str, fontstacks: dict[str, str], ranges: list[str],
                 old: dict[str, Any]) -> tuple[dict[str, dict[str, str | None]], int, int]:
     """Download each range of each stack: ({stack: {range: sha256 or None}},
@@ -555,8 +754,12 @@ def check() -> None:
         raise SystemExit("lock file: font settings differ from tools/pin_viewer_assets.py's "
                          "defaults (edit DEFAULT_FONTS/DEFAULT_FALLBACK and run --fonts, or "
                          "pin with --fonts --keep-lock to keep them):\n  " + "\n  ".join(drift))
-    for name in NPM_PACKAGES:
+    for name in ("maplibre-gl", *NPM_PACKAGES, va.SCRIPT_FONTS):
         va.vendored(name, lock)
+    if lock[va.SCRIPT_FONTS].get("ranges") != {script_font_file(s): r
+                                              for s, r in SCRIPT_FONTS.items()}:
+        raise SystemExit("lock file: the script fonts differ from SCRIPT_FONTS "
+                         "(run --script-fonts)")
     ranges = va.font_ranges(lock)
     stacks = lock["fonts"]["fontstacks"]
     for stack in stacks:
@@ -580,7 +783,9 @@ def check() -> None:
     if bad:
         raise SystemExit(f"lock file: malformed sha256 for {bad[0].stack}/{bad[0].range_key}")
     ocr = check_ocr(lock)
-    print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} and "
+    print(f"ok: maplibre-gl {lock['maplibre-gl']['version']} "
+          f"(legacy {lock[va.MAPLIBRE_LEGACY]['version']}), "
+          f"{len(SCRIPT_FONTS)} script fonts and "
           f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock file; "
           f"{len(ranges) - fb_count} glyph ranges and {fb_count} fallback ranges pinned{ocr}")
 
@@ -590,6 +795,10 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--check", action="store_true", help="verify vendored files (offline)")
     g.add_argument("--maplibre", metavar="VERSION", help="vendor this MapLibre GL JS version")
+    g.add_argument("--maplibre-legacy", metavar="VERSION",
+                   help="vendor this MapLibre GL JS 5 as the fallback for older engines")
+    g.add_argument("--script-fonts", action="store_true",
+                   help="re-pin the Noto Sans fonts the style's font-faces name")
     g.add_argument("--rtl-text", metavar="VERSION",
                    help="vendor this @mapbox/mapbox-gl-rtl-text version")
     g.add_argument("--fonts", action="store_true", help="re-pin every glyph range from the CDN")
@@ -610,6 +819,12 @@ def main() -> int:
             check()
         elif args.maplibre:
             pin_maplibre(args.maplibre)
+        elif args.maplibre_legacy:
+            if not args.maplibre_legacy.startswith("5."):
+                ap.error("--maplibre-legacy takes a MapLibre 5")
+            pin_npm(va.MAPLIBRE_LEGACY, args.maplibre_legacy)
+        elif args.script_fonts:
+            pin_script_fonts()
         elif args.rtl_text:
             pin_npm(va.RTL_TEXT_PLUGIN, args.rtl_text)
         elif args.fonts:

@@ -1,13 +1,14 @@
 {
  "_comment": "Written by tools/pin_viewer_assets.py; see docs/viewer-supply-chain.md. Do not edit by hand.",
  "maplibre-gl": {
-  "version": "5.23.0",
+  "version": "6.16.0",
   "licence": "BSD-3-Clause (LICENSE.txt)",
-  "tarball": "https://registry.npmjs.org/maplibre-gl/-/maplibre-gl-5.23.0.tgz",
-  "integrity": "sha512-aou8YBNFS8uVtDWFWt0W/6oorfl18wt+oIA8fnXk1kivjkbtXi9gGrQvflTpwrR3hG13aWdIdbYWeN0NFMV7ag==",
+  "tarball": "https://registry.npmjs.org/maplibre-gl/-/maplibre-gl-6.16.0.tgz",
+  "integrity": "sha512-gApO66EMtoDZuio680RUBvskR7ahFd/NNhLN4tBAs+Y7FeT4gQV8zVFgYVMRmFxQznOEzecW19w6xOd9XjZjiA==",
+  "converted": "dist/maplibre-gl.mjs + dist/maplibre-gl-worker.mjs -> maplibre-gl.js (tools/pin_viewer_assets.py classic_maplibre)",
   "files": {
-   "maplibre-gl.js": "e5b398823af45165124aef0b7e43ade5e1fc28d22807a5646da3ba38b8bfdc55",
-   "maplibre-gl.css": "ab1e70d59ec40465bae7e7030da2f3ccf28133fd502e62bd598eefbadfd7a732",
+   "maplibre-gl.js": "2055fa6225f4079d6a6ead072aab152d52f9a6a40ac51c8a4e4b64caaf8fe985",
+   "maplibre-gl.css": "a90798a1953017790e590f7e1bd35ff103a8a4263972cb47290b78adf86f8c20",
    "LICENSE.txt": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2"
   }
  },
@@ -1037,6 +1038,78 @@
    "tamil.txt": "85b541352ae18dc6ba6d47152d8bf8adff6b0266e605d2eef2990c1bf466117b",
    "telugu.txt": "42f83f5d3fdb50778e4fa5b66c58d99a59ab7792151c5e74f34b8ffd7b61c9d6",
    "LICENSE.txt": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+  }
+ },
+ "maplibre-gl-legacy": {
+  "version": "5.23.0",
+  "licence": "BSD-3-Clause (LICENSE.txt)",
+  "tarball": "https://registry.npmjs.org/maplibre-gl/-/maplibre-gl-5.23.0.tgz",
+  "integrity": "sha512-aou8YBNFS8uVtDWFWt0W/6oorfl18wt+oIA8fnXk1kivjkbtXi9gGrQvflTpwrR3hG13aWdIdbYWeN0NFMV7ag==",
+  "files": {
+   "maplibre-gl-legacy.js": "e5b398823af45165124aef0b7e43ade5e1fc28d22807a5646da3ba38b8bfdc55",
+   "LICENSE.txt": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2"
+  }
+ },
+ "noto-script-fonts": {
+  "version": "notofonts/notofonts.github.io@ac9cdcd317b3c34c7578f609189c963c7eeff3c5",
+  "licence": "Noto Sans, SIL Open Font License 1.1 (OFL.txt)",
+  "base_url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/ac9cdcd317b3c34c7578f609189c963c7eeff3c5/fonts",
+  "ranges": {
+   "NotoSansDevanagari-Regular.otf": [
+    "U+0900-097F",
+    "U+1CD0-1CFF",
+    "U+A8E0-A8FF"
+   ],
+   "NotoSansBengali-Regular.otf": [
+    "U+0980-09FF"
+   ],
+   "NotoSansGurmukhi-Regular.otf": [
+    "U+0A00-0A7F"
+   ],
+   "NotoSansGujarati-Regular.otf": [
+    "U+0A80-0AFF"
+   ],
+   "NotoSansOriya-Regular.otf": [
+    "U+0B00-0B7F"
+   ],
+   "NotoSansTamil-Regular.otf": [
+    "U+0B80-0BFF"
+   ],
+   "NotoSansTelugu-Regular.otf": [
+    "U+0C00-0C7F"
+   ],
+   "NotoSansKannada-Regular.otf": [
+    "U+0C80-0CFF"
+   ],
+   "NotoSansMalayalam-Regular.otf": [
+    "U+0D00-0D7F"
+   ],
+   "NotoSansSinhala-Regular.otf": [
+    "U+0D80-0DFF",
+    "U+111E0-111FF"
+   ],
+   "NotoSansOlChiki-Regular.otf": [
+    "U+1C50-1C7F"
+   ],
+   "NotoSansMeeteiMayek-Regular.otf": [
+    "U+ABC0-ABFF",
+    "U+AAE0-AAFF"
+   ]
+  },
+  "files": {
+   "NotoSansDevanagari-Regular.otf": "5f7aa01bf11eee437e1ac0d94b4bc4fb118be4b0ed4f66a18b3a0f64603457c8",
+   "NotoSansBengali-Regular.otf": "23c9db67164f5a8f3e15371f13f567eb74932fe58e04fb4b185e9e848c49c12c",
+   "NotoSansGurmukhi-Regular.otf": "768977af8da4b4697c35467e993972c1ed46ba1809876e0a7923415f7238995c",
+   "NotoSansGujarati-Regular.otf": "40c38b3656adaefaba8122c7e1cb1afc9a8b13e332ac0db1f6ffb77008794e79",
+   "NotoSansOriya-Regular.otf": "0dc68ff84aa73d0fd6a17d25b617fe530fbbba50a72ea4607defc91e583da414",
+   "NotoSansTamil-Regular.otf": "27a125025250a574a021c0615bf9a6fc7118871ac51370e5d35d126b2e57b76f",
+   "NotoSansTelugu-Regular.otf": "23896eb41e6e38db3a6fb1726491c03ee5821d887dbbaf1d10f2c78c81789c73",
+   "NotoSansKannada-Regular.otf": "5df46a9dbf0957e51f85cf1db585c3885f84bd5612fb5a5e00f0013c5c38c672",
+   "NotoSansMalayalam-Regular.otf": "baffcff657697bdc0d063745e281e5eaa6add260553556e401fded22d093648c",
+   "NotoSansSinhala-Regular.otf": "589c798e77cc9cbbae7a1c27ba702e540cdf5628745d7323544e76d683db25cc",
+   "NotoSansOlChiki-Regular.otf": "051f215e1d3f7ba8412df6b3d5fcbd334d1164b9056d2a12cac95d12a3ef0e04",
+   "NotoSansMeeteiMayek-Regular.otf": "cbcc91ebc42f793b789a4f430fb1717b57a4ebde9a57e62989a500869d3d6b5e",
+   "OFL.txt": "7713cfc8e3c36d5ec4aa3d6cffe7500a1b3310f8a86d914b8ea09c2a9dee7c2d"
   }
  }
 }

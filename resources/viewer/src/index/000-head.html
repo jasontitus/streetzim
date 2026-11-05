@@ -124,6 +124,34 @@
   add('meta', { name: 'theme-color', content: '#0b1220' });
 })();
 </script>
-<!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM -->
+<!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM.
+     maplibre-gl.js is MapLibre 6 in maps built since 2026-11 and 5.23
+     before. MapLibre 6 needs WebGL2 and class static blocks (Safari 16.4,
+     Chrome 94), so an engine without them asks first for
+     maplibre-gl-legacy.js (5.23), which the newer maps also carry; a map
+     without it answers 404 and the next script takes maplibre-gl.js, its
+     own 5.23. A maplibre-gl.js that fails to run falls back the same way.
+     document.write keeps the library loading before the scripts below, as
+     a plain script tag does. -->
 <link rel="stylesheet" href="maplibre-gl.css">
-<script src="maplibre-gl.js"></script>
+<script>
+(function() {
+  var modern = false;
+  try {
+    new Function('class A { static { } }');
+    var gl = document.createElement('canvas').getContext('webgl2');
+    modern = !!gl;
+    var lose = gl && gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+  } catch (e) {}
+  var files = modern ? ['maplibre-gl.js', 'maplibre-gl-legacy.js']
+                     : ['maplibre-gl-legacy.js', 'maplibre-gl.js'];
+  window.__szMapLibreNext = files[1];
+  document.write('<script src="' + files[0] + '"><\/script>');
+})();
+</script>
+<script>
+if (typeof window.maplibregl === 'undefined') {
+  document.write('<script src="' + window.__szMapLibreNext + '"><\/script>');
+}
+</script>

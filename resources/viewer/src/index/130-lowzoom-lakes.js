@@ -835,6 +835,41 @@ function makeStyle(config) {
     ]
   };
   _szAddClipMask(style, config);
+  var faces = _szFontFaces(window.maplibregl);
+  if (faces) style["font-faces"] = faces;
   return _szThemeStyle(style, _szPrefersDark());
+}
+
+// Fonts for the scripts MapLibre 6 draws from a font file, by Unicode
+// range: the complex scripts of India and Sri Lanka, whose letters change
+// shape with their neighbours, so no glyph range can hold them, and two
+// simple ones Open Sans lacks. The same table as tools/pin_viewer_assets.py
+// SCRIPT_FONTS (tests/test_script_fonts.py). Maps built since 2026-11
+// carry the files next to maplibre-gl.js and the PWA serves its own copies
+// (sw.js); MapLibre fetches one only when a label needs it, and draws with
+// the device's fonts where a file is missing. Every Open Sans stack uses
+// these Regular faces (no bold or italic is bundled). MapLibre 5 has no
+// font-faces and draws none of these scripts.
+var SZ_SCRIPT_FONTS = {
+  "NotoSansDevanagari-Regular.otf": ["U+0900-097F", "U+1CD0-1CFF", "U+A8E0-A8FF"],
+  "NotoSansBengali-Regular.otf": ["U+0980-09FF"],
+  "NotoSansGurmukhi-Regular.otf": ["U+0A00-0A7F"],
+  "NotoSansGujarati-Regular.otf": ["U+0A80-0AFF"],
+  "NotoSansOriya-Regular.otf": ["U+0B00-0B7F"],
+  "NotoSansTamil-Regular.otf": ["U+0B80-0BFF"],
+  "NotoSansTelugu-Regular.otf": ["U+0C00-0C7F"],
+  "NotoSansKannada-Regular.otf": ["U+0C80-0CFF"],
+  "NotoSansMalayalam-Regular.otf": ["U+0D00-0D7F"],
+  "NotoSansSinhala-Regular.otf": ["U+0D80-0DFF", "U+111E0-111FF"],
+  "NotoSansOlChiki-Regular.otf": ["U+1C50-1C7F"],
+  "NotoSansMeeteiMayek-Regular.otf": ["U+ABC0-ABFF", "U+AAE0-AAFF"]
+};
+function _szFontFaces(lib) {
+  if (!lib || !lib.Map || typeof lib.Map.prototype.setFontFaces !== 'function') return null;
+  var faces = [];
+  for (var file in SZ_SCRIPT_FONTS) {
+    faces.push({ "url": "zimtile://" + baseUrl + file, "unicode-range": SZ_SCRIPT_FONTS[file] });
+  }
+  return { "OpenSansRegular": faces, "OpenSansBold": faces, "OpenSansItalic": faces };
 }
 

@@ -52,7 +52,14 @@ function showFatalError(title, err, url) {
     });
   }
 }
-dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent });
+// The MapLibre this page runs: 6 in maps built since 2026-11 (and in the
+// PWA), 5 in older maps and on engines MapLibre 6 cannot run in (the loader
+// in part 000). Everything that differs between the two asks this.
+function szMapLibreMajor() {
+  try { return parseInt(maplibregl.getVersion(), 10) || 5; } catch (e) { return 5; }
+}
+dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent,
+              maplibre: window.maplibregl && maplibregl.getVersion ? maplibregl.getVersion() : null });
 
 // Register a custom protocol that fetches with retry logic and concurrency
 // limiting. Kiwix Desktop (especially macOS) drops requests when too many

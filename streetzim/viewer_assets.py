@@ -4,8 +4,13 @@ resources/viewer-assets.lock.json records, and tools/pin_viewer_assets.py
 writes (docs/viewer-supply-chain.md):
 
 - MapLibre GL JS: vendored in resources/vendor/maplibre-gl/ from the npm
-  tarball (checked against the registry's sha512 when pinned); the build
-  checks each file's SHA-256 before packing it and never fetches it.
+  tarball (checked against the registry's sha512 when pinned; MapLibre 6
+  converted to one classic script); the build checks each file's SHA-256
+  before packing it and never fetches it.
+- MapLibre GL JS 5 (``maplibre-gl-legacy``): vendored as published, the
+  fallback for web engines MapLibre 6 does not run in.
+- Noto Sans script fonts (``noto-script-fonts``): vendored from a commit of
+  notofonts/notofonts.github.io, the files the style's font-faces name.
 - mapbox-gl-rtl-text (MapLibre's RTL text plugin): vendored in
   resources/vendor/mapbox-gl-rtl-text/ from its npm tarball, and checked
   the same way. Required like MapLibre: a missing or altered copy stops the
@@ -96,6 +101,16 @@ def vendored(name: str, lock: dict[str, Any] | None = None,
                 f"({name} {entry['version']}); {PIN_HELP}")
         out[fname] = path
     return out
+
+
+# MapLibre 5 (its UMD build, as published) for web engines MapLibre 6 does
+# not run in; the viewer's head (000-head.html) picks one at load.
+MAPLIBRE_LEGACY = "maplibre-gl-legacy"
+MAPLIBRE_LEGACY_ENTRY = "maplibre-gl-legacy.js"
+# Noto Sans fonts that the style's font-faces name for complex scripts
+# (tools/pin_viewer_assets.py SCRIPT_FONTS); ZIM entries at the top level,
+# next to maplibre-gl.js.
+SCRIPT_FONTS = "noto-script-fonts"
 
 
 def vendored_maplibre(lock: dict[str, Any] | None = None,

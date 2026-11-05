@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-0df78633eb';
+const SHELL_CACHE = 'streetzim-drive-shell-a30e35ef72';
 
 const SHELL_URLS = [
   './',
@@ -52,10 +52,18 @@ const VIEWER_SHELL_NAMES = new Set([
   'index', 'index.html',
   'places', 'places.html',
   'maplibre-gl.js', 'maplibre-gl.css',
+  // MapLibre 5 for engines MapLibre 6 cannot run in (the viewer's loader
+  // asks for it there); maps built before 2026-11 do not carry it.
+  'maplibre-gl-legacy.js',
   // Routing worker source — served from Firebase for the PWA shell and
   // embedded directly in rebuilt ZIMs for native Kiwix.
   'routing-worker.js',
 ]);
+
+// The Noto Sans script fonts the viewer's style names in its font-faces
+// (part 130 SZ_SCRIPT_FONTS). Shell files too: maps built before 2026-11
+// lack them, and the site's copies draw those maps' Indian-script labels.
+const SCRIPT_FONT = /^NotoSans[A-Za-z]+-Regular\.otf$/;
 
 // ---------- IndexedDB helpers (no dependency) ----------
 
@@ -808,7 +816,8 @@ self.addEventListener('fetch', (event) => {
     // ignoreSearch, so storing `?debug=1` / `?bust=<ts>` variants
     // separately only accumulated ~370 KB copies of the viewer HTML.
     const cacheKey = url.origin + url.pathname;
-    if (VIEWER_SHELL_NAMES.has(firstSegment) && !restNoSlash.includes('/')) {
+    if ((VIEWER_SHELL_NAMES.has(firstSegment) || SCRIPT_FONT.test(firstSegment)) &&
+        !restNoSlash.includes('/')) {
       // Shell asset — NETWORK-FIRST. Stale cached HTML/JS was the
       // 2026-04-25 frustration: deploys were live on Firebase but
       // users saw old bundles for an indefinite window because the

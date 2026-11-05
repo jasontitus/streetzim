@@ -124,9 +124,37 @@
   add('meta', { name: 'theme-color', content: '#0b1220' });
 })();
 </script>
-<!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM -->
+<!-- MapLibre GL JS and CSS are loaded from embedded files in the ZIM.
+     maplibre-gl.js is MapLibre 6 in maps built since 2026-11 and 5.23
+     before. MapLibre 6 needs WebGL2 and class static blocks (Safari 16.4,
+     Chrome 94), so an engine without them asks first for
+     maplibre-gl-legacy.js (5.23), which the newer maps also carry; a map
+     without it answers 404 and the next script takes maplibre-gl.js, its
+     own 5.23. A maplibre-gl.js that fails to run falls back the same way.
+     document.write keeps the library loading before the scripts below, as
+     a plain script tag does. -->
 <link rel="stylesheet" href="maplibre-gl.css">
-<script src="maplibre-gl.js"></script>
+<script>
+(function() {
+  var modern = false;
+  try {
+    new Function('class A { static { } }');
+    var gl = document.createElement('canvas').getContext('webgl2');
+    modern = !!gl;
+    var lose = gl && gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+  } catch (e) {}
+  var files = modern ? ['maplibre-gl.js', 'maplibre-gl-legacy.js']
+                     : ['maplibre-gl-legacy.js', 'maplibre-gl.js'];
+  window.__szMapLibreNext = files[1];
+  document.write('<script src="' + files[0] + '"><\/script>');
+})();
+</script>
+<script>
+if (typeof window.maplibregl === 'undefined') {
+  document.write('<script src="' + window.__szMapLibreNext + '"><\/script>');
+}
+</script>
 <script>
 // BEGIN sz-i18n-runtime
 // resources/viewer/i18n/runtime.js (comments there); docs/i18n.md
@@ -2611,7 +2639,11 @@ link.style.display = 'none';
 });
 }
 }
-dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent });
+function szMapLibreMajor() {
+try { return parseInt(maplibregl.getVersion(), 10) || 5; } catch (e) { return 5; }
+}
+dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAgent,
+maplibre: window.maplibregl && maplibregl.getVersion ? maplibregl.getVersion() : null });
 (function() {
 if (window.__szUnsupported) return;
 var MAX_CONCURRENT = 6;
@@ -2722,7 +2754,8 @@ if (!window.__szUnsupported) fetchConfig(1)
 szUseLanguage(config && config.language, location.search);
 try {
 var canvas = document.createElement('canvas');
-var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+var gl = szMapLibreMajor() >= 6 ? canvas.getContext('webgl2')
+: canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
 if (!gl) throw new Error('WebGL not available');
 } catch (e) {
 szFatalPage({
@@ -3962,7 +3995,31 @@ var style = {
 ]
 };
 _szAddClipMask(style, config);
+var faces = _szFontFaces(window.maplibregl);
+if (faces) style["font-faces"] = faces;
 return _szThemeStyle(style, _szPrefersDark());
+}
+var SZ_SCRIPT_FONTS = {
+"NotoSansDevanagari-Regular.otf": ["U+0900-097F", "U+1CD0-1CFF", "U+A8E0-A8FF"],
+"NotoSansBengali-Regular.otf": ["U+0980-09FF"],
+"NotoSansGurmukhi-Regular.otf": ["U+0A00-0A7F"],
+"NotoSansGujarati-Regular.otf": ["U+0A80-0AFF"],
+"NotoSansOriya-Regular.otf": ["U+0B00-0B7F"],
+"NotoSansTamil-Regular.otf": ["U+0B80-0BFF"],
+"NotoSansTelugu-Regular.otf": ["U+0C00-0C7F"],
+"NotoSansKannada-Regular.otf": ["U+0C80-0CFF"],
+"NotoSansMalayalam-Regular.otf": ["U+0D00-0D7F"],
+"NotoSansSinhala-Regular.otf": ["U+0D80-0DFF", "U+111E0-111FF"],
+"NotoSansOlChiki-Regular.otf": ["U+1C50-1C7F"],
+"NotoSansMeeteiMayek-Regular.otf": ["U+ABC0-ABFF", "U+AAE0-AAFF"]
+};
+function _szFontFaces(lib) {
+if (!lib || !lib.Map || typeof lib.Map.prototype.setFontFaces !== 'function') return null;
+var faces = [];
+for (var file in SZ_SCRIPT_FONTS) {
+faces.push({ "url": "zimtile://" + baseUrl + file, "unicode-range": SZ_SCRIPT_FONTS[file] });
+}
+return { "OpenSansRegular": faces, "OpenSansBold": faces, "OpenSansItalic": faces };
 }
 // BEGIN map-theme
 var _SZ_DARK_HALO = 'rgba(0,0,0,0.75)';
@@ -4347,8 +4404,12 @@ return null;
 }
 function initPoiIcons(map) {
 var failed = {};
-map.on('styleimagemissing', function(e) {
-var id = e && e.id;
+if (typeof map.setMissingStyleImageResolver === 'function') {
+map.setMissingStyleImageResolver(function(id) { draw(id); });
+} else {
+map.on('styleimagemissing', function(e) { draw(e && e.id); });
+}
+function draw(id) {
 if (!id || id.indexOf(_SZ_POI_IMAGE_PREFIX) !== 0 || failed[id]) return;
 if (map.hasImage(id)) return;
 var icon = _szRenderPoiIcon(id.slice(_SZ_POI_IMAGE_PREFIX.length), window.devicePixelRatio);
@@ -4359,7 +4420,7 @@ map.addImage(id, icon.image, { pixelRatio: icon.pixelRatio });
 failed[id] = true;
 dbg('poi icon failed', id, describeError(err));
 }
-});
+}
 }
 // BEGIN rtl-text
 function initRtlText(map, config, lib) {
@@ -4368,6 +4429,7 @@ var file = config && config.rtlTextPlugin;
 if (!file || typeof file !== 'string' || /^[a-z]+:|^\/|\.\./i.test(file)) return false;
 if (!lib || typeof lib.setRTLTextPlugin !== 'function' ||
 typeof lib.getRTLTextPluginStatus !== 'function') return false;
+if (typeof lib.getVersion === 'function' && parseInt(lib.getVersion(), 10) >= 6) return false;
 var started = false;
 function check() {
 if (started || lib.getRTLTextPluginStatus() !== 'requested') return;
@@ -4397,7 +4459,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '9b2a21ba';
+var SZ_VIEWER_BUILD = 'd25875e1';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {

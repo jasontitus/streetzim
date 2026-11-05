@@ -145,7 +145,8 @@ def check_viewer_assets() -> list[CheckResult]:
     vendored MapLibre and RTL text plugin."""
     out = []
     # Hard requirements — build will ship these verbatim from here.
-    # maplibre-gl.js/.css and mapbox-gl-rtl-text.js are vendored in
+    # maplibre-gl.js/.css, maplibre-gl-legacy.js, the script fonts and
+    # mapbox-gl-rtl-text.js are vendored in
     # resources/vendor/ (nothing is downloaded) and checked against
     # resources/viewer-assets.lock.json below, as the build does.
     must = [
@@ -172,10 +173,11 @@ def check_viewer_assets() -> list[CheckResult]:
             sys.path.insert(0, str(ROOT))
         from streetzim import viewer_assets as va
         lock = va.load_lock()
-        for pkg in ("maplibre-gl", va.RTL_TEXT_PLUGIN):
+        for pkg in ("maplibre-gl", va.MAPLIBRE_LEGACY, va.SCRIPT_FONTS, va.RTL_TEXT_PLUGIN):
             va.vendored(pkg, lock)
         out.append(CheckResult("viewer.vendored", "pass",
-            f"maplibre-gl {lock['maplibre-gl']['version']}, "
+            f"maplibre-gl {lock['maplibre-gl']['version']} "
+            f"(legacy {lock[va.MAPLIBRE_LEGACY]['version']}), script fonts, "
             f"{va.RTL_TEXT_PLUGIN} {lock[va.RTL_TEXT_PLUGIN]['version']} match the lock"))
     except Exception as e:
         out.append(CheckResult("viewer.vendored", "fail", str(e),

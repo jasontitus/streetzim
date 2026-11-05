@@ -3,7 +3,7 @@
 // builder writes into the ZIM next to maplibre-gl.js and names in
 // map-config.json as `rtlTextPlugin`. Older ZIMs lack both, and in-place
 // patching cannot add the file, so without the key this is a no-op and
-// labels render as they always have.
+// labels render as they always have. MapLibre 6 needs no plugin.
 //
 // Loaded only when needed: MapLibre flips its plugin status to 'requested'
 // the first time a tile carries RTL text, and nothing is fetched before
@@ -19,6 +19,9 @@ function initRtlText(map, config, lib) {
   if (!file || typeof file !== 'string' || /^[a-z]+:|^\/|\.\./i.test(file)) return false;
   if (!lib || typeof lib.setRTLTextPlugin !== 'function' ||
       typeof lib.getRTLTextPluginStatus !== 'function') return false;
+  // MapLibre 6 orders and joins right-to-left text itself (its
+  // setRTLTextPlugin is deprecated, and a plugin would replace that).
+  if (typeof lib.getVersion === 'function' && parseInt(lib.getVersion(), 10) >= 6) return false;
   var started = false;
   function check() {
     if (started || lib.getRTLTextPluginStatus() !== 'requested') return;

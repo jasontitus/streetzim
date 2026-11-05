@@ -62,10 +62,12 @@ if (!window.__szUnsupported) fetchConfig(1)
     // URL asks for another (?uilang=de, ?uilang=qps). Translates the static
     // markup now; everything rendered from here on asks szT (docs/i18n.md).
     szUseLanguage(config && config.language, location.search);
-    // Check WebGL support before initializing MapLibre
+    // Check WebGL support before initializing MapLibre (6 draws with WebGL2
+    // only; the loader in part 000 gives an engine without it MapLibre 5).
     try {
       var canvas = document.createElement('canvas');
-      var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      var gl = szMapLibreMajor() >= 6 ? canvas.getContext('webgl2')
+        : canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) throw new Error('WebGL not available');
     } catch (e) {
       szFatalPage({

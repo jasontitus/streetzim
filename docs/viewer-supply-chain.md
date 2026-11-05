@@ -6,9 +6,11 @@ build". This note records what was done and why.
 
 ## 1. Pinned third-party files
 
-Every ZIM ships MapLibre GL JS (`maplibre-gl.js`, `maplibre-gl.css`),
+Every ZIM ships MapLibre GL JS (`maplibre-gl.js`, `maplibre-gl.css`; since
+2026-11 also `maplibre-gl-legacy.js` and the Noto Sans script fonts, see
+[MapLibre 6](#maplibre-6-its-fallback-and-the-script-fonts) below),
 MapLibre's RTL text plugin (`mapbox-gl-rtl-text.js`, which shapes Arabic and
-Hebrew labels) and 768 SDF glyph ranges (`fonts/<stack>/<start>-<end>.pbf`, 3 Open Sans
+Hebrew labels for MapLibre 5) and 768 SDF glyph ranges (`fonts/<stack>/<start>-<end>.pbf`, 3 Open Sans
 fontstacks × 256 ranges, about 1.2 MB). Builds used to download both from
 unpkg and the openmaptiles font CDN each time, with no check on the bytes.
 
@@ -38,7 +40,9 @@ task fetches no fonts at all.
 
 ```
 python tools/pin_viewer_assets.py --check            # offline: vendored files vs lock (CI)
-python tools/pin_viewer_assets.py --maplibre 5.24.0  # vendor another MapLibre from npm
+python tools/pin_viewer_assets.py --maplibre 6.16.0  # vendor another MapLibre from npm
+python tools/pin_viewer_assets.py --maplibre-legacy 5.23.0  # the MapLibre 5 fallback
+python tools/pin_viewer_assets.py --script-fonts     # re-pin the Noto Sans script fonts
 python tools/pin_viewer_assets.py --rtl-text 0.3.0   # vendor another RTL text plugin from npm
 python tools/pin_viewer_assets.py --fonts            # re-pin every range from the CDN
 python tools/pin_viewer_assets.py --prefetch DIR     # fill a cache, e.g. <--dl>/cache/viewer-assets
@@ -60,7 +64,9 @@ committing.
 - **Published ZIMs.** In-place viewer patching (`docs/viewer-slots.md`)
   replaces only the three slot files, never `maplibre-gl.js`. A MapLibre bump
   therefore reaches new builds only, and a viewer change must keep working
-  with the MapLibre that older ZIMs carry (5.23.0 at the time of writing).
+  with the MapLibre that older ZIMs carry (5.23.0 in every map built before
+  2026-11) as well as the current one. The PWA (/drive/) serves the site's
+  own copies, so every map opened there gets the current MapLibre.
 
 ### Fallback glyphs: Arabic, Hebrew and other scripts Open Sans lacks
 
@@ -91,9 +97,10 @@ Hebrew: U+0590–05FF, U+FB1D–FB4F; Armenian with its ligatures U+FB13–FB17;
 Georgian: Mkhedruli U+10A0–10FF, Mtavruli U+1C90–1CBF, which
 `text-transform: uppercase` turns Mkhedruli suburb, state and country
 labels into, and Nuskhuri U+2D00–2D2F; …). The style, the viewer and every other
-range are unchanged byte for byte. Scripts that need shaping MapLibre does
-not do (Devanagari, Bengali, …) are left out, and CJK is drawn by the
-browser (`localIdeographFontFamily`).
+range are unchanged byte for byte. Scripts whose letters change shape with
+their neighbours (Devanagari, Bengali, …) cannot be held in glyph ranges and
+are left out: MapLibre 6 draws them from the script fonts (below), MapLibre 5
+not at all. CJK is drawn by the browser (`localIdeographFontFamily`).
 
 Only the scripts a map's labels use are merged: the builder reads the
 values its vector tiles carry under the keys the style displays
@@ -120,10 +127,13 @@ range as it was, and the build log warns which style lost which scripts.
 `tests/test_glyph_fallback.py` and `tests/test_glyph_fallback_corners.py`
 cover the merge (against a first-font-wins composite oracle) and the scan.
 
-Known limits: MapLibre does no complex shaping beyond what the RTL plugin
+Known limits: MapLibre 5 does no complex shaping beyond what the RTL plugin
 does for Arabic, so Thai and Lao combining marks are placed by their glyph
 offsets alone and stacked marks (a tone mark over an upper vowel) can
-collide.
+collide. MapLibre 6 draws Thai, Lao, Tibetan, Myanmar and Khmer with the
+device's fonts instead, shaped by the browser, and uses these ranges only
+for the scripts it does not shape (Arabic's joined forms, Hebrew,
+Armenian, Georgian).
 
 Baseline: font-maker writes each glyph's `top` one pixel of the 24 px SDF
 higher than node-fontnik does for the same outline (U+0500–0513, drawn
@@ -137,6 +147,59 @@ a plain composite by that field only.
 `tests/test_font_download.py` cover a
 tampered vendored file, a wrong hash, a CDN serving other bytes (fatal even
 with the escape hatch), a corrupt cache entry, and an offline second build.
+
+### MapLibre 6, its fallback, and the script fonts
+
+MapLibre 6 is published only as an ES module (`dist/maplibre-gl.mjs`) that
+starts a module worker (`dist/maplibre-gl-worker.mjs`) by URL. Kiwix apps
+serve a map from `zim:`/`content:` URLs or a service worker, where a module
+script or a worker started by URL may not load, and the viewer is one
+classic script that needs `maplibregl` before it runs. So `--maplibre`
+converts the two files into one classic `maplibre-gl.js`
+(`classic_maplibre` in the tool): the module's code runs in a strict
+function; its closing `export {...}` becomes the global `maplibregl` with
+the same names; `import.meta.url` becomes the script's own URL; the worker,
+whose only export is itself, is embedded as a string without that export
+and handed to `setWorkerUrl` as a `blob:` URL (as MapLibre 5's UMD build
+did). Nothing else changes. The tool parses both results as classic
+scripts with node and stops on anything else left in them (an import, an
+export, `import.meta` beyond `.url`, a top-level await). The output is a
+pure function of the tarball: `tests/test_maplibre6.py` rebuilds it from a
+cached tarball (`viewer-assets/npm/maplibre-gl-<version>.tgz`) and compares
+bytes.
+
+MapLibre 6 needs WebGL2 and class static blocks (Safari 16.4, Chrome 94,
+Firefox 93). For other engines every map built since 2026-11 also carries
+MapLibre 5.23 as `maplibre-gl-legacy.js` (`--maplibre-legacy`, vendored as
+published). The viewer's head (part 000) tests for both and loads
+`maplibre-gl.js` or `maplibre-gl-legacy.js` with `document.write`, so the
+library still loads before the viewer's scripts; if the first choice is
+missing (an older map has no legacy file) or does not run, the next script
+loads the other. `maplibre-gl.css` is MapLibre 6's; its differences from
+5.23's are cosmetic. The viewer asks `szMapLibreMajor()` (part 110) where
+the two differ: WebGL2 for 6 (part 120), the style's `font-faces` (130),
+`setMissingStyleImageResolver` for the POI icons (136; MapLibre 6's
+`styleimagemissing` only notifies), and the RTL text plugin, which
+MapLibre 6 does not need (it orders and joins right-to-left text itself)
+and is not given (137).
+
+The script fonts (`--script-fonts`, `resources/vendor/noto-script-fonts/`,
+OFL) are unhinted OpenType Noto Sans fonts from a pinned commit of
+notofonts/notofonts.github.io: Devanagari, Bengali, Gurmukhi, Gujarati,
+Oriya, Tamil, Telugu, Kannada, Malayalam, Sinhala, Ol Chiki and Meetei
+Mayek, 0.8 MB in all. The style names them in `font-faces` by Unicode
+range for each Open Sans stack (`SZ_SCRIPT_FONTS`, part 130; the tool's
+`SCRIPT_FONTS` and the lock hold the same table, and a test keeps all three
+equal). MapLibre 6 fetches a file through the `zimtile:` protocol only when
+a label needs one of its letters, and draws a cluster of letters with it as
+the browser shapes it. A file a map lacks fails that fetch, and MapLibre
+draws those letters with the device's fonts. The PWA serves the fonts and
+`maplibre-gl-legacy.js` from the site (`sw.js` treats them as shell files),
+so maps built before 2026-11 get them there too.
+
+Known limits: MapLibre 6 rasterizes one grapheme cluster at a time, so a
+conjunct that spans clusters (Kannada ಕನ್ನಡ, Gurmukhi ਮ੍ਰਿ) is drawn in
+pieces; readable, not right. Bold labels use the Regular faces.
 
 ### The sign reader (`--ocr`)
 

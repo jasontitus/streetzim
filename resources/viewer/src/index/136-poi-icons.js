@@ -196,8 +196,14 @@ function _szRenderPoiIcon(icon, ratio) {
 
 function initPoiIcons(map) {
   var failed = {};
-  map.on('styleimagemissing', function(e) {
-    var id = e && e.id;
+  // MapLibre 6 asks a resolver for a missing image (its styleimagemissing
+  // event only notifies); MapLibre 5 asks the event's listeners.
+  if (typeof map.setMissingStyleImageResolver === 'function') {
+    map.setMissingStyleImageResolver(function(id) { draw(id); });
+  } else {
+    map.on('styleimagemissing', function(e) { draw(e && e.id); });
+  }
+  function draw(id) {
     if (!id || id.indexOf(_SZ_POI_IMAGE_PREFIX) !== 0 || failed[id]) return;
     if (map.hasImage(id)) return;
     var icon = _szRenderPoiIcon(id.slice(_SZ_POI_IMAGE_PREFIX.length), window.devicePixelRatio);
@@ -208,5 +214,5 @@ function initPoiIcons(map) {
       failed[id] = true;
       dbg('poi icon failed', id, describeError(err));
     }
-  });
+  }
 }
