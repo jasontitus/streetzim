@@ -28,13 +28,22 @@ with this profile; the world tiles change only when they are rebuilt.
 `lupa`).
 `streetzim.languages.MATRIX_TILE_LANGUAGES` is the list (21: ar de el es fa
 fr he hi id it ja ko nl pl pt ru th tr uk vi zh). A map whose row in
-`cloud/region-languages.tsv` lists at most `REGION_TILE_ROW_MAX` (7)
+`cloud/region-languages.tsv` lists at most `REGION_TILE_ROW_MAX` (32)
 languages also carries its own languages that the matrix lacks
 (`default_tile_languages`): Switzerland adds Romansh (`rm`), the Baltics
-`et lt lv`, the Balkans `bs cnr hr mk sl sq sr`; a longer row (Europe 38,
-Africa 31, the Indian subcontinent 22) adds none. Romansh is a build
+`et lt lv`, the Balkans `bs cnr hr mk sl sq sr`, Africa `am sw zgh`, East
+India `bn ur`. Only Europe's row (38) is longer and adds none (until
+2026-11-05 the limit was 7; Europe stays out for now, as its next build
+would carry 22 more languages). Romansh is a build
 language (`ISO639_3`, "roh"); the other region codes are in
-`REGION_ISO639_3`. The contract (`streetzim/languages.py`):
+`REGION_ISO639_3`. A short row's language that tiles cannot label yet is
+left out of the labels and still recorded as the map's region language
+(`region_label_languages`, which `ops/region-ml-tiles.py` and the
+`streetzim` command both use): South India's Kannada and Malayalam, Punjabi
+in Northwest India. Each region's languages that may be left out are listed
+for it (`UNLABELLED_REGION_LANGUAGES`, checked against the table); any
+other code a row names that tiles cannot label stops the tiles (a typo:
+`pa` for Papiamento's `pap`). The contract (`streetzim/languages.py`):
 `check()` (`--language`, the CLI's choices, the offliner definition)
 accepts `ISO639_3` only; `iso639_3()` (ZIM metadata) and
 `tile_languages()` (`--tile-languages`, the `.langs` sidecar) accept both.

@@ -317,5 +317,53 @@
  "east-polynesia": {
   "title": "East Polynesia",
   "description": "French Polynesia, the Cook Islands & the Austral and Tuamotu archipelagos — Papeete, Bora Bora, Mo‘orea, Rarotonga; atolls and volcanic islands across 3,000 km of the South Pacific."
+ },
+ "india-northwest": {
+  "title": "Northwest India",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu & Kashmir and Ladakh — New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur and Udaipur; the Thar Desert, the Punjab plains and the western Himalaya."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh & Central India",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh and Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra and the Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior and Raipur; the Ganges plain, the Garhwal and Kumaon Himalaya, and the forests of Kanha."
+ },
+ "india-east": {
+  "title": "East India",
+  "description": "West Bengal, Bihar, Jharkhand and Odisha — Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri and Darjeeling; the Ganges delta and the Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Northeast India",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura and Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl and Agartala; the Brahmaputra valley, Kaziranga and the eastern Himalaya."
+ },
+ "india-south": {
+  "title": "South India",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana and Puducherry, with Lakshadweep and the Andaman and Nicobar Islands — Chennai, Bengaluru, Hyderabad, Kochi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam and Port Blair; the Western Ghats and the Kerala backwaters."
+ },
+ "india-west": {
+  "title": "West India",
+  "description": "Maharashtra, Gujarat, Goa, and Dadra and Nagar Haveli and Daman and Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara and Panaji; the Konkan coast, the Western Ghats and the Rann of Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Northwest India (Light)",
+  "description": "Northwest India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh & Central India (Light)",
+  "description": "Uttar Pradesh & Central India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
+ },
+ "india-east-light": {
+  "title": "East India (Light)",
+  "description": "East India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
+ },
+ "india-northeast-light": {
+  "title": "Northeast India (Light)",
+  "description": "Northeast India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
+ },
+ "india-south-light": {
+  "title": "South India (Light)",
+  "description": "South India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
+ },
+ "india-west-light": {
+  "title": "West India (Light)",
+  "description": "West India without satellite imagery and capped at zoom 13 — the same places in a smaller download, for slower connections and smaller devices."
  }
 }

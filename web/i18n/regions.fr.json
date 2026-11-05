@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Polynésie orientale",
   "description": "La Polynésie française, les îles Cook et les archipels des Australes et des Tuamotu — Papeete, Bora-Bora, Moorea, Rarotonga ; atolls et îles volcaniques sur 3 000 km du Pacifique Sud."
+ },
+ "india-northwest": {
+  "title": "Nord-Ouest de l'Inde",
+  "description": "Delhi, le Pendjab, l'Haryana, Chandigarh, le Rajasthan, l'Himachal Pradesh, le Jammu-et-Cachemire et le Ladakh — New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur et Udaipur ; le désert du Thar, les plaines du Pendjab et l'Himalaya occidental."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh et Inde centrale",
+  "description": "L'Uttar Pradesh, l'Uttarakhand, le Madhya Pradesh et le Chhattisgarh — Lucknow, Kanpur, Varanasi (Bénarès), Agra et le Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior et Raipur ; la plaine du Gange, l'Himalaya du Garhwal et du Kumaon, et les forêts de Kanha."
+ },
+ "india-east": {
+  "title": "Est de l'Inde",
+  "description": "Le Bengale-Occidental, le Bihar, le Jharkhand et l'Odisha — Calcutta, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri et Darjeeling ; le delta du Gange et les Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Nord-Est de l'Inde",
+  "description": "L'Assam, le Meghalaya, l'Arunachal Pradesh, le Nagaland, le Manipur, le Mizoram, le Tripura et le Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl et Agartala ; la vallée du Brahmapoutre, Kaziranga et l'Himalaya oriental."
+ },
+ "india-south": {
+  "title": "Sud de l'Inde",
+  "description": "Le Tamil Nadu, le Kerala, le Karnataka, l'Andhra Pradesh, le Telangana et Pondichéry, ainsi que le Lakshadweep et les îles Andaman-et-Nicobar — Chennai, Bangalore, Hyderabad, Kochi, Thiruvananthapuram, Mysore, Madurai, Visakhapatnam et Port Blair ; les Ghâts occidentaux et les backwaters du Kerala."
+ },
+ "india-west": {
+  "title": "Ouest de l'Inde",
+  "description": "Le Maharashtra, le Gujarat, Goa, ainsi que Dadra et Nagar Haveli et Daman et Diu — Mumbai (Bombay), Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara et Panaji ; la côte du Konkan, les Ghâts occidentaux et le Rann de Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Nord-Ouest de l'Inde (version légère)",
+  "description": "La carte du Nord-Ouest de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh et Inde centrale (version légère)",
+  "description": "La carte de l'Uttar Pradesh et du centre de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
+ },
+ "india-east-light": {
+  "title": "Est de l'Inde (version légère)",
+  "description": "La carte de l'Est de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
+ },
+ "india-northeast-light": {
+  "title": "Nord-Est de l'Inde (version légère)",
+  "description": "La carte du Nord-Est de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
+ },
+ "india-south-light": {
+  "title": "Sud de l'Inde (version légère)",
+  "description": "La carte du Sud de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
+ },
+ "india-west-light": {
+  "title": "Ouest de l'Inde (version légère)",
+  "description": "La carte de l'Ouest de l'Inde, sans images satellite et avec un zoom limité au niveau 13 — les mêmes lieux dans un téléchargement plus léger, pour les connexions lentes et les petits appareils."
  }
 }

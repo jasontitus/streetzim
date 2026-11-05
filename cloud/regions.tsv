@@ -65,6 +65,19 @@ southeast-asia	Southeast Asia	92.0,-11.2,141.5,28.7	continent	13.7563,100.5018	1
 australia-nz	Australia & New Zealand	96.5,-50.0,180.0,-8.0	continent	-33.8688,151.2093	-35.2809,149.1300	Sydney	west 110.0 -> 96.5 on 2026-10-20 (Christmas Island and Cocos, in Geofabrik australia, were outside the box)
 canada	Canada	-141.0,41.5,-52.0,83.5	continent	43.6532,-79.3832	45.4215,-75.6972	Toronto	
 indian-subcontinent	Indian Subcontinent	60.0,-1.5,98.0,38.0	continent	28.6139,77.2090	27.1767,78.0081	Mumbai	~4h build; border cut; south 5.0 -> -1.5 on 2026-10-20 (the Maldives, on its card, were outside the box)
+# India in six zones (2026-11-05), Geofabrik's, after the zonal councils, each with a Light variant; cut from the subcontinent's data
+india-northwest	Northwest India	69.3,22.9,79.6,35.8	local	28.6139,77.2090	26.9124,75.7873	Amritsar	new 2026-11-05: Geofabrik asia/india/northern-zone; border cut
+india-northwest-light	Northwest India (Light)	69.3,22.9,79.6,35.8	local	28.6139,77.2090	26.9124,75.7873	Amritsar	new 2026-11-05: Light variant of india-northwest (no satellite imagery, z13); same box and extracts
+india-central	Uttar Pradesh & Central India	73.9,17.6,84.8,31.6	local	27.1767,78.0081	26.8467,80.9462	Varanasi	new 2026-11-05: Geofabrik asia/india/central-zone; border cut
+india-central-light	Uttar Pradesh & Central India (Light)	73.9,17.6,84.8,31.6	local	27.1767,78.0081	26.8467,80.9462	Varanasi	new 2026-11-05: Light variant of india-central (no satellite imagery, z13); same box and extracts
+india-east	East India	81.2,17.6,90.0,27.6	local	22.5726,88.3639	23.5204,87.3119	Patna	new 2026-11-05: Geofabrik asia/india/eastern-zone; border cut
+india-east-light	East India (Light)	81.2,17.6,90.0,27.6	local	22.5726,88.3639	23.5204,87.3119	Patna	new 2026-11-05: Light variant of india-east (no satellite imagery, z13); same box and extracts
+india-northeast	Northeast India	87.9,21.8,97.5,29.5	local	26.1445,91.7362	26.6338,92.8000	Shillong	new 2026-11-05: Geofabrik asia/india/north-eastern-zone; border cut
+india-northeast-light	Northeast India (Light)	87.9,21.8,97.5,29.5	local	26.1445,91.7362	26.6338,92.8000	Shillong	new 2026-11-05: Light variant of india-northeast (no satellite imagery, z13); same box and extracts
+india-south	South India	70.1,5.8,95.6,20.0	local	12.9716,77.5946	12.2958,76.6394	Kochi	new 2026-11-05: Geofabrik asia/india/southern-zone; border cut
+india-south-light	South India (Light)	70.1,5.8,95.6,20.0	local	12.9716,77.5946	12.2958,76.6394	Kochi	new 2026-11-05: Light variant of india-south (no satellite imagery, z13); same box and extracts
+india-west	West India	67.5,14.3,81.0,24.8	local	19.0760,72.8777	18.5204,73.8567	Ahmedabad	new 2026-11-05: Geofabrik asia/india/western-zone; border cut
+india-west-light	West India (Light)	67.5,14.3,81.0,24.8	local	19.0760,72.8777	18.5204,73.8567	Ahmedabad	new 2026-11-05: Light variant of india-west (no satellite imagery, z13); same box and extracts
 china	China	73.0,15.7,135.0,53.7	continent	39.90432,116.40533	31.23044,121.47389	Beijing	~6h build; border cut (asia/china: Hong Kong and Macau in, Taiwan out); north 53.5 -> 53.7 on 2026-10-20 (the Amur bend at Mohe reaches 53.56); south 18.0 -> 15.7 (the Paracels, in asia/china, had no map once Southeast Asia is cut)
 africa	Africa	-18.0,-35.0,52.0,38.0	continent	-1.2921,36.8219	-4.0435,39.6682	Cairo	
 south-america	South America	-82.0,-56.0,-32.0,13.5	continent	-34.6037,-58.3816	-32.9442,-60.6505	Lima	~15h build

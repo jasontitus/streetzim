@@ -210,16 +210,27 @@ def region_row(rid):
 
 def languages(rid=None):
     """$STREETZIM_TILE_LANGUAGES, else the matrix plus, for a region whose
-    row lists few languages, its own (streetzim.languages
-    .default_tile_languages: Switzerland adds Romansh)."""
+    row lists few languages, its own that tiles can label (streetzim.languages
+    .region_label_languages: Switzerland adds Romansh; South India its Telugu
+    and Tamil, not Kannada or Malayalam). A short row's language tiles cannot
+    label stops here unless the region is known to have no labels in it yet
+    (UNLABELLED_REGION_LANGUAGES[rid]): otherwise it is a typo."""
     from streetzim import languages as L
     text = os.environ.get("STREETZIM_TILE_LANGUAGES")
     try:
         if text:
             return L.tile_languages(text)
-        return L.default_tile_languages(region_row(rid) if rid else None)
+        tiles, unlabelled = L.region_label_languages(region_row(rid) if rid else None)
     except ValueError as e:
         fail(f"tile languages{' of ' + rid if rid and not text else ''}: {e}")
+    unknown = [x for x in unlabelled if x not in L.UNLABELLED_REGION_LANGUAGES.get(rid, ())]
+    if unknown:
+        fail(f"tile languages of {rid}: {', '.join(unknown)}: neither a language tiles can label nor one "
+             "this region is known to have no labels in yet (streetzim/languages.py UNLABELLED_REGION_LANGUAGES)")
+    if unlabelled:
+        print(f"region-ml-tiles: {rid}: {','.join(unlabelled)}: no labels in tiles yet (the map records them "
+              "as its region's languages)", file=sys.stderr, flush=True)
+    return tiles
 
 
 def timeout_for(pbf):

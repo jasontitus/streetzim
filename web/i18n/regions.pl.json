@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Polinezja Wschodnia",
   "description": "Polinezja Francuska, Wyspy Cooka, Wyspy Australskie i archipelag Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; atole i wyspy wulkaniczne rozsiane na 3000 km południowego Pacyfiku."
+ },
+ "india-northwest": {
+  "title": "Północno-zachodnie Indie",
+  "description": "Delhi, Pendżab, Hariana, Czandigarh, Radżastan, Himachal Pradesh, Dżammu i Kaszmir oraz Ladakh – Nowe Delhi, Dżajpur, Amritsar, Ludhiana, Czandigarh, Shimla, Srinagar, Leh, Jodhpur i Udaipur; pustynia Thar, równiny Pendżabu i zachodnie Himalaje."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh i środkowe Indie",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh i Chhattisgarh – Lucknow, Kanpur, Waranasi, Agra z Tadż Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior i Raipur; Nizina Gangesu, Himalaje Garhwalu i Kumaonu oraz lasy Kanha."
+ },
+ "india-east": {
+  "title": "Wschodnie Indie",
+  "description": "Bengal Zachodni, Bihar, Jharkhand i Odisha – Kalkuta, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaja, Siliguri i Dardżyling; delta Gangesu i Sundarbany."
+ },
+ "india-northeast": {
+  "title": "Północno-wschodnie Indie",
+  "description": "Asam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura i Sikkim – Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl i Agartala; dolina Brahmaputry, park narodowy Kaziranga i wschodnie Himalaje."
+ },
+ "india-south": {
+  "title": "Południowe Indie",
+  "description": "Tamilnadu, Kerala, Karnataka, Andhra Pradesh, Telangana i Puducherry, a także Lakszadiwy oraz Andamany i Nikobary – Ćennaj, Bengaluru, Hajdarabad, Koczin, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam i Port Blair; Ghaty Zachodnie i rozlewiska Kerali."
+ },
+ "india-west": {
+  "title": "Zachodnie Indie",
+  "description": "Maharasztra, Gudźarat, Goa oraz Dadra i Nagar Haveli i Daman i Diu – Mumbaj, Pune, Ahmadabad, Surat, Nagpur, Nashik, Vadodara i Panaji; wybrzeże Konkanu, Ghaty Zachodnie i słone bagna Rann of Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Północno-zachodnie Indie (Light)",
+  "description": "Mapa północno-zachodnich Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh i środkowe Indie (Light)",
+  "description": "Mapa stanu Uttar Pradesh i środkowych Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
+ },
+ "india-east-light": {
+  "title": "Wschodnie Indie (Light)",
+  "description": "Mapa wschodnich Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
+ },
+ "india-northeast-light": {
+  "title": "Północno-wschodnie Indie (Light)",
+  "description": "Mapa północno-wschodnich Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
+ },
+ "india-south-light": {
+  "title": "Południowe Indie (Light)",
+  "description": "Mapa południowych Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
+ },
+ "india-west-light": {
+  "title": "Zachodnie Indie (Light)",
+  "description": "Mapa zachodnich Indii bez zdjęć satelitarnych, z powiększeniem do poziomu 13 – te same miejsca w mniejszym pliku, dla wolniejszych łączy i mniejszych urządzeń."
  }
 }

@@ -76,6 +76,13 @@ midwest-us	north-america/us/ohio+north-america/us/indiana+north-america/us/illin
 central-asia	asia/kazakhstan+asia/uzbekistan+asia/turkmenistan+asia/tajikistan+asia/kyrgyzstan+asia/afghanistan+europe/georgia+asia/armenia+asia/azerbaijan
 china	asia/china
 indian-subcontinent	asia/india+asia/pakistan+asia/bangladesh+asia/sri-lanka+asia/nepal+asia/bhutan+asia/maldives
+# India's six zones (2026-11-05): Geofabrik's outlines; the Light variants use these rows
+india-northwest	asia/india/northern-zone
+india-central	asia/india/central-zone
+india-east	asia/india/eastern-zone
+india-northeast	asia/india/north-eastern-zone
+india-south	asia/india/southern-zone
+india-west	asia/india/western-zone
 southeast-asia	asia/thailand+asia/vietnam+asia/myanmar+asia/cambodia+asia/laos+asia/malaysia-singapore-brunei+asia/indonesia+asia/philippines+asia/east-timor
 taiwan	asia/taiwan
 thailand	asia/thailand

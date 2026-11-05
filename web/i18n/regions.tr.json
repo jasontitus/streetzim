@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Doğu Polinezya",
   "description": "Fransız Polinezyası, Cook Adaları ile Austral ve Tuamotu takımadaları — Papeete, Bora Bora, Moorea, Rarotonga; Güney Pasifik'te 3.000 km'ye yayılan atoller ve volkanik adalar."
+ },
+ "india-northwest": {
+  "title": "Kuzeybatı Hindistan",
+  "description": "Delhi, Pencap, Haryana, Chandigarh, Racastan, Himaçal Pradeş, Cammu ve Keşmir ile Ladakh — Yeni Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Şimla, Srinagar, Leh, Jodhpur ve Udaipur; Thar Çölü, Pencap ovaları ve Batı Himalayalar."
+ },
+ "india-central": {
+  "title": "Uttar Pradeş ve Orta Hindistan",
+  "description": "Uttar Pradeş, Uttarakhand, Madhya Pradeş ve Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra ve Tac Mahal, Prayagraj, Dehradun, Rişikeş, Bhopal, Indore, Gwalior ve Raipur; Ganj ovası, Garhwal ve Kumaon Himalayaları ile Kanha ormanları."
+ },
+ "india-east": {
+  "title": "Doğu Hindistan",
+  "description": "Batı Bengal, Bihar, Jharkhand ve Odisha — Kalküta, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri ve Darjeeling; Ganj Deltası ve Sundarbans mangrov ormanları."
+ },
+ "india-northeast": {
+  "title": "Kuzeydoğu Hindistan",
+  "description": "Assam, Meghalaya, Arunaçal Pradeş, Nagaland, Manipur, Mizoram, Tripura ve Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, İmphal, Aizawl ve Agartala; Brahmaputra Vadisi, Kaziranga ve Doğu Himalayalar."
+ },
+ "india-south": {
+  "title": "Güney Hindistan",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradeş, Telangana ve Puducherry; ayrıca Lakşadvip ile Andaman ve Nikobar Adaları — Chennai, Bengaluru, Haydarabad, Koçi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam ve Port Blair; Batı Gatlar ve Kerala'nın durgun su kanalları."
+ },
+ "india-west": {
+  "title": "Batı Hindistan",
+  "description": "Maharaştra, Gucerat, Goa ile Dadra ve Nagar Haveli ve Daman ve Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara ve Panaji; Konkan kıyısı, Batı Gatlar ve Kutch tuz bataklığı."
+ },
+ "india-northwest-light": {
+  "title": "Kuzeybatı Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Kuzeybatı Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradeş ve Orta Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Uttar Pradeş ve Orta Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "india-east-light": {
+  "title": "Doğu Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Doğu Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "india-northeast-light": {
+  "title": "Kuzeydoğu Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Kuzeydoğu Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "india-south-light": {
+  "title": "Güney Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Güney Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "india-west-light": {
+  "title": "Batı Hindistan (Hafif)",
+  "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Batı Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
  }
 }

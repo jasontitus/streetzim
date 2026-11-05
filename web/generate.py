@@ -721,6 +721,67 @@ REGIONS = [
         "zim_file": "osm-east-polynesia.zim",
         "description": "French Polynesia, the Cook Islands &amp; the Austral and Tuamotu archipelagos &mdash; Papeete, Bora Bora, Mo&lsquo;orea, Rarotonga; atolls and volcanic islands across 3,000 km of the South Pacific.",
     },
+    # ── India in six zones (2026-11-05), each with a Light variant ─────
+    {
+        "id": "india-northwest", "tier": "local", "title": "Northwest India",
+        "zim_file": "osm-india-northwest.zim",
+        "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu &amp; Kashmir and Ladakh &mdash; New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur and Udaipur; the Thar Desert, the Punjab plains and the western Himalaya.",
+    },
+    {
+        "id": "india-central", "tier": "local", "title": "Uttar Pradesh & Central India",
+        "zim_file": "osm-india-central.zim",
+        "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh and Chhattisgarh &mdash; Lucknow, Kanpur, Varanasi, Agra and the Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior and Raipur; the Ganges plain, the Garhwal and Kumaon Himalaya, and the forests of Kanha.",
+    },
+    {
+        "id": "india-east", "tier": "local", "title": "East India",
+        "zim_file": "osm-india-east.zim",
+        "description": "West Bengal, Bihar, Jharkhand and Odisha &mdash; Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri and Darjeeling; the Ganges delta and the Sundarbans.",
+    },
+    {
+        "id": "india-northeast", "tier": "local", "title": "Northeast India",
+        "zim_file": "osm-india-northeast.zim",
+        "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura and Sikkim &mdash; Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl and Agartala; the Brahmaputra valley, Kaziranga and the eastern Himalaya.",
+    },
+    {
+        "id": "india-south", "tier": "local", "title": "South India",
+        "zim_file": "osm-india-south.zim",
+        "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana and Puducherry, with Lakshadweep and the Andaman and Nicobar Islands &mdash; Chennai, Bengaluru, Hyderabad, Kochi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam and Port Blair; the Western Ghats and the Kerala backwaters.",
+    },
+    {
+        "id": "india-west", "tier": "local", "title": "West India",
+        "zim_file": "osm-india-west.zim",
+        "description": "Maharashtra, Gujarat, Goa, and Dadra and Nagar Haveli and Daman and Diu &mdash; Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara and Panaji; the Konkan coast, the Western Ghats and the Rann of Kutch.",
+    },
+    {
+        "id": "india-northwest-light", "tier": "local", "title": "Northwest India (Light)",
+        "zim_file": "osm-india-northwest-light.zim",
+        "description": "Northwest India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
+    {
+        "id": "india-central-light", "tier": "local", "title": "Uttar Pradesh & Central India (Light)",
+        "zim_file": "osm-india-central-light.zim",
+        "description": "Uttar Pradesh &amp; Central India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
+    {
+        "id": "india-east-light", "tier": "local", "title": "East India (Light)",
+        "zim_file": "osm-india-east-light.zim",
+        "description": "East India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
+    {
+        "id": "india-northeast-light", "tier": "local", "title": "Northeast India (Light)",
+        "zim_file": "osm-india-northeast-light.zim",
+        "description": "Northeast India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
+    {
+        "id": "india-south-light", "tier": "local", "title": "South India (Light)",
+        "zim_file": "osm-india-south-light.zim",
+        "description": "South India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
+    {
+        "id": "india-west-light", "tier": "local", "title": "West India (Light)",
+        "zim_file": "osm-india-west-light.zim",
+        "description": "West India without satellite imagery and capped at zoom 13 &mdash; the same places in a smaller download, for slower connections and smaller devices.",
+    },
 ]
 
 

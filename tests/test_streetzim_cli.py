@@ -965,7 +965,9 @@ def test_multilingual_labels_the_matrix_plus_a_short_rows_own_languages(tmp_path
 
 
 def test_a_long_row_adds_no_label_languages(tmp_path, no_network):
-    row = "de,fr,it,nl,pl,es,pt,ro"                        # 8 > REGION_TILE_ROW_MAX
+    from streetzim import languages as L
+    codes = [x for x in sorted(L.ISO639_3) if x != "en"]
+    row = ",".join(codes[:L.REGION_TILE_ROW_MAX + 1])     # longer than REGION_TILE_ROW_MAX
     argv, _ = plan(["--area", "monaco", "--multilingual", "--region-languages", row],
                    tmp_path)
     ns = builder_args(argv)
@@ -1166,7 +1168,12 @@ def test_every_streetzim_region_row_labels_as_before():
     for rid, row in rows:
         langs = L.region_languages(row)
         assert langs == row.split(","), rid
-        assert L.region_label_languages(langs) == (L.default_tile_languages(langs), []), rid
+        tiles, unlabelled = L.region_label_languages(langs)
+        # ops/region-ml-tiles.py takes the same labels; a row's languages with
+        # none yet (UNLABELLED_REGION_LANGUAGES) are left out by both
+        assert set(unlabelled) == set(L.UNLABELLED_REGION_LANGUAGES.get(rid, ())), rid
+        if not unlabelled:
+            assert tiles == L.default_tile_languages(langs), rid
 
 
 @pytest.mark.parametrize("flags, want, source", [
@@ -1308,9 +1315,11 @@ def test_three_letter_region_codes_become_two_letter(tmp_path, no_network):
 def test_english_counts_toward_the_region_row_limit():
     from streetzim import languages as L
     matrix = sorted(L.MATRIX_TILE_LANGUAGES)
-    seven = ["en", "de", "fr", "it", "nl", "pl", "rm"]
-    assert L.region_label_languages(seven) == (sorted(matrix + ["rm"]), [])
-    assert L.region_label_languages(seven + ["es"]) == (matrix, [])     # eight with English
+    others = [x for x in sorted(L.ISO639_3) if x not in matrix and x not in ("en", "rm")]
+    full = ["en", "rm"] + others[:L.REGION_TILE_ROW_MAX - 2]           # at the limit with English
+    assert len(full) == L.REGION_TILE_ROW_MAX
+    assert "rm" in L.region_label_languages(full)[0]
+    assert L.region_label_languages(full + [others[L.REGION_TILE_ROW_MAX - 2]]) == (matrix, [])   # one over
 
 
 def test_bibliographic_and_terminology_codes_become_two_letter():

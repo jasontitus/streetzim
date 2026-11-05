@@ -15,3 +15,9 @@
 # id	parent	satellite	max_zoom
 switzerland-light	switzerland	no	13
 africa-light	africa	no	13
+india-northwest-light	india-northwest	no	13
+india-central-light	india-central	no	13
+india-east-light	india-east	no	13
+india-northeast-light	india-northeast	no	13
+india-south-light	india-south	no	13
+india-west-light	india-west	no	13

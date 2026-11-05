@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Ostpolynesien",
   "description": "Französisch-Polynesien, die Cookinseln sowie die Austral- und die Tuamotu-Inseln — Papeete, Bora Bora, Mo‘orea, Rarotonga; Atolle und Vulkaninseln, verteilt über 3000 km des Südpazifiks."
+ },
+ "india-northwest": {
+  "title": "Nordwestindien",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu und Kashmir sowie Ladakh – Neu-Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur und Udaipur; die Wüste Thar, die Ebenen des Punjab und der westliche Himalaya."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh und Zentralindien",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh und Chhattisgarh – Lucknow, Kanpur, Varanasi, Agra mit dem Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior und Raipur; die Gangesebene, der Himalaya in Garhwal und Kumaon und die Wälder von Kanha."
+ },
+ "india-east": {
+  "title": "Östliches Indien",
+  "description": "Westbengalen, Bihar, Jharkhand und Odisha – Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri und Darjeeling; das Gangesdelta und die Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Nordostindien",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura und Sikkim – Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl und Agartala; das Tal des Brahmaputra, Kaziranga und der östliche Himalaya."
+ },
+ "india-south": {
+  "title": "Südindien",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana und Puducherry, dazu Lakshadweep sowie die Andamanen und Nikobaren – Chennai, Bengaluru, Hyderabad, Kochi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam und Port Blair; die Westghats und die Backwaters von Kerala."
+ },
+ "india-west": {
+  "title": "Westliches Indien",
+  "description": "Maharashtra, Gujarat, Goa sowie Dadra und Nagar Haveli und Daman und Diu – Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara und Panaji; die Konkanküste, die Westghats und der Rann von Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Nordwestindien (Light)",
+  "description": "Die Karte von Nordwestindien ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh und Zentralindien (Light)",
+  "description": "Die Karte von Uttar Pradesh und Zentralindien ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
+ },
+ "india-east-light": {
+  "title": "Östliches Indien (Light)",
+  "description": "Die Karte des östlichen Indiens ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
+ },
+ "india-northeast-light": {
+  "title": "Nordostindien (Light)",
+  "description": "Die Karte von Nordostindien ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
+ },
+ "india-south-light": {
+  "title": "Südindien (Light)",
+  "description": "Die Karte von Südindien ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
+ },
+ "india-west-light": {
+  "title": "Westliches Indien (Light)",
+  "description": "Die Karte des westlichen Indiens ohne Satellitenbilder, mit Zoom bis Stufe 13 – dieselben Orte als kleinerer Download, für langsamere Verbindungen und kleinere Geräte."
  }
 }

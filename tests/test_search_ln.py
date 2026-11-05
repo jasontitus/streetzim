@@ -56,12 +56,15 @@ def test_search_languages():
     assert L.search_languages(["ar", "de"], ["el", "en", "de"]) == ["ar", "de", "el"]
     # Not language-ready: none, whatever the region speaks.
     assert L.search_languages([], ["el"]) == [] and L.search_languages(None, None) == []
-    # A long row (a continent's) adds none, as for the tiles.
+    # A row longer than REGION_TILE_ROW_MAX (Europe's 38) adds none, as for the tiles.
     europe = ["ru", "de", "fr", "en", "it", "es", "pl", "uk", "ro", "nl", "hu"]
+    europe += [x for x in sorted(L.ISO639_3) if x not in europe][:L.REGION_TILE_ROW_MAX]
     assert len(europe) > L.REGION_TILE_ROW_MAX
     assert L.search_languages(["de", "fr"], europe) == ["de", "fr"]
-    assert L.search_languages(["de"], europe[:L.REGION_TILE_ROW_MAX]) == [
-        "de", "ru", "fr", "it", "es", "pl"]
+    assert L.search_languages(["de"], europe[:11]) == [
+        "de", "ru", "fr", "it", "es", "pl", "uk", "ro", "nl", "hu"]
+    # East India's own languages name its places, labelled in tiles or not
+    assert L.search_languages(["bn", "hi"], ["hi", "bn", "or", "en"]) == ["bn", "hi", "or"]
 
 
 def test_the_languages_switch(monkeypatch):

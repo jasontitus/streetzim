@@ -20,6 +20,18 @@ south-america	Colombia;Venezuela;Guyana;Suriname;French Guiana;Ecuador;Peru;Boli
 africa	@Africa			
 africa-light	@Africa			
 indian-subcontinent	India;Pakistan;Bangladesh;Sri Lanka;Nepal;Bhutan;Maldives			
+india-northwest	India	Northwest India		
+india-northwest-light	India	Northwest India		
+india-central	India	Uttar Pradesh & Central India		
+india-central-light	India	Uttar Pradesh & Central India		
+india-east	India	East India		
+india-east-light	India	East India		
+india-northeast	India	Northeast India		
+india-northeast-light	India	Northeast India		
+india-south	India	South India		
+india-south-light	India	South India		
+india-west	India	West India		
+india-west-light	India	West India		
 china	China			
 russia	Russia			Asia
 australia-nz	Australia;New Zealand			

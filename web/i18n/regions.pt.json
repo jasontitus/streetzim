@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Polinésia Oriental",
   "description": "Polinésia Francesa, Ilhas Cook e os arquipélagos Austrais e Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; atóis e ilhas vulcânicas espalhados por 3.000 km do Pacífico Sul."
+ },
+ "india-northwest": {
+  "title": "Noroeste da Índia",
+  "description": "Délhi, Punjab, Haryana, Chandigarh, Rajastão, Himachal Pradesh, Jammu e Caxemira, e Ladakh — Nova Délhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur e Udaipur; o deserto de Thar, as planícies do Punjab e o Himalaia ocidental."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh e centro da Índia",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh e Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra e o Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior e Raipur; a planície do Ganges, o Himalaia de Garhwal e Kumaon e as florestas de Kanha."
+ },
+ "india-east": {
+  "title": "Leste da Índia",
+  "description": "Bengala Ocidental, Bihar, Jharkhand e Odisha — Calcutá, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri e Darjeeling; o delta do Ganges e os Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Nordeste da Índia",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura e Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl e Agartala; o vale do Brahmaputra, Kaziranga e o Himalaia oriental."
+ },
+ "india-south": {
+  "title": "Sul da Índia",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana e Puducherry, além de Lakshadweep e das ilhas Andaman e Nicobar — Chennai, Bangalore, Hyderabad, Kochi, Thiruvananthapuram, Mysore, Madurai, Visakhapatnam e Port Blair; os Gates Ocidentais e os backwaters de Kerala."
+ },
+ "india-west": {
+  "title": "Oeste da Índia",
+  "description": "Maharashtra, Gujarat, Goa e o território de Dadrá e Nagar Aveli e Damão e Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara e Panaji; a costa de Konkan, os Gates Ocidentais e o Rann de Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Noroeste da Índia (versão leve)",
+  "description": "O mapa do Noroeste da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh e centro da Índia (versão leve)",
+  "description": "O mapa de Uttar Pradesh e do centro da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "india-east-light": {
+  "title": "Leste da Índia (versão leve)",
+  "description": "O mapa do Leste da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "india-northeast-light": {
+  "title": "Nordeste da Índia (versão leve)",
+  "description": "O mapa do Nordeste da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "india-south-light": {
+  "title": "Sul da Índia (versão leve)",
+  "description": "O mapa do Sul da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "india-west-light": {
+  "title": "Oeste da Índia (versão leve)",
+  "description": "O mapa do Oeste da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
  }
 }

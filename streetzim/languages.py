@@ -46,6 +46,43 @@ REGION_ISO639_3 = {
     "ty": "tah", "rar": "rar",
 }
 
+# Per region (cloud/region-languages.tsv), its row's languages that tiles do
+# not carry as labels yet (no ISO639_3 / REGION_ISO639_3 entry, so
+# tile_languages() refuses them): its tiles leave them out
+# (region_label_languages) and the map still records them (regionLanguages;
+# search names places in them, from OSM's name:xx; their Wikipedia packs).
+# Listed per region and checked against the table
+# (tests/test_region_languages.py), so a typo in a row (pa for Papiamento's
+# pap) is not taken for a language: any other code a row names that tiles
+# cannot label stops its tiles (ops/region-ml-tiles.py).
+UNLABELLED_REGION_LANGUAGES = {
+    "africa": frozenset({"ha", "om", "yo", "ln", "ff", "ig", "zu", "mg", "so", "xh", "af", "sn", "ny", "bm", "rw", "st", "rn", "ti", "mos", "sg", "ss", "zdj", "crs"}),
+    "africa-light": frozenset({"ha", "om", "yo", "ln", "ff", "ig", "zu", "mg", "so", "xh", "af", "sn", "ny", "bm", "rw", "st", "rn", "ti", "mos", "sg", "ss", "zdj", "crs"}),
+    "caucasus": frozenset({"ka", "hy", "av", "dar", "kbd", "os", "kum", "lez", "inh", "krc"}),
+    "central-africa": frozenset({"ln", "kg", "bem", "lua", "umb", "sg", "ff", "kmb", "ny"}),
+    "central-asia": frozenset({"uz", "ps", "kk", "tg", "ky", "tk", "ka", "hy"}),
+    "east-africa": frozenset({"om", "so", "rw", "rn", "lg", "ki", "ti", "suk", "luy", "kln", "luo", "kam", "sid", "din"}),
+    "himalayas": frozenset({"ks", "mai", "bo", "phr", "doi", "bho", "dz"}),
+    "horn-of-africa": frozenset({"om", "so", "ti", "sid", "din", "aa", "wal"}),
+    "india-central": frozenset({"hne", "bhb"}),
+    "india-central-light": frozenset({"hne", "bhb"}),
+    "india-east": frozenset({"or", "mai", "bho", "mag", "sat"}),
+    "india-east-light": frozenset({"or", "mai", "bho", "mag", "sat"}),
+    "india-northeast": frozenset({"as", "mni", "brx", "kha", "grt", "trp", "lus"}),
+    "india-northeast-light": frozenset({"as", "mni", "brx", "kha", "grt", "trp", "lus"}),
+    "india-northwest": frozenset({"pa", "ks", "bhb", "doi"}),
+    "india-northwest-light": frozenset({"pa", "ks", "bhb", "doi"}),
+    "india-south": frozenset({"kn", "ml"}),
+    "india-south-light": frozenset({"kn", "ml"}),
+    "india-west": frozenset({"gu", "bhb"}),
+    "india-west-light": frozenset({"gu", "bhb"}),
+    "indian-subcontinent": frozenset({"pa", "gu", "kn", "bho", "sd", "or", "ml", "mai", "ps", "skr", "as", "si", "dv", "dz"}),
+    "pacific-islands": frozenset({"tpi", "fj", "hif", "bi", "gil", "mh", "tvl", "na"}),
+    "southeast-asia": frozenset({"jv", "my", "su", "ceb", "km", "tts", "ilo", "hil", "mad", "lo", "tet"}),
+    "southern-africa": frozenset({"zu", "xh", "af", "ny", "sn", "st", "nso", "tn", "vmw", "bem", "ts", "ss", "seh", "nd", "nr", "ve"}),
+    "west-africa": frozenset({"pcm", "ha", "yo", "ig", "ff", "ak", "bm", "wo", "dyu", "mos", "ee", "kr"}),
+}
+
 # Language packs only (tools/langpack/, streetzim/wiki_pack.py): the other
 # two-letter codes of cloud/region-languages.tsv, whose Wikipedia packs need
 # an ISO 639-3 code in their metadata. Not tile or build languages: only
@@ -163,13 +200,14 @@ MATRIX_TILE_LANGUAGES = ("ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "
 
 
 # A map whose row in cloud/region-languages.tsv lists at most this many
-# languages (a country, or a few: Switzerland's de,fr,it,rm, the Baltics,
-# the Balkans' seven) carries all of them in its tiles besides the matrix
-# (default_tile_languages), so its own minority and national languages
-# label the map and name its search records (Romansh in Graubünden). A
-# longer row (Europe's 38, Africa's 31, the Indian subcontinent's 22) adds
-# none: dozens of languages per continent map, each mostly unlabelled.
-REGION_TILE_ROW_MAX = 7
+# languages (English counted) carries all of them that tiles can label in its
+# tiles besides the matrix (default_tile_languages), so its own national and
+# minority languages label the map and name its search records (Romansh in
+# Graubünden, Bengali in East India, Swahili in East Africa). Only Europe's
+# row (38) is longer: its next build would carry 22 more languages in its
+# tiles and search, and its tile step already runs for over 12 hours (user,
+# 2026-11-05: every region but Europe; until then the cap was 7).
+REGION_TILE_ROW_MAX = 32
 
 
 def default_tile_languages(region_langs: list[str] | None) -> list[str]:

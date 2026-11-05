@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Đông Polynesia",
   "description": "Polynésie thuộc Pháp, Quần đảo Cook, cùng quần đảo Austral và Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; các đảo san hô vòng và đảo núi lửa trải dài 3.000 km ở Nam Thái Bình Dương."
+ },
+ "india-northwest": {
+  "title": "Tây Bắc Ấn Độ",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu và Kashmir cùng Ladakh — New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur và Udaipur; sa mạc Thar, đồng bằng Punjab và dãy Himalaya phía tây."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh và miền Trung Ấn Độ",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh và Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra với lăng Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior và Raipur; đồng bằng sông Hằng, dãy Himalaya vùng Garhwal và Kumaon, cùng những cánh rừng Kanha."
+ },
+ "india-east": {
+  "title": "Đông Ấn Độ",
+  "description": "Tây Bengal, Bihar, Jharkhand và Odisha — Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri và Darjeeling; châu thổ sông Hằng và rừng ngập mặn Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Đông Bắc Ấn Độ",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura và Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl và Agartala; thung lũng sông Brahmaputra, vườn quốc gia Kaziranga và dãy Himalaya phía đông."
+ },
+ "india-south": {
+  "title": "Nam Ấn Độ",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana và Puducherry, cùng Lakshadweep và quần đảo Andaman và Nicobar — Chennai, Bengaluru, Hyderabad, Kochi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam và Port Blair; dãy Ghat Tây và vùng sông nước Kerala."
+ },
+ "india-west": {
+  "title": "Tây Ấn Độ",
+  "description": "Maharashtra, Gujarat, Goa, cùng Dadra và Nagar Haveli và Daman và Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara và Panaji; bờ biển Konkan, dãy Ghat Tây và đầm muối Rann of Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Tây Bắc Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Tây Bắc Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh và miền Trung Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Uttar Pradesh và miền Trung Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "india-east-light": {
+  "title": "Đông Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Đông Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "india-northeast-light": {
+  "title": "Đông Bắc Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Đông Bắc Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "india-south-light": {
+  "title": "Nam Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Nam Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "india-west-light": {
+  "title": "Tây Ấn Độ (bản nhẹ)",
+  "description": "Bản đồ Tây Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
  }
 }

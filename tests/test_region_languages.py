@@ -184,11 +184,25 @@ def test_main_applies_the_languages(coz, monkeypatch):
 
 def test_every_row_gives_tile_languages():
     """Every short row's own languages are codes a tile list accepts
-    (ISO639_3), so no region's ML tiles stop on its table row."""
+    (ISO639_3), or ones known to have no labels yet, so no region's ML tiles
+    stop on its table row (ops/region-ml-tiles.py)."""
     for rid, text in _rows(TABLE):
-        langs = L.default_tile_languages(text.split(","))
+        langs, unlabelled = L.region_label_languages(text.split(","))
         assert set(L.MATRIX_TILE_LANGUAGES) <= set(langs), rid
         assert "en" not in langs and langs == sorted(langs), rid
+        # each region's languages with no labels yet, exactly as listed for it:
+        # a typo (pa for pap) is not taken for a language
+        assert set(unlabelled) == set(L.UNLABELLED_REGION_LANGUAGES.get(rid, ())), (rid, unlabelled)
+        if not unlabelled:
+            assert langs == L.default_tile_languages(text.split(",")), rid
+
+
+def test_no_unlabelled_language_has_labels_and_every_listed_region_is_a_row():
+    """A language that gains label support leaves UNLABELLED_REGION_LANGUAGES;
+    a region that leaves the table leaves it too."""
+    ids = {rid for rid, _t in _rows(TABLE)}
+    assert set(L.UNLABELLED_REGION_LANGUAGES) <= ids
+    assert not {x for v in L.UNLABELLED_REGION_LANGUAGES.values() for x in v if L.has_label_support(x)}
 
 
 def test_switzerland_carries_romansh():
@@ -201,10 +215,11 @@ def test_switzerland_carries_romansh():
 
 @pytest.mark.parametrize("rid, extra", [("baltics", ["et", "lt", "lv"]), ("greece", []),
                                         ("balkans", ["bs", "cnr", "hr", "mk", "sl", "sq", "sr"]),
-                                        ("europe", []), ("africa", []),
-                                        ("indian-subcontinent", [])])
+                                        ("europe", []), ("africa", ["am", "sw", "zgh"]),
+                                        ("indian-subcontinent", ["bn", "mr", "ne", "ta", "te", "ur"]),
+                                        ("india-east", ["bn", "ur"])])
 def test_the_row_cap(rid, extra):
-    langs = L.default_tile_languages(dict(_rows(TABLE))[rid].split(","))
+    langs, _unlabelled = L.region_label_languages(dict(_rows(TABLE))[rid].split(","))
     assert sorted(set(langs) - set(L.MATRIX_TILE_LANGUAGES)) == extra
 
 
@@ -214,7 +229,11 @@ def test_default_tile_languages_rule():
     assert L.default_tile_languages(["de", "rm", "en"]) == sorted(M + ["rm"])
     seven = ["rm", "sq", "mk", "bs", "lb", "fy", "sc"]
     assert L.default_tile_languages(seven) == sorted(M + seven)
-    assert L.default_tile_languages(seven + ["az"]) == sorted(M)
+    # a row longer than REGION_TILE_ROW_MAX (Europe's) adds none
+    long_row = seven + [x for x in sorted(L.ISO639_3) if x not in M and x not in seven]
+    assert len(long_row) > L.REGION_TILE_ROW_MAX >= len(long_row[:L.REGION_TILE_ROW_MAX])
+    assert L.default_tile_languages(long_row) == sorted(M)
+    assert set(seven) <= set(L.default_tile_languages(long_row[:L.REGION_TILE_ROW_MAX]))
     with pytest.raises(ValueError):
         L.default_tile_languages(["qqq"])
 

@@ -595,9 +595,9 @@ assembled from ([proposal-kiwix-language-assembly.md](proposal-kiwix-language-as
 - **Labels in many languages.** tilemaker writes `name:XX` for the 21
   label languages (ar de el es fa fr he hi id it ja ko nl pl pt ru th tr
   uk vi zh: `MATRIX_TILE_LANGUAGES` in `streetzim/languages.py`), plus the
-  region's own languages when there are at most 7 of them, English
+  region's own languages when there are at most 32 of them, English
   counted (`REGION_TILE_ROW_MAX`; Switzerland's de, fr, it, rm add
-  Romansh). Only languages with label support join
+  Romansh; Europe's 38 add none). Only languages with label support join
   (`region_label_languages`); the others are recorded but never labels,
   and the log says so ("ka: recorded, no label support"). English is
   always in the tiles (`name:latin`). For every StreetZim region this

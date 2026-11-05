@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Polinesia Timur",
   "description": "Polinesia Prancis, Kepulauan Cook, serta Kepulauan Austral dan Tuamotu — Papeete, Bora Bora, Mo‘orea, Rarotonga; atol dan pulau vulkanik yang tersebar sepanjang 3.000 km di Pasifik Selatan."
+ },
+ "india-northwest": {
+  "title": "India Barat Laut",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu dan Kashmir, serta Ladakh — New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur, dan Udaipur; Gurun Thar, dataran Punjab, dan Himalaya bagian barat."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh dan India Tengah",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh, dan Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra dan Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior, dan Raipur; dataran Sungai Gangga, Himalaya Garhwal dan Kumaon, serta hutan Kanha."
+ },
+ "india-east": {
+  "title": "India Timur",
+  "description": "Benggala Barat, Bihar, Jharkhand, dan Odisha — Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri, dan Darjeeling; delta Sungai Gangga dan hutan bakau Sundarbans."
+ },
+ "india-northeast": {
+  "title": "India Timur Laut",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura, dan Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl, dan Agartala; lembah Sungai Brahmaputra, Kaziranga, dan Himalaya bagian timur."
+ },
+ "india-south": {
+  "title": "India Selatan",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana, dan Puducherry, serta Lakshadweep dan Kepulauan Andaman dan Nikobar — Chennai, Bengaluru, Hyderabad, Kochi, Thiruvananthapuram, Mysuru, Madurai, Visakhapatnam, dan Port Blair; Ghats Barat dan perairan backwater Kerala."
+ },
+ "india-west": {
+  "title": "India Barat",
+  "description": "Maharashtra, Gujarat, Goa, serta Dadra dan Nagar Haveli dan Daman dan Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara, dan Panaji; pesisir Konkan, Ghats Barat, dan rawa garam Rann of Kutch."
+ },
+ "india-northwest-light": {
+  "title": "India Barat Laut (Ringan)",
+  "description": "Peta India Barat Laut tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh dan India Tengah (Ringan)",
+  "description": "Peta Uttar Pradesh dan India Tengah tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "india-east-light": {
+  "title": "India Timur (Ringan)",
+  "description": "Peta India Timur tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "india-northeast-light": {
+  "title": "India Timur Laut (Ringan)",
+  "description": "Peta India Timur Laut tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "india-south-light": {
+  "title": "India Selatan (Ringan)",
+  "description": "Peta India Selatan tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "india-west-light": {
+  "title": "India Barat (Ringan)",
+  "description": "Peta India Barat tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
  }
 }

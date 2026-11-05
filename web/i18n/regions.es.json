@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Polinesia Oriental",
   "description": "La Polinesia Francesa, las Islas Cook y los archipiélagos de las Australes y las Tuamotu: Papeete, Bora Bora, Mo‘orea, Rarotonga; atolones e islas volcánicas repartidos por 3000 km del Pacífico Sur."
+ },
+ "india-northwest": {
+  "title": "Noroeste de la India",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajastán, Himachal Pradesh, Jammu y Cachemira, y Ladakh — Nueva Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur y Udaipur; el desierto de Thar, las llanuras del Punjab y el Himalaya occidental."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh y centro de la India",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh y Chhattisgarh — Lucknow, Kanpur, Benarés (Varanasi), Agra y el Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior y Raipur; la llanura del Ganges, el Himalaya de Garhwal y Kumaon, y los bosques de Kanha."
+ },
+ "india-east": {
+  "title": "Este de la India",
+  "description": "Bengala Occidental, Bihar, Jharkhand y Odisha — Calcuta, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri y Darjeeling; el delta del Ganges y los Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Noreste de la India",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura y Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl y Agartala; el valle del Brahmaputra, Kaziranga y el Himalaya oriental."
+ },
+ "india-south": {
+  "title": "Sur de la India",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana y Puducherry, junto con Lakshadweep y las islas Andamán y Nicobar — Chennai, Bangalore, Hyderabad, Kochi, Thiruvananthapuram, Mysore, Madurai, Visakhapatnam y Port Blair; los Ghats occidentales y los backwaters de Kerala."
+ },
+ "india-west": {
+  "title": "Oeste de la India",
+  "description": "Maharashtra, Gujarat, Goa y el territorio de Dadra y Nagar Haveli y Damán y Diu — Bombay (Mumbai), Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara y Panaji; la costa de Konkan, los Ghats occidentales y el Rann de Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Noroeste de la India (versión ligera)",
+  "description": "El mapa del noroeste de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh y centro de la India (versión ligera)",
+  "description": "El mapa de Uttar Pradesh y el centro de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
+ },
+ "india-east-light": {
+  "title": "Este de la India (versión ligera)",
+  "description": "El mapa del este de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
+ },
+ "india-northeast-light": {
+  "title": "Noreste de la India (versión ligera)",
+  "description": "El mapa del noreste de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
+ },
+ "india-south-light": {
+  "title": "Sur de la India (versión ligera)",
+  "description": "El mapa del sur de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
+ },
+ "india-west-light": {
+  "title": "Oeste de la India (versión ligera)",
+  "description": "El mapa del oeste de la India sin imágenes de satélite y con el zoom limitado al nivel 13 — los mismos lugares en una descarga más pequeña, para conexiones más lentas y dispositivos más pequeños."
  }
 }

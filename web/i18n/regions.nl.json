@@ -314,5 +314,53 @@
  "east-polynesia": {
   "title": "Oost-Polynesië",
   "description": "Frans-Polynesië, de Cookeilanden, de Australeilanden en de Tuamotu-archipel — Papeete, Bora Bora, Mo‘orea, Rarotonga; atollen en vulkanische eilanden verspreid over 3000 km van de zuidelijke Stille Oceaan."
+ },
+ "india-northwest": {
+  "title": "Noordwest-India",
+  "description": "Delhi, Punjab, Haryana, Chandigarh, Rajasthan, Himachal Pradesh, Jammu en Kasjmir en Ladakh — New Delhi, Jaipur, Amritsar, Ludhiana, Chandigarh, Shimla, Srinagar, Leh, Jodhpur en Udaipur; de Tharwoestijn, de vlakten van de Punjab en de westelijke Himalaya."
+ },
+ "india-central": {
+  "title": "Uttar Pradesh en Centraal-India",
+  "description": "Uttar Pradesh, Uttarakhand, Madhya Pradesh en Chhattisgarh — Lucknow, Kanpur, Varanasi, Agra en de Taj Mahal, Prayagraj, Dehradun, Rishikesh, Bhopal, Indore, Gwalior en Raipur; de Gangesvlakte, de Himalaya van Garhwal en Kumaon en de bossen van Kanha."
+ },
+ "india-east": {
+  "title": "Oost-India",
+  "description": "West-Bengalen, Bihar, Jharkhand en Odisha — Kolkata, Patna, Ranchi, Bhubaneswar, Cuttack, Puri, Gaya, Siliguri en Darjeeling; de Gangesdelta en de Sundarbans."
+ },
+ "india-northeast": {
+  "title": "Noordoost-India",
+  "description": "Assam, Meghalaya, Arunachal Pradesh, Nagaland, Manipur, Mizoram, Tripura en Sikkim — Guwahati, Shillong, Gangtok, Itanagar, Kohima, Imphal, Aizawl en Agartala; de vallei van de Brahmaputra, Kaziranga en de oostelijke Himalaya."
+ },
+ "india-south": {
+  "title": "Zuid-India",
+  "description": "Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana en Puducherry, met Lakshadweep en de Andamanen en Nicobaren — Chennai, Bangalore, Hyderabad, Kochi, Thiruvananthapuram, Mysore, Madurai, Visakhapatnam en Port Blair; de West-Ghats en de backwaters van Kerala."
+ },
+ "india-west": {
+  "title": "West-India",
+  "description": "Maharashtra, Gujarat, Goa en het territorium Dadra en Nagar Haveli en Daman en Diu — Mumbai, Pune, Ahmedabad, Surat, Nagpur, Nashik, Vadodara en Panaji; de Konkankust, de West-Ghats en de Rann van Kutch."
+ },
+ "india-northwest-light": {
+  "title": "Noordwest-India (Light)",
+  "description": "De kaart van Noordwest-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
+ },
+ "india-central-light": {
+  "title": "Uttar Pradesh en Centraal-India (Light)",
+  "description": "De kaart van Uttar Pradesh en Centraal-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
+ },
+ "india-east-light": {
+  "title": "Oost-India (Light)",
+  "description": "De kaart van Oost-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
+ },
+ "india-northeast-light": {
+  "title": "Noordoost-India (Light)",
+  "description": "De kaart van Noordoost-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
+ },
+ "india-south-light": {
+  "title": "Zuid-India (Light)",
+  "description": "De kaart van Zuid-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
+ },
+ "india-west-light": {
+  "title": "West-India (Light)",
+  "description": "De kaart van West-India zonder satellietbeelden en met zoom tot niveau 13 — dezelfde plaatsen in een kleinere download, voor tragere verbindingen en kleinere apparaten."
  }
 }

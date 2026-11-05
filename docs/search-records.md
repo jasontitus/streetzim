@@ -180,8 +180,10 @@ Latin name already).
   one "Αθήνα" without the record repeating it (Greece: 7,984 `el`
   entries). At most 100 characters.
 - **Languages:** the tile languages, plus the region languages when the
-  map's `regionLanguages` row is short (at most `REGION_TILE_ROW_MAX`, 7,
-  the tiles' rule); a continent's 38 add none.
+  map's `regionLanguages` row is not longer than `REGION_TILE_ROW_MAX`
+  (32, the tiles' rule): every region but Europe, whose 38 add none. A
+  region language with no labels in tiles (Kannada in South India) still
+  names places here, from OSM's `name:xx`.
 - **Index:** under every name, like `nn` (more prefix keys per record).
 - **Viewer:** matched by any of them; a result on a map shown in a
   second language (`SZ_LANG2`, a merged language-pack ZIM) shows `ln[lang]`

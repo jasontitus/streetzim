@@ -1303,7 +1303,9 @@ def test_a_variant_takes_its_extracts_languages(host):
 
 
 def test_a_long_row_adds_none(host):
-    rows = ",".join(["sw", "ha", "yo", "ig", "am", "om", "so", "zu"])     # 8 > the cap
+    from streetzim import languages as L
+    codes = [x for x in sorted(L.ISO639_3) if x != "en"]
+    rows = ",".join(codes[:L.REGION_TILE_ROW_MAX + 1])     # longer than the cap (Europe's 38)
     _table(host, f"hispaniola\t{rows}\n")
     out = _load().make("hispaniola", "hispaniola", BOX)
     assert Path(out + ".langs").read_text() == LANGS + "\n"
@@ -1320,6 +1322,27 @@ def test_no_row_is_the_matrix(host):
     _table(host, "elsewhere\tht\n")
     out = _load().make("hispaniola", "hispaniola", BOX)
     assert Path(out + ".langs").read_text() == LANGS + "\n"
+
+
+def test_a_short_row_s_language_with_no_labels_is_left_out(host, capfd, monkeypatch):
+    """South India's own Kannada and Malayalam have no labels in tiles yet:
+    the tiles carry the matrix and Telugu and Tamil, and say what they left out."""
+    from streetzim import languages as L
+    monkeypatch.setitem(L.UNLABELLED_REGION_LANGUAGES, "hispaniola", frozenset({"kn", "ml"}))
+    _table(host, "hispaniola\tte,ta,kn,ml,en,hi\n")
+    out = _load().make("hispaniola", "hispaniola", BOX)
+    langs = Path(out + ".langs").read_text().strip().split(",")
+    assert {"te", "ta"} <= set(langs) and not {"kn", "ml"} & set(langs)
+    assert "kn,ml: no labels in tiles yet" in capfd.readouterr().err
+
+
+def test_a_language_with_no_labels_another_region_has_stops(host):
+    """Kannada is South India's, not Hispaniola's: in Hispaniola's row it is
+    taken for a typo."""
+    _table(host, "hispaniola\tes,kn\n")
+    with pytest.raises(SystemExit):
+        _load().make("hispaniola", "hispaniola", BOX)
+    assert _calls(host) == []
 
 
 def test_an_unknown_code_in_a_short_row_stops_before_docker(host):
