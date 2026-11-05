@@ -306,7 +306,7 @@
     index.regions.sort((a, b) => a.title.localeCompare(b.title));
     const sel = $('region');
     sel.innerHTML = '';
-    for (const reg of index.regions) sel.add(new Option(reg.photo_search ? `${reg.title} · photo search` : reg.title, reg.id));
+    for (const reg of index.regions) sel.add(new Option(reg.title, reg.id));
     const want = q.get('region');
     if (want && !index.regions.some((r) => r.id === want)) {
       $('notice').textContent = `No such region: “${want}”. Pick one from the list.`;
