@@ -239,7 +239,7 @@ def test_a_font_that_is_not_the_pinned_one_stops_the_build(tmp_path, monkeypatch
     lock = va.load_lock()
     lock[va.SCRIPT_FONTS]["files"]["NotoSansTamil-Regular.otf"] = "0" * 64
     monkeypatch.setattr(va, "load_lock", lambda *a, **k: lock)
-    with pytest.raises(SystemExit, match="NotoSansTamil-Regular.otf: sha256"):
+    with pytest.raises(SystemExit, match=re.escape("NotoSansTamil-Regular.otf: sha256")):
         _viewer_entries(tmp_path, None)
 
 

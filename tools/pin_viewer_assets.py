@@ -349,7 +349,7 @@ def pin_maplibre(version: str) -> None:
         (out_dir / fname).write_bytes(data)
         files[fname] = va.sha256_hex(data)
         print(f"  {fname}: {len(data):,} bytes, sha256 {files[fname]}")
-    for stale in sorted(set(p.name for p in out_dir.iterdir()) - set(written)):
+    for stale in sorted({p.name for p in out_dir.iterdir()} - set(written)):
         (out_dir / stale).unlink()
         print(f"  removed {stale}")
     lock = read_lock_or_empty()

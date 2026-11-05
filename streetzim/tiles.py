@@ -454,8 +454,11 @@ def script_fonts_in_tiles(tiles, lock=None):
     if total > FALLBACK_SCAN_MAX_BYTES:
         print(f"  Script fonts: not scanned ({total / 1e6:,.0f} MB of tiles); shipping all")
         return None
-    blocks = {f: [tuple(int(x, 16) for x in r[2:].split("-")) for r in rs]
-              for f, rs in ranges.items()}
+    def span(r: str) -> tuple[int, int]:                 # "U+0900-097F"
+        lo, hi = r[2:].split("-")
+        return int(lo, 16), int(hi, 16)
+    blocks: dict[str, list[tuple[int, int]]] = {
+        str(f): [span(r) for r in rs] for f, rs in ranges.items()}
     t0 = time.monotonic()
     found = glyph_fallback.scripts_in_tiles(tiles.values(), blocks)
     print(f"  Script fonts for the labels: {', '.join(sorted(found)) or 'none'} "

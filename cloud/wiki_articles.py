@@ -421,7 +421,7 @@ def back_bar_script() -> bytes:
     root's copy or a pack's (~w/<xx>/). Nothing happens without a fetch,
     a readable map-config or words for the language: the bar stays English."""
     table = json.dumps(BACK_TO_MAP, ensure_ascii=False, sort_keys=True)
-    rtl = json.dumps({k: 1 for k in sorted(BACK_TO_MAP_RTL)})
+    rtl = json.dumps(dict.fromkeys(sorted(BACK_TO_MAP_RTL), 1))
     fb = json.dumps(BACK_TO_MAP_FALLBACK, sort_keys=True)
     js = (
         "/* The Back to map bar of a bundled Wikipedia article in the map's language"
