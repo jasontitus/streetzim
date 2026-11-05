@@ -69,11 +69,14 @@ def test_conversion_exports_url_and_worker():
 def test_conversion_hands_the_worker_over_as_a_blob():
     out = pin.classic_maplibre(MAIN.replace("function W(e){return e}",
                                             "function W(e){globalThis.__w=e}"), WORKER, "6.99.0")
-    got = _run("", out + "\n(async()=>{const r=await fetch(globalThis.__w);"
-                         "console.log(r.headers.get('content-type')+'|'+(await r.text()))})()")
-    kind, src = got.split("|", 1)
+    got = _run("", out + "\n(async()=>{const [u,frag]=globalThis.__w.split('#');"
+                         "const r=await fetch(u);"
+                         "console.log(frag+'|'+r.headers.get('content-type')+'|'+(await r.text()))})()")
+    frag, kind, src = got.split("|", 2)
+    # MapLibre starts a URL ending in .cjs as a classic worker (#8769).
+    assert frag == "maplibre-gl-worker.cjs"
     assert kind == "text/javascript"
-    assert src.startswith("self.worker={ok:1};var d=class{};")
+    assert src.startswith('"use strict";\nself.worker={ok:1};var d=class{};')
     assert "export" not in src and "sourceMappingURL" not in src
 
 
@@ -130,7 +133,7 @@ def test_vendored_maplibre_runs_and_starts_its_worker_from_a_blob():
                                "w:maplibregl.getWorkerUrl(),m:typeof maplibregl.Map,"
                                "f:typeof maplibregl.Map.prototype.setFontFaces}))"))
     assert got["v"] == version and got["m"] == "function" and got["f"] == "function"
-    assert got["w"].startswith("blob:")
+    assert got["w"].startswith("blob:") and got["w"].endswith("#maplibre-gl-worker.cjs")
 
 
 def _viewer_script_fonts() -> dict[str, list[str]]:
@@ -175,3 +178,110 @@ def test_the_pwa_serves_the_script_fonts_and_maplibre_5_from_the_site():
     sync = (ROOT / "scripts/sync-drive-viewer.sh").read_text(encoding="utf-8")
     assert "maplibre-gl-legacy/maplibre-gl-legacy.js" in sync
     assert "noto-script-fonts/NotoSans*-Regular.otf" in sync
+
+
+# ---- the builder: what a ZIM carries ----------------------------------
+
+from streetzim import tiles as tiles_mod, zim_writer  # noqa: E402
+
+
+class FakeItem:
+    def __init__(self, path, title, mimetype, content, is_front=False, compress=True, namespace=None):
+        self.path, self.mimetype, self.content = path, mimetype, content
+
+
+class FakeCreator:
+    def __init__(self):
+        self.items = {}
+
+    def add_item(self, item):
+        assert item.path not in self.items, item.path
+        self.items[item.path] = item
+
+
+def _viewer_entries(tmp_path, script_fonts):
+    js = tmp_path / "maplibre-gl.js"; js.write_text("//")
+    css = tmp_path / "maplibre-gl.css"; css.write_text("/**/")
+    html = tmp_path / "index.html"; html.write_text("<html></html>")
+    c = FakeCreator()
+    zim_writer._add_viewer(c, FakeItem, maplibre_js_path=js, maplibre_css_path=css,
+                           viewer_html_path=html, map_config={}, name="t",
+                           script_fonts=script_fonts)
+    return c.items
+
+
+FONT_DIR = va.VENDOR / va.SCRIPT_FONTS
+ALL_FONTS = {pin.script_font_file(s) for s in pin.SCRIPT_FONTS}
+
+
+@pytest.mark.parametrize("chosen,want", [
+    ({"NotoSansBengali-Regular.otf"}, {"NotoSansBengali-Regular.otf"}),
+    (None, ALL_FONTS),           # tiles not scanned: every font
+    (set(), set()),              # no label in these scripts: none, and no licence
+])
+def test_a_zim_carries_maplibre_5_and_the_fonts_its_labels_use(tmp_path, chosen, want):
+    items = _viewer_entries(tmp_path, chosen)
+    legacy = items[va.MAPLIBRE_LEGACY_ENTRY]
+    assert legacy.mimetype == "application/javascript"
+    assert Path(legacy.content).read_bytes() == (
+        va.VENDOR / va.MAPLIBRE_LEGACY / va.MAPLIBRE_LEGACY_ENTRY).read_bytes()
+    fonts = {p for p in items if p.endswith(".otf")}
+    assert fonts == want
+    for f in fonts:
+        assert items[f].mimetype == "font/otf"
+        assert Path(items[f].content).read_bytes() == (FONT_DIR / f).read_bytes()
+    assert (va.SCRIPT_FONTS_LICENCE in items) == bool(want)
+    # The viewer asks for every font by the name the ZIM stores it under.
+    assert want <= set(_viewer_script_fonts())
+
+
+def test_a_font_that_is_not_the_pinned_one_stops_the_build(tmp_path, monkeypatch):
+    lock = va.load_lock()
+    lock[va.SCRIPT_FONTS]["files"]["NotoSansTamil-Regular.otf"] = "0" * 64
+    monkeypatch.setattr(va, "load_lock", lambda *a, **k: lock)
+    with pytest.raises(SystemExit, match="NotoSansTamil-Regular.otf: sha256"):
+        _viewer_entries(tmp_path, None)
+
+
+def _v(n: int) -> bytes:
+    out = b""
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out += bytes([b | 0x80])
+        else:
+            return out + bytes([b])
+
+
+def _ld(field: int, data: bytes) -> bytes:
+    return _v(field << 3 | 2) + _v(len(data)) + data
+
+
+def mvt(*values: str, key: str = "name") -> bytes:
+    """One layer, one feature per value, each tagged ``key=value``."""
+    feats = b"".join(_ld(2, _ld(2, _v(0) + _v(i)) + _ld(4, _v(9) + _v(2) + _v(2)))
+                     for i in range(len(values)))
+    layer = (_ld(1, b"poi") + feats + _ld(3, key.encode())
+             + b"".join(_ld(4, _ld(1, s.encode())) for s in values))
+    return _ld(3, layer)
+
+
+def test_the_script_fonts_follow_the_labels(monkeypatch):
+    monkeypatch.delenv("STREETZIM_TILE_LANGUAGES", raising=False)
+    t = {(14, 0, 0): mvt("गुवाहाटी", "Main Street"), (14, 1, 0): mvt("চট্টগ্রাম"),
+         (14, 2, 0): mvt("ᱥᱟᱱᱛᱟᱲᱤ")}
+    assert tiles_mod.script_fonts_in_tiles(t) == {
+        "NotoSansDevanagari-Regular.otf", "NotoSansBengali-Regular.otf",
+        "NotoSansOlChiki-Regular.otf"}
+    assert tiles_mod.script_fonts_in_tiles({(14, 0, 0): mvt("Main Street", "شارع")}) == set()
+    # A name the style does not show does not count; the build's own
+    # language does (STREETZIM_TILE_LANGUAGES, glyph_fallback.label_keys).
+    hi = {(14, 0, 0): mvt("गुवाहाटी", key="name:hi")}
+    assert tiles_mod.script_fonts_in_tiles(hi) == set()
+    monkeypatch.setenv("STREETZIM_TILE_LANGUAGES", "hi")
+    assert tiles_mod.script_fonts_in_tiles(hi) == {"NotoSansDevanagari-Regular.otf"}
+    # Streamed or too big to scan: every font.
+    assert tiles_mod.script_fonts_in_tiles(None) is None
+    monkeypatch.setattr(tiles_mod, "FALLBACK_SCAN_MAX_BYTES", 3)
+    assert tiles_mod.script_fonts_in_tiles(t) is None

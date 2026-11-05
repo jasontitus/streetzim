@@ -124,8 +124,24 @@ dbg('boot', { href: window.location.href, baseUrl: baseUrl, ua: navigator.userAg
   // Also used for one-off ZIM files outside a style (the RTL text plugin).
   window.__szFetchWithRetry = fetchWithRetry;
 
+  // The script fonts (part 130, MapLibre 6): fetched once however many
+  // Open Sans stacks ask (MapLibre loads a declared file once per font
+  // name), outside the tile queue and without retries, so a map without a
+  // file, or a reader that fails it, costs no tile slot and no back-off.
+  var fontLoads = {};
+  function fetchFont(url) {
+    if (!fontLoads[url]) {
+      fontLoads[url] = fetch(url).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url);
+        return r.arrayBuffer();
+      });
+    }
+    return fontLoads[url].then(function(buf) { return { data: buf.slice(0) }; });
+  }
+
   maplibregl.addProtocol('zimtile', function(params, abortController) {
     var url = params.url.replace('zimtile://', '');
+    if (/\.otf$/.test(url)) return fetchFont(url);
     return new Promise(function(resolve, reject) {
       function run() {
         fetchWithRetry(url, abortController.signal)

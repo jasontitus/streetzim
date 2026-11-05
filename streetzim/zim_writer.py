@@ -34,6 +34,7 @@ from streetzim.routing.build import (
 from streetzim.tiles import (
     estimate_tile_total,
     iter_tiles_from_mbtiles,
+    script_fonts_in_tiles,
 )
 from streetzim.tile_alias import TileAliaser, max_alias_bytes
 from streetzim import viewer_assets
@@ -1256,7 +1257,7 @@ def _create_zim(
         _add_viewer(creator, MapItem, maplibre_js_path=maplibre_js_path,
                     maplibre_css_path=maplibre_css_path,
                     viewer_html_path=viewer_html_path, map_config=map_config,
-                    name=name)
+                    name=name, script_fonts=script_fonts_in_tiles(tiles))
         if ocr is not None:
             _add_ocr(creator, MapItem, plan=ocr)
         _add_vector_tiles(creator, MapItem, output_path=output_path, tiles=tiles,
@@ -1583,7 +1584,8 @@ def _rtl_text_plugin_bytes():
     return viewer_assets.rtl_text_plugin_entry()
 
 
-def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path, map_config, name):
+def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer_html_path,
+                map_config, name, script_fonts=None):
     """The viewer: index.html, routing-worker.js and places.html in their
     fixed uncompressed slots, and MapLibre. (map-config.json is written by
     _add_map_config, after the Wikipedia articles.)"""
@@ -1649,6 +1651,34 @@ def _add_viewer(creator, MapItem, *, maplibre_js_path, maplibre_css_path, viewer
         RTL_TEXT_PLUGIN_ENTRY, "MapLibre RTL text plugin", "application/javascript",
         _rtl_text_plugin_bytes(),
     ))
+    _add_maplibre_extras(creator, MapItem, script_fonts=script_fonts)
+
+
+def _add_maplibre_extras(creator, MapItem, *, script_fonts=None):
+    """MapLibre 5 (maplibre-gl-legacy.js), which the viewer's head loads in
+    engines MapLibre 6 cannot run in, and the Noto Sans script fonts the
+    style's font-faces name (docs/viewer-supply-chain.md), at the top level
+    next to maplibre-gl.js: those of ``script_fonts`` (file names, from
+    script_fonts_in_tiles), every one for None. Each file is checked against
+    the lock file."""
+    try:
+        legacy = viewer_assets.vendored(viewer_assets.MAPLIBRE_LEGACY)
+        fonts = viewer_assets.vendored(viewer_assets.SCRIPT_FONTS)
+    except viewer_assets.IntegrityError as e:
+        raise SystemExit(str(e)) from None
+    creator.add_item(MapItem(
+        viewer_assets.MAPLIBRE_LEGACY_ENTRY, "MapLibre GL JS 5", "application/javascript",
+        str(legacy[viewer_assets.MAPLIBRE_LEGACY_ENTRY]),
+    ))
+    names = sorted(f for f in fonts if f.endswith(".otf")
+                   and (script_fonts is None or f in script_fonts))
+    for fname in names:
+        creator.add_item(MapItem(fname, fname[:-4], "font/otf", str(fonts[fname])))
+    if names:
+        creator.add_item(MapItem(viewer_assets.SCRIPT_FONTS_LICENCE, "Noto Sans font licence",
+                                 "text/plain", str(fonts["OFL.txt"])))
+    print(f"    Added MapLibre 5 and {len(names)} script fonts"
+          + (f" ({', '.join(n[8:-12] for n in names)})" if names else ""))
 
 
 

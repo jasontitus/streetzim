@@ -105,6 +105,11 @@ if (!window.__szUnsupported) fetchConfig(1)
       pitch: openCam.pitch,
       minZoom: config.minZoom || 0,
       maxZoom: 20,
+      // MapLibre 6 cuts z15-z16 tiles out of the z14 tile (maxZoom 20 minus
+      // its zoomLevelsToOverscale default of 4) instead of overscaling it,
+      // fetching the z14 tile again per piece and dropping labels at the
+      // cuts; undefined keeps MapLibre 5's overscaling, which 5 does anyway.
+      zoomLevelsToOverscale: undefined,
       attributionControl: true,
       maxBounds: _szMaxBounds(config)   // the built box, no margin (140)
     });

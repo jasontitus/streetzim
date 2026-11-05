@@ -111,6 +111,7 @@ MAPLIBRE_LEGACY_ENTRY = "maplibre-gl-legacy.js"
 # (tools/pin_viewer_assets.py SCRIPT_FONTS); ZIM entries at the top level,
 # next to maplibre-gl.js.
 SCRIPT_FONTS = "noto-script-fonts"
+SCRIPT_FONTS_LICENCE = "NotoSans-OFL.txt"   # the fonts' OFL, as a ZIM entry
 
 
 def vendored_maplibre(lock: dict[str, Any] | None = None,

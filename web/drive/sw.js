@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-a30e35ef72';
+const SHELL_CACHE = 'streetzim-drive-shell-7a825a9428';
 
 const SHELL_URLS = [
   './',
@@ -38,7 +38,11 @@ const SHELL_URLS = [
   './viewer/places/',
   './viewer/routing-worker.js',
   './viewer/maplibre-gl.js',
-  './viewer/maplibre-gl.css'
+  './viewer/maplibre-gl.css',
+  // MapLibre 5, for engines MapLibre 6 cannot run in: precached too, or
+  // such an engine offline after a deploy (which clears the old shell
+  // cache) would fall through to MapLibre 6 and get no map.
+  './viewer/maplibre-gl-legacy.js'
 ];
 
 // Files in /drive/viewer/ that are always part of the shell, never

@@ -7,7 +7,7 @@
   "integrity": "sha512-gApO66EMtoDZuio680RUBvskR7ahFd/NNhLN4tBAs+Y7FeT4gQV8zVFgYVMRmFxQznOEzecW19w6xOd9XjZjiA==",
   "converted": "dist/maplibre-gl.mjs + dist/maplibre-gl-worker.mjs -> maplibre-gl.js (tools/pin_viewer_assets.py classic_maplibre)",
   "files": {
-   "maplibre-gl.js": "2055fa6225f4079d6a6ead072aab152d52f9a6a40ac51c8a4e4b64caaf8fe985",
+   "maplibre-gl.js": "9229b81147fa0300238e5ef9fea6b428270bb086fec26174916e58ebdf74a935",
    "maplibre-gl.css": "a90798a1953017790e590f7e1bd35ff103a8a4263972cb47290b78adf86f8c20",
    "LICENSE.txt": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2"
   }

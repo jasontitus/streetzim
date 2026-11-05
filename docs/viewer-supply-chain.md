@@ -160,10 +160,14 @@ converts the two files into one classic `maplibre-gl.js`
 function; its closing `export {...}` becomes the global `maplibregl` with
 the same names; `import.meta.url` becomes the script's own URL; the worker,
 whose only export is itself, is embedded as a string without that export
-and handed to `setWorkerUrl` as a `blob:` URL (as MapLibre 5's UMD build
-did). Nothing else changes. The tool parses both results as classic
-scripts with node and stops on anything else left in them (an import, an
-export, `import.meta` beyond `.url`, a top-level await). The output is a
+(and with the strict mode a module has) and handed to `setWorkerUrl` as a
+`blob:` URL ending in `#maplibre-gl-worker.cjs`, which MapLibre starts as a
+classic worker (maplibre-gl-js#8769), as MapLibre 5's UMD build did: a
+module worker from a `blob:` URL cannot start in a page with an opaque
+origin (`file:`, a sandboxed frame), which a Kiwix app's page may be.
+Nothing else changes. The tool compiles both results as classic scripts
+with node (`vm.Script`) and stops on anything else left in them (an import,
+an export, `import.meta` beyond `.url`, a top-level await or return). The output is a
 pure function of the tarball: `tests/test_maplibre6.py` rebuilds it from a
 cached tarball (`viewer-assets/npm/maplibre-gl-<version>.tgz`) and compares
 bytes.
@@ -171,17 +175,23 @@ bytes.
 MapLibre 6 needs WebGL2 and class static blocks (Safari 16.4, Chrome 94,
 Firefox 93). For other engines every map built since 2026-11 also carries
 MapLibre 5.23 as `maplibre-gl-legacy.js` (`--maplibre-legacy`, vendored as
-published). The viewer's head (part 000) tests for both and loads
+published). The viewer's head (part 000) tests for both (static blocks
+with a script of their own, not an eval a CSP may forbid) and loads
 `maplibre-gl.js` or `maplibre-gl-legacy.js` with `document.write`, so the
 library still loads before the viewer's scripts; if the first choice is
 missing (an older map has no legacy file) or does not run, the next script
-loads the other. `maplibre-gl.css` is MapLibre 6's; its differences from
+loads the other. `tests/test_maplibre_loader.py` runs that block in
+Chromium for each layout (new map, old map, a broken 6, no WebGL2, a CSP
+without eval, a sandboxed frame, `file:`) and checks that a map draws. `maplibre-gl.css` is MapLibre 6's; its differences from
 5.23's are cosmetic. The viewer asks `szMapLibreMajor()` (part 110) where
 the two differ: WebGL2 for 6 (part 120), the style's `font-faces` (130),
 `setMissingStyleImageResolver` for the POI icons (136; MapLibre 6's
 `styleimagemissing` only notifies), and the RTL text plugin, which
 MapLibre 6 does not need (it orders and joins right-to-left text itself)
-and is not given (137).
+and is not given (137). The map is made with `zoomLevelsToOverscale:
+undefined` (120): with the map's maxZoom of 20, MapLibre 6 otherwise cuts
+z15 and z16 tiles out of the z14 tile (20 minus its default of 4), fetching
+the z14 tile again for each and losing labels at the cuts.
 
 The script fonts (`--script-fonts`, `resources/vendor/noto-script-fonts/`,
 OFL) are unhinted OpenType Noto Sans fonts from a pinned commit of
@@ -192,14 +202,28 @@ range for each Open Sans stack (`SZ_SCRIPT_FONTS`, part 130; the tool's
 `SCRIPT_FONTS` and the lock hold the same table, and a test keeps all three
 equal). MapLibre 6 fetches a file through the `zimtile:` protocol only when
 a label needs one of its letters, and draws a cluster of letters with it as
-the browser shapes it. A file a map lacks fails that fetch, and MapLibre
-draws those letters with the device's fonts. The PWA serves the fonts and
-`maplibre-gl-legacy.js` from the site (`sw.js` treats them as shell files),
-so maps built before 2026-11 get them there too.
+the browser shapes it. The `zimtile:` handler (part 110) fetches a font
+once whichever Open Sans stack asks (MapLibre loads a declared file once
+per font name), outside the tile queue and without retries. A map carries
+the fonts its labels use: `streetzim/zim_writer.py` (`_add_maplibre_extras`)
+writes `maplibre-gl-legacy.js` into every ZIM and the fonts that
+`script_fonts_in_tiles` finds (the fallback glyphs' scan and cap; every
+font for a streamed or larger build), with their OFL as `NotoSans-OFL.txt`.
+A file a map lacks fails that fetch, and MapLibre draws those letters with
+the device's fonts. The PWA serves the fonts and `maplibre-gl-legacy.js`
+from the site (`sw.js` treats them as shell files, and precaches the
+legacy file), so maps built before 2026-11 get them there too.
 
 Known limits: MapLibre 6 rasterizes one grapheme cluster at a time, so a
 conjunct that spans clusters (Kannada ಕನ್ನಡ, Gurmukhi ਮ੍ਰਿ) is drawn in
-pieces; readable, not right. Bold labels use the Regular faces.
+pieces; readable, not right. Bold labels use the Regular faces. MapLibre 6
+draws every complex script with a font file or the device's fonts, never
+from glyph ranges, so on a device without Thai, Lao, Myanmar, Khmer or
+Tibetan fonts those labels show as boxes where MapLibre 5 drew them
+unshaped. On the first PWA load after a deploy the previous service worker
+still routes `maplibre-gl-legacy.js` to the map, so an engine that needs
+MapLibre 5 and opens a map built before 2026-11 gets no map until it
+reloads.
 
 ### The sign reader (`--ocr`)
 

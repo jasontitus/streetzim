@@ -132,14 +132,20 @@
      without it answers 404 and the next script takes maplibre-gl.js, its
      own 5.23. A maplibre-gl.js that fails to run falls back the same way.
      document.write keeps the library loading before the scripts below, as
-     a plain script tag does. -->
+     a plain script tag does. The static-block probe is a script of its own
+     (an older engine rejects that one script) rather than an eval, which a
+     page's CSP may forbid. -->
 <link rel="stylesheet" href="maplibre-gl.css">
+<!-- BEGIN maplibre-loader (tests/test_maplibre_loader.py) -->
+<script>
+(class { static { window.__szStaticBlocks = true; } });
+</script>
 <script>
 (function() {
   var modern = false;
   try {
-    new Function('class A { static { } }');
-    var gl = document.createElement('canvas').getContext('webgl2');
+    var gl = window.__szStaticBlocks === true &&
+      document.createElement('canvas').getContext('webgl2');
     modern = !!gl;
     var lose = gl && gl.getExtension('WEBGL_lose_context');
     if (lose) lose.loseContext();
@@ -155,6 +161,7 @@ if (typeof window.maplibregl === 'undefined') {
   document.write('<script src="' + window.__szMapLibreNext + '"><\/script>');
 }
 </script>
+<!-- END maplibre-loader -->
 <script>
 // BEGIN sz-i18n-runtime
 // resources/viewer/i18n/runtime.js (comments there); docs/i18n.md
@@ -2687,8 +2694,19 @@ throw err;
 return attempt(1);
 }
 window.__szFetchWithRetry = fetchWithRetry;
+var fontLoads = {};
+function fetchFont(url) {
+if (!fontLoads[url]) {
+fontLoads[url] = fetch(url).then(function(r) {
+if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url);
+return r.arrayBuffer();
+});
+}
+return fontLoads[url].then(function(buf) { return { data: buf.slice(0) }; });
+}
 maplibregl.addProtocol('zimtile', function(params, abortController) {
 var url = params.url.replace('zimtile://', '');
+if (/\.otf$/.test(url)) return fetchFont(url);
 return new Promise(function(resolve, reject) {
 function run() {
 fetchWithRetry(url, abortController.signal)
@@ -2779,6 +2797,7 @@ bearing: openCam.bearing,
 pitch: openCam.pitch,
 minZoom: config.minZoom || 0,
 maxZoom: 20,
+zoomLevelsToOverscale: undefined,
 attributionControl: true,
 maxBounds: _szMaxBounds(config)
 });
@@ -4459,7 +4478,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'd25875e1';
+var SZ_VIEWER_BUILD = '7e92eb75';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {

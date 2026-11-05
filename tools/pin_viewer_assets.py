@@ -258,13 +258,15 @@ def _split_export(src: str, what: str) -> tuple[str, list[tuple[str, str]]]:
 
 
 def node_check(js: str, what: str) -> None:
-    """Parse ``js`` as a classic script with node (a .cjs file): an import,
-    an export, `import.meta` or a top-level await left in it fails here, not
-    in a reader's browser."""
+    """Compile ``js`` as a classic script with node (vm.Script, not run): an
+    import, an export, `import.meta`, a top-level await, return or
+    new.target left in it fails here, not in a reader's browser."""
     with tempfile.TemporaryDirectory() as tmp:
-        f = Path(tmp) / "check.cjs"
+        f = Path(tmp) / "check.js"
         f.write_text(js, encoding="utf-8")
-        r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+        r = subprocess.run(["node", "-e", "new (require('vm').Script)(require('fs').readFileSync("
+                            "process.argv[1], 'utf8'), {filename: process.argv[1]})", str(f)],
+                           capture_output=True, text=True)
     if r.returncode:
         raise SystemExit(f"{what} does not parse as a classic script:\n{r.stderr[-2000:]}")
 
@@ -277,11 +279,14 @@ def classic_maplibre(main: str, worker: str, version: str) -> str:
     The module runs in a strict function instead of a module scope; its
     `export` becomes the object `maplibregl` (the same names), and
     `import.meta.url` the URL of the script. The worker carries no import
-    and exports only itself, so without that export it runs as a module or
-    a classic worker alike; it is embedded as a string and started from a
-    blob: URL (setWorkerUrl), so it loads wherever the page does: in Kiwix
-    apps a module script or a worker at a zim: or content: URL may not.
-    Nothing else changes, byte for byte."""
+    and exports only itself, so without that export (and with the strict
+    mode a module has) it runs as a classic worker; it is embedded as a
+    string and started from a blob: URL, so it loads wherever the page
+    does: in Kiwix apps a module script or a worker at a zim: or content:
+    URL may not, and a page with an opaque origin (file:, a sandbox) cannot
+    start a module worker from a blob at all. MapLibre starts a worker URL
+    ending in ".cjs" as a classic worker, hence the fragment
+    (maplibre-gl-js#8769). Nothing else changes, byte for byte."""
     body, exports = _split_export(main, "maplibre-gl.mjs")
     names = [e for _, e in exports]
     if "setWorkerUrl" not in names or len(set(names)) != len(names):
@@ -295,6 +300,7 @@ def classic_maplibre(main: str, worker: str, version: str) -> str:
     worker_body, worker_exports = _split_export(worker, "maplibre-gl-worker.mjs")
     if [e for _, e in worker_exports] != ["default"]:
         raise SystemExit(f"maplibre-gl-worker.mjs exports {worker_exports}, not only a default")
+    worker_body = '"use strict";\n' + worker_body.rstrip() + "\n"
     node_check(worker_body, "the worker")
     api = ",\n".join(f"  {json.dumps(e)}: {loc}" for loc, e in exports)
     out = (
@@ -307,7 +313,7 @@ def classic_maplibre(main: str, worker: str, version: str) -> str:
         + body.rstrip() + "\n"
         f"var __maplibreApi = {{\n{api}\n}};\n"
         "__maplibreApi.setWorkerUrl(URL.createObjectURL(new Blob([" + json.dumps(worker_body)
-        + "], { type: \"text/javascript\" })));\n"
+        + "], { type: \"text/javascript\" })) + \"#maplibre-gl-worker.cjs\");\n"
         "globalThis.maplibregl = __maplibreApi;\n"
         "})();\n")
     node_check(out, "maplibre-gl.js")

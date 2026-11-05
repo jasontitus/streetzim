@@ -436,6 +436,33 @@ def fallback_scripts_in_tiles(tiles, lock=None):
     return found
 
 
+def script_fonts_in_tiles(tiles, lock=None):
+    """The script fonts (lock ``noto-script-fonts``: file -> Unicode ranges)
+    whose ranges occur in the labels of ``tiles`` ({(z, x, y): tile bytes}),
+    for the ZIM (streetzim/zim_writer.py _add_viewer). The style names all
+    of them in font-faces (viewer part 130), and MapLibre 6 fetches one only
+    when a label needs it, so a map carries just the ones its labels use.
+
+    None (all of them, 0.8 MB) when the tiles are not in memory or are more
+    than FALLBACK_SCAN_MAX_BYTES, as for the fallback glyphs."""
+    import time
+    from streetzim import glyph_fallback
+    ranges = (lock or viewer_assets.load_lock())[viewer_assets.SCRIPT_FONTS]["ranges"]
+    if tiles is None:
+        return None
+    total = sum(len(t) for t in tiles.values())
+    if total > FALLBACK_SCAN_MAX_BYTES:
+        print(f"  Script fonts: not scanned ({total / 1e6:,.0f} MB of tiles); shipping all")
+        return None
+    blocks = {f: [tuple(int(x, 16) for x in r[2:].split("-")) for r in rs]
+              for f, rs in ranges.items()}
+    t0 = time.monotonic()
+    found = glyph_fallback.scripts_in_tiles(tiles.values(), blocks)
+    print(f"  Script fonts for the labels: {', '.join(sorted(found)) or 'none'} "
+          f"({len(tiles):,} tiles scanned in {time.monotonic() - t0:.1f}s)")
+    return found
+
+
 def generate_sdf_font_glyphs(lock=None, scripts=None):
     """SDF font glyphs for MapLibre GL JS, as pinned in the lock file.
 
