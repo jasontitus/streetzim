@@ -373,7 +373,8 @@ function initWikidataPopups(map, config) {
     var name = szDisplayLabelOf(feat.properties) || feat.properties.label || qid;
     fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
       if (seq !== tapSeq) return;
-      var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
+      // In the map's language where its Wikipedia pack has the place (100).
+      var wd = _wikiLocalFacts((chunk && chunk[qid]) ? chunk[qid] : null, qid);
       popupSeq = seq;
       currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
         .setLngLat(e.lngLat)

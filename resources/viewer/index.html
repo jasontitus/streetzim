@@ -2287,6 +2287,27 @@ out.push(base);
 WIKI_PACKS.forEach(function(p) { if (out.indexOf(p) < 0) out.push(p); });
 return out;
 }
+function _wikiLocalSummary(qid) {
+if (!qid || !WIKI_MAP_LANG || _wikiLangIs(WIKI_BASE_LANG, WIKI_MAP_LANG)) return '';
+var has = Object.prototype.hasOwnProperty;
+for (var i = 0; i < WIKI_PACKS.length; i++) {
+var p = WIKI_PACKS[i];
+if (!_wikiLangIs(p.lang, WIKI_MAP_LANG) || !p.qid || !has.call(p.qid, qid)) continue;
+var d = _wikiEntryDesc(p.index[p.qid[qid]], true);
+if (d) return d;
+}
+return '';
+}
+function _wikiLocalFacts(wd, qid) {
+var lead = _wikiLocalSummary(qid);
+if (!lead) return wd;
+var out = {};
+if (wd) for (var k in wd) {
+if (Object.prototype.hasOwnProperty.call(wd, k) && k !== 'd' && k !== 'i') out[k] = wd[k];
+}
+out.x = lead;
+return out;
+}
 function _wikiArticleLinks(qid, w) {
 var has = Object.prototype.hasOwnProperty;
 if (!WIKI_PACKS.length) {
@@ -4478,7 +4499,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '7e92eb75';
+var SZ_VIEWER_BUILD = '322e90bf';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -5559,8 +5580,7 @@ var qid = String(r.wd);
 if (qid.charAt(0) !== 'Q') qid = 'Q' + qid; // tolerate stripped prefix
 var prefix = map._getWdPrefix(qid);
 map._fetchWdChunk(prefix).then(function(chunk) {
-if (!chunk) return;
-var wd = chunk[qid] || chunk[qid.replace(/^Q/, '')];
+var wd = _wikiLocalFacts(chunk && (chunk[qid] || chunk[qid.replace(/^Q/, '')]), qid);
 if (!wd) return;
 _populateWikipediaExtract(wdSlot, wd);
 }).catch(function() {});
@@ -10220,7 +10240,7 @@ function wikiPopup(e, feat, qid, seq) {
 var name = szDisplayLabelOf(feat.properties) || feat.properties.label || qid;
 fetchWdChunk(getWdPrefix(qid)).then(function(chunk) {
 if (seq !== tapSeq) return;
-var wd = (chunk && chunk[qid]) ? chunk[qid] : null;
+var wd = _wikiLocalFacts((chunk && chunk[qid]) ? chunk[qid] : null, qid);
 popupSeq = seq;
 currentPopup = new maplibregl.Popup({ maxWidth: '320px', offset: POPUP_OFFSET })
 .setLngLat(e.lngLat)

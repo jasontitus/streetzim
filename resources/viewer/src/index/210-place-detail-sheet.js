@@ -155,8 +155,8 @@ function _showPlaceDetail(map, r, idx) {
     if (qid.charAt(0) !== 'Q') qid = 'Q' + qid; // tolerate stripped prefix
     var prefix = map._getWdPrefix(qid);
     map._fetchWdChunk(prefix).then(function(chunk) {
-      if (!chunk) return;
-      var wd = chunk[qid] || chunk[qid.replace(/^Q/, '')];
+      // In the map's language where its Wikipedia pack has the place (100).
+      var wd = _wikiLocalFacts(chunk && (chunk[qid] || chunk[qid.replace(/^Q/, '')]), qid);
       if (!wd) return;
       _populateWikipediaExtract(wdSlot, wd);
     }).catch(function() {});

@@ -64,7 +64,7 @@ function loadWiki(map) {
     ' _wikiAlsoIn, openWikiArticle, wikiGeoTitlesInBounds,' +
     ' _wikiYourLang, _wikiIsOther, _wikiLangLabel, _wikiLangTag, _wikiPanelPick, _wikiPanelFilter, _wikiYoursFirst,' +
     ' _wikiPanelRowEl, _wikiMarkerEl, _wikiMarkerOptions, _wikiMarkerOrder, _wikiReadLabel, _wikiSheetLabel,' +
-    ' _wikiOnlyYoursSaved, _wikiOnlyYoursRow };');
+    ' _wikiOnlyYoursSaved, _wikiOnlyYoursRow, _wikiLocalSummary, _wikiLocalFacts };');
   const api = fn(window, fakeDocument(), history, { pathname: '/C/index.html', search: '' },
                  'http://kiwix/content/osm_th_liechtenstein/');
   return { ...api, nav };
@@ -113,6 +113,47 @@ await ok('wikiPacks are read as documented; anything else is ignored', () => {
     { lang: 'de', prefix: '~w/de/' }, { lang: 'de', prefix: '~w/de/' }, { lang: 'x y', prefix: '~w/fr/' },
     null, { prefix: '~w/es/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }, { lang: 'TH', prefix: '~w/th/' }] }),
     [{ lang: 'de', prefix: '~w/de/' }, { lang: 'zh-yue', prefix: '~w/zh-yue/' }, { lang: 'th', prefix: '~w/th/' }]);
+});
+
+await ok('a place\'s facts in the map language: its pack\'s lead replaces the base\'s description', () => {
+  const FACTS = { d: 'capital of Liechtenstein', x: 'Vaduz is the capital of Liechtenstein.', i: 'city',
+                  p: 5700, a: 17.3, c: 'Liechtenstein', tz: 'UTC+01:00' };
+  let W = merged();                                          // a Thai map of an English base
+  assert.strictEqual(W._wikiLocalSummary('Q1844'), 'เมืองหลวง');
+  // The lead from the Thai pack; the English short description and kind go;
+  // numbers and names stay; the base's object is not changed.
+  assert.deepStrictEqual(W._wikiLocalFacts(FACTS, 'Q1844'),
+    { x: 'เมืองหลวง', p: 5700, a: 17.3, c: 'Liechtenstein', tz: 'UTC+01:00' });
+  assert.strictEqual(FACTS.d, 'capital of Liechtenstein');
+  // No facts in the base: the lead alone.
+  assert.deepStrictEqual(W._wikiLocalFacts(null, 'Q1844'), { x: 'เมืองหลวง' });
+  // Only the map language's pack counts: Q4540 is in the German pack only.
+  const other = { d: 'municipality', x: 'Eschen is a municipality.' };
+  assert.strictEqual(W._wikiLocalFacts(other, 'Q4540'), other);
+  // A pack entry without a description, a place no pack has, no Q-ID.
+  assert.strictEqual(W._wikiLocalFacts(other, 'Q999'), other);
+  assert.strictEqual(W._wikiLocalFacts(other, 'Q675040'), other);
+  assert.strictEqual(W._wikiLocalFacts(other, null), other);
+  assert.strictEqual(W._wikiLocalFacts(null, 'Q675040'), null);
+  // A map in its base's language, or one without packs: as before.
+  W = merged({ ...MERGED, language: 'en' });
+  assert.strictEqual(W._wikiLocalFacts(FACTS, 'Q1844'), FACTS);
+  W = loadWiki();
+  W.set(BASE);
+  W.wikiPacksInit({ language: 'th' });
+  assert.strictEqual(W._wikiLocalFacts(FACTS, 'Q1844'), FACTS);
+  // The pack's index not loaded yet: as before, not an error.
+  W = merged(MERGED, { de: DE });
+  assert.strictEqual(W._wikiLocalFacts(FACTS, 'Q1844'), FACTS);
+});
+
+await ok('the map popup and the place sheet show a place\'s facts through _wikiLocalFacts', () => {
+  const popup = slice('function wikiPopup(e, feat, qid, seq) {', 'function placeLabelPopup(');
+  assert.match(popup, /var wd = _wikiLocalFacts\(\(chunk && chunk\[qid\]\) \? chunk\[qid\] : null, qid\);/);
+  assert.match(popup, /buildWikiPopupDOM\(name, wd,/);
+  const sheet = slice('// Wikipedia extract — async fetch via the existing wd cache.', '// Nearby — up to 5 closest');
+  assert.match(sheet, /var wd = _wikiLocalFacts\(chunk && \(chunk\[qid\] \|\| chunk\[qid\.replace\(\/\^Q\/, ''\)\]\), qid\);/);
+  assert.match(sheet, /_populateWikipediaExtract\(wdSlot, wd\);/);
 });
 
 await ok('language codes in any case; a map in zh-Hans takes the zh Wikipedia first', () => {

@@ -232,6 +232,38 @@ function _wikiSources() {
   return out;
 }
 
+// A place's Wikidata facts as a map in another language than its base's
+// shows them. The base's wikidata/ chunk describes a place in the base's
+// language: d (a short description), x (its article's lead) and i (what
+// it is, "city"). Where the map language's pack has the place's article,
+// that article's lead (the pack's geo-index description) is the summary
+// instead, and the base's d and i, which have no counterpart in the pack,
+// are left out: a Hindi map describes Shillong in Hindi, not English.
+// Facts that are numbers or names (population, area, country, ...) stay.
+// Unchanged without such an article, or when the map is in the base's
+// language. A place the base has no facts for gets the lead alone.
+function _wikiLocalSummary(qid) {
+  if (!qid || !WIKI_MAP_LANG || _wikiLangIs(WIKI_BASE_LANG, WIKI_MAP_LANG)) return '';
+  var has = Object.prototype.hasOwnProperty;
+  for (var i = 0; i < WIKI_PACKS.length; i++) {
+    var p = WIKI_PACKS[i];
+    if (!_wikiLangIs(p.lang, WIKI_MAP_LANG) || !p.qid || !has.call(p.qid, qid)) continue;
+    var d = _wikiEntryDesc(p.index[p.qid[qid]], true);
+    if (d) return d;
+  }
+  return '';
+}
+function _wikiLocalFacts(wd, qid) {
+  var lead = _wikiLocalSummary(qid);
+  if (!lead) return wd;
+  var out = {};
+  if (wd) for (var k in wd) {
+    if (Object.prototype.hasOwnProperty.call(wd, k) && k !== 'd' && k !== 'i') out[k] = wd[k];
+  }
+  out.x = lead;
+  return out;
+}
+
 // A place's bundled articles, preferred first: [{lang, prefix, title}],
 // one per Wikipedia. Every Wikipedia is asked by the place's Q-ID first.
 // A pack is then asked for the `w` tag's title when the tag is in its
