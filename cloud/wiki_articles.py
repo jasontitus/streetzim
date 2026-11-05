@@ -281,20 +281,178 @@ BACK_BAR_CSS = (
 )
 
 
+# The bar's words in the map's language. The build writes them in English;
+# BACK_BAR_SCRIPT, next to the articles, rewords them from the map's
+# map-config.json "language" when the page opens, since one article serves
+# every language version of a map (a Wikipedia pack is shared by all of
+# them). The PWA's service worker (web/drive/sw.js) rewords them the same
+# way for maps built before the script; tests/test_back_bar_script.py keeps
+# its table equal to this one. One entry per viewer UI table
+# (resources/viewer/i18n/<lang>.json); English and a language without an
+# entry keep the English.
+BACK_TO_MAP = {
+    "af": "Terug na die kaart",
+    "am": "ወደ ካርታው ተመለስ",
+    "ar": "العودة إلى الخريطة",
+    "av": "Картаялде тӀадбуссине",
+    "az": "Xəritəyə qayıt",
+    "bg": "Назад към картата",
+    "bi": "Gobak long map",
+    "bs": "Nazad na mapu",
+    "ca": "Torna al mapa",
+    "ce": "Карте юхадерза",
+    "cs": "Zpět na mapu",
+    "cy": "Yn ôl i’r map",
+    "da": "Tilbage til kortet",
+    "de": "Zurück zur Karte",
+    "din": "Dhuk në map",
+    "el": "Επιστροφή στον χάρτη",
+    "es": "Volver al mapa",
+    "et": "Tagasi kaardile",
+    "eu": "Itzuli mapara",
+    "fa": "بازگشت به نقشه",
+    "ff": "Rutto e kartal",
+    "fi": "Takaisin karttaan",
+    "fj": "Lesu ki na mape",
+    "fr": "Retour à la carte",
+    "fy": "Werom nei de kaart",
+    "ga": "Ar ais chuig an léarscáil",
+    "gl": "Volver ao mapa",
+    "glk": "نقشه ره واگردستن",
+    "ha": "Koma taswira",
+    "haw": "Hoʻi i ka palapala ʻāina",
+    "he": "חזרה למפה",
+    "hi": "मानचित्र पर लौटें",
+    "hif": "Naksa pe waapas jao",
+    "hr": "Natrag na kartu",
+    "ht": "Tounen sou kat la",
+    "hu": "Vissza a térképhez",
+    "hy": "Վերադառնալ քարտեզին",
+    "id": "Kembali ke peta",
+    "ig": "Laghachi na maapụ",
+    "is": "Aftur á kortið",
+    "it": "Torna alla mappa",
+    "ja": "地図に戻る",
+    "jam": "Go bak a di map",
+    "jv": "Bali menyang peta",
+    "ka": "რუკაზე დაბრუნება",
+    "kab": "Uɣal ɣer tkarḍa",
+    "kg": "Vutuka ku kalati",
+    "ko": "지도로 돌아가기",
+    "ku": "Vegere nexşeyê",
+    "lb": "Zréck op d’Kaart",
+    "ln": "Zonga na kárte",
+    "lt": "Atgal į žemėlapį",
+    "lv": "Atpakaļ uz karti",
+    "mk": "Назад кон мапата",
+    "ms": "Kembali ke peta",
+    "mt": "Lura għall-mappa",
+    "my": "မြေပုံသို့ ပြန်သွားရန်",
+    "mzn": "نقشه ره برگردستن",
+    "nl": "Terug naar de kaart",
+    "no": "Tilbake til kartet",
+    "ny": "Bwererani ku mapu",
+    "om": "Gara kaartaatti deebi'i",
+    "pap": "Bolbe na e mapa",
+    "pcm": "Go bak to di map",
+    "pl": "Wróć do mapy",
+    "pt": "Voltar ao mapa",
+    "rm": "Enavos a la charta",
+    "ro": "Înapoi la hartă",
+    "ru": "Назад к карте",
+    "sc": "Torra a sa mapa",
+    "sg": "Kîri na kârâte",
+    "sk": "Späť na mapu",
+    "sl": "Nazaj na zemljevid",
+    "sn": "Dzokera kumepu",
+    "so": "Ku noqo khariidadda",
+    "sq": "Kthehu te harta",
+    "sr": "Назад на мапу",
+    "su": "Balik deui ka peta",
+    "sv": "Tillbaka till kartan",
+    "sw": "Rudi kwenye ramani",
+    "th": "กลับไปที่แผนที่",
+    "ti": "ናብ ካርታ ተመለስ",
+    "tl": "Bumalik sa mapa",
+    "tpi": "Go bek long map",
+    "tr": "Haritaya dön",
+    "ty": "Hoʻi i te hōhoʻa fenua",
+    "uk": "Назад до карти",
+    "vi": "Quay lại bản đồ",
+    "xh": "Buyela kwimaphu",
+    "yo": "Padà sí máàpù",
+    "zgh": "ⴰⵖⵓⵍ ⵖⵔ ⵜⴽⴰⵔⴹⴰ",
+    "zh": "返回地图",
+    "zu": "Buyela emephini",
+}
+# Right-to-left: the words in their own direction, the arrow pointing back
+# toward the line's start, which is on the right.
+BACK_TO_MAP_RTL = frozenset(["ar", "fa", "glk", "he", "mzn"])
+# A language without words of its own takes another its readers read, as
+# the viewer does (runtime.js SZ_UI_FALLBACK).
+BACK_TO_MAP_FALLBACK = {"gsw": "de"}
+BACK_BAR_SCRIPT = "sz-back.js"
+
+
 def back_to_map_bar(title: str, prefix_depth: int = 0) -> str:
-    """The "Back to map" bar for an article stored at wiki-article/<title>.
+    """The "Back to map" bar for an article stored at wiki-article/<title>,
+    with the script that words it in the map's language (BACK_BAR_SCRIPT,
+    stored next to that Wikipedia's wiki-article/: the map's root, or a
+    pack's ~w/<xx>/).
 
     A title with slashes is stored that many levels deeper (its images are
-    linked ../../wiki-image/…), so the map link climbs the same depth.
+    linked ../../wiki-image/…), so the links climb the same depth.
     `prefix_depth`: folders above wiki-article/ (2 for a Wikipedia pack's
     ~w/<xx>/wiki-article/<title>, whose map is ../../../index.html).
     """
-    up = "../" * (1 + prefix_depth + title.count("/"))
+    own = "../" * (1 + title.count("/"))
+    up = "../" * prefix_depth + own
     return (
         f'<nav class="sz-back"><a href="{up}index.html" '
         'onclick="if(history.length>1){history.back();return false}">'
-        "&#8592; Back to map</a></nav>"
+        f"&#8592; Back to map</a></nav><script src=\"{own}{BACK_BAR_SCRIPT}\"></script>"
     )
+
+
+def back_bar_script() -> bytes:
+    """BACK_BAR_SCRIPT: rewords the bar just before it (back_to_map_bar) in
+    the language map-config.json names, as web/drive/sw.js backToMapText
+    does. It finds map-config.json at the map's root whether it is the
+    root's copy or a pack's (~w/<xx>/). Nothing happens without a fetch,
+    a readable map-config or words for the language: the bar stays English."""
+    table = json.dumps(BACK_TO_MAP, ensure_ascii=False, sort_keys=True)
+    rtl = json.dumps({k: 1 for k in sorted(BACK_TO_MAP_RTL)})
+    fb = json.dumps(BACK_TO_MAP_FALLBACK, sort_keys=True)
+    js = (
+        "/* The Back to map bar of a bundled Wikipedia article in the map's language"
+        " (cloud/wiki_articles.py back_bar_script). */\n"
+        "(function () {\n"
+        "  var s = document.currentScript;\n"
+        "  var nav = s && s.previousElementSibling;\n"
+        "  var a = nav && nav.className === 'sz-back' ? nav.querySelector('a') : null;\n"
+        "  if (!a || typeof fetch !== 'function') return;\n"
+        f"  var W = {table}, RTL = {rtl}, FB = {fb};\n"
+        "  var root = String(s.src).replace(/(?:(?:~|%7e)w\\/[^\\/]+\\/)?sz-back\\.js(?:[?#].*)?$/i, '');\n"
+        "  fetch(root + 'map-config.json').then(function (r) { return r.ok ? r.json() : null; })\n"
+        "    .then(function (c) {\n"
+        "      var l = c && typeof c.language === 'string' ? c.language.toLowerCase() : '';\n"
+        "      var b = W[l] ? l : l.split('-')[0];\n"
+        "      if (!W[b] && FB[b]) b = FB[b];\n"
+        "      var t = W[b];\n"
+        "      if (!t) return;\n"
+        "      a.textContent = '';\n"
+        "      if (RTL[b]) {\n"
+        "        var sp = document.createElement('span');\n"
+        "        sp.setAttribute('dir', 'rtl');\n"
+        "        sp.textContent = '\\u2192 ' + t;\n"
+        "        a.appendChild(sp);\n"
+        "      } else {\n"
+        "        a.textContent = '\\u2190 ' + t;\n"
+        "      }\n"
+        "    })['catch'](function () {});\n"
+        "})();\n"
+    )
+    return js.encode("utf-8")
 
 
 # Kept links (clean_article_html's link_href) cross the tag whitelist and the

@@ -32,6 +32,20 @@ const BARE = '<html><head><title>Foo</title></head><body><p>x</p></body></html>'
 const BUILT = '<html><head></head><body><nav class="sz-back"><a href="../../../index.html#map=12/47.1/9.5" ' +
   'onclick="x">&#8592; Back to map</a></nav><p>Pack body.</p></body></html>';
 
+// The bar as cloud/wiki_articles.py writes it: its onclick holds a '>'.
+const BUILT_REAL = '<html><head></head><body><nav class="sz-back"><a href="../../../index.html" ' +
+  'onclick="if(history.length>1){history.back();return false}">&#8592; Back to map</a></nav>' +
+  '<script src="../sz-back.js"></script><p>Pack body.</p></body></html>';
+
+await ok('the bar as the build writes it is reworded too (a ">" in its onclick)', () => {
+  const out = run(BUILT_REAL, 'hi');
+  assert.ok(out.includes('<a href="/drive/viewer/" onclick="if(history.length>1){history.back();return false}">' +
+    '&#8592; मानचित्र पर लौटें</a></nav><script src="../sz-back.js"></script>'), out);
+  assert.ok(!out.includes('Back to map'));
+  assert.ok(run(BUILT_REAL, 'ar').includes('<span dir="rtl">&#8594; العودة إلى الخريطة</span></a></nav>'));
+  assert.strictEqual(run(BUILT_REAL, 'en'), BUILT_REAL.replace('../../../index.html', '/drive/viewer/'));
+});
+
 await ok('English, no language, or one without a table: the old bar, byte for byte', () => {
   for (const lang of [undefined, '', 'en', 'EN', 'qu', 'qqx', 42]) {
     assert.strictEqual(api.backBarHtml(lang), OLD_BAR, String(lang));

@@ -69,7 +69,9 @@ from pathlib import Path
 from typing import Any
 
 from cloud.wiki_articles import (
+    BACK_BAR_SCRIPT,
     _is_disambiguation,
+    back_bar_script,
     article_figures,
     article_url,
     clean_article_html,
@@ -1291,6 +1293,11 @@ def build_pack(base_path: str | os.PathLike[str], *, lang: str, source: str | os
                                     text_blob))
         geo_blob = json.dumps(geo, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         creator.add_item(_Entry(prefix + "wiki-geo-index.json", "", "application/json", geo_blob))
+        if pages:
+            # Words each article's "Back to map" bar in the merged map's
+            # language: one pack serves every language version of its map.
+            creator.add_item(_Entry(prefix + BACK_BAR_SCRIPT, "", "application/javascript",
+                                    back_bar_script()))
         meta = {"lang": lang, "region": region, "base_uuid": base.uuid, "articles": len(pages),
                 "images": len(spooled), "source": os.path.basename(str(source)), "built": built}
         creator.add_item(_Entry(prefix + "pack.json", "", "application/json",

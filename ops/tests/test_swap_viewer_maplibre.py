@@ -86,3 +86,53 @@ def test_without_the_option_maplibre_is_left_alone(tmp_path, monkeypatch):
     for path in ("maplibre-gl.js", "maplibre-gl.css"):
         assert after.get(path) == before.get(path)
     assert not any(p.endswith(".otf") or p == "maplibre-gl-legacy.js" for p in after)
+
+
+# ---- --back-bar --------------------------------------------------------
+
+def _svr():
+    spec = importlib.util.spec_from_file_location("swap_viewer_rust_backbar_under_test",
+                                                  ROOT / "ops" / "cloud" / "swap_viewer_rust.py")
+    assert spec and spec.loader
+    svr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(svr)
+    return svr
+
+
+@pytest.mark.parametrize("path,title,depth,script", [
+    ("wiki-article/Vaduz", "Vaduz", 0, "../sz-back.js"),
+    ("wiki-article/AC/DC", "AC/DC", 0, "../../sz-back.js"),
+    ("~w/hi/wiki-article/शिलांग", "शिलांग", 2, "../sz-back.js"),
+    ("~w/hi/wiki-article/A/B/C", "A/B/C", 2, "../../../sz-back.js"),
+])
+def test_back_bar_retrofit_gives_an_old_page_what_a_build_writes(path, title, depth, script):
+    from cloud import wiki_articles as wa
+    svr = _svr()
+    built_now = wa.back_to_map_bar(title, depth)
+    old_bar = built_now.split("<script")[0]                        # as built before the script
+    page = f"<html><body>{old_bar}<h1>{title}</h1></body></html>".encode()
+    out = svr.back_bar_retrofit(path, page)
+    assert out == f"<html><body>{built_now}<h1>{title}</h1></body></html>".encode()
+    assert f'<script src="{script}"></script>' in out.decode()
+    assert svr.back_bar_retrofit(path, out) is out                 # once only
+
+
+@pytest.mark.parametrize("path,page", [
+    ("index.html", b'<nav class="sz-back"><a href="x">&#8592; Back to map</a></nav>'),
+    ("wiki-image/a.webp", b'&#8592; Back to map</a></nav>'),
+    ("wiki-article/Foo", b"<html><body><a href='../index.html'>map</a></body></html>"),
+    ("search/foo-1.html", b'&#8592; Back to map</a></nav>'),
+])
+def test_back_bar_retrofit_leaves_everything_else(path, page):
+    assert _svr().back_bar_retrofit(path, page) is page
+
+
+def test_back_bar_swap_adds_the_script_beside_each_article_folder(tmp_path, monkeypatch):
+    from cloud.wiki_articles import back_bar_script
+    src, dst = _swap(tmp_path, monkeypatch, back_bar=True)
+    before, after = _entries(src), _entries(dst)
+    roots = {p.split("wiki-article/")[0] for p in before if "wiki-article/" in p}
+    assert roots                                                   # the fixture has articles
+    for root in roots:
+        assert after[root + "sz-back.js"] == ("application/javascript", back_bar_script())
+    assert {p for p in after if p.endswith("sz-back.js")} == {r + "sz-back.js" for r in roots}

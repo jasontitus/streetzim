@@ -2327,6 +2327,12 @@ def _add_wiki_articles(creator, MapItem, *, wiki_cross_refs, bundle_wiki_article
                 lang=lang,
             )
             _bundled_set = _wa_stats.get("stored_titles") or set()
+            if _wa_stats.get("bundled"):
+                # Words each article's "Back to map" bar in the map's
+                # language (cloud/wiki_articles.py back_bar_script).
+                from cloud.wiki_articles import BACK_BAR_SCRIPT, back_bar_script
+                creator.add_item(MapItem(BACK_BAR_SCRIPT, "", "application/javascript",
+                                         back_bar_script()))
             PHASE_TIMER.record_subphase(
                 "zim-pack: wiki-articles", time.time() - _wa_t0,
                 note=f"{_wa_stats['bundled']} articles, "

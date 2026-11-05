@@ -50,7 +50,7 @@ refresh. Use `repackage_zim.py` for those (and accept that it loses Xapian
 on rust-built sources).
 
 Usage:
-    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips] [--maplibre]
+    python3 cloud/swap_viewer_rust.py SRC.zim DST.zim [--reshard-chips] [--maplibre] [--back-bar]
         [--reshard-search | --rebuild-search [--allow-total-mismatch]
                             [--add-admin-areas REGION.osm.pbf [--bbox W,S,E,N]
                              [--wikidata-title-cache JSON] [--allow-no-admin-areas]]
@@ -756,6 +756,31 @@ def _plan_xapian(spool_path: Path, admin_feats: list[dict], admin_first: int,
     return pages_path, n_pages
 
 
+_ARTICLE_PATH = re.compile(r"^(~w/[^/]+/)?wiki-article/(.+)$")
+_SCRIPT_PATH = re.compile(r"^(~w/[^/]+/)?sz-back\.js$")
+_BAR_END = b"&#8592; Back to map</a></nav>"
+
+
+def back_bar_retrofit(path: str, data: bytes) -> bytes:
+    """--back-bar: a Wikipedia article page built before its "Back to map"
+    bar loaded the script that words it in the map's language
+    (cloud/wiki_articles.py back_to_map_bar) gets that script tag after the
+    bar, as a build now writes it. Anything else, and a page that has it,
+    is returned as it is."""
+    m = _ARTICLE_PATH.match(path)
+    if not m:
+        return data
+    i = data.find(_BAR_END)
+    if i < 0:
+        return data
+    j = i + len(_BAR_END)
+    if data.startswith(b"<script src=", j):
+        return data
+    from cloud.wiki_articles import BACK_BAR_SCRIPT
+    own = "../" * (1 + m.group(2).count("/"))
+    return data[:j] + f'<script src="{own}{BACK_BAR_SCRIPT}"></script>'.encode() + data[j:]
+
+
 def maplibre_entries() -> dict[str, tuple[str, bytes, str]]:
     """--maplibre: path -> (mimetype, bytes, title) of the vendored MapLibre
     (maplibre-gl.js and .css), maplibre-gl-legacy.js and every script font
@@ -795,7 +820,8 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                      kiwix_poi_pages: bool = False,
                      wikidata_title_cache: str | None = None,
                      allow_no_admin_areas: bool = False,
-                     maplibre: bool = False) -> int:
+                     maplibre: bool = False,
+                     back_bar: bool = False) -> int:
     from libzim.reader import Archive
 
     if add_admin_areas and not rebuild_search:
@@ -984,6 +1010,12 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
     dropped_chip_files = 0
     dropped_search_files = 0
     replaced_paths: set[str] = set()
+    # --back-bar: the article folders (the root's '', a pack's ~w/<xx>/), and
+    # those that already carry the script.
+    bar_roots: set[str] = set()
+    script_roots: set[str] = set()
+    bar_pages = 0
+    from cloud.wiki_articles import BACK_BAR_SCRIPT, back_bar_script
     admin_feats: list[dict] = []
     admin_first = 0
 
@@ -1180,6 +1212,18 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     continue
 
                 data = bytes(item.content)
+                if back_bar:
+                    am = _ARTICLE_PATH.match(path)
+                    sm = _SCRIPT_PATH.match(path)
+                    if am and mime.startswith("text/html"):
+                        bar_roots.add(am.group(1) or "")
+                        new = back_bar_retrofit(path, data)
+                        if new is not data:
+                            data = new
+                            bar_pages += 1
+                    elif sm:                     # the current script, not the source's
+                        script_roots.add(sm.group(1) or "")
+                        data = back_bar_script()
                 # Drop geo-index entries whose article wasn't actually bundled
                 # (enwiki had no page for that title) so the viewer never lists a
                 # place that 404s on "Read full article".
@@ -1214,6 +1258,12 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
                     kept += 1
                 del data
 
+            for root in sorted(bar_roots - script_roots):
+                c.add_item(_Item(root + BACK_BAR_SCRIPT, "application/javascript", title="",
+                                 data=back_bar_script(), compress=True, namespace=None))
+            if back_bar:
+                print(f"  back-to-map bars: {bar_pages} page(s) given the script; "
+                      f"{BACK_BAR_SCRIPT} under {sorted(bar_roots) or 'no article folder'}")
             for path, (e_mime, e_data, e_title) in extras.items():
                 if path not in replaced_paths:
                     c.add_item(_Item(path, e_mime, title=e_title, data=e_data,
@@ -1621,6 +1671,10 @@ def main() -> int:
                          "differ from the source manifest's total (e.g. a ZIM "
                          "whose addresses derive_zim stripped). Otherwise that "
                          "is an error.")
+    ap.add_argument("--back-bar", action="store_true",
+                    help="give every Wikipedia article's Back to map bar the script that "
+                         "words it in the map's language (cloud/wiki_articles.py), and "
+                         "that script beside each article folder")
     ap.add_argument("--maplibre", action="store_true",
                     help="also swap in the vendored MapLibre (maplibre-gl.js/.css) and add "
                          "maplibre-gl-legacy.js and the script fonts, as a build since "
@@ -1628,6 +1682,7 @@ def main() -> int:
     args = ap.parse_args()
     return swap_viewer_rust(args.src, args.dst,
                             maplibre=args.maplibre,
+                            back_bar=args.back_bar,
                             reshard_chips=args.reshard_chips,
                             reshard_search=args.reshard_search,
                             rebuild_search=args.rebuild_search,

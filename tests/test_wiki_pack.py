@@ -343,6 +343,17 @@ def test_back_bar_climbs_out_of_the_prefix(world: dict[str, Any]) -> None:
     assert len(acdc_img) == 1 and acdc_img[0].startswith("../../wiki-image/")
 
 
+def test_the_pack_words_its_back_bar_in_the_merged_maps_language(world: dict[str, Any]) -> None:
+    # Each page loads the pack's own copy of the script right after the bar,
+    # which rewords it from the merged map-config (tests/test_back_bar_script.py).
+    from cloud.wiki_articles import back_bar_script
+    assert '&#8592; Back to map</a></nav><script src="../sz-back.js"></script>' in _page(world, "Alpha_Town")
+    assert '</nav><script src="../../sz-back.js"></script>' in _page(world, "AC/DC_Place")
+    entry = Archive(world["pack"]).get_entry_by_path(PRE + "sz-back.js")
+    assert entry.get_item().mimetype == "application/javascript"
+    assert bytes(entry.get_item().content) == back_bar_script()
+
+
 def test_pages_are_in_the_pack_language(world: dict[str, Any]) -> None:
     alpha = _page(world, "Alpha_Town")
     assert alpha.startswith('<!DOCTYPE html><html lang="fr">')

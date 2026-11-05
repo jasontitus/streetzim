@@ -583,10 +583,11 @@ function withBackToMap(data, lang) {
     // view stamped after the file name (#map=…) is kept.
     html = html.replace(/(<nav class="sz-back"><a href=")(?:\.\.\/)+index\.html(#[^"]*)?"/,
                         (m, open, frag) => open + '/drive/viewer/' + (frag || '') + '"');
-    // The build writes the words in English.
+    // The build writes the words in English. The link's attributes are
+    // quoted and its onclick holds a '>' (history.length>1).
     const words = backToMapText(lang);
     if (words !== BACK_TO_MAP_EN) {
-      html = html.replace(/(<nav class="sz-back"><a [^>]*>)&#8592; Back to map(<\/a>)/,
+      html = html.replace(/(<nav class="sz-back"><a (?:[^>"]|"[^"]*")*>)&#8592; Back to map(<\/a>)/,
                           (m, open, close) => open + words + close);
     }
   } else {
