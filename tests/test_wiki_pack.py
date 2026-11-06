@@ -434,6 +434,27 @@ def test_wikidata_text_norwegian_reads_bokmal_terms(tmp_path: Path) -> None:
     assert st["complete"] and "nb" in asked[0]
 
 
+def test_norwegian_text_from_before_bokmal_is_not_read(tmp_path: Path) -> None:
+    """A cache's no.jsonl was asked as "no" (nearly every row an empty
+    answer); Norwegian's text is now kept in its own file, so those answers
+    are asked again, as Bokmål, and other languages' files are as they were."""
+    d = tmp_path / "wikidata-text"
+    d.mkdir()
+    (d / "no.jsonl").write_text('["Q1", "", ""]\n', encoding="utf-8")
+    (d / "sv.jsonl").write_text('["Q1", "Trondheim", "stad"]\n', encoding="utf-8")
+    asked: list[list[str]] = []
+
+    def fetch(ids: list[str], codes: list[str]) -> dict[str, Any]:
+        asked.append(ids)
+        return {"Q1": {"id": "Q1", "labels": {"nb": {"value": "Trondheim"}}}}
+    got, _ = wiki_pack.wikidata_text(["Q1"], "no", tmp_path, fetch=fetch, langs=("no",))
+    assert asked == [["Q1"]] and got == {"Q1": ["Trondheim", ""]}
+    assert wiki_pack._text_cache(tmp_path, "no").name == "no-nb.jsonl"
+    assert wiki_pack._text_cache(tmp_path, "sv").name == "sv.jsonl"
+    from tools.langpack.region_meta import label_in
+    assert label_in(tmp_path, "no", "Q1") == "Trondheim" and label_in(tmp_path, "sv", "Q1") == "Trondheim"
+
+
 def test_wikidata_text_stops_when_refused(tmp_path: Path) -> None:
     import urllib.error
     calls: list[list[str]] = []

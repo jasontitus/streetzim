@@ -137,7 +137,8 @@ def region_qid(z: ZimReader, name: str, region: str | None = None) -> str | None
 def label_in(cache: Path | None, lang: str, qid: str | None) -> str:
     if not cache or not qid:
         return ""
-    p = cache / "wikidata-text" / f"{lang}.jsonl"
+    from streetzim.wiki_pack import _text_cache
+    p = _text_cache(cache, lang)
     found = ""
     try:
         with open(p, encoding="utf-8") as fh:

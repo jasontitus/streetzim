@@ -559,8 +559,15 @@ def renamed_titles(lang: str, targets: Iterable[str], cache_dir: Path, *, offlin
 TEXT_CODE_RE = re.compile(r"[a-z]{2,3}(-[a-z]+)?")
 
 
+# A language's cache file is named for what it was asked as: Norwegian's
+# rows come from asking for nb first (TEXT_VARIANTS, since 2026-11-06), so
+# they go in a file of their own and a cache written before (asked as "no":
+# nearly every row an empty answer, kept as an answer) is not read again.
+TEXT_CACHE_NAME = {"no": "no-nb"}
+
+
 def _text_cache(cache_dir: Path, lang: str) -> Path:
-    return cache_dir / "wikidata-text" / f"{lang}.jsonl"
+    return cache_dir / "wikidata-text" / f"{TEXT_CACHE_NAME.get(lang, lang)}.jsonl"
 
 
 def _load_text_cache(path: Path, wanted: set[str] | None = None) -> dict[str, tuple[str, str]]:

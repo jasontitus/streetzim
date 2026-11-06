@@ -43,7 +43,10 @@ class _Item(Item):
         self._p, self._t, self._m = path, title, mime
         self._d = data.encode() if isinstance(data, str) else data
         self._front = front
-        self._compress = compress
+        self._hint = compress
+        # the packer's (cloud/manifest_writer.py) reading: compressed unless
+        # said otherwise, as a build's items are
+        self._compress = True if compress is None else compress
         # what streetzim's packer reads (cloud/manifest_writer.py, a MapItem)
         self._path, self._title, self._mimetype, self._data = path, title, mime, self._d
         self._is_front = front
@@ -62,8 +65,8 @@ class _Item(Item):
 
     def get_hints(self) -> dict[Any, bool]:
         h = {Hint.FRONT_ARTICLE: self._front}
-        if self._compress is not None:
-            h[Hint.COMPRESS] = self._compress
+        if self._hint is not None:
+            h[Hint.COMPRESS] = self._hint
         return h
 
 
