@@ -486,18 +486,36 @@ function _szCorners(as, bs) {
 function _szSignCorner(cands) {
   var c = (cands || []).filter(function (x) { return x && x.sim >= 1 && isFinite(x.lat) && isFinite(x.lon); });
   var best = null, bestKm = SZ_SIGN_CORNER_KM;
+  var dist = function (a, b) {
+    var dy = (a[0] - b[0]) * 111.2, dx = (a[1] - b[1]) * 111.2 * Math.cos(a[0] * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy);
+  };
   for (var i = 0; i < c.length; i++) {
     for (var j = i + 1; j < c.length; j++) {
       // two blades: not one line, nor one blade read twice ("EMERSON", "EMERSON 1000")
       var li = String(c[i].line || '').toLowerCase(), lj = String(c[j].line || '').toLowerCase();
       if (li === lj || li.indexOf(lj) >= 0 || lj.indexOf(li) >= 0 || c[i].rec.n === c[j].rec.n) continue;
-      var dy = (c[i].lat - c[j].lat) * 111.2;
-      var dx = (c[i].lon - c[j].lon) * 111.2 * Math.cos(c[i].lat * Math.PI / 180);
-      var km = Math.sqrt(dx * dx + dy * dy);
+      var km = dist([c[i].lat, c[i].lon], [c[j].lat, c[j].lon]);
       if (km <= bestKm) { bestKm = km; best = (c[j].weight || 1) > (c[i].weight || 1) ? [c[j], c[i]] : [c[i], c[j]]; }
     }
   }
-  return best && [best[0].rec, best[1].rec];
+  if (!best) return null;
+  var pair = [best[0].rec, best[1].rec];
+  // Where else these two names meet, among the records found: a street's
+  // records are points up to a km apart, so pieces of the two within 1 km,
+  // one place per km ("Broadway" and "El Camino Real" in four towns; "Main
+  // St" and "1st Ave" in many). More than one: the sign does not say which.
+  var at = [];
+  c.forEach(function (a) {
+    if (a.rec.n !== pair[0].n) return;
+    c.forEach(function (b) {
+      if (b.rec.n !== pair[1].n || dist([a.lat, a.lon], [b.lat, b.lon]) > 1) return;
+      var mid = [(a.lat + b.lat) / 2, (a.lon + b.lon) / 2];
+      if (!at.some(function (o) { return dist(o, mid) < 1; })) at.push(mid);
+    });
+  });
+  pair.several = at.length > 1;
+  return pair;
 }
 function _szSignScore(rec, lines, norm) {
   var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [], blade = {};
@@ -1926,7 +1944,7 @@ var SEARCH_SHARDS = (function () {
       });
       scored.forEach(function(m) {
         var sc = scores.get(m.item) || {};
-        if (corner && (m.item === corner[0] || m.item === corner[1])) m.signCorner = true;
+        if (corner && (m.item === corner[0] || m.item === corner[1])) { m.signCorner = true; m.signCornerSeveral = !!corner.several; }
         m.signLine = sc.line || '';
         m.signSim = sc.sim || 0;
       });

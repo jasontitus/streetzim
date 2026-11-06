@@ -30,7 +30,7 @@ const M = new Function(
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
-  '\nreturn { _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame, _szSignUnsure, _szSignIOS, _szSignRoman, _szSignElsewhere };')();
+  '\nreturn { _szSignBlockLand, _szSignLineGroups, _szSignWeighted, _szSignMerge, _szSignCompose, _szSignDigits, _szSignAddress, _szSignKiwixApp, _szSignKinds, _szSignAddressKind, _szSignPlate, _szSignMayBeAddress, _szSignCyrillic, SZ_SIGN_OWN, _szSignSameName, _szSignClearFrame, _szSignUnsure, _szSignIOS, _szSignRoman, _szSignElsewhere };')();
 // The photo's frame (sign-view): fit, bounds, what it shows, zoom, taps, parts.
 const V = new Function(slice(HTML, '// BEGIN sign-view', '// END sign-view') +
   '\nreturn { _szSignFit, _szSignClamp, _szSignVisible, _szSignAt, _szSignZoomAt, _szSignPartOf, _szSignOnPhoto, _szSignIsWhole };')();
@@ -80,6 +80,30 @@ ok('a US street-name blade: the name without its type, the block number beside i
   // a place named only by digits is no sign's place ("1000" on the blade)
   assert.strictEqual(score({ n: '1000', t: 'poi' }, ['EMERSON 1000']), 0);
   assert.strictEqual(score({ n: '200', t: 'poi' }, ['200']), 0);
+});
+
+ok('a corner whose two names cross in more than one place is not sure', () => {
+  const st = (n, line, lat, lon) => ({ rec: { n, t: 'street' }, line, sim: 1, weight: 1, lat, lon });
+  const here = [st('Main Street', 'MAIN ST', 37.4400, -122.1553), st('1st Avenue', '1ST AVE', 37.4405, -122.1560)];
+  const one = M._szSignCorner(here);
+  assert.strictEqual(one.several, false);
+  // the same two names crossing in another town, 40 km away
+  const two = M._szSignCorner(here.concat([st('Main Street', 'MAIN ST', 37.8000, -122.2700),
+    st('1st Avenue', '1ST AVE', 37.8004, -122.2706)]));
+  assert.strictEqual(two.several, true);
+  // pieces of one crossing (two pieces of each street at the corner) are one place
+  const pieces = M._szSignCorner(here.concat([st('Main Street', 'MAIN ST', 37.4410, -122.1565),
+    st('1st Avenue', '1ST AVE', 37.4398, -122.1550)]));
+  assert.strictEqual(pieces.several, false);
+  // in another town the two names' points are 600 m apart (a street's points are up to a km apart)
+  const far = M._szSignCorner(here.concat([st('Main Street', 'MAIN ST', 37.5000, -122.2500),
+    st('1st Avenue', '1ST AVE', 37.5054, -122.2500)]));
+  assert.strictEqual(far.several, true);
+  // a third street on the photo, near another piece of one of them, does not make the corner several
+  const third = M._szSignCorner(here.concat([st('Main Street', 'MAIN ST', 37.4480, -122.1600),
+    st('University Avenue', 'UNIVERSITY AVE', 37.4498, -122.1600)]));
+  assert.deepStrictEqual(third.map((r) => r.n), ['Main Street', '1st Avenue']);
+  assert.strictEqual(third.several, false);
 });
 
 ok("two street blades: their corner, the nearest pieces of the two streets, first", () => {
@@ -851,8 +875,11 @@ ok('a Latin brand on a Russian sign is searched as read too; an initial is no ho
   assert.deepStrictEqual(L._szSignWeighted(L._szSignLineGroups([box('KOCЫГИНА', 0, 0, 300, 40)]), 40).map((x) => x.text), ['КОСЫГИНА']);
   // "12 Λ. Κηφισίας" (Λεωφόρος), "12 N. Main Street": an abbreviation or an initial, not house 12Λ or 12N
   assert.strictEqual(kinds([addr('12 Λ. Κηφισίας', 38.0, 23.8)], [{ text: 'Λ. ΚΗΦΙΣΙΑΣ 12' }])[0].kind, 'address');
-  assert.strictEqual(kinds([addr('12 N. Main Street', 37.77, -122.42)], [{ text: 'N. MAIN STREET 12' }])[0].kind, 'address');
-  assert.strictEqual(kinds([addr('12a Main Street', 37.77, -122.42)], [{ text: 'MAIN STREET 12a' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 N. Main Street', 37.77, -122.42)], [{ text: '12 N. MAIN STREET' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12a Main Street', 37.77, -122.42)], [{ text: '12a MAIN STREET' }])[0].kind, 'address');
+  // street first, as German plates are: "12 a." is the house's letter, "N." an initial
+  assert.strictEqual(kinds([addr('12 a. Hauptweg', 52.52, 13.40)], [{ text: 'HAUPTWEG 12A' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 N. Hauptweg', 52.52, 13.40)], [{ text: 'N. HAUPTWEG 12' }])[0].kind, 'address');
   // the line's numbers and types aside, a short name is most of it
   for (const [n, line] of [['вулиця Миру', 'ВУЛ. МИРУ'], ['вулиця Миру', 'МИРУ 125'], ['провулок Тихий', 'ПРОВ. ТИХИЙ'], ['переулок Мира', 'ПЕР. МИРА'], ['проїзд Тихий', 'ТИХИЙ']])
     assert.ok(score({ n, t: 'street' }, [line]) >= M.SZ_SIGN_MIN, `${n} / ${line}: ${score({ n, t: 'street' }, [line])}`);
@@ -862,7 +889,7 @@ ok('a Latin brand on a Russian sign is searched as read too; an initial is no ho
   assert.ok(score({ n: '1-й Тверской-Ямской переулок', t: 'street' }, ['1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК']) >= M.SZ_SIGN_MIN);
   assert.ok(score({ n: 'Тверской переулок', t: 'street' }, ['ТВЕРСКОЙ ПЕР.']) >= M.SZ_SIGN_MIN);
   // "12 a." is a house's letter, a capital with a full stop an initial
-  assert.strictEqual(kinds([addr('12 a. Main Street', 37.77, -122.42)], [{ text: 'MAIN STREET 12A' }])[0].kind, 'address');
+  assert.strictEqual(kinds([addr('12 a. Main Street', 37.77, -122.42)], [{ text: '12A MAIN STREET' }])[0].kind, 'address');
   assert.strictEqual(kinds([addr('12 ø. Farimagsgade', 55.68, 12.57)], [{ text: 'Ø. FARIMAGSGADE 12' }])[0].kind, 'address');
   assert.strictEqual(kinds([addr('12 а. Серпова вулиця', 50.46, 30.37)], [{ text: 'ВУЛИЦЯ СЕРПОВА 12 А' }])[0].kind, 'address');
   // only a Cyrillic name is looked for without its type
@@ -1261,4 +1288,32 @@ await (async () => {
     console.log('ok   ', name); pass++;
   } catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
 })();
+ok('a blade: the number after the street is its block, never the building, in the US and for English streets', () => {
+  const rec = (n, a, o) => ({ n, t: 'addr', a, o });
+  const kindOf = (r, texts) => L._szSignKinds([{ item: r }], texts.map((x, i) => ({ text: x, size: 10,
+    box: { x: 0, y: i * 12, width: 100, height: 10 } })), W, [r])[0].kind;
+  const PA = [37.44, -122.16], BERLIN = [52.52, 13.40], LONDON = [51.51, -0.13];
+  assert.strictEqual(kindOf(rec('1000 Emerson Street', ...PA), ['EMERSON ST 1000']), 'similar');
+  assert.strictEqual(kindOf(rec('1000 Emerson Street', ...PA), ['Emerson Street 1000']), 'similar');
+  // in the US and Canada whatever the street's type, or none
+  assert.strictEqual(kindOf(rec('3000 El Camino Real, Palo Alto', ...PA), ['EL CAMINO REAL 3000']), 'similar');
+  assert.strictEqual(kindOf(rec('1000 Broadway', 40.75, -73.99), ['BROADWAY 1000']), 'similar');
+  assert.strictEqual(kindOf(rec('100 Avenue A', 40.72, -73.98), ['AVENUE A 100']), 'similar');
+  // an English street elsewhere too ("1000 Emerson St" is how English writes it)
+  assert.strictEqual(kindOf(rec('10 Emerson Street', ...LONDON), ['EMERSON STREET 10']), 'similar');
+  // number first: the building
+  assert.strictEqual(kindOf(rec('1000 Emerson Street', ...PA), ['1000 EMERSON ST']), 'address');
+  assert.strictEqual(kindOf(rec('3000 El Camino Real, Palo Alto', ...PA), ['3000 EL CAMINO REAL']), 'address');
+  // a German plate's street then number is the building
+  assert.strictEqual(kindOf(rec('10 Schulweg, Husum', 54.48, 9.05), ['Schulweg 10']), 'address');
+  assert.strictEqual(kindOf(rec('10 Broadway', ...LONDON), ['BROADWAY 10']), 'address');
+  // the US and Canada, and Mexico (a town on the border itself may count as the US: a block, said not offered)
+  for (const [lat, lon] of [[32.72, -117.16], [32.68, -115.50], [31.78, -106.45], [29.36, -100.90], [27.51, -99.51],
+    [26.20, -98.23], [25.90, -97.49], [21.31, -157.86], [61.22, -149.90], [43.65, -79.38], [49.28, -123.12]])
+    assert.strictEqual(L._szSignBlockLand(lat, lon), true, `${lat},${lon}`);   // San Diego .. Vancouver
+  for (const [lat, lon] of [[31.87, -116.60], [32.60, -115.45], [29.07, -110.96], [28.63, -106.08], [25.67, -100.31],
+    [19.43, -99.13], [23.13, -82.38], [18.47, -66.11], BERLIN])
+    assert.strictEqual(L._szSignBlockLand(lat, lon), false, `${lat},${lon}`);  // Ensenada .. San Juan PR, Berlin
+});
+
 console.log(`${pass} passed`);

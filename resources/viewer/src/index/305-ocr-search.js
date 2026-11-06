@@ -289,6 +289,34 @@ var SZ_SIGN_TYPES = { road: 'road', rd: 'road', street: 'street', st: 'street', 
                       'набережная': 'набережная', 'набережна': 'набережная', 'наб': 'набережная',
                       'проезд': 'проезд', 'проізд': 'проезд', 'тупик': 'тупик', 'спуск': 'спуск', 'узвіз': 'спуск',
                       'аллея': 'аллея', 'алея': 'аллея' };
+// English street types as their word: with one, a number after the street
+// on its line is a blade's block (_szSignAddressKind).
+var SZ_SIGN_EN_CANON = ['road', 'street', 'avenue', 'lane', 'drive', 'boulevard', 'way', 'court', 'place',
+                        'terrace', 'circle', 'parkway', 'highway', 'expressway'];
+// The United States and Canada (Alaska and Hawaii too), drawn coarsely:
+// where street blades carry block numbers. The Mexican border runs about 2 km
+// south of the real one (the Rio Grande in a few straight lines), so a doubt
+// there makes a number a block (said, not offered), never a building.
+var SZ_SIGN_MX_BORDER = [[-117.13, 32.51], [-114.72, 32.70], [-114.81, 32.47], [-111.07, 31.31], [-108.21, 31.31],
+                         [-108.21, 31.76], [-106.53, 31.76], [-106.0, 31.37], [-105.85, 31.27], [-104.9, 30.57],
+                         [-104.37, 29.52], [-103.6, 29.17], [-103.15, 28.95], [-102.7, 29.62], [-102.0, 29.77],
+                         [-100.9, 29.32], [-100.5, 28.68], [-99.5, 27.47], [-98.8, 26.35], [-98.25, 26.05],
+                         [-97.45, 25.84], [-97.14, 25.95]]
+function _szSignBlockLand(lat, lon) {
+  if (!isFinite(lat) || !isFinite(lon)) return false;
+  if (lat >= 18.8 && lat <= 22.4 && lon >= -160.6 && lon <= -154.7) return true;     // Hawaii
+  if (lon < -169 || lon > -52 || lat < 24.3) return false;
+  var b = SZ_SIGN_MX_BORDER;
+  if (lon <= b[0][0]) return lat >= b[0][1];
+  if (lon >= b[b.length - 1][0]) return true;                     // the Gulf coast and the east
+  for (var i = 1; i < b.length; i++) {
+    if (lon <= b[i][0]) {
+      var f = (lon - b[i - 1][0]) / (b[i][0] - b[i - 1][0] || 1);
+      return lat >= b[i - 1][1] + f * (b[i][1] - b[i - 1][1]);
+    }
+  }
+  return true;
+}
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
 // Words of a speed sign: a number beside them is a limit, never a building.
@@ -515,6 +543,14 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
   };
   var bare = _szSignBare(p.rest, plate);
   var one = named && (onLine(p.rest) || (bare && onLine(bare)));
+  // A street with the number after it on one line is a street blade and its
+  // block, where blades carry one and addresses put the building's number
+  // first (the United States and Canada: "EMERSON ST 1000", "EL CAMINO
+  // REAL 3000", "BROADWAY 1000"), and so is an English street anywhere
+  // ("1000 Emerson St" is how an English address is written); a German
+  // "Schulweg 10" is the building.
+  if (one && (SZ_SIGN_EN_CANON.indexOf(p.rest[p.rest.length - 1]) >= 0 || _szSignBlockLand(+rec.a, +rec.o)) &&
+      _szSignSame(one, p.rest.concat(p.b)) && !_szSignSame(one, p.b.concat(p.rest))) return 'similar';
   if (one) {
     if (_szSignOtherBuilding(plate, p, [one], plate.sizes[plate.lines.indexOf(one)])) return 'similar';
     return _szSignTownOk(rec, plate, words, [one], places, pois, tailed.indexOf(one) >= 0 ? [one] : []) ? 'address' : 'similar';
@@ -1876,12 +1912,12 @@ function initSignSearch(map, config) {
           Array.prototype.push.apply(found, pair.concat(rest));
           kinds = _szSignKinds(found, lines, words, all, mapName);
         }
-        if (corner) kinds[0] = kinds[1] = { kind: 'corner' };
+        if (corner) kinds[0] = kinds[1] = { kind: 'corner', several: !!found[0].signCornerSeveral };
         cornerPair = corner ? [found[0].item, found[1].item] : null;
         found.forEach(function (m, i) {
           var k = kinds[i];
           // An address found in several places is not the one: said on its row too.
-          m.signBadge = k.kind === 'address' && k.several
+          m.signBadge = (k.kind === 'address' || k.kind === 'corner') && k.several
             ? { kind: 'several', text: szT('search.sign_several', "Other places have this name: the sign doesn't say which") }
             : { kind: k.kind, text: signLabel(k) };
         });
