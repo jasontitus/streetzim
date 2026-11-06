@@ -697,11 +697,30 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+      # zim-tools first: the image takes its zimcheck from here (the
+      # Dockerfile's zimtools stage, checked against ZIMCHECK_SHA256) rather
+      # than downloading the release, which download.openzim.org serves at
+      # about 100 KB/s (builds sat on it until the job's time limit). The
+      # host's validation below uses it too.
+      - name: Cache zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        id: zimtools-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/zim-tools
+          key: zim-tools-${{ env.ZIM_TOOLS_VERSION }}-linux-x86_64
+      - name: Download zim-tools ${{ env.ZIM_TOOLS_VERSION }}
+        if: steps.zimtools-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 --max-time 1200 -o /tmp/zt.tgz \
+            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
+          mkdir -p ~/.local/zim-tools
+          tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
       - name: Build the image
         run: |
           version=dev
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="${GITHUB_REF_NAME#v}"; fi
           docker build --platform linux/amd64 \
+            --build-context zimtools="$HOME/.local/zim-tools" \
             --label org.opencontainers.image.revision="$(git rev-parse HEAD)" \
             --label org.opencontainers.image.version="$version" -t streetzim .
       - name: The image has tilemaker and osmium, and uses zimscraperlib
@@ -728,19 +747,6 @@ jobs:
       - name: Fetch shapefiles
         if: steps.shp-cache.outputs.cache-hit != 'true'
         run: scripts/fetch-shapefiles.sh .
-      - name: Cache zim-tools ${{ env.ZIM_TOOLS_VERSION }}
-        id: zimtools-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/zim-tools
-          key: zim-tools-${{ env.ZIM_TOOLS_VERSION }}-linux-x86_64
-      - name: Download zim-tools ${{ env.ZIM_TOOLS_VERSION }}
-        if: steps.zimtools-cache.outputs.cache-hit != 'true'
-        run: |
-          curl -fsSL --retry 3 --max-time 1200 -o /tmp/zt.tgz \
-            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz"
-          mkdir -p ~/.local/zim-tools
-          tar -xzf /tmp/zt.tgz -C ~/.local/zim-tools --strip-components=1
 
       - name: Build Monaco inside the image, --profile full, offline and not as root
         # No --mbtiles and no --no-routing: the flags Zimfarm's recipe would

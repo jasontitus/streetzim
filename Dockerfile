@@ -15,6 +15,14 @@
 #   docker run --rm -v "$PWD/out:/output" streetzim scripts/fetch-shapefiles.sh /output
 # Builds from OpenFreeMap tiles (--mbtiles) need neither tilemaker nor shapefiles.
 
+# zim-tools' zimcheck (below), when the build is handed it:
+#   docker build --build-context zimtools=<folder with zimcheck> ...
+# CI does, from its zim-tools cache: download.openzim.org serves the
+# release at about 100 KB/s, and CI's builds sat on that download until
+# their time limit. Without it (this empty stage) the build downloads the
+# release. Either way zimcheck is checked against ZIMCHECK_SHA256.
+FROM scratch AS zimtools
+
 FROM debian:trixie-slim AS tilemaker
 # 3.2.0: the tilemaker the world tiles were made with (master facdf93 = v3.2.0
 # plus a version bump), so a region cut here (ops: the multilingual tile
@@ -46,12 +54,24 @@ COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
 # x86_64 only, like the image's CI build.
 ARG ZIM_TOOLS_VERSION=3.8.0
 ARG ZIM_TOOLS_SHA256=9d4cbf68675670176fe72f096364c7f4ecf09950340e769bdb81dcbb5030da00
-RUN curl -fsSL --retry 3 -o /tmp/zim-tools.tgz \
-        "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz" \
-    && echo "${ZIM_TOOLS_SHA256}  /tmp/zim-tools.tgz" | sha256sum -c - \
-    && tar -xzf /tmp/zim-tools.tgz -C /usr/local/bin --strip-components=1 \
-        "zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}/zimcheck" \
-    && rm /tmp/zim-tools.tgz && zimcheck --version | head -n 1
+# zimcheck in that release (a new version changes both)
+ARG ZIMCHECK_SHA256=6c2cffc01b30a4965c2b5f320a99ec31f6425ba8d39846196cca29a3c0bc9acc
+# A download that slows to a crawl (under 10 KB/s for 2 minutes) is
+# dropped and tried again rather than holding the build.
+RUN --mount=type=bind,from=zimtools,target=/zimtools \
+    if [ -f /zimtools/zimcheck ]; then \
+        install -m 0755 /zimtools/zimcheck /usr/local/bin/zimcheck; \
+    else \
+        curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+            --speed-limit 10240 --speed-time 120 -o /tmp/zim-tools.tgz \
+            "https://download.openzim.org/release/zim-tools/zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}.tar.gz" \
+        && echo "${ZIM_TOOLS_SHA256}  /tmp/zim-tools.tgz" | sha256sum -c - \
+        && tar -xzf /tmp/zim-tools.tgz -C /usr/local/bin --strip-components=1 \
+            "zim-tools_linux-x86_64-${ZIM_TOOLS_VERSION}/zimcheck" \
+        && rm /tmp/zim-tools.tgz; \
+    fi \
+    && echo "${ZIMCHECK_SHA256}  /usr/local/bin/zimcheck" | sha256sum -c - \
+    && zimcheck --version | head -n 1
 
 WORKDIR /app
 # Runtime dependencies only (no pytest, no internetarchive; see
