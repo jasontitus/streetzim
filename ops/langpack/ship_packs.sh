@@ -133,12 +133,26 @@ IA=${IA:-/storage/streetzim/venv-linux/bin/ia}
 UPLOAD_LOCK=${UPLOAD_LOCK:-/storage/streetzim/.langpack-upload.lock}
 export PYTHONDONTWRITEBYTECODE=1
 case "$REGION" in *[!a-z0-9-]*|"") echo "ship_packs: region id '$REGION': a-z 0-9 - only" >&2; exit 1 ;; esac
-# Light and ultralight maps carry no Wikipedia: no packs for them (the
-# German Swiss maps, switzerland-de*, are not excluded: their base is German).
-case "$REGION" in *-light|*-light-*|*ultralight*)
-  [ "${SHIP_ALLOW_LIGHT:-0}" = 1 ] || { echo "ship_packs: $REGION is a light map: no language packs (SHIP_ALLOW_LIGHT=1 to force)" >&2; exit 1; } ;;
-esac
 [ -s "$BASE" ] || { echo "ship_packs: no base $BASE" >&2; exit 1; }
+# A map with no Wikipedia articles (an ultralight one; a light one built before they had
+# them) has nothing for packs to add to; a light map with them is shipped as any other is.
+"${PYTHON:-python3}" - "$BASE" "$(cd "$(dirname "$0")/../.." && pwd)" <<'PY' || { echo "ship_packs: $BASE carries no Wikipedia: no language packs" >&2; exit 1; }
+import json, sys
+sys.path.insert(0, sys.argv[2])
+from tools.langpack.merge_zim import KEY_MAPCFG, blob_of
+from tools.langpack.zimfmt import ZimReader
+try:
+    cfg = json.loads(blob_of(ZimReader(sys.argv[1]), KEY_MAPCFG) or b"{}")
+except ValueError:
+    cfg = {}
+sys.exit(0 if isinstance(cfg, dict) and cfg.get("hasWikiArticles") else 1)
+PY
+# A light map's packs carry no pictures, as its own articles do not (cloud/region-variants.tsv's
+# wiki_images column: none for the light maps): small phones, slow networks. PACK_IMAGES, if
+# set, decides.
+VAR_WIKI_IMAGES=$(awk -F'\t' -v id="$REGION" '$1 == id && $1 !~ /^#/ {print $5; exit}' \
+                  "${LANGPACK_VARIANTS:-$(cd "$(dirname "$0")/../.." && pwd)/cloud/region-variants.tsv}" 2>/dev/null)
+export PACK_IMAGES=${PACK_IMAGES:-${VAR_WIKI_IMAGES:-lead}}
 if [ "${SHIP_SKIP_ENV_CHECK:-0}" != 1 ]; then
   langpack_env_check || { echo "ship_packs: fix the host setup first (ops/langpack/host-env.sh)" >&2; exit 1; }
 fi

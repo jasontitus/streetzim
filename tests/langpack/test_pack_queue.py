@@ -158,6 +158,7 @@ def q(tmp_path: Path) -> SimpleNamespace:
     lpzims.write_base(maps / "osm-old-2026-10-01.zim", cfg_extra=ml)
     lpzims.write_base(maps / "osm-gamma-2026-10-23.zim", cfg_extra=ml)
     lpzims.write_base(maps / "osm-noml-2026-10-23.zim")                         # no multilingual tiles
+    lpzims.write_base(maps / "osm-switzerland-light-2026-10-23.zim", cfg_extra=ml, wiki=False)   # no Wikipedia
     lpzims.write_base(maps / "osm-big-2026-10-23.zim", cfg_extra=ml,            # over the size limit set below
                       extra={"pad.json": "".join(random.choice("0123456789abcdef") for _ in range(600_000))})
     lpzims.write_base(maps / "osm-cont-2026-10-23.zim", cfg_extra=ml)
@@ -263,7 +264,7 @@ def test_ships_in_order_publishes_to_the_preview_and_resumes(q: SimpleNamespace)
     st = _status(q)
     assert st["beta"][1] == "published" and st["alpha"][1] == "pending" and st["cont"][1] == "refused-4", st
     assert st["fail"][1] == "failed" and st["noml"][1] == "ineligible-no-ml-tiles" and st["big"][1] == "ineligible-size", st
-    assert st["switzerland-light"][1] == "ineligible-light" and "gamma" not in st and "old" not in st
+    assert st["switzerland-light"][1] == "ineligible-no-wiki" and "gamma" not in st and "old" not in st
     assert st["delta"][1] == "waiting-listing", st           # upload-pending, archive.org does not list it yet
     assert "big: osm-big-2026-10-23.zim is" in log_text(q) and "GB limit: no language packs in v1" in log_text(q)
     # published into the preview clone at production's commit, then the preview channel deployed from it

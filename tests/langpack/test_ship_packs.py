@@ -35,6 +35,9 @@ import argparse, json, os, shutil, sys, time
 ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("--lang"); ap.add_argument("-o"); ap.add_argument("--stats")
 a, _ = ap.parse_known_args()
 with open(os.environ["FAKE_BUILD_LOG"], "a") as fh: fh.write(a.lang + "\n")
+if os.environ.get("FAKE_IMAGES_LOG"):           # the builder's --images, per pack
+    _i = sys.argv.index("--images") if "--images" in sys.argv else -1
+    with open(os.environ["FAKE_IMAGES_LOG"], "a") as fh: fh.write(f"{a.lang} {sys.argv[_i + 1] if _i >= 0 else '-'}\n")
 if a.lang in os.environ.get("FAKE_SLOW", "").split(","):    # a build that takes longer than its time
     time.sleep(120)
 src = os.path.join(os.environ["FAKE_PACKS"], f"osm_testland_wiki-{a.lang}_2026-10-13.zim")
@@ -714,15 +717,21 @@ open(a.stats, "w").write(json.dumps({{"zim_bytes": os.path.getsize(a.o), "check"
     assert {_pk(ship, x) for x in ("de", "fr", "th")} <= names          # the first base's are still there
 
 
-@pytest.mark.parametrize("rid,refused", [("switzerland-light", True), ("switzerland-border-de-ultralight", True),
-                                         ("switzerland", False), ("switzerland-de", False),
-                                         ("switzerland-nosat", False)])
-def test_light_maps_get_no_packs(rid: str, refused: bool, ship: SimpleNamespace) -> None:
-    """Light and ultralight maps carry no Wikipedia; Switzerland itself, its
-    no-satellite builds and the German Swiss maps are never refused here."""
-    r = subprocess.run(["bash", str(SHIP), rid, str(ship.base)], capture_output=True, text=True, timeout=900,
+@pytest.mark.parametrize("rid,wiki,refused", [("switzerland-border-de-ultralight", False, True),
+                                              ("switzerland-light", False, True), ("switzerland-light", True, False),
+                                              ("switzerland", True, False), ("switzerland-de", True, False)])
+def test_maps_without_wikipedia_get_no_packs(rid: str, wiki: bool, refused: bool, ship: SimpleNamespace,
+                                             tmp_path: Path) -> None:
+    """A map with no Wikipedia articles (an ultralight one, a light one built
+    before they had them) gets no packs, whatever its name; a light map with
+    them is shipped as any other is."""
+    base = ship.base
+    if not wiki:
+        base = tmp_path / "bases" / "osm-nowiki-2026-10-13.zim"
+        lpzims.write_base(base, wiki=False)
+    r = subprocess.run(["bash", str(SHIP), rid, str(base)], capture_output=True, text=True, timeout=900,
                        env={**ship.env, "SHIP_SKIP_UPLOAD": "1"})
-    assert ("is a light map" in r.stderr) is refused, r.stderr[-500:]
+    assert ("carries no Wikipedia" in r.stderr) is refused, r.stderr[-500:]
     if refused:
         assert r.returncode == 1
 
@@ -1218,3 +1227,20 @@ def test_a_region_language_out_of_time_means_run_again_not_refused(ship: SimpleN
     packs = ship.work / "packs" / ship.tag
     assert (packs / "retry-langs").read_text().split() == slow.split(","), (packs / "retry-langs").read_text()
     assert "ran out of time: run again later (exit 7)" in _log(ship)
+
+
+@pytest.mark.parametrize("rid,images", [("testland-light", "none"), ("testland", "lead")])
+def test_a_light_maps_packs_carry_no_pictures(rid: str, images: str, ship: SimpleNamespace, tmp_path: Path) -> None:
+    """A light map (cloud/region-variants.tsv, wiki_images none) gets packs
+    built without pictures, as its own articles have none: its language
+    versions stay small. Other maps' packs carry their lead pictures."""
+    variants = tmp_path / "variants.tsv"
+    variants.write_text("# id\tparent\tsatellite\tmax_zoom\twiki_images\ntestland-light\ttestland\tno\t13\tnone\n")
+    (ship.work / "ia-cache" / f"ia-streetzim-{rid}.json").write_text(json.dumps(
+        {"files": [{"name": ship.base.name, "size": str(ship.base.stat().st_size), "md5": _md5(ship.base)}]}))
+    log = tmp_path / "images.log"
+    r = subprocess.run(["bash", str(SHIP), rid, str(ship.base)], capture_output=True, text=True, timeout=900,
+                       env={**ship.env, "LANGPACK_VARIANTS": str(variants), "FAKE_IMAGES_LOG": str(log)})
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    got = {ln.split()[1] for ln in log.read_text().splitlines()}
+    assert got == {images}, got

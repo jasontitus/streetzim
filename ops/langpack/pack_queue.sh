@@ -51,7 +51,8 @@
 # shared Wikipedia cache), uploads go one at a time under the host's upload
 # lock, and publishing and deploying are done one at a time here.
 # Per map:
-#   - eligible: not a light/ultralight map, its base on disk, at most
+#   - eligible: Wikipedia articles in it (map-config hasWikiArticles: a light map
+#     has them, an ultralight one not), its base on disk, at most
 #     QUEUE_MAX_BASE_GB (8; also passed to ship_packs.sh as SHIP_MAX_BASE_GB),
 #     multilingual tiles (map-config tileLanguages). A continent is refused by
 #     ship_packs.sh itself (exit 4).
@@ -368,7 +369,8 @@ try:
 except ValueError:
     cfg = {}
 tl = cfg.get("tileLanguages") if isinstance(cfg, dict) else None
-print(z.header.uuid.hex(), len(tl) if isinstance(tl, list) else 0)
+wiki = isinstance(cfg, dict) and bool(cfg.get("hasWikiArticles"))
+print(z.header.uuid.hex(), len(tl) if isinstance(tl, list) else 0, int(wiki))
 PY
 }
 
@@ -554,13 +556,19 @@ eligible() {  # region zim round-status
   local now
   if now=$(scheme_now); then SCHEME=$now; else warn "no viewer code in $VIEWER_INDEX just now: $SCHEME stands"; fi
   [ -n "${RUN_PID[$rid]:-}" ] && return 1                     # shipping now
-  case "$rid" in *-light|*-light-*|*ultralight*) [ -n "$(state_of "$rid" -)" ] || { set_state "$rid" ineligible-light "$zim" - - "a light map carries no Wikipedia"; say "$rid: a light map: no packs"; }; return 1 ;; esac
   if [ ! -s "$base" ]; then
     [ "$(state_of "$rid" - | cut -f1)" = missing ] || { loud "$rid: $base is not on disk"; set_state "$rid" missing "$zim" - - "not in $MAPS_DIR"; }
     ANY_FAILED=1; return 1
   fi
-  read -r uuid ntile < <(exec 9>&-; baseinfo "$base") || true
+  read -r uuid ntile wiki < <(exec 9>&-; baseinfo "$base") || true
   if [ -z "${uuid:-}" ]; then loud "$rid: could not read $base"; set_state "$rid" failed "$zim" - - "unreadable"; ANY_FAILED=1; return 1; fi
+  # a map with no Wikipedia articles (an ultralight one; a light one built before they had them)
+  # has nothing for packs to add to; a light map with them is shipped as any other is
+  if [ "${wiki:-0}" != 1 ]; then
+    [ "$(state_of "$rid" "$uuid" | cut -f1)" = ineligible-no-wiki ] && return 1
+    set_state "$rid" ineligible-no-wiki "$zim" "$uuid" - "no Wikipedia articles"
+    say "$rid: $zim carries no Wikipedia: no packs"; return 1
+  fi
   # whatever the file's bytes: the size and the tiles (logged once per base)
   gb=$("$PY" -c 'import sys; print(f"{int(sys.argv[1]) / 1e9:.2f}")' "$(stat -c %s "$base")")
   if [ "$("$PY" -c 'import sys; print(int(int(sys.argv[1]) > float(sys.argv[2]) * 1e9))' "$(stat -c %s "$base")" "$MAXGB")" = 1 ]; then

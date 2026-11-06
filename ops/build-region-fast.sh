@@ -57,13 +57,15 @@ VARIANTS=/storage/streetzim/cloud/region-variants.tsv
 SRC_ID="$ID"
 VAR_SAT=yes
 VAR_MAXZOOM=""
+VAR_WIKI_IMAGES=""
 if [ -f "$VARIANTS" ]; then
     _row=$(awk -F'\t' -v id="$ID" '$1==id && $1 !~ /^#/ {print; exit}' "$VARIANTS")
     if [ -n "$_row" ]; then
         SRC_ID=$(printf '%s' "$_row" | cut -f2)
         VAR_SAT=$(printf '%s' "$_row" | cut -f3)
         VAR_MAXZOOM=$(printf '%s' "$_row" | cut -f4)
-        echo "  variant of $SRC_ID: satellite=$VAR_SAT max_zoom=${VAR_MAXZOOM:-default}"
+        VAR_WIKI_IMAGES=$(printf '%s' "$_row" | cut -f5)
+        echo "  variant of $SRC_ID: satellite=$VAR_SAT max_zoom=${VAR_MAXZOOM:-default} wiki_images=${VAR_WIKI_IMAGES:-default}"
     fi
 fi
 
@@ -108,7 +110,8 @@ if [ -n "${BUILD_WIKI_ZIM:-}" ]; then
         echo "  BUILD_WIKI_ZIM=$BUILD_WIKI_ZIM is missing or the wrong size; using $WIKI_ZIM"
     fi
 fi
-WIKI_IMAGES="${WIKI_IMAGES:-all}"
+# a variant's own (cloud/region-variants.tsv wiki_images: none for the light maps), unless set
+WIKI_IMAGES="${WIKI_IMAGES:-${VAR_WIKI_IMAGES:-all}}"
 WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${SRC_ID}_qid_titles.json
 
 OUT_FINAL=osm-${ID}-${TODAY}.zim

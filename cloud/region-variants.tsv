@@ -11,13 +11,17 @@
 # satellite: no  -> omit --satellite entirely (there is no --no-satellite)
 # max_zoom:  13  -> pass --max-zoom 13 (honoured on the in-memory path since
 #                   3910bfc; switzerland's mbtiles is 0.9 GB so it takes it)
+# wiki_images: none -> Wikipedia articles without their pictures (WIKI_IMAGES;
+#                   empty: the build's default), and the map's language packs
+#                   without them too (ops/langpack/ship_packs.sh): light maps
+#                   for small phones and slow networks
 #
-# id	parent	satellite	max_zoom
-switzerland-light	switzerland	no	13
-africa-light	africa	no	13
-india-northwest-light	india-northwest	no	13
-india-central-light	india-central	no	13
-india-east-light	india-east	no	13
-india-northeast-light	india-northeast	no	13
-india-south-light	india-south	no	13
-india-west-light	india-west	no	13
+# id	parent	satellite	max_zoom	wiki_images
+switzerland-light	switzerland	no	13	none
+africa-light	africa	no	13	none
+india-northwest-light	india-northwest	no	13	none
+india-central-light	india-central	no	13	none
+india-east-light	india-east	no	13	none
+india-northeast-light	india-northeast	no	13	none
+india-south-light	india-south	no	13	none
+india-west-light	india-west	no	13	none

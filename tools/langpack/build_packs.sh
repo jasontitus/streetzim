@@ -12,7 +12,8 @@
 #   PACK_GATE_ZIMCHECK (the official zimcheck, else zimcheck on PATH; anything
 #   else is refused; the builder gets it as ZIMCHECK_BIN too), BUILDER (tests
 #   substitute a fake), LANGPACK_MIN_FREE_GB (pause while MemAvailable is below it),
-#   LANGPACK_TMP (the builder's TMPDIR; default $LANGPACK_WORK/tmp),
+#   LANGPACK_TMP (the builder's TMPDIR; default $LANGPACK_WORK/tmp), PACK_IMAGES (the
+#   builder's --images: lead, the default, or none for a light map's packs, all),
 #   PACK_BUILD_TIMEOUT (seconds a build may take; default 3 h per 3 GB of base,
 #   at least 3 h: during a rebuild round the source ZIMs' random reads share the
 #   disk with the map builds), PACK_GATE_TIMEOUT (pack_gate.py's, 3600),
@@ -102,7 +103,7 @@ for L in $LANGS; do
   echo "   time limit: $TMO s"
   nice -n 19 "${LIM[@]}" timeout "$TMO" \
     "$PY" "$BUILDER" "$B" --lang "$L" \
-      --source "$LSRC" --region "$R" --images lead --offline \
+      --source "$LSRC" --region "$R" --images "${PACK_IMAGES:-lead}" --offline \
       "${CACHE[@]}" --jobs 4 --workers 2 \
       -o "$ST/$F" --stats "$STATS" \
       > "$OUT/build-$L.log" 2>&1

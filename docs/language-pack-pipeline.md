@@ -617,8 +617,14 @@ test recipes the channel shows now (`QUEUE_SEED`, from
 `/storage/experiments/lang-torrents/swiss-site2`); production's Switzerland
 replaces them when it ships. The preview's home page is not regenerated.
 
-- Eligible: not a light map, at most 8 GB, multilingual tiles
+- Eligible: Wikipedia articles in the map (`hasWikiArticles`: a light map
+  has them, an ultralight one not), at most 8 GB, multilingual tiles
   (`tileLanguages`); `ship_packs.sh` refuses continents itself (exit 4).
+  A light map's packs carry no pictures (`cloud/region-variants.tsv`'s
+  `wiki_images` column, none for the light maps, which the map's own
+  articles follow from its next build: `PACK_IMAGES` for `build_packs.sh`),
+  so its language versions stay small for small phones and slow networks:
+  pictures are about 80% of a pack.
   The log says so for each. Of the 2026-10 round's border-clipped maps,
   France (8.4 GB) gets no packs in v1; Germany (7.4 GB), the Nordics and
   Italy do.
