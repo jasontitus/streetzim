@@ -291,8 +291,7 @@ def _leftovers(host):
 
 def _inputs(co: Checkout, rev="HEAD"):
     tree = co.git("rev-parse", f"{rev}:resources/tilemaker")
-    blob = co.git("rev-parse", f"{rev}:Dockerfile")
-    return f"tilemaker={tree} dockerfile={blob} ref=v3.2.0"
+    return f"tilemaker={tree} build={_load().tile_build(co.git('show', f'{rev}:Dockerfile'))} ref=v3.2.0"
 
 
 # ---- the run -------------------------------------------------------------------
@@ -372,6 +371,80 @@ def test_any_input_that_decides_the_tiles_remakes_them(host, monkeypatch):
     Path(str(_out(host)) + ".profile").unlink()                  # a sidecar gone
     m.make("hispaniola", "hispaniola", "-74.5,17.5,-68.3,20.2")
     assert len(_runs(host)) == 6
+
+
+DOCKERFILE = """# builder
+FROM debian:trixie-slim AS tilemaker
+ARG TILEMAKER_REF=v3.2.0
+RUN apt-get update && apt-get install -y \\
+        build-essential liblua5.1-0-dev
+FROM scratch AS zimtools
+FROM python:3.14-slim-trixie
+RUN apt-get update && apt-get install -y \\
+        liblua5.1-0 libshp4
+COPY --from=tilemaker /src/tilemaker/build/tilemaker /usr/local/bin/tilemaker
+RUN curl -o /tmp/z.tgz https://example.org/zim-tools-3.8.0.tgz
+RUN pip install -r requirements.txt
+"""
+
+
+@pytest.mark.parametrize("change,same", [
+    ("# a comment\n", True),
+    ("RUN curl -o /tmp/z.tgz https://example.org/zim-tools-3.9.0.tgz\n", True),     # zimcheck
+    ("RUN pip install duckdb\n", True),
+    ("RUN apt-get install -y libsqlite3-0\n", False),          # a library tilemaker may load
+    (None, False),                                                # the tilemaker stage itself
+])
+def test_the_tile_build_is_what_makes_tiles(change, same):
+    """tile_build: the tilemaker stage and the image's base, apt packages and
+    copy of tilemaker decide the tiles; zimcheck, pip, the app and comments
+    do not (a zimcheck-only change once made every region's tiles stale)."""
+    m = _load()
+    base = m.tile_build(DOCKERFILE)
+    if change is None:
+        other = DOCKERFILE.replace("build-essential liblua5.1-0-dev", "build-essential liblua5.1-0-dev libz-dev")
+    else:
+        other = DOCKERFILE + change
+    assert (m.tile_build(other) == base) is same
+    # a continued line is one instruction, however it is spaced
+    assert m.tile_build(DOCKERFILE.replace("        liblua5.1-0 libshp4", "  liblua5.1-0   libshp4")) == base
+
+
+def test_a_dockerfile_change_outside_the_tile_build_keeps_the_tiles(host, monkeypatch):
+    m = _load()
+    co = host.co
+    m.make("hispaniola", "hispaniola", BOX)
+    co.commit("main: zimcheck", {"Dockerfile": "FROM x\nARG TILEMAKER_REF=v3.2.0\nRUN curl zim-tools\n"})
+    co.main()
+    m.make("hispaniola", "hispaniola", BOX)
+    assert len(_runs(host)) == 1                                  # the tiles are still this checkout's
+    co.commit("main: tilemaker's libraries", {"Dockerfile": "FROM x\nARG TILEMAKER_REF=v3.2.0\nRUN apt-get install -y libfoo\n"})
+    co.main()
+    publish(host, co.head())
+    monkeypatch.setenv("FAKE_REV", co.head())
+    m.make("hispaniola", "hispaniola", BOX)
+    assert len(_runs(host)) == 2
+
+
+def test_a_profile_from_before_the_tile_build_is_read_from_its_dockerfile(host, monkeypatch):
+    """A sidecar written before 2026-11-06 names the whole Dockerfile's blob:
+    reused when that blob's tile build is this checkout's (and rewritten),
+    stale when it is not."""
+    m = _load()
+    co = host.co
+    m.make("hispaniola", "hispaniola", BOX)
+    side = Path(str(_out(host)) + ".profile")
+    tree = co.git("rev-parse", "HEAD:resources/tilemaker")
+    same = co.git("rev-parse", "HEAD:Dockerfile")
+    side.write_text(f"tilemaker={tree} dockerfile={same} ref=v3.2.0\n")
+    m.make("hispaniola", "hispaniola", BOX)
+    assert len(_runs(host)) == 1 and side.read_text() == _inputs(co) + "\n"
+    p = co.path / "Dockerfile.other"
+    p.write_text("FROM y\nARG TILEMAKER_REF=v3.2.0\n")
+    other = co.git("hash-object", "-w", str(p))
+    side.write_text(f"tilemaker={tree} dockerfile={other} ref=v3.2.0\n")
+    m.make("hispaniola", "hispaniola", BOX)
+    assert len(_runs(host)) == 2
 
 
 def test_a_symlinked_output_is_not_fresh(host):

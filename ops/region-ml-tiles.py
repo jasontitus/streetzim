@@ -12,8 +12,9 @@ the region's own extract with tilemaker:
   hex>, .github/workflows/docker-publish.yml; only the main tips CI tested
   have one), with the tile profile inside it (/app/resources/tilemaker). It
   is the newest one on main's first-parent line, at or below the checkout,
-  whose resources/tilemaker and Dockerfile (TILEMAKER_REF with it) are the
-  checkout's (image_commit). None: the build fails, there is no fallback to
+  whose resources/tilemaker and the Dockerfile's tile build (its tilemaker
+  stage and the image's base, packages and tilemaker: tile_build;
+  TILEMAKER_REF with it) are the checkout's (image_commit). None: the build fails, there is no fallback to
   the world tiles;
 - world-data/regions/<src-id>.osm.pbf (a Light variant passes its parent
   as --src-id) and the registry bbox; the coastline and Natural Earth
@@ -58,6 +59,7 @@ STREETZIM_ML_IMAGE_REPO, STREETZIM_ML_CHECKOUT and DOCKER (tests).
 import argparse
 import fcntl
 import gzip
+import hashlib
 import importlib
 import json
 import os
@@ -250,17 +252,78 @@ def _git(*args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _instructions(text):
+    """A Dockerfile's instructions, one string each: comments and blank
+    lines out, continued lines joined, runs of spaces as one."""
+    out, cur = [], []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        cont = s.endswith("\\")
+        cur.append(s[:-1] if cont else s)
+        if not cont:
+            out.append(" ".join(" ".join(cur).split()))
+            cur = []
+    if cur:
+        out.append(" ".join(" ".join(cur).split()))
+    return out
+
+
+def tile_build(text):
+    """What of a Dockerfile decides the tiles its image makes, as a short
+    hash: its global ARGs, the stage that builds tilemaker, and of the
+    image's own (last) stage its base, what it installs with apt-get
+    (tilemaker's shared libraries) and its copy of tilemaker. Anything else
+    (zimcheck, the Python packages, the app, comments) changes no tile, so
+    an image differing only there makes the same tiles (2026-11-06: a
+    zimcheck-only change made all 81 regions' tiles stale)."""
+    head, stages = [], []
+    for ins in _instructions(text):
+        if ins.upper().startswith("FROM "):
+            stages.append([ins])
+        elif stages:
+            stages[-1].append(ins)
+        else:
+            head.append(ins)
+    keep = [i for i in head if i.upper().startswith("ARG ")]
+    for st in stages[:-1]:
+        m = re.search(r"\sAS\s+(\S+)$", st[0], re.I)
+        if m and m.group(1).lower() == "tilemaker":
+            keep += st
+    for i in (stages[-1] if stages else []):
+        u = i.upper()
+        if u.startswith("FROM ") or "APT-GET INSTALL" in u or u.startswith("COPY --FROM=TILEMAKER "):
+            keep.append(i)
+    return hashlib.sha1("\n".join(keep).encode()).hexdigest()[:16]
+
+
 def tile_inputs(rev):
     """What decides the tiles an image built from ``rev`` makes: its
-    resources/tilemaker tree, its Dockerfile blob, and the TILEMAKER_REF in
-    it. None when ``rev`` lacks them."""
+    resources/tilemaker tree, its Dockerfile's tile build (tile_build), and
+    the TILEMAKER_REF in it. None when ``rev`` lacks them."""
     tree = _git("rev-parse", "--verify", "--quiet", f"{rev}:resources/tilemaker")
-    blob = _git("rev-parse", "--verify", "--quiet", f"{rev}:Dockerfile")
     text = _git("show", f"{rev}:Dockerfile")
-    if not tree or not blob or text is None:
+    if not tree or text is None:
         return None
+    return _inputs_of(tree, text)
+
+
+def _inputs_of(tree, text):
     m = re.search(r"^ARG TILEMAKER_REF=(\S+)", text, re.M)
-    return f"tilemaker={tree} dockerfile={blob} ref={m.group(1) if m else 'none'}"
+    return f"tilemaker={tree} build={tile_build(text)} ref={m.group(1) if m else 'none'}"
+
+
+def _old_profile(have):
+    """A profile sidecar written before 2026-11-06 ("tilemaker=T
+    dockerfile=<blob> ref=R", the whole Dockerfile) as it reads now, from
+    that blob in the checkout's history; None when it is not one or the blob
+    is not there."""
+    m = re.fullmatch(r"tilemaker=(\S+) dockerfile=([0-9a-f]{40}) ref=\S+", have or "")
+    if not m:
+        return None
+    text = _git("cat-file", "blob", m.group(2))
+    return _inputs_of(m.group(1), text) if text else None
 
 
 def checkout_inputs():
@@ -384,12 +447,20 @@ def is_fresh(out, want):
     ``want``'s value (a missing sidecar: stale)."""
     if not os.path.isfile(out) or os.path.islink(out) or os.path.getsize(out) == 0:
         return False
+    old = None
     for k in SIDECARS:
         have = read_sidecar(f"{out}.{k}")
         if have != want[k]:
+            if k == "profile" and _old_profile(have) == want[k]:
+                old = have
+                continue
             say(f"  {os.path.basename(out)}: {k} is {have!r}, this run's is "
                 f"{want[k]!r}: stale")
             return False
+    if old:
+        write_sidecar(f"{out}.profile", want["profile"])
+        say(f"  {os.path.basename(out)}: its profile ({old}) has this run's tile build: "
+            f"now {want['profile']!r}")
     return True
 
 
