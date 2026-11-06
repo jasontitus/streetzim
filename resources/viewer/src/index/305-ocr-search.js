@@ -317,6 +317,16 @@ function _szSignBlockLand(lat, lon) {
   }
   return true;
 }
+// One number in two parts joined by a hyphen or a slash: a line that is just
+// that ("130-19", "1020 / 7"), and an address that starts with it.
+var SZ_SIGN_COMPOUND = /^\s*\d+\s*[-\u2010-\u2013\/]\s*\d+\s*$/;
+// Whether `text` holds the numbers a and b joined by a hyphen or a slash
+// ("130-19", "1020 / 7"): not "1→65", nor "1 65".
+function _szSignJoined(text, a, b) {
+  return new RegExp('(?:^|[^0-9])' + a + '\\s*[-\\u2010-\\u2013\\/]\\s*' + b + '(?![0-9])')
+    .test(String(text || '').normalize('NFKC'));
+}
+var SZ_SIGN_COMPOUND_LEAD = /^\s*(?:\p{L}+\.?\s+)*?(\d+)\s*[-\u2010-\u2013\/]\s*(\d+)(?=[\s,]|$)/u;
 var SZ_SIGN_FILLER = ['building', 'bldg', 'bldng', 'bld', 'no', 'house', 'مبنى', 'منزل'];
 var SZ_SIGN_SUFFIX = ['號', '号', '番地', '번지'];
 // Words of a speed sign: a number beside them is a limit, never a building.
@@ -400,9 +410,14 @@ function _szSignPlate(lines, words, mapName) {
     return out;
   };
   plate.isType = function (w) { return Object.prototype.hasOwnProperty.call(types, w); };
-  var building = function (ws) {
+  // A building's number: digits, with a letter or 號 at most ("366", "12a",
+  // "23號"); or one compound number, its parts joined by a hyphen or a slash
+  // ("130-19": a Korean building's main and sub number; "1020/7"), which is
+  // that number whole (_szSignAddressParts reads an address's the same way).
+  var building = function (ws, text) {
     return _szSignIsNum(ws[0] || '') && (ws.length === 1 ||
-      (ws.length === 2 && (SZ_SIGN_HOUSE_LETTER.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0)));
+      (ws.length === 2 && (SZ_SIGN_HOUSE_LETTER.test(ws[1]) || plate.suffix.indexOf(ws[1]) >= 0 ||
+        _szSignIsNum(ws[1]) && SZ_SIGN_COMPOUND.test(String(text || '')))));
   };
   var rows = ls.map(function (L) {
     return { ws: plate.norm(words(L.text)), size: L.size || 0, box: L.box, text: String(L.text).trim() };
@@ -431,7 +446,7 @@ function _szSignPlate(lines, words, mapName) {
   rows.forEach(function (r) {
     r.ws.forEach(function (w) { if (plate.isType(w) && plate.signTypes.indexOf(types[w]) < 0) plate.signTypes.push(types[w]); });
   });
-  var top = rows.filter(function (r) { return building(r.ws); }).sort(function (x, y) { return y.size - x.size; })[0];
+  var top = rows.filter(function (r) { return building(r.ws, r.text); }).sort(function (x, y) { return y.size - x.size; })[0];
   plate.building = top ? top.ws : null;
   var speed = fold(SZ_SIGN_SPEED);
   var onePlate = function (r) {
@@ -489,9 +504,13 @@ function _szSignAddressParts(rec, plate, words) {
   // small a-z or Cyrillic one ("12 a.", "12 а.": the house's).
   var named = function (r) { return r.some(function (w) { return !_szSignIsNum(w) && !plate.isType(w); }); };
   var initial = /^\D*?\d+\s+(?![a-zа-яёіїєґ]\.)\p{L}\./u.test(raw);
-  var n = ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || !initial && SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
+  // A compound number first ("130-19 세검정로4길", "1020/7 Janáčkova") is the
+  // building's whole: a sign's "130" is not it, nor its "19" a street's.
+  var compound = raw.match(SZ_SIGN_COMPOUND_LEAD);
+  var n = compound && ws[0] === compound[1] && ws[1] === compound[2] ? 2 :
+    ws[1] && (plate.suffix.indexOf(ws[1]) >= 0 || !initial && SZ_SIGN_HOUSE_LETTER.test(ws[1]) && named(ws.slice(2))) ? 2 : 1;
   var rest = ws.slice(n).filter(function (w) { return plate.filler.indexOf(w) < 0; });
-  return rest.length ? { b: ws.slice(0, n), rest: rest } : null;
+  return rest.length ? { b: ws.slice(0, n), rest: rest, compound: !!compound && n === 2 && _szSignIsNum(ws[1]) } : null;
 }
 // The record's street (`rest`) and a street line of the sign, word for word:
 // the same words and types; a record naming the street without a type
@@ -536,6 +555,8 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
           var Lb = L.filter(function (w) { return !plate.isType(w); }), Rb = rest.filter(function (w) { return !plate.isType(w); });
           ok = _szSignSameLine(Lb, Rb.concat(p.b)) || _szSignSameLine(Lb, p.b.concat(Rb));
         }
+        // a compound number written joined ("세종대로 1-65", "49/15"; not a range's "1→65")
+        if (ok && p.compound && !_szSignJoined(plate.texts[i], p.b[0], p.b[1])) ok = false;
         if (ok && k === 1 && tailed.indexOf(L0) < 0) tailed.push(L0);
         return ok;
       });
@@ -581,8 +602,9 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
 // Whether another line of the sign (besides `skip`, the address's own)
 // looks like a building's number and is not the address's (`p`): a number
 // alone, or with "No.", 號, 番地, 호, 門牌 or one stray mark ("133",
-// "No. 133", "133番地", "福 133"), a second number after it ("133之1",
-// "22-4": the first is the building's), a letter ("12b"). Not a floor or
+// "No. 133", "133番地", "福 133"), a second number after it ("133之1": the
+// first is the building's; but two joined by a hyphen or a slash are one,
+// "130-1", the building next to 130), a letter ("12b"). Not a floor or
 // the hours ("3F", "B1", "24H"), a unit ("#200"), a postcode or a phone
 // (5 digits or more), a year after ©, a contact line, nor the street's own
 // number. A stray "4" glued to "中山北路一段" while the plate's "133" was
@@ -592,7 +614,7 @@ function _szSignAddressKind(rec, plate, words, streets, places, pois) {
 // its neighbours' numbers.
 var SZ_SIGN_MARKS = ['no', 'nr', 'num', 'number', '門牌', '门牌', 'رقم', '之', 'の', '-', '호'];
 function _szSignOtherBuilding(plate, p, skip, size) {
-  var mine = p.b.join('');
+  var mine = p.compound ? p.b.join('-') : p.b.join('');
   var chars = function (w) { return Array.from(w.normalize('NFC')).length; };
   var markChars = plate.suffix.concat(plate.marks).map(function (w) { return w.normalize('NFC'); })
     .filter(function (c) { return Array.from(c).length === 1; });
@@ -617,6 +639,9 @@ function _szSignOtherBuilding(plate, p, skip, size) {
     if (at < 0) return false;
     if (!ws.every(function (w, j) { return j === at || _szSignIsNum(w) || chars(w) <= 1; })) return false;
     var b = ws[at] + (SZ_SIGN_HOUSE_LETTER.test(ws[at + 1] || '') ? ws[at + 1] : '');
+    // two numbers joined by a hyphen or a slash are one ("130-1": the
+    // building next to 130, not 130 itself; "20-1" is not "201")
+    if (_szSignIsNum(ws[at + 1] || '') && _szSignJoined(raw, ws[at], ws[at + 1])) b = ws[at] + '-' + ws[at + 1];
     return b !== mine && p.rest.indexOf(ws[at]) < 0;
   });
 }

@@ -1316,4 +1316,44 @@ ok('a blade: the number after the street is its block, never the building, in th
     assert.strictEqual(L._szSignBlockLand(lat, lon), false, `${lat},${lon}`);  // Ensenada .. San Juan PR, Berlin
 });
 
+ok('a compound building number is one number: Korean plates ("130-19"), Czech "1020/7"', () => {
+  const SEOUL = [37.60, 126.95];
+  const addr = (n, a, o) => ({ n, t: 'addr', a, o });
+  // as the map writes a Korean street: its Latin name, its Korean one in nn
+  const road = (nn, n) => ({ n, nn, t: 'street', a: SEOUL[0], o: SEOUL[1] });
+  // a road-name address plate: the road, its romanised name, the building's number (main-sub), biggest
+  const plateOf = (rows) => rows.map(([text, h], i) => ({ text, size: h,
+    box: { x: 0, y: rows.slice(0, i).reduce((y, r) => y + r[1] + 4, 0), width: 120, height: h } }));
+  const kindsOn = (recs, rows) => L._szSignKinds(recs.map((item) => ({ item })), plateOf(rows), W, recs).map((k) => k.kind);
+  const a13019 = addr('130-19 세검정로4길, 서울특별시', ...SEOUL), r4 = road('세검정로4길', 'Segeomjeong-ro 4-gil');
+  const plate = [['세검정로4길', 14], ['Segeomjeong-ro 4-gil', 8], ['130-19', 24]];
+  assert.deepStrictEqual(kindsOn([a13019, r4], plate), ['address', 'street']);
+  // on one line
+  assert.deepStrictEqual(kindsOn([a13019, r4], [['세검정로4길 130-19', 14]]), ['address', 'similar']);
+  // part of the number is another building: "130" is not 130-19, nor "130-19" 130
+  assert.notStrictEqual(kindsOn([addr('130 세검정로4길, 서울특별시', ...SEOUL), r4], plate)[0], 'address');
+  assert.notStrictEqual(kindsOn([a13019, r4], [['세검정로4길', 14], ['130', 24]])[0], 'address');
+  // a postcode under the number (kr-5012) is no other building
+  assert.deepStrictEqual(kindsOn([addr('10-1 논골1길, 서울특별시', ...SEOUL), road('논골1길', 'Nongol 1-gil')],
+    [['논골1길', 14], ['Nongol 1-gil', 8], ['10-1', 24], ['25717', 8]]), ['address', 'street']);
+  // a street sign's range of numbers is no building (kr-5001)
+  assert.deepStrictEqual(kindsOn([addr('18-1 이태원로36길, 서울특별시', ...SEOUL), road('이태원로36길', 'Itaewon-ro 36-gil')],
+    [['이태원로36길', 14], ['18-1→18-12', 10], ['Itaewon-ro 36-gil', 8]]).slice(0, 1), ['drop']);
+  // a neighbour's plate in the photo ("130-1", smaller) is another building, not 130's
+  assert.notStrictEqual(kindsOn([addr('130 세검정로4길, 서울특별시', ...SEOUL), r4],
+    [['세검정로4길', 14], ['Segeomjeong-ro 4-gil', 8], ['130', 24], ['130-1', 16]])[0], 'address');
+  // the address's own "20-1" is not "201", nor "12-3" a stray "123"
+  assert.notStrictEqual(kindsOn([addr('12-3 세검정로4길, 서울특별시', ...SEOUL), r4],
+    [['세검정로4길', 14], ['Segeomjeong-ro 4-gil', 8], ['12-3', 24], ['123', 16]])[0], 'address');
+  // on one line, written joined: not a range's "1→65", nor two numbers apart
+  const r65 = road('세종대로', 'Sejong-daero');
+  assert.deepStrictEqual(kindsOn([addr('1-65 세종대로, 서울특별시', ...SEOUL), r65], [['세종대로 1-65', 14]]).slice(0, 1), ['address']);
+  for (const line of ['세종대로 1→65', '세종대로 1 65'])
+    assert.notStrictEqual(kindsOn([addr('1-65 세종대로, 서울특별시', ...SEOUL), r65], [[line, 14]])[0], 'address', line);
+  // Czech: conscription/orientation number, read whole
+  const PRAGUE = [50.08, 14.42];
+  assert.deepStrictEqual(kindsOn([addr('1020/7 Janáčkova, Brno', ...PRAGUE)], [['Janáčkova 1020/7', 14]]), ['address']);
+  assert.notStrictEqual(kindsOn([addr('1020/7 Janáčkova, Brno', ...PRAGUE)], [['Janáčkova 1020', 14]])[0], 'address');
+});
+
 console.log(`${pass} passed`);
