@@ -419,6 +419,21 @@ def test_wikidata_text_halves_a_refused_batch(tmp_path: Path) -> None:
     assert calls == [["Q13"]]
 
 
+def test_wikidata_text_norwegian_reads_bokmal_terms(tmp_path: Path) -> None:
+    """A "no" pack's text comes from Wikidata's nb terms (Bokmål), where
+    Wikidata keeps them; "no" terms, rare, still count when nb has none."""
+    asked: list[list[str]] = []
+
+    def fetch(ids: list[str], codes: list[str]) -> dict[str, Any]:
+        asked.append(codes)
+        return {"Q1": {"id": "Q1", "labels": {"nb": {"value": "Trondheim"}},
+                       "descriptions": {"nb": {"value": "by i Trøndelag"}}},
+                "Q2": {"id": "Q2", "labels": {"no": {"value": "Bodø"}}}}
+    got, st = wiki_pack.wikidata_text(["Q1", "Q2"], "no", tmp_path, fetch=fetch, langs=("no",))
+    assert got == {"Q1": ["Trondheim", "by i Trøndelag"], "Q2": ["Bodø", ""]}
+    assert st["complete"] and "nb" in asked[0]
+
+
 def test_wikidata_text_stops_when_refused(tmp_path: Path) -> None:
     import urllib.error
     calls: list[list[str]] = []

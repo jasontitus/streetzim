@@ -91,7 +91,11 @@ TEXT_LANGS = ("ar", "de", "el", "en", "es", "fa", "fr", "he", "hi", "id", "it", 
 # (without languagefallback, which would hand back English).
 TEXT_VARIANTS = {"zh": ("zh", "zh-hans", "zh-cn", "zh-sg", "zh-my",
                         "zh-hant", "zh-tw", "zh-hk", "zh-mo"),
-                 "pt": ("pt", "pt-br")}
+                 "pt": ("pt", "pt-br"),
+                 # Norwegian packs are "no" (cloud/region-languages.tsv), but
+                 # Wikidata keeps Bokmål's terms under nb: "no" alone found 344
+                 # labels in 103,573 Nordic items (Swedish 149,966)
+                 "no": ("nb", "no")}
 DUMPS_URL = "https://dumps.wikimedia.org/{site}/latest/{site}-latest-{table}.sql.gz"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 _QID_RE = re.compile(r"Q[1-9][0-9]{0,9}")
