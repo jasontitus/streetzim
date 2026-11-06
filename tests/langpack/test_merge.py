@@ -328,3 +328,46 @@ def test_verify_compares_the_entries_bytes(lp: SimpleNamespace, tmp_path: Path) 
     assert r.returncode == 1, r.stdout[-3000:]
     fails = [x for x in r.stdout.splitlines() if x.startswith("FAIL")]
     assert len(fails) == 1 and "pack C entries identical" in fails[0] and path.decode() in fails[0], fails
+
+
+def test_verify_takes_the_base_counters_gaps_not_its_counts() -> None:
+    """India East's merged versions (2026-11-06): the base's Counter missed
+    the entries its viewer swap added (one licence text, two scripts, twelve
+    fonts), and the packs added a script of their own. The gaps match, so the
+    merge added nothing to the discrepancy; one more uncounted entry would."""
+    from tools.langpack.verify_merge import counter_gaps
+    base = counter_gaps({b"text/plain": 3, b"application/javascript": 5, b"text/html": 900},
+                        {b"text/plain": 4, b"application/javascript": 7, b"text/html": 900, b"font/otf": 12})
+    assert base == {"text/plain": 1, "application/javascript": 2, "font/otf": 12}
+    merged = counter_gaps({b"text/plain": 3, b"application/javascript": 6, b"text/html": 1400},
+                          {b"text/plain": 4, b"application/javascript": 8, b"text/html": 1400, b"font/otf": 12})
+    assert merged == base
+    worse = counter_gaps({b"text/plain": 3, b"application/javascript": 6, b"text/html": 1400},
+                         {b"text/plain": 4, b"application/javascript": 9, b"text/html": 1400, b"font/otf": 12})
+    assert worse != base
+    assert counter_gaps({b"text/html": 2}, {b"text/html": 2}) == {}
+
+
+def test_a_base_whose_counter_misses_entries_still_merges(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """A base whose M/Counter misses one JSON entry (a viewer swap's, before
+    2026-11-06) and packs that add JSON entries of their own: the merged
+    Counter misses that same one, and verify_merge.py passes it."""
+    import os
+    from libzim.reader import Archive
+    from tests.langpack import lpzims
+    os.environ.setdefault("STREETZIM_ROOT", str(Path(__file__).resolve().parents[2]))
+    stored = merge_zim.parse_counter(bytes(Archive(str(lp.base)).get_metadata("Counter")))
+    stored[b"application/json"] -= 1
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    uuid = lpzims.write_base(base, counter=";".join(f"{k.decode()}={v}" for k, v in sorted(stored.items())))
+    assert merge_zim.parse_counter(bytes(Archive(str(base)).get_metadata("Counter"))) == stored   # the gap is there
+    packs = [tmp_path / f"osm_testland_wiki-{x}_2026-10-13.zim" for x in ("de", "fr")]
+    for x, p in zip(("de", "fr"), packs):
+        lpzims.write_pack(p, x, uuid)
+    out = tmp_path / "m.zim"
+    r = tool("merge_zim.py", base, *packs, "-o", out, "--lang", "de", "--region-langs", "en", "--title", "Testland")
+    assert r.returncode == 0, r.stdout + r.stderr
+    merged = merge_zim.parse_counter(bytes(Archive(str(out)).get_metadata("Counter")))
+    assert merged[b"application/json"] > stored[b"application/json"]          # the packs' JSON
+    r = tool("verify_merge.py", out, base, *packs, "--lang", "de", "--region-langs", "en", "--title", "Testland")
+    assert "PASS  M/Counter" in r.stdout and r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]

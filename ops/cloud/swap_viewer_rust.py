@@ -1097,10 +1097,16 @@ def swap_viewer_rust(src_path: str, dst_path: str, reshard_chips: bool = False,
 
         with _open_creator(dst_path, main_path) as c:
             # Copy metadata entries verbatim (Title, Description, Date, Name,
-            # Counter, Language, etc.). ManifestCreator distinguishes
+            # Language, etc.). ManifestCreator distinguishes
             # metadata via add_metadata; iterating metadata_keys gives names
             # only (no namespace prefixes).
             for k in src.metadata_keys:
+                # Counter (entries per MIME type) is the packer's to write:
+                # copied, it misses what the swap adds (--maplibre: the
+                # legacy MapLibre, twelve fonts, their licence; --back-bar:
+                # sz-back.js).
+                if k == "Counter":
+                    continue
                 try:
                     v = src.get_metadata(k)
                     if k == "Illustration_48x48@1":

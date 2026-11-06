@@ -80,6 +80,36 @@ def test_maplibre_swaps_in_the_vendored_files_and_adds_the_rest(tmp_path, monkey
     assert set(after) - set(before) - set(want) == set()
 
 
+def _counter_and_recount(path: Path) -> tuple[dict[str, int], dict[str, int]]:
+    from libzim.reader import Archive
+    a = Archive(str(path))
+    stored: dict[str, int] = {}
+    for part in bytes(a.get_metadata("Counter")).decode().split(";"):
+        if "=" in part:
+            mime, n = part.rsplit("=", 1)
+            stored[mime.split(";")[0].strip()] = stored.get(mime.split(";")[0].strip(), 0) + int(n)
+    recount: dict[str, int] = {}
+    for i in range(a.entry_count):
+        e = a._get_entry_by_id(i)
+        if not e.is_redirect:
+            mime = e.get_item().mimetype.split(";")[0].strip()
+            recount[mime] = recount.get(mime, 0) + 1
+    return ({k: v for k, v in stored.items() if v}, recount)
+
+
+def test_maplibre_swap_counts_the_entries_it_adds(tmp_path, monkeypatch):
+    """M/Counter counts the twelve fonts, the licence and the legacy MapLibre
+    the swap adds: copied from the source it missed them, and every language
+    version merged onto such a base then failed verify_merge.py's Counter
+    check once its packs added a script of their own."""
+    src, dst = _swap(tmp_path, monkeypatch, maplibre=True)
+    stored, recount = _counter_and_recount(dst)
+    assert stored == recount
+    assert recount.get("font/otf") == 12
+    s_stored, s_recount = _counter_and_recount(src)
+    assert s_stored == s_recount and "font/otf" not in s_recount
+
+
 def test_without_the_option_maplibre_is_left_alone(tmp_path, monkeypatch):
     src, dst = _swap(tmp_path, monkeypatch)
     before, after = _entries(src), _entries(dst)

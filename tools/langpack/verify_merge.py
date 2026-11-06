@@ -32,6 +32,13 @@ C, M, W, X = (ord(c) for c in "CMWX")
 results = []
 
 
+def counter_gaps(stored: dict[bytes, int], recount: dict[bytes, int]) -> dict[str, int]:
+    """Per MIME type, how many more entries a recount finds than M/Counter
+    says (fewer: negative); only the types where the two differ."""
+    gaps = {k: recount.get(k, 0) - stored.get(k, 0) for k in set(stored) | set(recount)}
+    return {k.decode(): g for k, g in gaps.items() if g}
+
+
 def check(name, ok, detail=""):
     results.append((name, bool(ok), detail))
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}", flush=True)
@@ -214,7 +221,11 @@ def main():
             brecount[km] = brecount.get(km, 0) + 1
     bdiff = {k.decode(): (bstored.get(k), brecount.get(k)) for k in set(bstored) | set(brecount)
              if bstored.get(k) != brecount.get(k)}
-    check("M/Counter == recount (or carries exactly the base's own discrepancy)", diff == bdiff,
+    # The gaps, not the counts: a base whose Counter missed entries (a viewer
+    # swap's added files: maplibre-gl-legacy.js, the script fonts) keeps
+    # missing exactly those, while its packs add to the same types.
+    check("M/Counter == recount (or off by exactly the base's own gaps)",
+          counter_gaps(stored, recount) == counter_gaps(bstored, brecount),
           f"diff={diff} base_diff={bdiff}")
 
     # v1 listing

@@ -44,6 +44,9 @@ class _Item(Item):
         self._d = data.encode() if isinstance(data, str) else data
         self._front = front
         self._compress = compress
+        # what streetzim's packer reads (cloud/manifest_writer.py, a MapItem)
+        self._path, self._title, self._mimetype, self._data = path, title, mime, self._d
+        self._is_front = front
 
     def get_path(self) -> str:
         return self._p
@@ -90,7 +93,8 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
                extra: dict[str, Any] | None = None, slots: dict[str, bytes] | None = None,
                front_redirects: list[tuple[str, str, str]] | None = None, cfg_extra: dict[str, Any] | None = None,
                pages: list[tuple[str, str, str]] | None = None, fulltext: bool = False, fronts: bool = True,
-               front_pages: list[tuple[str, str, str]] | None = None, all_front: bool = False) -> str:
+               front_pages: list[tuple[str, str, str]] | None = None, all_front: bool = False,
+               counter: str | None = None) -> str:
     """The base; returns its UUID (hex). `extra`: more JSON entries {path: value};
     `slots`: the three viewer files in fixed-size uncompressed slots
     (cloud/viewer_slots.py), as published bases carry them; `front_redirects`:
@@ -102,9 +106,24 @@ def write_base(path: Path, *, description: str = "Offline map of Testland", wiki
     until 2026-10-29 (their own title index holds every page all the same);
     `front_pages`: pages (path, title, text) flagged front whatever `fronts`
     says; `all_front`: every entry flagged front, tiles and JSON too, as some
-    older builds listed them."""
-    with Creator(str(path)).config_indexing(fulltext, "eng") as c:
-        c.set_mainpath("index.html")
+    older builds listed them; `counter`: this M/Counter instead of a count of
+    the entries, written through streetzim's packer (cloud/manifest_writer.py;
+    libzim refuses one), as cloud/swap_viewer_rust.py left the bases it gave
+    files until 2026-11-06 (it copied the source's Counter)."""
+    if counter is None:
+        creator = Creator(str(path)).config_indexing(fulltext, "eng")
+    else:
+        if str(ROOT) not in __import__("sys").path:
+            __import__("sys").path.insert(0, str(ROOT))
+        from cloud.manifest_writer import ManifestCreator
+        creator = ManifestCreator(str(path))
+        creator.config_indexing(fulltext, "eng")
+        creator.set_mainpath("index.html")       # configured before it is entered
+    with creator as c:
+        if counter is None:
+            c.set_mainpath("index.html")
+        else:
+            c.add_metadata("Counter", counter)
         for k, v in (("Name", f"osm_en_{REGION}"), ("Title", "OSM - Testland"), ("Language", "eng"),
                      ("Description", description), ("Creator", "OpenStreetMap"), ("Publisher", "StreetZim"),
                      ("Date", "2026-10-13")):
