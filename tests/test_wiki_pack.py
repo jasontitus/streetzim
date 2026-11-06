@@ -661,6 +661,19 @@ def test_pick_source_finds_kiwixs_bokmal_zim_for_no(tmp_path: Path) -> None:
         wiki_pack.pick_source(str(tmp_path), "sv")
 
 
+def test_bhojpuri_reads_bhwiki_from_kiwixs_bho_zim(tmp_path: Path) -> None:
+    """Bhojpuri (bho, India East and the Himalayas) is bh.wikipedia.org: its
+    dumps, Wikidata sitelinks and articles are bhwiki, while Kiwix names its
+    ZIM wikipedia_bho_*.zim. Asking dumps.wikimedia.org for bhowiki got a 404,
+    which left India East without its Bhojpuri pack."""
+    from streetzim.languages import kiwix_zim_code, wiki_code
+    (tmp_path / "wikipedia_bho_all_maxi_2026-10.zim").write_bytes(b"")
+    (tmp_path / "wikipedia_bh_all_maxi_2026-10.zim").write_bytes(b"")      # not Kiwix's name for it
+    assert wiki_pack.pick_source(str(tmp_path), "bho").endswith("wikipedia_bho_all_maxi_2026-10.zim")
+    assert wiki_pack.site_of("bho") == "bhwiki"
+    assert (wiki_code("bho"), kiwix_zim_code("bho")) == ("bh", "bho")
+
+
 def test_region_languages_have_iso639_3_codes() -> None:
     """Every region language can label a pack (Language metadata): Romansh for
     Switzerland, Armenian, three-letter codes as they are."""

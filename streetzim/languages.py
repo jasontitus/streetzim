@@ -126,12 +126,15 @@ def two_letter(code: str) -> str:
 RTL = frozenset({"ar", "fa", "he", "ur", "glk", "mzn"})
 
 
-# Wikipedia editions whose code is not the language's ISO 639-1 code.
-WIKI_CODE = {"nb": "no"}
-# Kiwix names a Wikipedia ZIM by another code than the edition's in one
-# case: Norwegian Bokmål is no.wikipedia.org (dumps: nowiki), but its ZIM is
-# wikipedia_nb_*.zim (cloud/region-languages.tsv says "no").
-KIWIX_ZIM_CODE = {"no": "nb", "nb": "nb"}
+# Wikipedia editions whose code is not the language's code: Bhojpuri is
+# bh.wikipedia.org (dumps: bhwiki; Wikidata site bhwiki; bho.wikipedia.org
+# only redirects to the incubator).
+WIKI_CODE = {"nb": "no", "bho": "bh"}
+# Kiwix names a Wikipedia ZIM by another code than the edition's:
+# Norwegian Bokmål is no.wikipedia.org (dumps: nowiki), but its ZIM is
+# wikipedia_nb_*.zim (cloud/region-languages.tsv says "no"); Bhojpuri's is
+# wikipedia_bho_*.zim (Source bh.wikipedia.org).
+KIWIX_ZIM_CODE = {"no": "nb", "nb": "nb", "bho": "bho"}
 
 
 def wiki_code(lang: str) -> str:
