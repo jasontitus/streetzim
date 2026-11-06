@@ -110,8 +110,9 @@ if [ -n "${BUILD_WIKI_ZIM:-}" ]; then
         echo "  BUILD_WIKI_ZIM=$BUILD_WIKI_ZIM is missing or the wrong size; using $WIKI_ZIM"
     fi
 fi
-# a variant's own (cloud/region-variants.tsv wiki_images: none for the light maps), unless set
-WIKI_IMAGES="${WIKI_IMAGES:-${VAR_WIKI_IMAGES:-all}}"
+# A variant's own (cloud/region-variants.tsv wiki_images: none for the light maps) before
+# WIKI_IMAGES, which the drivers always pass (their tier's default: all, lead for continents).
+WIKI_IMAGES="${VAR_WIKI_IMAGES:-${WIKI_IMAGES:-all}}"
 WIKI_TITLE_CACHE=/storage/streetzim/wiki_articles_cache/${SRC_ID}_qid_titles.json
 
 OUT_FINAL=osm-${ID}-${TODAY}.zim

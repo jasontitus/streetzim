@@ -309,3 +309,26 @@ def test_a_later_schema_is_kept_and_a_stale_sidecar_beside_a_link_is_replaced(tm
     (regions / "r.search.jsonl.schema").symlink_to(tmp_path / "world.s2.jsonl.schema")
     _run(tmp_path, env, "r")
     _schema_copy(regions / "r.search.jsonl.schema", tmp_path)
+
+
+@pytest.mark.parametrize("row,driver,want", [("v\tp\tno\t13\tnone", "all", "none"),
+                                             ("v\tp\tno\t13\tnone", "lead", "none"),
+                                             ("v\tp\tno\t13", "all", "all"),
+                                             ("v\tp\tno\t13", "", "all")])
+def test_a_light_maps_own_wiki_images_beats_the_drivers_default(tmp_path, row, driver, want):
+    """build-region-fast.sh: a variant's wiki_images (none for the light maps)
+    decides over WIKI_IMAGES, which rebuild_old_regions.sh and
+    build-refresh-queue.sh always pass as their tier's default."""
+    text = (ROOT / "ops" / "build-region-fast.sh").read_text()
+    i = text.index("VARIANTS=")
+    block = text[i:text.index("\nfi\n", i) + 4]
+    line = next(ln for ln in text.splitlines() if ln.startswith('WIKI_IMAGES="'))
+    (tmp_path / "v.tsv").write_text("# id\tparent\tsatellite\tmax_zoom\twiki_images\n" + row + "\n")
+    body = (block.replace("VARIANTS=/storage/streetzim/cloud/region-variants.tsv", f"VARIANTS={tmp_path}/v.tsv")
+            + "\n" + line + '\necho "WI=$WIKI_IMAGES"\n')
+    env = {**os.environ, "ID": "v"}
+    env.pop("WIKI_IMAGES", None)
+    if driver:
+        env["WIKI_IMAGES"] = driver
+    r = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, timeout=30)
+    assert f"WI={want}" in r.stdout.splitlines(), r.stdout + r.stderr
