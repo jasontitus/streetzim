@@ -259,8 +259,8 @@ function initRouting(map, config) {
     originInput._szHere = false;
     destInput.value = '';
     setRoutingStatus('');   // and its data-state: a cleared panel is not "failed"
-    originResultsEl.style.display = 'none';
-    destResultsEl.style.display = 'none';
+    dismissOriginSuggestions();
+    dismissDestSuggestions();
     resultEl.style.display = 'none';
     setExpandHint();
     clearBtn.style.display = 'none';

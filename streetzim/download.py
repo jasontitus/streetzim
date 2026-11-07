@@ -106,6 +106,7 @@ def _head_once(url: str, user_agent: str) -> dict[str, str] | None:
         h = dict(r.headers.items())
         m = re.match(r"bytes \d+-\d+/(\d+)$", _header(h, "Content-Range"))
         if r.status == 206 and m:
+            h = {key: value for key, value in h.items() if key.lower() != "content-length"}
             h["Content-Length"] = m.group(1)
             h.setdefault("Accept-Ranges", "bytes")
         elif r.status != 200:
@@ -174,39 +175,48 @@ class IncompleteBody(OSError):
     kept in the .part, for the caller to resume or restart."""
 
 
-def _download(url: str, part: Path, offset: int, total: int, validator: str,
+def _download(url: str, part: Path, offset: int, total: int, stamp: dict[str, str],
               user_agent: str, check_head: Callable[[bytes], None] | None) -> bool:
     """Write `url` into `part` from byte `offset` (a Range request with
     If-Range when offset > 0). False when a resume was answered with a
     range that does not start at the offset (nothing written). Raises
-    IncompleteBody when the body is shorter or longer than its
-    Content-Length."""
+    IncompleteBody when the body differs from the expected byte count."""
     headers = {"User-Agent": user_agent, "Accept-Encoding": "identity"}
+    validator_key = "ETag" if stamp["ETag"] else "Last-Modified"
+    validator = stamp[validator_key]
     if offset:
         headers.update({"Range": f"bytes={offset}-", "If-Range": validator})
     with _stream(url, headers) as (status, h, blocks):
+        actual = _header(h, validator_key)
+        if validator and actual and actual != validator:
+            raise OSError(f"{url}: source changed during download; retry to check its new version")
         if offset and status == 200:
             print("    the server sent the whole file: starting over", flush=True)
             offset = 0
-        elif offset and not (status == 206
-                             and _header(h, "Content-Range").startswith(f"bytes {offset}-")):
+        elif offset and not (status == 206 and
+                             _header(h, "Content-Range") == f"bytes {offset}-{total - 1}/{total}"):
             print(f"    unexpected answer to a resume ({status} "
                   f"{h.get('Content-Range', '')!r}): starting over", flush=True)
             return False
+        elif not offset and status != 200:
+            raise OSError(f"{url}: expected a whole file, got HTTP {status}")
+        response_length = int(_header(h, "Content-Length") or 0)
+        if total and response_length and response_length != total - offset:
+            raise OSError(f"{url}: GET declared {response_length:,} bytes, expected {total - offset:,}")
+        expected = total - offset if total else response_length
         with open(part, "r+b" if part.exists() else "wb") as f:
             f.truncate(offset)
             f.seek(offset)
             sink = Progress(f, offset, total, check_head)
             for block in blocks:
                 sink.write(block)
-            response_length = _header(h, "Content-Length")
-            if response_length and sink.done - offset != int(response_length):
+            if expected and sink.done - offset != expected:
                 raise IncompleteBody(f"{url}: GET body has {sink.done - offset:,} bytes, "
-                              f"expected {response_length}")
+                              f"expected {expected}")
     return True
 
 
-def _download_retrying(url: str, part: Path, offset: int, total: int, validator: str,
+def _download_retrying(url: str, part: Path, offset: int, total: int, stamp: dict[str, str],
                        user_agent: str, check_head: Callable[[bytes], None] | None,
                        ranges: bool) -> bool:
     """_download, tried again after a transient failure, ATTEMPTS tries in
@@ -215,7 +225,7 @@ def _download_retrying(url: str, part: Path, offset: int, total: int, validator:
     over."""
     for tries in range(1, ATTEMPTS + 1):
         try:
-            return _download(url, part, offset, total, validator, user_agent, check_head)
+            return _download(url, part, offset, total, stamp, user_agent, check_head)
         except (OSError, http.client.HTTPException) as e:
             if not _transient(e) or tries == ATTEMPTS:
                 raise
@@ -389,6 +399,13 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
     offset = part.stat().st_size if part.exists() else 0
     ranges = _header(h, "Accept-Ranges").lower() == "bytes" and bool(validator)
     resumable = ranges and read_download_metadata(part_meta) == stamp and 0 < offset <= total
+    if resumable and check_head is not None:
+        try:
+            with part.open("rb") as f:
+                check_head(f.read(64))
+            resumable = offset >= 64 or offset == total
+        except ValueError:
+            resumable = False
     if not resumable:
         offset = 0
         part.unlink(missing_ok=True)
@@ -396,19 +413,13 @@ def _fetch_locked(url: str, dest: Path, user_agent: str,
     for attempt in (1, 2):
         if offset and offset == total:
             print(f"  {part.name} is complete: not downloading it again")
-            if check_head is not None:
-                with open(part, "rb") as f:
-                    check_head(f.read(64))
             break
         if offset:
             print(f"  Resuming {url} at {offset / 1e6:,.0f} of {total / 1e6:,.0f} MB")
-            if check_head is not None:
-                with open(part, "rb") as f:
-                    check_head(f.read(64))
         else:
             print(f"  Downloading {url}" + (f" ({total / 1e6:,.0f} MB)" if total else ""))
         try:
-            wrote = _download_retrying(url, part, offset, total, validator, user_agent,
+            wrote = _download_retrying(url, part, offset, total, stamp, user_agent,
                                        check_head, ranges)
         except ValueError:                      # not the file wanted: don't resume it
             part.unlink(missing_ok=True)

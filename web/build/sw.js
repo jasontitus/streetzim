@@ -40,23 +40,24 @@ self.addEventListener('message', (e) => {
   if (d.type !== 'register' || !e.ports[0]) return;
   const port = e.ports[0];
   const hwm = Math.min(HWM, Math.max(1048576, +d.hwm || HWM));
-  let ctrl, waiting = 0, enqueued = 0, ended = false, lastPulled = -1, heard = Date.now(), since = Date.now(), tick = Date.now(), pace = 5000;
+  let ctrl, waiting = 0, enqueued = 0, ended = false, terminal = false, lastPulled = -1, heard = Date.now(), since = Date.now(), tick = Date.now(), pace = 5000;
   const queued = () => hwm - ctrl.desiredSize;
-  const forget = () => { streams.delete(d.id); clearInterval(watch); };
+  const forget = () => { terminal = true; streams.delete(d.id); clearInterval(watch); };
+  const fail = (reason) => {
+    forget();
+    ctrl.error(new Error(reason));
+    port.postMessage({ type: 'cancelled', reason });
+  };
   const watch = setInterval(() => {
     const now = Date.now(), gap = now - tick;
     if (gap > 3 * Math.max(5000, pace)) { heard = since = now; }   // woke from sleep
     pace = gap; tick = now;
     if (!s.started && now - since > START_TIMEOUT_MS) {
-      forget();
-      try { ctrl.error(new Error('not started')); } catch (err) { /* closed */ }
-      port.postMessage({ type: 'cancelled', reason: 'the download did not start' });
+      fail('the download did not start');
       return;
     }
-    if (ended || now - heard < SILENT_MS) return;
-    forget();
-    try { ctrl.error(new Error('the page stopped writing')); } catch (err) { /* closed */ }
-    port.postMessage({ type: 'cancelled', reason: 'the page stopped writing' });    // in case it is only slow
+    if (now - heard < SILENT_MS) return;
+    fail('the page stopped writing');
   }, 5000);
   const report = () => {
     const pulled = enqueued - queued();
@@ -66,19 +67,27 @@ self.addEventListener('message', (e) => {
   const stream = new ReadableStream({
     start(c) { ctrl = c; },
     pull() {
+      if (terminal) return;
       if (waiting) { waiting--; port.postMessage({ type: 'ack' }); }
       report();
     },
     cancel(reason) { forget(); port.postMessage({ type: 'cancelled', reason: String(reason || 'cancelled') }); },
   }, new ByteLengthQueuingStrategy({ highWaterMark: hwm }));
   port.onmessage = (m) => {
+    if (terminal) return;
     const x = m.data || {};
     heard = Date.now();
     if (x.type === 'chunk') {
+      if (ended || enqueued + x.chunk.byteLength > d.size) { fail('invalid download length'); return; }
       ctrl.enqueue(x.chunk); enqueued += x.chunk.byteLength;
       if (ctrl.desiredSize > 0) port.postMessage({ type: 'ack' }); else waiting++;
-    } else if (x.type === 'end') { ended = true; report(); }
-    else if (x.type === 'error') { try { ctrl.error(new Error(x.reason)); } catch (err) { /* closed */ } forget(); }
+    } else if (x.type === 'end') {
+      if (ended) return;
+      if (enqueued !== d.size) { fail('invalid download length'); return; }
+      ended = true;
+      report();
+    }
+    else if (x.type === 'error') { forget(); ctrl.error(new Error(x.reason)); }
     else if (x.type === 'ping') port.postMessage({ type: 'pong' });
   };
   const s = { stream, filename: d.filename, size: d.size, started: false, port };

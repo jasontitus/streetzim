@@ -126,11 +126,18 @@ class OpfsSink {                     // browser-private storage (folder lab-buil
   async dir() { return (await navigator.storage.getDirectory()).getDirectoryHandle('lab-build', { create: true }); }
   async open() {
     const dir = await this.dir();
-    await dir.removeEntry(this.name).catch(() => {});
     this.fh = await dir.getFileHandle(this.name, { create: true });
     this.h = await this.fh.createSyncAccessHandle(); this.pos = 0;
   }
-  async write(u8) { let n = 0; while (n < u8.length) n += this.h.write(u8.subarray(n), { at: this.pos + n }); this.pos += u8.length; }
+  async write(u8) {
+    let n = 0;
+    while (n < u8.length) {
+      const written = this.h.write(u8.subarray(n), { at: this.pos + n });
+      if (!written) throw new Error('browser storage stopped accepting bytes');
+      n += written;
+    }
+    this.pos += n;
+  }
   // flush() and close() return promises in older Safari (15.2-16.x); await them.
   async close() { await this.h.flush(); await this.h.close(); }
   async abort() {
@@ -159,6 +166,9 @@ class Source {
   constructor(name, desc, read, net) {
     this.name = name; this.size = desc.size; this.C = desc.chunk; this.hashes = desc.sha256; this.mask = desc.mask || null;
     this.read = read; this.net = net; this.cache = new Map(); this.inflight = new Map();
+    if (!Number.isSafeInteger(this.size) || this.size <= 0 || !Number.isSafeInteger(this.C) || this.C <= 0) {
+      throw new Error(`${name}: invalid source or chunk size`);
+    }
     if (Math.ceil(this.size / this.C) !== this.hashes.length) throw new Error(`${name}: ${this.hashes.length} chunk hashes for ${this.size} bytes`);
   }
   span(k) { return [k * this.C, Math.min((k + 1) * this.C, this.size)]; }
@@ -274,6 +284,12 @@ async function run(o) {
 
   const last = recipe.segments[recipe.segments.length - 1];
   if (!last || last.src !== 'md5' || recipe.segments.filter((x) => x.src === 'md5').length !== 1) throw new Error('the recipe must end with the checksum');
+  let plannedSize = 16;             // the checksum at the end of the ZIM
+  for (const s of recipe.segments.slice(0, -1)) {
+    if (!Number.isSafeInteger(s.len) || s.len < 0) throw new Error('invalid recipe segment length');
+    plannedSize += s.len;
+  }
+  if (!Number.isSafeInteger(recipe.size) || plannedSize !== recipe.size) throw new Error('recipe size does not match its segments');
   // The reads, in order: [sourceKey, chunk index, take from, take to] per piece.
   const steps = [];
   for (const s of recipe.segments) {
@@ -281,6 +297,7 @@ async function run(o) {
     const key = s.src === 'base' ? 'base' : 'pack:' + s.pack;
     const src = sources[key];
     if (!src) throw new Error('recipe names an unknown source ' + key);
+    if (!Number.isSafeInteger(s.off) || s.off < 0 || s.off > src.size - s.len) throw new Error('recipe segment is outside ' + src.name);
     if (src.mask && src.mask.some(([o, n]) => s.off < o + n && o < s.off + s.len)) throw new Error('the recipe reads a masked viewer slot from the base');
     for (let off = s.off; off < s.off + s.len;) {
       const k = Math.floor(off / src.C), [a, b] = src.span(k);
@@ -407,9 +424,14 @@ async function run(o) {
     Object.assign(o, await new Promise((r) => { sinkReply = r; }));
   }
 
+  if (o.sink === 'opfs' && !/^job-[0-9a-f]{32}\.zim$/.test(o.storageName || '')) {
+    clearInterval(ticker);
+    abort.abort();
+    throw new Error('This page was updated while it was open. Reload it and try again.');
+  }
   sink = o.sink === 'fsa' ? new WritableSink(o.handle)
     : o.sink === 'sw' ? new SwDownloadSink(o.port)
-    : o.sink === 'opfs' ? new OpfsSink(o.fileName)
+    : o.sink === 'opfs' ? new OpfsSink(o.storageName)
     : null;
   if (!sink) { clearInterval(ticker); throw new Error('unknown sink ' + o.sink); }
   const md5 = await hashwasm.createMD5(); md5.init();
@@ -451,6 +473,7 @@ async function run(o) {
       lastUse = null;
       written += n;
     }
+    if (written !== recipe.size) throw new Error('assembled size does not match the recipe');
     clearInterval(ticker);
     progress({ closing: true });
     await sink.close();

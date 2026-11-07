@@ -4,8 +4,7 @@
 //   - a local pick is validated, checked against the storage estimate,
 //     written to IndexedDB from the page, opened by the worker, and the
 //     page moves on to the viewer;
-//   - a pick bigger than the free quota is refused before anything is
-//     written;
+//   - a pick bigger than the free quota opens without a durable copy;
 //   - ?zim= does not auto-stream under Data Saver, but Stream still does;
 //   - an installed (standalone) launch forwards to the viewer when a ZIM
 //     is loaded, and ?picker=1 keeps the picker;
@@ -137,20 +136,41 @@ async function main() {
       assert.equal(r.loaded, true);
     });
 
-    await scenario('a pick bigger than the free quota is refused before writing', noFsAccess + `
+    await scenario('a pick bigger than the free quota is opened for the session only', noFsAccess + `
       Object.defineProperty(navigator, 'storage', { value: {
         estimate: () => Promise.resolve({ quota: 4096, usage: 1024 }),
         persist: () => Promise.resolve(false),
       } });`, async (page) => {
       await ready(page);
       await pick(page);
-      await page.waitForFunction(() => /Not enough storage/.test(document.getElementById('status-title').textContent), { timeout: 30000 });
+      await page.waitForFunction(() => document.getElementById('status-title')?.textContent === 'Map open (not saved)', { timeout: 30000 });
       const st = await status(page);
-      assert.match(st.msg, /reports it can store only about 0 MB more/);
-      assert.equal(await page.$eval('#pick-btn', (b) => b.disabled), false, 'buttons re-enabled');
-      assert.equal(st.url, '/drive/');
+      assert.match(st.msg, /opened directly from your device/);
+      await page.waitForFunction(() => location.pathname === '/drive/viewer/', { timeout: 15000 });
       const r = await ask(page, { type: 'status' });
-      assert.equal(r.present, false, 'nothing must have been stored');
+      assert.deepEqual([r.present, r.loaded, r.session], [true, true, true]);
+    });
+
+    await scenario('clear during file validation prevents a late page-side save', noFsAccess, async (page) => {
+      await ready(page);
+      await page.evaluate(() => {
+        const post = ServiceWorker.prototype.postMessage;
+        ServiceWorker.prototype.postMessage = function(msg, transfer) {
+          if (msg.type !== 'check-zim') return post.call(this, msg, transfer);
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (e) => {
+            window.releaseCheck = () => transfer[0].postMessage(e.data);
+          };
+          post.call(this, msg, [channel.port2]);
+        };
+      });
+      await pick(page);
+      await page.waitForFunction(() => typeof window.releaseCheck === 'function');
+      assert.ok((await ask(page, { type: 'clear-zim' })).ok);
+      await page.evaluate(() => window.releaseCheck());
+      await page.waitForFunction(() => /superseded/.test(document.getElementById('status')?.textContent || ''));
+      assert.equal((await ask(page, { type: 'status' })).present, false);
+      assert.equal(new URL(page.url()).pathname, '/drive/');
     });
 
     await scenario('?zim= under Data Saver waits for Stream; Stream then works',

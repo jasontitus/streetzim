@@ -726,6 +726,7 @@
       this.stats = { requests: 0, bytes: 0 };
       this.etag = null;
       this.lastModified = null;
+      this.sourceChanged = null;
     }
 
     // Fetch block 0 (the header and, for every ZIM we ship, the whole
@@ -767,6 +768,7 @@
     }
 
     async _read(offset, length, exact) {
+      if (this.sourceChanged) throw this.sourceChanged;
       if (length <= 0) return new ArrayBuffer(0);
       if (offset < 0 || offset + length > this.size) {
         throw new Error('HttpRangeSource: out-of-range read (' + offset + '+' +
@@ -851,6 +853,7 @@
           const wait = 500 * Math.pow(2, attempt - 1) + Math.random() * 300;
           await new Promise((r) => setTimeout(r, wait));
         }
+        if (this.sourceChanged) throw this.sourceChanged;
         let res;
         try {
           // The range goes in the header (what any file server needs)
@@ -868,8 +871,23 @@
           continue;
         }
         this.stats.requests++;
+        if (this.sourceChanged) {
+          discardBody(res);
+          throw this.sourceChanged;
+        }
         if (res.status === 206) {
           const cr = parseContentRange(res.headers.get('Content-Range'));
+          const etag = res.headers.get('ETag');
+          const modified = res.headers.get('Last-Modified');
+          const validatorChanged = this.etag && etag ? this.etag !== etag
+            : this.lastModified && modified && this.lastModified !== modified;
+          if (validatorChanged || (this.size && cr && cr.total > 0 && cr.total !== this.size)) {
+            discardBody(res);
+            const error = new Error('The remote ZIM changed while it was open. Select the map again.');
+            error.status = 409;
+            this.sourceChanged = error;
+            throw error;
+          }
           const cl = parseInt(res.headers.get('Content-Length') || '', 10);
           // A range past EOF is legitimately answered short, with
           // Content-Range telling us so (open() asks for a whole block

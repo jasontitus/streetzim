@@ -60,6 +60,7 @@ function make(opts = {}) {
   var expandHint = '';
   function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint(t) { expandHint = t || ''; }
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
+  function dismissOriginSuggestions() {} function dismissDestSuggestions() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
   function haversine(a, b, c, d) { return ${opts.realDistance ? 'env.hav(a, b, c, d)' : '1000'}; }
   function unwrapLngs(c) { return c; } function drawRoute() {}
@@ -80,6 +81,8 @@ function make(opts = {}) {
   ${CLEAR}
   env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
+    graphLoading() { loadGraphInflight = true; },
+    graphLoaded() { graph = {}; loadGraphInflight = false; },
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
       statusState: statusEl.state, minimized: panelClasses.has('minimized'), hint: expandHint,
       fold() { panelClasses.add('minimized'); },
@@ -375,5 +378,27 @@ await ok('a route that lands while a newer pick snaps is described by its own pi
   a.setDestFromLatLon(3, 3, 'D2');                          // its snap is still pending
   await route(e, {});                                       // the route to D lands first
   assert.strictEqual(a.state.status, '');
+});
+await ok('clear invalidates both picks waiting for a cold graph', async () => {
+  const e = make({ noGraph: true }); const a = e.api;
+  a.graphLoading();
+  a.setOriginFromLatLon(1, 1, 'Old origin');
+  a.setDestFromLatLon(2, 2, 'Old destination');
+  a.clearRoute();
+  a.graphLoaded();
+  await new Promise((r) => setTimeout(r, 125));
+  assert.deepStrictEqual(e.snaps, []);
+  assert.deepStrictEqual([a.state.oIn, a.state.dIn, a.state.status], ['', '', '']);
+});
+await ok('only the latest pick per endpoint snaps when the graph becomes ready', async () => {
+  const e = make({ noGraph: true }); const a = e.api;
+  a.graphLoading();
+  a.setDestFromLatLon(1, 1, 'Old');
+  a.setDestFromLatLon(2, 2, 'Latest');
+  a.graphLoaded();
+  await new Promise((r) => setTimeout(r, 125));
+  assert.deepStrictEqual(e.snaps.map((s) => s.lat), [2]);
+  await snap(e, 'dest', 20);
+  assert.strictEqual(a.state.dIn, 'Latest');
 });
 console.log(`${pass} passed`);

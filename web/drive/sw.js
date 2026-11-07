@@ -20,7 +20,7 @@ importScripts('./fzstd.js', './zim-reader.js');
 // changed viewer always produces a new precache and the old one is
 // dropped on activate. Keep the 'streetzim-drive-shell-' prefix — the
 // activate handler only deletes caches carrying it.
-const SHELL_CACHE = 'streetzim-drive-shell-0468f9d3dd';
+const SHELL_CACHE = 'streetzim-drive-shell-30d00e08f5';
 
 const SHELL_URLS = [
   './',
@@ -89,42 +89,67 @@ function openDB() {
   });
 }
 
-async function idbGet(id) {
+async function inStore(mode, action) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readonly');
-    const req = tx.objectStore(DB_STORE).get(id);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, mode);
+      let result;
+      try { result = action(tx.objectStore(DB_STORE)); }
+      catch (error) { tx.abort(); reject(error); return; }
+      tx.oncomplete = () => {
+        try { resolve(result()); } catch (error) { reject(error); }
+      };
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+    });
+  } finally {
+    db.close();
+  }
 }
 
-async function idbPut(record) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readwrite');
-    tx.objectStore(DB_STORE).put(record);
-    tx.oncomplete = () => resolve();
-    tx.onerror = (e) => reject((e && e.target && e.target.error) || tx.error || new Error('IndexedDB write failed'));
-  });
-}
+const revisionOf = (req) => req.result ? req.result.value : null;
+const readRevision = () => inStore('readonly', (store) => {
+  const req = store.get('revision');
+  return () => revisionOf(req);
+});
 
-async function idbDelete(id) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, 'readwrite');
-    tx.objectStore(DB_STORE).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+const readCurrent = () => inStore('readonly', (store) => {
+  const current = store.get('current'), revision = store.get('revision');
+  return () => ({ rec: current.result || null, revision: revisionOf(revision) });
+});
+
+function writeSelection(record, expectedRevision) {
+  const revision = String(crypto.getRandomValues(new Uint32Array(4)));
+  return inStore('readwrite', (store) => {
+    const current = store.get('revision');
+    let superseded = false;
+    current.onsuccess = () => {
+      superseded = expectedRevision !== undefined && revisionOf(current) !== expectedRevision;
+      if (superseded) return;
+      store.put({ id: 'revision', value: revision });
+      if (record) store.put(record);
+      else store.delete('current');
+    };
+    return () => {
+      if (superseded) throw new Error('Map selection was superseded');
+      return revision;
+    };
   });
 }
 
 // ---------- ZIM reader (lazy singleton) ----------
 
-let readerPromise = null;  // Promise<ZimReader|null>
+let selection = null;  // Promise<{rec, reader, session?, error?}>
+let selectionVersion = 0;
+let commits = Promise.resolve();
 
-function resetReader() {
-  readerPromise = null;
+function commitSelection(version, action) {
+  const next = commits.then(() => {
+    if (version !== null && version !== selectionVersion) throw new Error('Map selection was superseded');
+    return action();
+  });
+  commits = next.catch(() => {});
+  return next;
 }
 
 // A record holds either a File/Blob picked on /drive/ or the URL of a
@@ -136,8 +161,6 @@ function resetReader() {
 // ZIM in IndexedDB at any price, but it will happily read one off disk --
 // the copy exists for persistence across reloads, not for reading.
 // Lost when the worker is terminated; the picker says so.
-let sessionRec = null;
-
 async function openReader(rec) {
   let source = rec.blob;
   if (rec.url) {
@@ -158,22 +181,46 @@ async function requireMap(r, what) {
   if (!cfg) throw new Error((what || 'this ZIM') + ' is not a StreetZim map (no map-config.json)');
 }
 
-async function getReader() {
-  if (readerPromise) return readerPromise;
-  const p = (async () => {
-    const rec = await idbGet('current');
-    if (!rec || !(rec.blob || rec.url)) return null;
-    return openReader(rec);
+function getSelection(current) {
+  if (selection) return selection;
+  const pending = (async () => {
+    let rec = null, revision = null;
+    try {
+      ({ rec, revision } = await (current || readCurrent()));
+      if (!rec || !(rec.blob || rec.url)) return { rec: null, reader: null, revision };
+      return { rec, reader: await openReader(rec), revision };
+    } catch (error) {
+      // Retry the next open, while keeping this reply's record and error
+      // together. A newer commit may already have replaced this snapshot.
+      if (selection === pending) selection = null;
+      return { rec, reader: null, revision, error };
+    }
   })();
-  // A failed open (transient IDB error, file moved/modified under a
-  // persisted File handle) must not be memoised — every later request
-  // would 500 until the SW happened to be terminated.
-  const wrapped = p.catch((err) => {
-    if (readerPromise === wrapped) readerPromise = null;
-    throw err;
-  });
-  readerPromise = wrapped;
-  return wrapped;
+  selection = pending;
+  return pending;
+}
+
+async function statusSelection() {
+  const pending = getSelection();
+  const snapshot = await pending;
+  // Recover if the picker committed a file but closed before notifying
+  // the worker. Content reads can still share the in-memory reader.
+  if (!snapshot.error) {
+    const revision = await readRevision().catch(() => snapshot.revision);
+    if (selection !== pending) return getSelection();
+    if (revision !== snapshot.revision) {
+      selection = null;
+      return getSelection();
+    }
+  }
+  return snapshot;
+}
+
+async function getReader() {
+  const { reader, error } = await getSelection();
+  if (error) throw error;
+  if (reader && reader.file && reader.file.sourceChanged) throw reader.file.sourceChanged;
+  return reader;
 }
 
 // ---------- Lifecycle ----------
@@ -243,6 +290,9 @@ self.addEventListener('message', (event) => {
     let reply = { ok: true };
     try {
       if (msg.type === 'set-zim') {
+        const version = ++selectionVersion;
+        await commits;
+        const expectedRevision = await readRevision();
         // Validate BEFORE persisting. Writing first meant a non-ZIM
         // (or truncated) file stuck as `current`: every request then
         // 500'd and the picker hid the Remove button because status
@@ -265,15 +315,12 @@ self.addEventListener('message', (event) => {
         const r = await openReader(rec);
         await requireMap(r, rec.name);
         const sessionOnly = !!msg.session && !msg.url;
-        if (sessionOnly) {
-          // Skip the copy entirely. Reads come from the File reference.
-          await idbDelete('current').catch(() => {});
-          sessionRec = { name: rec.name, addedAt: rec.addedAt };
-        } else {
-          sessionRec = null;
-          await idbPut(rec);
-        }
-        readerPromise = Promise.resolve(r);
+        await commitSelection(version, async () => {
+          // A session selection replaces the saved map only after its
+          // deletion commits. A failed mutation leaves the old selection.
+          const revision = await writeSelection(sessionOnly ? null : rec, expectedRevision);
+          selection = Promise.resolve({ rec, reader: r, session: sessionOnly, revision });
+        });
         reply.info = r.info;
         reply.source = rec.url ? 'url' : 'file';
         reply.session = sessionOnly;
@@ -282,61 +329,63 @@ self.addEventListener('message', (event) => {
         // the record itself: a window has no event time limit, whereas
         // Chromium ends a service-worker message event after five
         // minutes — which copying a multi-GB file on a phone exceeds.
+        const revision = await readRevision();
         const r = new self.StreetZimReader(msg.blob);
         await r.open();
         await requireMap(r, msg.name);
         reply.info = r.info;
+        reply.revision = revision;
       } else if (msg.type === 'reload-zim') {
         // The page put a new `current` record in IndexedDB.
-        resetReader();
-        const r = await getReader();
-        if (!r) throw new Error('no ZIM record to open');
-        reply.info = r.info;
-        const rec = await idbGet('current').catch(() => null);
-        reply.source = rec && rec.url ? 'url' : 'file';
+        let pending;
+        await commitSelection(null, async () => {
+          const current = await readCurrent();
+          if (msg.pickId && (!current.rec || current.rec.pickId !== msg.pickId ||
+              current.revision !== msg.pickId)) throw new Error('Map selection was superseded');
+          selection = null;
+          pending = getSelection(current);
+        });
+        const { rec, reader, error } = await pending;
+        if (error) throw error;
+        if (selection !== pending) {
+          throw new Error('Map selection was superseded');
+        }
+        if (!reader) throw new Error('no ZIM record to open');
+        reply.info = reader.info;
+        reply.source = rec.url ? 'url' : 'file';
       } else if (msg.type === 'ping') {
         // The viewer's preview banner every few seconds: bytes moved so
         // far from the memoised reader, no IndexedDB round trip, and
         // enough activity to keep the worker from being idle-killed.
-        const r = readerPromise ? await readerPromise.catch(() => null) : null;
+        const r = selection ? (await selection).reader : null;
         reply.loaded = !!r;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
         reply.cache = r ? r.cacheStats : null;
         reply.sw = Object.assign({}, swStats);
       } else if (msg.type === 'clear-zim') {
-        await idbDelete('current');
-        sessionRec = null;
-        resetReader();
-      } else if (msg.type === 'status') {
-        let openError = null;
-        const r = await getReader().catch((err) => {
-          openError = String(err && err.message || err);
-          return null;
+        const version = ++selectionVersion;
+        await commitSelection(version, async () => {
+          const revision = await writeSelection(null);
+          selection = Promise.resolve({ rec: null, reader: null, revision });
         });
+      } else if (msg.type === 'status') {
+        const { rec, reader, session, error } = await statusSelection();
+        const openError = error || (reader && reader.file && reader.file.sourceChanged);
+        const r = openError ? null : reader;
         reply.info = r ? r.info : null;
         // Why the record could not be opened (QuotaExceededError,
         // NotReadableError, HTTP 404 from archive.org…) so the picker
         // can say so instead of guessing.
-        reply.openError = openError;
+        reply.openError = openError ? String(openError.message || openError) : null;
         reply.loaded = !!r;
         // `present` ≠ `loaded`: a persisted File handle can stop being
         // readable later (file moved / edited on disk). The picker uses
         // this to keep the Remove button available so the user can
         // clear a record that no longer opens.
-        const rec = await idbGet('current').catch(() => null);
-        reply.present = !!(rec && (rec.blob || rec.url)) || !!sessionRec;
-        reply.name = (rec && rec.name) || (sessionRec && sessionRec.name) || null;
-        reply.session = !!sessionRec && !rec;
-        // Where the bytes come from — 'file' for a local pick, 'url' for
-        // the online preview. The picker's status line and the viewer's
-        // preview banner (with its Download link) key off this.
-        // A session-only open has no IDB record: `source` must fall back to
-        // sessionRec, or the picker reports "not loaded" for a map that IS
-        // open. (An earlier fix set this above and was silently overwritten
-        // here -- this is the authoritative assignment.)
-        reply.source = rec && rec.url ? 'url'
-                     : (rec && rec.blob) ? 'file'
-                     : sessionRec ? 'file' : null;
+        reply.present = !!rec;
+        reply.name = (rec && rec.name) || null;
+        reply.session = !!session;
+        reply.source = rec ? (rec.url ? 'url' : 'file') : null;
         reply.url = rec && rec.url ? (rec.sourceUrl || rec.url) : null;
         reply.sizeBytes = r ? r.size : null;
         reply.stats = (r && r.file && r.file.stats) ? r.file.stats : null;
@@ -643,7 +692,7 @@ const STREAM_MIN_BYTES = 4 * 1024 * 1024;
 // Reads of the same path in flight at once share one read: the cells
 // index is requested by the main thread and the worker together on
 // older viewers.
-const inflightEntryReads = new Map();   // lookupPath → Promise<{mime, data, url}>
+const inflightEntryReads = new WeakMap();   // reader → (lookupPath → entry read)
 
 // Counters the tests read through `status`/`ping` — the memory claims
 // ("streamed, not buffered"; "one read for concurrent requests") are
@@ -755,13 +804,18 @@ async function serveFromZim(viewerPath, request, event) {
         return await streamRaw(reader, span, entry.mime, request, event);
       }
     }
-    let read = inflightEntryReads.get(lookupPath);
+    let reads = inflightEntryReads.get(reader);
+    if (!reads) {
+      reads = new Map();
+      inflightEntryReads.set(reader, reads);
+    }
+    let read = reads.get(lookupPath);
     if (read) swStats.dedupedReads++;
     if (!read) {
       read = reader.readEntry(entry);
-      inflightEntryReads.set(lookupPath, read);
+      reads.set(lookupPath, read);
       read.then(() => {}, () => {}).then(() => {
-        if (inflightEntryReads.get(lookupPath) === read) inflightEntryReads.delete(lookupPath);
+        reads.delete(lookupPath);
       });
     }
     const got = await read;

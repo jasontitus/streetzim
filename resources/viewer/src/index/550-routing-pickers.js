@@ -5,7 +5,7 @@
   // Loads the graph if needed, then re-fires the pick with the original
   // label. Pass a 'which' of 'origin' or 'dest' so the retry dispatches
   // to the correct setter.
-  function queueGraphPick(which, lat, lon, label) {
+  function queueGraphPick(which, lat, lon, label, seq) {
     if (graph) return false;
     // Show the picked label in the input IMMEDIATELY so the user can
     // see what they chose — graph load can take 3-5 s, and an empty
@@ -23,7 +23,9 @@
     var tries = 0;
     var retry = setInterval(function() {
       tries++;
-      if (graph) {
+      if (seq !== (which === 'origin' ? originSnapSeq : destSnapSeq)) {
+        clearInterval(retry);
+      } else if (graph) {
         clearInterval(retry);
         if (which === 'origin') setOriginFromLatLon(lat, lon, label);
         else setDestFromLatLon(lat, lon, label);
@@ -95,10 +97,10 @@
     if (here && window.__streetzim_originBeingEdited) {
       return;
     }
-    if (queueGraphPick('origin', lat, lon, label)) return;
+    var snapSeq = ++originSnapSeq;
+    if (queueGraphPick('origin', lat, lon, label, snapSeq)) return;
     originPick = { lat: lat, lon: lon };
     navPlanSeq++;
-    var snapSeq = ++originSnapSeq;
     setRoutingStatus(snappingText(), 'loading');
     var snapped;
     try {
@@ -133,10 +135,10 @@
   }
 
   async function setDestFromLatLon(lat, lon, label) {
-    if (queueGraphPick('dest', lat, lon, label)) return;
+    var snapSeq = ++destSnapSeq;
+    if (queueGraphPick('dest', lat, lon, label, snapSeq)) return;
     destPick = { lat: lat, lon: lon };
     navPlanSeq++;
-    var snapSeq = ++destSnapSeq;
     setRoutingStatus(snappingText(), 'loading');
     var snapped;
     try {
@@ -406,11 +408,20 @@
   // `target` is 'origin' or 'dest' — determines which handler runs on pick.
   function attachTypeahead(inputEl, resultsEl, target) {
     var timer;
+    var seq = 0;
     var activeIdx = -1;
     var lastMatches = [];
 
-    function pickMatch(m) {
+    function dismiss() {
+      clearTimeout(timer);
+      seq++;
+      activeIdx = -1;
+      lastMatches = [];
       resultsEl.style.display = 'none';
+    }
+
+    function pickMatch(m) {
+      dismiss();
       var lat = m.item.a;
       var lon = m.item.o;
       // The name the row shows (in the map's second language, _szShownNames).
@@ -488,7 +499,6 @@
     // feels hung — show a spinner row so the user knows the fetch is
     // in flight. Tracked with a sequence id so a stale response from
     // an earlier keystroke doesn't overwrite the dropdown.
-    var seq = 0;
     function renderLoading() {
       while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
       var row = document.createElement('div');
@@ -500,24 +510,26 @@
       resultsEl.style.display = 'block';
     }
     inputEl.addEventListener('input', function() {
-      clearTimeout(timer);
+      dismiss();
       // Without the bidi isolates a right-to-left UI wraps a picked point's
       // coordinates in (coordLabel, szLtr), should the reader edit them.
       var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
-      if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+      if (q.length < 2) return;
       if (!map._queryPlaces) return;
+      var mySeq = seq;
       timer = setTimeout(function() {
-        var mySeq = ++seq;
         renderLoading();
         map._queryPlaces(q).then(function(matches) {
-          if (mySeq !== seq) return;  // newer keystroke already in flight
-          renderDropdown(matches);
+          if (mySeq === seq) renderDropdown(matches);
+        }, function() {
+          if (mySeq === seq) dismiss();
         });
       }, 150);
     });
 
     inputEl.addEventListener('keydown', function(e) {
-      var rows = resultsEl.querySelectorAll('.routing-result-row');
+      var rows = resultsEl.style.display === 'none' ? [] :
+        resultsEl.querySelectorAll('.routing-result-row:not(.routing-result-loading)');
       if (e.key === 'ArrowDown' && rows.length) {
         e.preventDefault();
         activeIdx = Math.min(activeIdx + 1, rows.length - 1);
@@ -532,7 +544,7 @@
           pickMatch(lastMatches[activeIdx]);
         }
       } else if (e.key === 'Escape') {
-        resultsEl.style.display = 'none';
+        dismiss();
       }
     });
 
@@ -543,14 +555,12 @@
       if (activeIdx >= 0) rows[activeIdx].scrollIntoView({ block: 'nearest' });
     }
 
-    inputEl.addEventListener('blur', function() {
-      // Delay so mousedown on row still fires
-      setTimeout(function() { resultsEl.style.display = 'none'; }, 150);
-    });
+    inputEl.addEventListener('blur', dismiss);
+    return dismiss;
   }
 
-  attachTypeahead(originInput, originResultsEl, 'origin');
-  attachTypeahead(destInput, destResultsEl, 'dest');
+  var dismissOriginSuggestions = attachTypeahead(originInput, originResultsEl, 'origin');
+  var dismissDestSuggestions = attachTypeahead(destInput, destResultsEl, 'dest');
 
   // Focus behaviour: select existing text so the next keystroke
   // overwrites it cleanly, AND clear the synthetic "Current location"

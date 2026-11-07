@@ -4499,7 +4499,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '67afa38a';
+var SZ_VIEWER_BUILD = 'e50f8b4e';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8095,6 +8095,13 @@ resultsEl.innerHTML = html;
 resultsEl.style.display = 'block';
 }
 var searchSeq = 0;
+var debounceTimer;
+function dismissSearchResults() {
+clearTimeout(debounceTimer);
+searchSeq++;
+activeIdx = -1;
+resultsEl.style.display = 'none';
+}
 function doSearch(query) {
 if (!manifest || query.length < 2) {
 resultsEl.style.display = 'none';
@@ -8168,6 +8175,8 @@ if (seq === searchSeq) render(scored);
 return;
 }
 render(scored);
+}, function() {
+if (seq === searchSeq) render([]);
 });
 }
 function escapeHtml(s) {
@@ -8199,7 +8208,7 @@ brand: item.brand,
 wd:    item.wd,
 };
 }
-resultsEl.style.display = 'none';
+dismissSearchResults();
 input.blur();
 var _topChrome = (function() {
 var sc = document.getElementById('search-container');
@@ -8215,15 +8224,14 @@ _szFlyToClear(map, { center: [lon, lat], zoom: zoom, duration: 1500, offset: [0,
 }
 placeSearchPin(map, lat, lon, name, enrich);
 }
-var debounceTimer;
 input.addEventListener('input', function() {
-clearTimeout(debounceTimer);
+dismissSearchResults();
 var v = input.value.trim();
 clearBtn.style.display = v ? 'block' : 'none';
 debounceTimer = setTimeout(function() { doSearch(v); }, 200);
 });
 input.addEventListener('keydown', function(e) {
-var items = resultsEl.querySelectorAll('.search-result');
+var items = resultsEl.style.display === 'none' ? [] : resultsEl.querySelectorAll('.search-result[data-idx]');
 if (e.key === 'ArrowDown') {
 e.preventDefault();
 activeIdx = Math.min(activeIdx + 1, items.length - 1);
@@ -8236,7 +8244,7 @@ updateActive(items);
 e.preventDefault();
 selectResult(items[activeIdx]);
 } else if (e.key === 'Escape') {
-resultsEl.style.display = 'none';
+dismissSearchResults();
 input.blur();
 }
 });
@@ -8267,17 +8275,15 @@ __touchScrolled = false;
 return;
 }
 var el = e.target.closest('.search-result');
-if (el) selectResult(el);
+if (el && el.hasAttribute('data-idx')) selectResult(el);
 });
 clearBtn.addEventListener('click', function() {
 input.value = '';
 clearBtn.style.display = 'none';
-resultsEl.style.display = 'none';
+dismissSearchResults();
 if (searchMarker) { searchMarker.remove(); searchMarker = null; }
 });
-map.on('click', function() {
-resultsEl.style.display = 'none';
-});
+map.on('click', dismissSearchResults);
 try { window.__streetzim_map = map; } catch (e) {}
 window.__streetzimLookupPlace = function(name, lat, lon) {
 if (!manifest || !name || name.length < 2) return Promise.resolve(null);
@@ -8332,7 +8338,7 @@ return out;
 map._szGoCorner = function(ra, rb) {
 var name = (ra.nn || ra.n) + ' & ' + (rb.nn || rb.n);
 var est = [(+ra.o + +rb.o) / 2, (+ra.a + +rb.a) / 2];
-resultsEl.style.display = 'none';
+dismissSearchResults();
 input.value = name;
 input.blur();
 _szFlyToClear(map, { center: est, zoom: 17, duration: 1500 });
@@ -11035,8 +11041,8 @@ originInput.value = '';
 originInput._szHere = false;
 destInput.value = '';
 setRoutingStatus('');
-originResultsEl.style.display = 'none';
-destResultsEl.style.display = 'none';
+dismissOriginSuggestions();
+dismissDestSuggestions();
 resultEl.style.display = 'none';
 setExpandHint();
 clearBtn.style.display = 'none';
@@ -12724,7 +12730,7 @@ inner.className = cls;
 el.appendChild(inner);
 return el;
 }
-function queueGraphPick(which, lat, lon, label) {
+function queueGraphPick(which, lat, lon, label, seq) {
 if (graph) return false;
 var visible = szIsHere(label) ? szHereLabel() : (label || coordLabel(lat, lon));
 if (which === 'origin') {
@@ -12737,7 +12743,9 @@ loadGraph();
 var tries = 0;
 var retry = setInterval(function() {
 tries++;
-if (graph) {
+if (seq !== (which === 'origin' ? originSnapSeq : destSnapSeq)) {
+clearInterval(retry);
+} else if (graph) {
 clearInterval(retry);
 if (which === 'origin') setOriginFromLatLon(lat, lon, label);
 else setDestFromLatLon(lat, lon, label);
@@ -12781,10 +12789,10 @@ var here = szIsHere(label);
 if (here && window.__streetzim_originBeingEdited) {
 return;
 }
-if (queueGraphPick('origin', lat, lon, label)) return;
+var snapSeq = ++originSnapSeq;
+if (queueGraphPick('origin', lat, lon, label, snapSeq)) return;
 originPick = { lat: lat, lon: lon };
 navPlanSeq++;
-var snapSeq = ++originSnapSeq;
 setRoutingStatus(snappingText(), 'loading');
 var snapped;
 try {
@@ -12815,10 +12823,10 @@ setRoutingStatus(szT('routing.enter_dest', 'Enter destination'), 'prompt');
 }
 }
 async function setDestFromLatLon(lat, lon, label) {
-if (queueGraphPick('dest', lat, lon, label)) return;
+var snapSeq = ++destSnapSeq;
+if (queueGraphPick('dest', lat, lon, label, snapSeq)) return;
 destPick = { lat: lat, lon: lon };
 navPlanSeq++;
-var snapSeq = ++destSnapSeq;
 setRoutingStatus(snappingText(), 'loading');
 var snapped;
 try {
@@ -13028,10 +13036,18 @@ clearBtn.style.display = 'block';
 }
 function attachTypeahead(inputEl, resultsEl, target) {
 var timer;
+var seq = 0;
 var activeIdx = -1;
 var lastMatches = [];
-function pickMatch(m) {
+function dismiss() {
+clearTimeout(timer);
+seq++;
+activeIdx = -1;
+lastMatches = [];
 resultsEl.style.display = 'none';
+}
+function pickMatch(m) {
+dismiss();
 var lat = m.item.a;
 var lon = m.item.o;
 var label = szFirstName(_szShownNames(m.item, SZ_LANG2)[0]);
@@ -13085,7 +13101,6 @@ resultsEl.appendChild(row);
 }
 resultsEl.style.display = 'block';
 }
-var seq = 0;
 function renderLoading() {
 while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
 var row = document.createElement('div');
@@ -13097,21 +13112,23 @@ resultsEl.appendChild(row);
 resultsEl.style.display = 'block';
 }
 inputEl.addEventListener('input', function() {
-clearTimeout(timer);
+dismiss();
 var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
-if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+if (q.length < 2) return;
 if (!map._queryPlaces) return;
+var mySeq = seq;
 timer = setTimeout(function() {
-var mySeq = ++seq;
 renderLoading();
 map._queryPlaces(q).then(function(matches) {
-if (mySeq !== seq) return;
-renderDropdown(matches);
+if (mySeq === seq) renderDropdown(matches);
+}, function() {
+if (mySeq === seq) dismiss();
 });
 }, 150);
 });
 inputEl.addEventListener('keydown', function(e) {
-var rows = resultsEl.querySelectorAll('.routing-result-row');
+var rows = resultsEl.style.display === 'none' ? [] :
+resultsEl.querySelectorAll('.routing-result-row:not(.routing-result-loading)');
 if (e.key === 'ArrowDown' && rows.length) {
 e.preventDefault();
 activeIdx = Math.min(activeIdx + 1, rows.length - 1);
@@ -13126,7 +13143,7 @@ e.preventDefault();
 pickMatch(lastMatches[activeIdx]);
 }
 } else if (e.key === 'Escape') {
-resultsEl.style.display = 'none';
+dismiss();
 }
 });
 function updateActive(rows) {
@@ -13135,12 +13152,11 @@ rows[i].classList.toggle('active', i === activeIdx);
 }
 if (activeIdx >= 0) rows[activeIdx].scrollIntoView({ block: 'nearest' });
 }
-inputEl.addEventListener('blur', function() {
-setTimeout(function() { resultsEl.style.display = 'none'; }, 150);
-});
+inputEl.addEventListener('blur', dismiss);
+return dismiss;
 }
-attachTypeahead(originInput, originResultsEl, 'origin');
-attachTypeahead(destInput, destResultsEl, 'dest');
+var dismissOriginSuggestions = attachTypeahead(originInput, originResultsEl, 'origin');
+var dismissDestSuggestions = attachTypeahead(destInput, destResultsEl, 'dest');
 function autoSelectOnFocus(input) {
 input.addEventListener('focus', function() {
 setTimeout(function() {

@@ -182,7 +182,9 @@
   // While a pick or a stream is in progress (a multi-GB copy can take
   // minutes) a second pick, Stream or Remove would start a parallel
   // write or delete the record under it.
+  let busy = false;
   function setBusy(on) {
+    busy = on;
     pickBtn.disabled = on;
     clearBtn.disabled = on;
     const streamBtn = urlForm.querySelector('button[type=submit]');
@@ -389,7 +391,7 @@
   // multi-GB region on a phone, and Chromium ends a worker message event
   // after five minutes. A window has no such limit
   // (docs/mobile-browser-review.md §A4).
-  function putRecord(rec) {
+  function putRecord(rec, revision) {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open('streetzim-drive', 1);
       req.onupgradeneeded = () => {
@@ -403,24 +405,30 @@
         let tx;
         try { tx = db.transaction('zim', 'readwrite'); }
         catch (e) { db.close(); reject(e); return; }
-        const put = tx.objectStore('zim').put(rec);
-        // A failed put reports on the request first; tx.error is only
-        // filled in once the abort runs, so read the request's error
-        // (that is where QuotaExceededError shows up).
-        const fail = (e) => {
+        const store = tx.objectStore('zim');
+        let failure = null;
+        const read = store.get('revision');
+        read.onsuccess = () => {
+          try {
+            if ((read.result ? read.result.value : null) !== revision) throw new Error('Map selection was superseded');
+            store.put(rec);
+            store.put({ id: 'revision', value: rec.pickId });
+          } catch (error) {
+            failure = error;
+            tx.abort();
+          }
+        };
+        tx.onabort = () => {
           db.close();
-          reject((e && e.target && e.target.error) || put.error || tx.error ||
-                 new Error('IndexedDB write failed'));
+          reject(failure || tx.error || new Error('IndexedDB write failed'));
         };
         tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = fail;
-        tx.onabort = fail;
       };
     });
   }
 
   async function loadZim(file) {
-    if (!file) return;
+    if (!file || busy) return;
     if (!/\.zim$/i.test(file.name) && file.type !== 'application/octet-stream') {
       setStatus('warn', 'Not a .zim file',
         'Got: ' + file.name + ' (' + (file.type || 'unknown type') + ')');
@@ -460,7 +468,6 @@
               file.name + ' · ' + size + ' — opened directly from your device. '
               + 'It is not copied into the browser, so if this tab is closed or the '
               + 'browser evicts the worker you will need to pick the file again.');
-            setBusy(false);
             setTimeout(() => { window.location.href = viewerUrl(); }, 900);
             return;
           }
@@ -473,8 +480,10 @@
       // 3. Store the record, then have the worker open it.
       setStatus('warn', 'Saving to browser storage…',
         file.name + ' · ' + size + ' — the browser keeps its own copy; on a phone this can take a few minutes.');
-      await putRecord({ id: 'current', blob: file, name: file.name, addedAt: Date.now() });
-      const resp = await askSW({ type: 'reload-zim' });
+      const pickId = String(crypto.getRandomValues(new Uint32Array(4)));
+      await putRecord({ id: 'current', blob: file, name: file.name, addedAt: Date.now(), pickId },
+        checked.revision === undefined ? null : checked.revision);
+      const resp = await askSW({ type: 'reload-zim', pickId });
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW could not open the saved copy');
       // Ask the browser not to evict it under storage pressure (Chromium
       // grants this silently for installed apps and engaged sites; a
@@ -483,12 +492,10 @@
         navigator.storage.persist().then((ok) => dbg('persist', ok), () => {});
       }
       await refreshStatus();
-      setBusy(false);
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
     } catch (err) {
       const msg = String(err && err.message || err);
       const name = err && err.name || '';
-      setBusy(false);
       if (/quota/i.test(msg) || /Quota/.test(name)) {
         setStatus('err', 'Not enough storage for this map',
           'The browser ran out of room while copying ' + file.name + ' (' + size + '). ' +
@@ -501,6 +508,7 @@
         setStatus('err', 'Failed to open ZIM', msg);
       }
       await refreshStatus({ quiet: true });
+      setBusy(false);
     }
   }
 
@@ -604,15 +612,16 @@
   }
 
   async function loadZimUrl(raw) {
+    if (busy) return false;
     let src;
     setBusy(true);
     try {
       setStatus('warn', 'Resolving…', String(raw));
       src = await resolveZimUrl(raw);
     } catch (err) {
-      setBusy(false);
       setStatus('err', 'Can\'t stream that', String(err && err.message || err));
       await refreshStatus({ quiet: true });
+      setBusy(false);
       return false;
     }
     setStatus('warn', 'Connecting…', src.name + ' — reading the ZIM header from ' + src.host + '…');
@@ -622,18 +631,18 @@
       if (!resp || !resp.ok) throw new Error(resp && resp.error || 'SW rejected URL');
       dbg('streaming', src, resp.info);
       await refreshStatus();
-      setBusy(false);
       setTimeout(() => { window.location.href = viewerUrl(); }, 600);
       return true;
     } catch (err) {
-      setBusy(false);
       setStatus('err', 'Failed to open ZIM from ' + src.host, String(err && err.message || err));
       await refreshStatus({ quiet: true });
+      setBusy(false);
       return false;
     }
   }
 
   pickBtn.addEventListener('click', async () => {
+    if (busy) return;
     const file = await pickFile();
     if (file) loadZim(file);
   });
@@ -645,13 +654,16 @@
   });
 
   clearBtn.addEventListener('click', async () => {
-    if (!confirm('Remove the loaded ZIM from this browser?')) return;
+    if (busy || !confirm('Remove the loaded ZIM from this browser?')) return;
+    setBusy(true);
     try {
       const r = await askSW({ type: 'clear-zim' });
       if (!r || !r.ok) throw new Error(r && r.error || 'SW refused');
       await refreshStatus();
     } catch (err) {
       setStatus('err', 'Clear failed', String(err && err.message || err));
+    } finally {
+      setBusy(false);
     }
   });
 
@@ -662,6 +674,7 @@
            window.navigator.standalone === true;
   }
 
+  setBusy(true);
   (async () => {
     try {
       swRegistration = await ensureSW();
@@ -676,6 +689,7 @@
         urlInput.value = wanted;
         const saveData = !!(navigator.connection && navigator.connection.saveData);
         if (!saveData) {
+          setBusy(false);
           await loadZimUrl(wanted);
           return;
         }
@@ -683,6 +697,7 @@
         setStatus('warn', 'Data Saver is on',
           'Streaming this map reads about 15–25 MB for a first look and more as you ' +
           'pan, search or route. Press Stream to start, or download the file instead.');
+        setBusy(false);
         return;
       }
       await refreshStatus();
@@ -716,12 +731,14 @@
         if (r && r.ok && r.loaded) {
           dbg('standalone launch: forwarding to the viewer');
           window.location.replace(viewerUrl());
+          return;
         }
       }
     } catch (err) {
       setStatus('err', 'Service worker registration failed',
         String(err && err.message || err));
     }
+    setBusy(false);
   })();
 })();
 </script>

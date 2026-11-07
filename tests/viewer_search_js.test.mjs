@@ -33,6 +33,12 @@ function slice(src, from, to) {
   assert.ok(a >= 0 && b > a, `${from} .. ${to} not found`);
   return src.slice(a, b);
 }
+
+function selectResultSource(src) {
+  return 'var debounceTimer, searchSeq = 0, activeIdx = -1;\n' +
+    slice(src, '  function dismissSearchResults()', '  function doSearch(') +
+    slice(src, '  function selectResult(el) {', '\n  // Input handler with debounce');
+}
 const V = new Function(slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   '\nreturn { _szSearchForms, _szFormsContain, _szTextScore, _szAdminCamera, _szAdminKeys, _szFitAdminBox, SZ_ADMIN_ZOOM,' +
   ' _szRecordNames, _szLnNames, _szShownNames, _szVisitorLangs };')();
@@ -193,7 +199,7 @@ ok('the padding is capped by the canvas height, not its width', () => {
 
 ok('selectResult measures the chrome with the results list closed, and the camera moves', () => {
   const SEARCH = fs.readFileSync(`${REPO}/resources/viewer/src/index/300-search.js`, 'utf8');
-  const body = slice(SEARCH, '  function selectResult(el) {', '\n  // Input handler with debounce');
+  const body = selectResultSource(SEARCH);
   const resultsEl = { style: { display: 'block' } };
   const input = { blurred: false, blur() { this.blurred = true; } };
   // The list lives inside #search-container: open, the box ends at its
@@ -460,7 +466,7 @@ ok('forms carry the language of a name that only ln gives', () => {
 // "Genf", as the result row did.
 ok('a pick on a merged map pins the name the row showed', () => {
   const SEARCH = fs.readFileSync(`${REPO}/resources/viewer/src/index/300-search.js`, 'utf8');
-  const body = slice(SEARCH, '  function selectResult(el) {', '\n  // Input handler with debounce');
+  const body = selectResultSource(SEARCH);
   const pinned = [];
   const rec = Object.assign({ a: 46.2, o: 6.15 }, GENEVA);
   const doc = { getElementById: () => ({ getBoundingClientRect: () => ({ bottom: 110 }) }) };

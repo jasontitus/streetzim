@@ -1603,6 +1603,14 @@ var SEARCH_SHARDS = (function () {
   }
 
   var searchSeq = 0;  // Sequence counter to discard stale results
+  var debounceTimer;
+
+  function dismissSearchResults() {
+    clearTimeout(debounceTimer);
+    searchSeq++;
+    activeIdx = -1;
+    resultsEl.style.display = 'none';
+  }
 
   function doSearch(query) {
     if (!manifest || query.length < 2) {
@@ -1701,6 +1709,8 @@ var SEARCH_SHARDS = (function () {
         return;
       }
       render(scored);
+    }, function() {
+      if (seq === searchSeq) render([]);
     });
   }
 
@@ -1744,7 +1754,7 @@ var SEARCH_SHARDS = (function () {
     }
     // Close the list first: it sits inside #search-container, so measured
     // open, that box's bottom is the list's (~400 px down), not the chips'.
-    resultsEl.style.display = 'none';
+    dismissSearchResults();
     input.blur();
     // Start the camera move BEFORE dropping the pin: placeSearchPin
     // opens the popup immediately when no move is in flight, and
@@ -1779,9 +1789,8 @@ var SEARCH_SHARDS = (function () {
   }
 
   // Input handler with debounce
-  var debounceTimer;
   input.addEventListener('input', function() {
-    clearTimeout(debounceTimer);
+    dismissSearchResults();
     var v = input.value.trim();
     clearBtn.style.display = v ? 'block' : 'none';
     debounceTimer = setTimeout(function() { doSearch(v); }, 200);
@@ -1789,7 +1798,7 @@ var SEARCH_SHARDS = (function () {
 
   // Keyboard navigation
   input.addEventListener('keydown', function(e) {
-    var items = resultsEl.querySelectorAll('.search-result');
+    var items = resultsEl.style.display === 'none' ? [] : resultsEl.querySelectorAll('.search-result[data-idx]');
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       activeIdx = Math.min(activeIdx + 1, items.length - 1);
@@ -1802,7 +1811,7 @@ var SEARCH_SHARDS = (function () {
       e.preventDefault();
       selectResult(items[activeIdx]);
     } else if (e.key === 'Escape') {
-      resultsEl.style.display = 'none';
+      dismissSearchResults();
       input.blur();
     }
   });
@@ -1849,19 +1858,17 @@ var SEARCH_SHARDS = (function () {
       return;
     }
     var el = e.target.closest('.search-result');
-    if (el) selectResult(el);
+    if (el && el.hasAttribute('data-idx')) selectResult(el);
   });
 
   clearBtn.addEventListener('click', function() {
     input.value = '';
     clearBtn.style.display = 'none';
-    resultsEl.style.display = 'none';
+    dismissSearchResults();
     if (searchMarker) { searchMarker.remove(); searchMarker = null; }
   });
 
-  map.on('click', function() {
-    resultsEl.style.display = 'none';
-  });
+  map.on('click', dismissSearchResults);
 
   // Expose map globally for DevTools diagnostics. Safe to leave in shipping
   // builds — it's just a property on window.
@@ -1955,7 +1962,7 @@ var SEARCH_SHARDS = (function () {
   map._szGoCorner = function(ra, rb) {
     var name = (ra.nn || ra.n) + ' & ' + (rb.nn || rb.n);
     var est = [(+ra.o + +rb.o) / 2, (+ra.a + +rb.a) / 2];
-    resultsEl.style.display = 'none';
+    dismissSearchResults();
     input.value = name;
     input.blur();
     _szFlyToClear(map, { center: est, zoom: 17, duration: 1500 });

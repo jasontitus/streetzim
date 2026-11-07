@@ -113,11 +113,18 @@
 
   // While packs download or a build runs: keep the screen on where the
   // browser allows it, and warn before the tab is closed.
-  let wakeLock = null;
+  let wakeLock = null, wakePending = false;
   const busy = () => !!running || !!packAbort;
   async function holdScreen() {
-    if (!('wakeLock' in navigator) || document.visibilityState !== 'visible' || (wakeLock && !wakeLock.released)) return;
-    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* refused, e.g. battery saver */ }
+    if (!busy() || !('wakeLock' in navigator) || document.visibilityState !== 'visible' ||
+        wakePending || (wakeLock && !wakeLock.released)) return;
+    wakePending = true;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      if (busy() && document.visibilityState === 'visible') wakeLock = lock;
+      else await lock.release();
+    } catch (e) { /* refused, e.g. battery saver */ }
+    finally { wakePending = false; }
   }
   function releaseScreen() { if (wakeLock && !busy()) { wakeLock.release().catch(() => {}); wakeLock = null; } }
   document.addEventListener('visibilitychange', () => { if (busy() && document.visibilityState === 'visible') holdScreen(); });
@@ -641,6 +648,7 @@
     const seq = ++packSeq;
     if (packAbort) packAbort.abort();
     packAbort = null; packsOk = false;
+    releaseScreen();
     const out = $('packStatus');
     out.className = ''; out.textContent = '';
     $('packRetry').hidden = true;
@@ -660,6 +668,7 @@
     // the chunks to check, in bytes: the progress says how far it is
     const chunkLen = (p, k) => Math.min(p.chunk, p.size - k * p.chunk);
     const todo = ids.filter((id) => !packSeeds.has(seedKey(rec.packs[id], firstChunk(rec, id))));
+    if (todo.length) holdScreen();
     const total = todo.reduce((t, id) => t + chunkLen(rec.packs[id], firstChunk(rec, id)), 0);
     let before = 0, high = 0, note = null;
     // never back (a damaged chunk is downloaded again from 0); a retry's note stays 15 s
@@ -685,6 +694,7 @@
     } catch (e) {
       if (seq !== packSeq || e.name === 'AbortError') return false;
       packAbort = null;
+      releaseScreen();
       out.className = 'bad';
       out.textContent = /HTTP 40[34]|HTTP 410/.test(e.message)
         ? `${e.pack} isn't available right now (${e.message}). Nothing was saved. Try again later.`
@@ -696,6 +706,7 @@
     }
     if (seq !== packSeq) return false;
     packAbort = null;
+    releaseScreen();
     if (ids.length) track('packs_end', Object.assign({}, evBase, netParams(), { outcome: 'ok', secs: Math.round((performance.now() - t0) / 1000) }));
     packsOk = true;
     const wiki = ids.filter((id) => id !== 'search');
@@ -827,8 +838,13 @@
     // Messages to the service worker keep the browser from stopping it
     // while the download runs (Firefox stops idle ones after 30 s).
     const keepalive = setInterval(() => { const c = navigator.serviceWorker.controller; if (c) c.postMessage({ type: 'keepalive' }); }, 10000);
-    return { sink: 'sw', port: ch.port1, transfer: [ch.port1],
-             cleanup: (ok) => { clearInterval(keepalive); setTimeout(() => ifr.remove(), ok ? 5000 : 0); } };
+    return { sink: 'sw', port: ch.port1, transfer: [ch.port1], cleanup: (ok) => {
+      clearInterval(keepalive);
+      if (!ok) {
+        try { ch.port1.postMessage({ type: 'error', reason: 'build stopped' }); } catch (e) { /* transferred */ }
+      }
+      setTimeout(() => ifr.remove(), ok ? 5000 : 0);
+    } };
   }
   // Why browser storage cannot take `size` bytes, or null if it can.
   async function opfsRoomError(size) {
@@ -839,10 +855,31 @@
     return null;
   }
   const willUseOpfs = () => isWebKit || swFailedBefore() || !('serviceWorker' in navigator);
-  async function opfsSink(size) {
+  async function opfsSink(fileName, size) {
     const err = await opfsRoomError(size);
     if (err) throw new Error(err);
-    return { sink: 'opfs', transfer: [] };
+    const storageName = 'job-' + hex(crypto.getRandomValues(new Uint8Array(16))) + '.zim';
+    let unlock = () => {};
+    if (navigator.locks) {
+      // The lock covers the gaps before the worker opens its file and
+      // after it closes it, while the file is still marked unfinished.
+      await new Promise((resolve, reject) => {
+        navigator.locks.request(opfsKey(storageName), () => new Promise((release) => {
+          unlock = release;
+          resolve();
+        })).catch(reject);
+      });
+    }
+    opfsState(storageName, { name: fileName, state: 'building' });
+    return { sink: 'opfs', storageName, transfer: [], cleanup: async (ok) => {
+      try {
+        if (!ok) {
+          try { await (await opfsDir(false)).removeEntry(storageName); }
+          catch (e) { if (e.name !== 'NotFoundError') return; } // Leave metadata for a later cleanup.
+          opfsState(storageName, null);
+        }
+      } finally { unlock(); }
+    } };
   }
   // Where to write. picker: File System Access when the browser has it (the
   // "build from my copy" path, from a click); the one-click path does not
@@ -869,25 +906,31 @@
       }
       if (got && !got.blocked) return got;
     }
-    return opfsSink(size);
+    return opfsSink(fileName, size);
   }
 
   // ------------------------------------------------------------ browser storage (OPFS)
   // A file built into browser storage (folder lab-build/) is offered with a
-  // Save link; the visitor then deletes the browser's copy, or it is deleted
-  // on the next visit once it has been saved. States per file name, in
-  // localStorage: building | ready | saved.
+  // Save link. Its browser-private name is unique to this attempt and
+  // its download name comes from the recipe. Older copies use the
+  // download name on disk and keep their original localStorage entry.
   const OPFS_DIR = 'lab-build';
   const opfsDir = async (create) => (await navigator.storage.getDirectory()).getDirectoryHandle(OPFS_DIR, { create: !!create });
-  const opfsStates = () => { try { return JSON.parse(localStorage.getItem('sz_lab_opfs') || '{}'); } catch (e) { return {}; } };
-  const opfsState = (name, state) => {
-    const st = opfsStates();
-    if (state) st[name] = state; else delete st[name];
-    try { localStorage.setItem('sz_lab_opfs', JSON.stringify(st)); } catch (e) { /* no storage */ }
+  const opfsKey = (name) => 'sz_lab_opfs:' + name;
+  const oldOpfsStates = () => { try { return JSON.parse(localStorage.getItem('sz_lab_opfs')) || {}; } catch (e) { return {}; } };
+  const opfsState = (name, entry) => {
+    try {
+      if (entry) localStorage.setItem(opfsKey(name), JSON.stringify(entry));
+      else localStorage.removeItem(opfsKey(name));
+    } catch (e) { /* no storage */ }
   };
-  async function offerSave(name, earlier) {
+  const readOpfsState = (name) => {
+    try { return JSON.parse(localStorage.getItem(opfsKey(name))); } catch (e) { return null; }
+  };
+  async function offerSave(storageName, name, earlier) {
     const dir = await opfsDir();
-    const f = await (await dir.getFileHandle(name)).getFile();
+    const f = await (await dir.getFileHandle(storageName)).getFile();
+    if (earlier && running) return;
     const box = $('save');
     box.innerHTML = ''; box.hidden = false;
     const head = document.createElement('p');
@@ -901,13 +944,16 @@
     const note = document.createElement('p');
     note.className = 'dim'; note.hidden = true;
     note.textContent = `When your browser shows the download as finished, delete the browser's copy to free ${fmtMB(f.size)}.`;
-    a.onclick = () => { opfsState(name, 'saved'); note.hidden = false; $('after').hidden = false; announce('Saving the file. When the download has finished, delete the browser\'s copy.'); };
+    a.onclick = () => { note.hidden = false; $('after').hidden = false; announce('Saving the file. When the download has finished, delete the browser\'s copy.'); };
     del.onclick = async () => {
       del.disabled = true;
-      try { await dir.removeEntry(name); } catch (e) { del.disabled = false; note.hidden = false; note.textContent = 'Could not delete it yet (' + (e.message || e) + '). Try again in a moment.'; return; }
+      try { await dir.removeEntry(storageName); } catch (e) { if (e.name !== 'NotFoundError') { del.disabled = false; note.hidden = false; note.textContent = 'Could not delete it yet (' + (e.message || e) + '). Try again in a moment.'; return; } }
       URL.revokeObjectURL(a.href);
-      opfsState(name, null);
-      box.textContent = "The browser's copy is deleted.";
+      opfsState(storageName, null);
+      if (box.contains(del)) {
+        box.textContent = "The browser's copy is deleted.";
+        tidyBrowserStorage();
+      }
     };
     const row = document.createElement('p');
     row.append(a, ' ', del);
@@ -915,18 +961,31 @@
   }
   // On load: offer finished files again (Save / Delete), whether or not Save
   // was clicked — a cancelled download looks the same as a finished one, so
-  // only the Delete button removes a finished file. Leftovers of builds that
-  // did not finish are deleted. A file another tab is writing is locked.
+  // only the Delete button removes a finished file. Reclaim incomplete
+  // attempts only when we can prove their owner is gone.
   async function tidyBrowserStorage() {
     if (!navigator.storage || !navigator.storage.getDirectory) return;
     let dir;
     try { dir = await opfsDir(false); } catch (e) { return; }    // nothing built here yet
-    const st = opfsStates();
+    const legacy = oldOpfsStates();
     try {
       for await (const [name, h] of dir.entries()) {
         if (h.kind !== 'file') continue;
-        if (st[name] === 'ready' || st[name] === 'saved') { if (!running) await offerSave(name, true); continue; }
-        try { await dir.removeEntry(name); opfsState(name, null); } catch (e) { /* in use */ }
+        if (legacy[name] === 'ready' || legacy[name] === 'saved') {
+          if (!running) await offerSave(name, name, true).catch(() => {});
+        } else if (/^job-[0-9a-f]{32}\.zim$/.test(name)) {
+          const recover = async (canRemove) => {
+            const entry = readOpfsState(name);
+            if (entry && entry.state === 'ready') {
+              if (!running) await offerSave(name, entry.name, true).catch(() => {});
+            } else if (canRemove && entry && entry.state === 'building') {
+              try { await dir.removeEntry(name); opfsState(name, null); } catch (e) { /* in use */ }
+            }
+          };
+          if (navigator.locks) {
+            await navigator.locks.request(opfsKey(name), { ifAvailable: true }, (lock) => lock ? recover(true) : undefined);
+          } else await recover(false);
+        }
       }
     } catch (e) { /* no directory iteration in this browser */ }
   }
@@ -999,29 +1058,38 @@
   const fmtDur = (s) => (s < 90 ? 'a minute' : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
 
   async function build(mode) {
+    if (running) return;
     running = { starting: true, mode };
     showWay();
     $('oneclick').classList.remove('attention');
     // Visible at once, before anything is fetched: the button busy, the job panel.
     jobStart(mode === 'file' ? $('go') : $('oneclick'));
     setStatus('', true);
-    try { await buildJob(mode); }
+    const resources = { worker: null, sink: null, ok: false };
+    let completed = false;
+    try { completed = !!(await buildJob(mode, resources)); }
     catch (e) {                      // nothing may leave the page busy
       setStatus('Stopped: ' + (e && e.message || e), true);
       announce($('status').textContent);
     } finally {
-      if (job.on || running) { running = null; releaseScreen(); if (job.on) jobEnd(false); else checkReady(); }
-      showWay();
+      try {
+        if (resources.worker) resources.worker.terminate();
+        if (resources.sink && resources.sink.cleanup) await resources.sink.cleanup(resources.ok);
+      } finally {
+        running = null;
+        releaseScreen();
+        jobEnd(completed);
+        showWay();
+      }
     }
   }
 
-  async function buildJob(mode) {
+  async function buildJob(mode, resources) {
     checkReady();                    // locks region, language and file too
     $('save').hidden = true; $('after').hidden = true;
     holdScreen();
     let recipe, fileName, sinkInfo = null, baseUrl = null;
     const notStarted = (msg) => {
-      running = null; releaseScreen(); jobEnd(false);
       setStatus('Not started: ' + msg, true); announce($('status').textContent);
     };
     // The whole job's progress (one bar): from the network, what the recipe,
@@ -1039,7 +1107,7 @@
     planGot = planGot || planTotal;
     fileName = `${recipe.file_name || recipe.name}.zim`;
     if (mode === 'file') {
-      try { sinkInfo = await prepareSink(fileName, recipe.size, true); }
+      try { resources.sink = sinkInfo = await prepareSink(fileName, recipe.size, true); }
       catch (e) { notStarted(e.name === 'AbortError' ? 'no place to save the file was chosen.' : (e.message || e)); return; }
     } else {
       baseUrl = baseUrlFor(region, recipe);
@@ -1052,7 +1120,6 @@
         checkGot = got;
         jobShow('check', T.note(T.checking(got, total, bps), why), (planGot + got) / netTotal);
       })) {  // #packStatus says why
-        running = null; releaseScreen(); jobEnd(false);
         setStatus('Not started: Wikipedia could not be downloaded (see above). Nothing was saved.', true);
         return;
       }
@@ -1064,23 +1131,31 @@
                    download_mb: Math.round((mode === 'net' ? recipe.base.size : 0) / 1e6 + entry.download_bytes / 1e6),
                    sink: sinkInfo ? sinkInfo.sink : 'pending' };
     track('build_start', base);
-    if (sinkInfo && sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
-    const worker = new Worker('assembler-worker.js?v=4');
+    const worker = resources.worker = new Worker('assembler-worker.js?v=5');
     running = { worker, base, t0, sent: new Set(), mode };
     checkReady();
     if (mode === 'net') jobShow('map', T.connecting(region.title), (planGot + checkGot) / netTotal);
     else jobShow('copy', T.copying(0, recipe.size), 0);
     let note = null;
+    let settled = false;
     const result = await new Promise((resolve) => {
+      const finish = (result) => { settled = true; resolve(result); };
       worker.onmessage = async (e) => {
         const d = e.data;
         if (d.type === 'need-sink') {
           // The base's first chunk and UUID are checked: now open the download.
           try { sinkInfo = await prepareSink(fileName, recipe.size, false); }
-          catch (err) { resolve({ ok: false, outcome: 'no_sink', error: err.message || String(err) }); return; }
+          catch (err) { finish({ ok: false, outcome: 'no_sink', error: err.message || String(err) }); return; }
+          if (settled) {
+            if (sinkInfo.cleanup) await sinkInfo.cleanup(false);
+            return;
+          }
+          resources.sink = sinkInfo;
           base.sink = sinkInfo.sink;
-          if (sinkInfo.sink === 'opfs') opfsState(fileName, 'building');
-          worker.postMessage({ cmd: 'sink', sink: sinkInfo.sink, handle: sinkInfo.handle, port: sinkInfo.port, fileName }, sinkInfo.transfer);
+          try {
+            worker.postMessage({ cmd: 'sink', sink: sinkInfo.sink, handle: sinkInfo.handle, port: sinkInfo.port,
+                                 storageName: sinkInfo.storageName }, sinkInfo.transfer);
+          } catch (err) { finish({ ok: false, outcome: 'error', error: err.message || String(err) }); }
         } else if (d.type === 'note') {
           note = { text: d.text, at: performance.now() };
         } else if (d.type === 'progress') {
@@ -1114,9 +1189,9 @@
               track('build_progress', Object.assign({}, base, { pct: p, elapsed_s: Math.round(ms / 1000) }));
             }
           }
-        } else if (d.type === 'done') resolve(d.result);
+        } else if (d.type === 'done') finish(d.result);
       };
-      worker.onerror = (e) => resolve({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
+      worker.onerror = (e) => finish({ ok: false, outcome: 'error', error: 'worker: ' + e.message });
       // The worker streams the packs itself (recipe.packs[id].url). The
       // chunk each pack's check downloaded moves to it (no copy, in both
       // modes); a later build from the same page downloads it again.
@@ -1128,12 +1203,13 @@
       worker.postMessage({ cmd: 'run', proto: 7, recipe, baseFile: mode === 'file' ? baseFile : null, baseUrl, mem: MEM,
                            packBytes: entry.download_bytes, seeds,
                            sink: sinkInfo ? sinkInfo.sink : 'later', handle: sinkInfo && sinkInfo.handle,
-                           port: sinkInfo && sinkInfo.port, fileName }, (sinkInfo ? sinkInfo.transfer : []).concat(moved));
+                           port: sinkInfo && sinkInfo.port, storageName: sinkInfo && sinkInfo.storageName }, (sinkInfo ? sinkInfo.transfer : []).concat(moved));
     });
     worker.terminate();
+    resources.worker = null;
     $('startDl').hidden = true;
     if (mode === 'net') { $('packStatus').textContent = ''; $('packStatus').className = ''; }
-    if (sinkInfo && sinkInfo.cleanup) sinkInfo.cleanup(result.ok);
+    resources.ok = result.ok;
     // Only a watchdog (not the visitor cancelling) moves this tab to OPFS.
     if (result.outcome === 'download_stopped' && result.watchdog) swFailed();
     if (hiddenSince !== null) { hiddenMs += performance.now() - hiddenSince; hiddenSince = performance.now(); }
@@ -1144,18 +1220,15 @@
       base_stream_mbps_p10: rn.base_stream_mbps_p10, base_ttfb_ms_p50: rn.base_ttfb_p50,
       base_retries: rn.base_retries, base_slow_retries: rn.base_slow_retries, base_resets: rn.base_resets,
       hidden_s: Math.round(hiddenMs / 1000), hash_ok: result.ok ? 1 : 0 }));
-    running = null;
-    releaseScreen();
-    jobEnd(result.ok);               // after running: the button is enabled again, focus and all
     if (result.ok) {
       const secs = Math.round(result.ms / 1000);
       const tail = ` ${fmtMB(result.size)} in ${secs < 120 ? secs + ' s' : fmtDur(secs)}` +
         (rn.base_mbps ? ` (map downloaded at ${rn.base_mbps} MB/s)` : '') + `. MD5 (as md5sum prints it): ${result.file_md5}`;
       if (sinkInfo.sink === 'opfs') {
-        opfsState(fileName, 'ready');
+        opfsState(sinkInfo.storageName, { name: fileName, state: 'ready' });
         setStatus('Done and verified; one more step: save it.' + tail, true);
         announce('Done and verified. One more step: save the file.');
-        await offerSave(fileName, false);
+        await offerSave(sinkInfo.storageName, fileName, false);
       } else {                         // saved (or, streamed, being saved by the browser)
         setStatus((sinkInfo.sink === 'sw' ? 'Done and verified. Your browser has the whole file and is finishing the download; look in your downloads.'
           : 'Done and verified. The file is saved.') + tail, true);
@@ -1163,7 +1236,6 @@
         $('after').hidden = false;
       }
     } else {
-      if (sinkInfo && sinkInfo.sink === 'opfs') opfsState(fileName, null);
       // The worker discarded what it wrote; File System Access leaves the
       // empty file the save dialog created, which goes too.
       if (sinkInfo && sinkInfo.sink === 'fsa') {
@@ -1180,6 +1252,7 @@
         : 'Stopped: ' + result.error, true);
       announce($('status').textContent);
     }
+    return result.ok;
   }
 
 

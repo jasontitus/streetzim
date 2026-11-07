@@ -160,9 +160,9 @@ jobs:
                    tests/zim_reader_js.test.mjs \
                    tests/test_zim_http_source.mjs tests/viewer_style_js.test.mjs \
                    tests/viewer_ui_js.test.mjs tests/viewer_search_js.test.mjs \
-                   tests/viewer_routing_pickers_js.test.mjs \
+                   tests/viewer_routing_pickers_js.test.mjs tests/browser_state_js.test.mjs \
                    tests/viewer_i18n_js.test.mjs tests/viewer_wikipacks_js.test.mjs \
-                   tests/sw_back_bar_js.test.mjs tests/build_proxy_merged_js.test.mjs \
+                   tests/sw_back_bar_js.test.mjs tests/sw_state_js.test.mjs tests/build_proxy_merged_js.test.mjs \
                    tests/viewer_ocr_js.test.mjs; do
             echo "::group::$t"
             node "$t"

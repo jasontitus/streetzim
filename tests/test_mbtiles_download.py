@@ -875,3 +875,61 @@ def test_a_retry_that_resumes_into_a_wrong_range_starts_over(monkeypatch, tmp_pa
     monkeypatch.setattr(download, "_stream", stream)
     assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
     assert seen == [None, "bytes=5000-", None]
+
+
+def test_inconsistent_resume_end_and_total_cannot_publish_mixed_bytes(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    _no_wait(monkeypatch)
+    seen = []
+
+    @contextmanager
+    def stream(url, request_headers):
+        rng = request_headers.get("Range")
+        seen.append(rng)
+        if len(seen) == 1:
+            def cut():
+                yield A[:5000]
+                raise TimeoutError("t")
+            yield 200, HEADERS, cut()
+        elif rng:
+            yield 206, {"Content-Range": f"bytes 5000-{len(B)}/{len(B) + 1}",
+                        "Content-Length": str(len(B) - 5000)}, iter([B[5000:]])
+        else:
+            yield 200, HEADERS, iter([A])
+
+    monkeypatch.setattr(download, "_stream", stream)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == A
+    assert seen == [None, "bytes=5000-", None]
+
+
+def test_same_size_new_version_between_head_and_get_is_not_cached(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    headers = {**HEADERS, "ETag": '"new"'}
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+
+    @contextmanager
+    def stream(url, request_headers):
+        yield 200, headers, iter([B])
+
+    monkeypatch.setattr(download, "_stream", stream)
+    dest = tmp_path / "x.pbf"
+    with pytest.raises(OSError, match="source changed"):
+        cli.fetch_resumable("https://example.org/x", dest)
+    assert not dest.exists()
+    monkeypatch.setattr(download, "head", lambda url, agent: headers)
+    assert cli.fetch_resumable("https://example.org/x", dest).read_bytes() == B
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_a_format_invalid_partial_is_replaced_on_retry(monkeypatch, tmp_path, complete):
+    monkeypatch.setattr(download, "head", lambda url, agent: HEADERS)
+    seen = _flaky_stream(monkeypatch, [])
+    dest = tmp_path / "tiles.mbtiles"
+    partial = dest.with_name(dest.name + ".part")
+    partial.write_bytes(b"X" * (len(A) if complete else 100))
+    download.write_download_metadata(partial.with_name(partial.name + ".source.json"), download.stamp_of(HEADERS))
+    assert cli.fetch_resumable("https://example.org/x", dest, check_head=cli._check_mbtiles_head).read_bytes() == A
+    assert seen == [None]
