@@ -276,7 +276,7 @@ def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
     # the arrival clock's digits follow the table's _nu (Latin in ar / fa)
     ("600-driving-mode.js", "new Intl.DateTimeFormat(SZ_I18N ? SZ_NUM_LANG : undefined,"),
     # an edited coordinate label is searched without its bidi isolates
-    ("550-routing-pickers.js", "var q = inputEl.value.replace(/[\\u200e\\u200f\\u2066-\\u2069]/g, '').trim();"),
+    ("550-routing-pickers.js", "return inputEl.value.replace(/[\\u200e\\u200f\\u2066-\\u2069]/g, '').trim();"),
     # a picked point's coordinates keep their order
     ("540-routing-worker-bridge.js", "return szLtr(lat.toFixed(4) + ', ' + lon.toFixed(4));"),
     # the place sheet's button icon sits before the label on either side

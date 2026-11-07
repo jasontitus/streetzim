@@ -175,6 +175,12 @@ class IncompleteBody(OSError):
     kept in the .part, for the caller to resume or restart."""
 
 
+def _same_validator(value: str) -> str:
+    """A validator as compared between HEAD and GET: a server may mark one
+    answer's ETag weak (W/) and not the other's for the same bytes."""
+    return value[2:] if value.startswith("W/") else value
+
+
 def _download(url: str, part: Path, offset: int, total: int, stamp: dict[str, str],
               user_agent: str, check_head: Callable[[bytes], None] | None) -> bool:
     """Write `url` into `part` from byte `offset` (a Range request with
@@ -188,7 +194,7 @@ def _download(url: str, part: Path, offset: int, total: int, stamp: dict[str, st
         headers.update({"Range": f"bytes={offset}-", "If-Range": validator})
     with _stream(url, headers) as (status, h, blocks):
         actual = _header(h, validator_key)
-        if validator and actual and actual != validator:
+        if validator and actual and _same_validator(actual) != _same_validator(validator):
             raise OSError(f"{url}: source changed during download; retry to check its new version")
         if offset and status == 200:
             print("    the server sent the whole file: starting over", flush=True)

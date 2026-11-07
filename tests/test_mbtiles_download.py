@@ -933,3 +933,16 @@ def test_a_format_invalid_partial_is_replaced_on_retry(monkeypatch, tmp_path, co
     download.write_download_metadata(partial.with_name(partial.name + ".source.json"), download.stamp_of(HEADERS))
     assert cli.fetch_resumable("https://example.org/x", dest, check_head=cli._check_mbtiles_head).read_bytes() == A
     assert seen == [None]
+
+
+def test_a_weak_mark_on_one_answer_is_the_same_version(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    monkeypatch.setattr(download, "head", lambda url, agent: {**HEADERS, "ETag": '"v1"'})
+
+    @contextmanager
+    def stream(url, request_headers):
+        yield 200, {**HEADERS, "ETag": 'W/"v1"'}, iter([B])
+
+    monkeypatch.setattr(download, "_stream", stream)
+    assert cli.fetch_resumable("https://example.org/x", tmp_path / "x.pbf").read_bytes() == B

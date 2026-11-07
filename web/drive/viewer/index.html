@@ -4499,7 +4499,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'e50f8b4e';
+var SZ_VIEWER_BUILD = '8909de13';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -13039,12 +13039,20 @@ var timer;
 var seq = 0;
 var activeIdx = -1;
 var lastMatches = [];
+var parked = null;
 function dismiss() {
 clearTimeout(timer);
 seq++;
 activeIdx = -1;
 lastMatches = [];
+parked = null;
 resultsEl.style.display = 'none';
+}
+function fieldQuery() {
+return inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
+}
+function focused() {
+return document.activeElement === inputEl;
 }
 function pickMatch(m) {
 dismiss();
@@ -13113,18 +13121,26 @@ resultsEl.style.display = 'block';
 }
 inputEl.addEventListener('input', function() {
 dismiss();
-var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
+var q = fieldQuery();
 if (q.length < 2) return;
 if (!map._queryPlaces) return;
 var mySeq = seq;
 timer = setTimeout(function() {
-renderLoading();
+parked = { q: q, matches: null };
+if (focused()) renderLoading();
 map._queryPlaces(q).then(function(matches) {
-if (mySeq === seq) renderDropdown(matches);
+if (mySeq !== seq) return;
+if (focused()) { parked = null; renderDropdown(matches); }
+else parked = { q: q, matches: matches };
 }, function() {
 if (mySeq === seq) dismiss();
 });
 }, 150);
+});
+inputEl.addEventListener('focus', function() {
+if (!parked || parked.q !== fieldQuery()) return;
+if (parked.matches) { var m = parked.matches; parked = null; renderDropdown(m); }
+else renderLoading();
 });
 inputEl.addEventListener('keydown', function(e) {
 var rows = resultsEl.style.display === 'none' ? [] :
@@ -13152,7 +13168,11 @@ rows[i].classList.toggle('active', i === activeIdx);
 }
 if (activeIdx >= 0) rows[activeIdx].scrollIntoView({ block: 'nearest' });
 }
-inputEl.addEventListener('blur', dismiss);
+inputEl.addEventListener('blur', function() {
+if (!parked) { dismiss(); return; }
+activeIdx = -1;
+resultsEl.style.display = 'none';
+});
 return dismiss;
 }
 var dismissOriginSuggestions = attachTypeahead(originInput, originResultsEl, 'origin');

@@ -985,6 +985,11 @@
           if (navigator.locks) {
             await navigator.locks.request(opfsKey(name), { ifAvailable: true }, (lock) => lock ? recover(true) : undefined);
           } else await recover(false);
+        } else if (!running) {
+          // An unfinished build under an older builder's naming: those
+          // builders deleted these at start-up and nothing else will. A file
+          // another tab is still writing refuses removal.
+          try { await dir.removeEntry(name); } catch (e) { /* in use */ }
         }
       }
     } catch (e) { /* no directory iteration in this browser */ }

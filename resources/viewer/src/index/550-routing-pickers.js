@@ -411,13 +411,28 @@
     var seq = 0;
     var activeIdx = -1;
     var lastMatches = [];
+    // A lookup for the field's text that outlives a blur (iOS Done while a
+    // 20-40 s chunk loads): its answer waits here, shown on refocus if the
+    // text is unchanged. An edit, Escape, a pick or Clear drop it.
+    var parked = null;  // { q, matches } (matches null while it runs)
 
     function dismiss() {
       clearTimeout(timer);
       seq++;
       activeIdx = -1;
       lastMatches = [];
+      parked = null;
       resultsEl.style.display = 'none';
+    }
+
+    function fieldQuery() {
+      // Without the bidi isolates a right-to-left UI wraps a picked point's
+      // coordinates in (coordLabel, szLtr), should the reader edit them.
+      return inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
+    }
+
+    function focused() {
+      return document.activeElement === inputEl;
     }
 
     function pickMatch(m) {
@@ -511,20 +526,27 @@
     }
     inputEl.addEventListener('input', function() {
       dismiss();
-      // Without the bidi isolates a right-to-left UI wraps a picked point's
-      // coordinates in (coordLabel, szLtr), should the reader edit them.
-      var q = inputEl.value.replace(/[\u200e\u200f\u2066-\u2069]/g, '').trim();
+      var q = fieldQuery();
       if (q.length < 2) return;
       if (!map._queryPlaces) return;
       var mySeq = seq;
       timer = setTimeout(function() {
-        renderLoading();
+        parked = { q: q, matches: null };
+        if (focused()) renderLoading();
         map._queryPlaces(q).then(function(matches) {
-          if (mySeq === seq) renderDropdown(matches);
+          if (mySeq !== seq) return;
+          if (focused()) { parked = null; renderDropdown(matches); }
+          else parked = { q: q, matches: matches };
         }, function() {
           if (mySeq === seq) dismiss();
         });
       }, 150);
+    });
+
+    inputEl.addEventListener('focus', function() {
+      if (!parked || parked.q !== fieldQuery()) return;
+      if (parked.matches) { var m = parked.matches; parked = null; renderDropdown(m); }
+      else renderLoading();
     });
 
     inputEl.addEventListener('keydown', function(e) {
@@ -555,7 +577,12 @@
       if (activeIdx >= 0) rows[activeIdx].scrollIntoView({ block: 'nearest' });
     }
 
-    inputEl.addEventListener('blur', dismiss);
+    // Hide on blur, but let a running lookup finish for the next focus.
+    inputEl.addEventListener('blur', function() {
+      if (!parked) { dismiss(); return; }
+      activeIdx = -1;
+      resultsEl.style.display = 'none';
+    });
     return dismiss;
   }
 

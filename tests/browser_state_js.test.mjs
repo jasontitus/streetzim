@@ -32,6 +32,7 @@ function search(routing) {
   const clearTimeout = (id) => timers.delete(id);
   const fetchRows = () => { const read = deferred(); reads.push(read); return read.promise; };
   const map = { _queryPlaces: fetchRows, on() {} };
+  const doc = { createElement: element, activeElement: input };
   const source = routing
     ? slice(read('resources/viewer/src/index/550-routing-pickers.js'), '  function attachTypeahead(', '  var dismissOriginSuggestions')
     : (() => {
@@ -51,9 +52,9 @@ function search(routing) {
     function renderResults() { resultsEl.style.display = 'block'; }
     ${source}
     ${routing ? "attachTypeahead(input, resultsEl, 'origin');" : ''}
-  `)(input, resultsEl, clearBtn, map, { createElement: element }, setTimeout, clearTimeout, fetchRows);
+  `)(input, resultsEl, clearBtn, map, doc, setTimeout, clearTimeout, fetchRows);
   return {
-    input, resultsEl, reads, clearBtn,
+    input, resultsEl, reads, clearBtn, doc,
     type(value) { input.value = value; input.listeners.input(); },
     runTimers() { for (const [id, run] of timers) { timers.delete(id); run(); } },
   };
@@ -88,6 +89,85 @@ for (const routing of [false, true]) {
     assert.equal(box.resultsEl.style.display, 'none');
   });
 }
+
+const ROWS = [{ item: { n: 'Result', a: 1, o: 2 } }];
+function leave(box) { box.doc.activeElement = null; box.input.listeners.blur(); }
+function back(box) { box.doc.activeElement = box.input; box.input.listeners.focus(); }
+
+test('route picker keeps a lookup running across a blur and shows it on refocus', async () => {
+  const box = search(true);
+  box.type('kyoto');
+  box.runTimers();
+  leave(box);
+  assert.equal(box.resultsEl.style.display, 'none');
+  box.reads[0].resolve(ROWS);
+  await box.reads[0].promise;
+  assert.equal(box.resultsEl.style.display, 'none', 'no list while the field is not focused');
+  back(box);
+  assert.equal(box.resultsEl.style.display, 'block');
+});
+
+test('route picker shows Searching again on refocus while the lookup runs', async () => {
+  const box = search(true);
+  box.type('kyoto');
+  box.runTimers();
+  leave(box);
+  back(box);
+  assert.equal(box.resultsEl.style.display, 'block');
+  box.reads[0].resolve(ROWS);
+  await box.reads[0].promise;
+  assert.equal(box.resultsEl.style.display, 'block');
+});
+
+test('route picker drops a parked answer when the text changed or Escape was pressed', async () => {
+  // 'set': the app fills the field itself (a map tap), with no input event.
+  for (const how of ['edit', 'Escape', 'set']) {
+    const box = search(true);
+    box.type('kyoto');
+    box.runTimers();
+    leave(box);
+    box.reads[0].resolve(ROWS);
+    await box.reads[0].promise;
+    if (how === 'edit') { box.doc.activeElement = box.input; box.type('k'); }
+    else if (how === 'Escape') box.input.listeners.keydown({ key: 'Escape' });
+    else box.input.value = '35.0, 135.7';
+    back(box);
+    assert.equal(box.resultsEl.style.display, 'none', how);
+  }
+});
+
+test('route picker clears Searching when the lookup fails', async () => {
+  const box = search(true);
+  box.type('kyoto');
+  box.runTimers();
+  assert.equal(box.resultsEl.style.display, 'block');
+  box.reads[0].reject(new Error('chunk failed'));
+  await box.reads[0].promise.catch(() => {});
+  assert.equal(box.resultsEl.style.display, 'none');
+});
+
+test('OPFS cleanup removes an older builder\'s unfinished file, not while a build runs', async () => {
+  const source = read('web/build/builder.js');
+  const files = new Set(['map.zim', 'done.zim']);
+  const dir = {
+    async *entries() { for (const file of [...files]) yield [file, { kind: 'file' }]; },
+    async removeEntry(name) { files.delete(name); },
+  };
+  const navigator = { storage: { async getDirectory() { return { async getDirectoryHandle() { return dir; } }; } } };
+  const localStorage = { getItem: (k) => (k === 'sz_lab_opfs' ? JSON.stringify({ 'done.zim': 'ready' }) : null),
+                         setItem() {}, removeItem() {} };
+  for (const running of [true, false]) {
+    const tidy = new Function('navigator', 'localStorage', `
+      let running = ${running};
+      ${slice(source, '  const OPFS_DIR =', '  async function offerSave(')}
+      async function offerSave() {}
+      ${slice(source, '  async function tidyBrowserStorage()', '  // ------------------------------------------------------------ build')}
+      return tidyBrowserStorage;
+    `)(navigator, localStorage);
+    await tidy();
+    assert.deepEqual([...files].sort(), running ? ['done.zim', 'map.zim'] : ['done.zim'], String(running));
+  }
+});
 
 test('clear cancels a queued map search before it makes any requests', () => {
   const box = search(false);
