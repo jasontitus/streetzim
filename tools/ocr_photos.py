@@ -58,7 +58,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 READ_MIN = 0.8
-_DIGITS = {**{0x660 + i: str(i) for i in range(10)}, **{0x6F0 + i: str(i) for i in range(10)}}
+_DIGITS = {**{0x660 + i: str(i) for i in range(10)}, **{0x6F0 + i: str(i) for i in range(10)},
+           # Arabic letters as Persian and Urdu write them, as the viewer
+           # compares them (SZ_SIGN_VARIANTS): the Arabic recognizer reads
+           # کوچه as "كوچه", and that is the sign read
+           **{ord(a): b for a, b in (("ي", "ی"), ("ى", "ی"), ("ك", "ک"), ("ڪ", "ک"),
+                                      ("ہ", "ه"), ("ە", "ه"), ("ۀ", "ه"))}}
 # Accents on Latin, Greek and Cyrillic letters, Arabic vowel signs and the
 # tatweel: written or not, read or not, the same name ("Zurich", "Zürich").
 _DROP = {*range(0x300, 0x370), *range(0x64B, 0x660), 0x670, 0x640}

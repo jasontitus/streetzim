@@ -29,7 +29,7 @@
 // vertical line of its own (Chinese and Japanese signs: 安平區 down the
 // side of a house-number plate), never joined to the lines beside it.
 // Each line's size is its letters' height (a vertical line's width).
-var SZ_SIGN_RTL = { Arab: 1, Hebr: 1 };
+var SZ_SIGN_RTL_LETTERS = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
 var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
 // A box the recognizers read in parts: the Latin model reads the digits of
 // "2912 طريق" and garbles the Arabic, the Arabic model reads طريق and
@@ -143,7 +143,12 @@ function _szSignLineGroups(items) {
   lines = _szSignColumns(lines);
   _szSignHouseNumber(lines);
   return lines.sort(function (a, b) { return a.y - b.y; }).map(function (L) {
-    var rtl = L.items.filter(function (it) { return SZ_SIGN_RTL[it.script]; }).length * 2 > L.items.length;
+    // Right to left when most of its boxes with letters hold Arabic or
+    // Hebrew letters. Not by the model that read a box: the Arabic model
+    // reads Latin too, and "AIGLE D'OR" read by it came back "OR'AIGLE D".
+    // Boxes of digits alone go either way ("شارع" by "22").
+    var lettered = L.items.filter(function (it) { return /\p{L}/u.test(it.text); });
+    var rtl = lettered.filter(function (it) { return SZ_SIGN_RTL_LETTERS.test(it.text); }).length * 2 > lettered.length;
     L.items.sort(function (a, b) { return L.column ? a.box.y - b.box.y : rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
     var text = '', seen = '', join = function (a, t) {
       return a + (a && !(SZ_SIGN_NOSPACE.test(a.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0))) ? ' ' : '') + t;

@@ -328,7 +328,11 @@ ok('no viewer splits a query into words except through SEARCH_SHARDS.words', () 
     // _szSignWords (the sign reader's labels, 300-search.js) compares a
     // photo's lines with names word for word, numbers and one-letter words
     // kept; it makes no index key, so it is not the writer's rule.
-    const outside = h.replace(blockOf(f), '').replace("out.replace(/(\\p{Nd}+)/gu, ' $1 ').split(/[^\\p{L}\\p{M}\\p{N}]+/u)", '');
+    // _szSignHouseNumber and _szSignRoman (305-ocr-search.js) read a plate's
+    // words and a town's name off a photo's lines; no index key either.
+    const outside = h.replace(blockOf(f), '').replace("out.replace(/(\\p{Nd}+)/gu, ' $1 ').split(/[^\\p{L}\\p{M}\\p{N}]+/u)", '')
+      .replace(".split(/[^\\p{L}\\d\\/]+/u)", '')
+      .replace("String(s == null ? '' : s).toLowerCase().split(/[^\\p{L}]+/u)", '');
     assert.ok(!/split\(\/\[\^\\p\{L\}/.test(outside), `${f} splits words outside SEARCH_SHARDS`);
     assert.strictEqual(blockOf(f), BLOCK, `${f}: search-shards block differs`);
   }

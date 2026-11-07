@@ -4499,7 +4499,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'e7788bad';
+var SZ_VIEWER_BUILD = '60fff40b';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -8371,7 +8371,7 @@ return scored;
 };
 }
 // BEGIN sign-lines
-var SZ_SIGN_RTL = { Arab: 1, Hebr: 1 };
+var SZ_SIGN_RTL_LETTERS = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
 var SZ_SIGN_NOSPACE = /[฀-๿぀-ヿ㐀-䶿一-鿿豈-﫿]/;
 function _szSignDigits(s) {
 return String(s).replace(/[\u0660-\u0669]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0x0630); })
@@ -8456,7 +8456,8 @@ _szSignOutline(line);
 lines = _szSignColumns(lines);
 _szSignHouseNumber(lines);
 return lines.sort(function (a, b) { return a.y - b.y; }).map(function (L) {
-var rtl = L.items.filter(function (it) { return SZ_SIGN_RTL[it.script]; }).length * 2 > L.items.length;
+var lettered = L.items.filter(function (it) { return /\p{L}/u.test(it.text); });
+var rtl = lettered.filter(function (it) { return SZ_SIGN_RTL_LETTERS.test(it.text); }).length * 2 > lettered.length;
 L.items.sort(function (a, b) { return L.column ? a.box.y - b.box.y : rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
 var text = '', seen = '', join = function (a, t) {
 return a + (a && !(SZ_SIGN_NOSPACE.test(a.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0))) ? ' ' : '') + t;

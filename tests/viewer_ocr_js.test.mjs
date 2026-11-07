@@ -536,6 +536,19 @@ ok('Arabic boxes join right to left; Chinese and Thai words without a space', ()
     { text: 'شارع', box: { x: 160, y: 10, width: 40, height: 20 }, script: 'Arab' },
   ]);
   assert.strictEqual(ar[0].text, 'شارع الملك');
+  // the Arabic model reads Latin too: a Latin line it read stays left to right
+  const lat = L._szSignLineGroups([
+    { text: "OR", box: { x: 130, y: 10, width: 30, height: 20 }, script: 'Arab' },
+    { text: "AIGLE D'", box: { x: 10, y: 10, width: 110, height: 20 }, script: 'Arab' },
+  ]);
+  assert.strictEqual(lat[0].text, "AIGLE D' OR");
+  assert.strictEqual(lat[0].rtl, false);
+  // a number beside an Arabic word does not turn the line round
+  const num = L._szSignLineGroups([
+    { text: '22', box: { x: 100, y: 10, width: 30, height: 20 }, script: 'Latn' },
+    { text: 'شارع', box: { x: 140, y: 10, width: 40, height: 20 }, script: 'Latn' },
+  ]);
+  assert.strictEqual(num[0].text, 'شارع 22');
   const zh = L._szSignLineGroups([
     { text: '大街', box: { x: 60, y: 10, width: 40, height: 20 }, script: 'Hani' },
     { text: '王府井', box: { x: 0, y: 10, width: 55, height: 20 }, script: 'Hani' },

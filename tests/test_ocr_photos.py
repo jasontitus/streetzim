@@ -22,6 +22,8 @@ from tools import ocr_photos as op  # noqa: E402
 def test_norm_folds_what_two_readings_of_a_sign_share() -> None:
     assert op.norm("Road ٢٩١٢") == op.norm("road 2912") == "road2912"
     assert op.norm("خیابان ۱۲") == op.norm("خیابان12")
+    assert op.norm("كوچه شهيد") == op.norm("کوچه شهید") and op.norm("مستشفى") == op.norm("مستشفی")
+    assert op.coverage("کوچه", "شارع كوچه") == 1.0
     assert op.norm("Bab Al-Bahrain!") == "babalbahrain"
     assert op.norm("  ") == ""
     assert op.norm("Zürich HB") == op.norm("Zurich HB") and op.norm("مَال") == op.norm("مال")
