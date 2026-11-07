@@ -1356,4 +1356,38 @@ ok('a compound building number is one number: Korean plates ("130-19"), Czech "1
   assert.notStrictEqual(kindsOn([addr('1020/7 Janáčkova, Brno', ...PRAGUE)], [['Janáčkova 1020', 14]])[0], 'address');
 });
 
+ok('an old Chinese signboard written right to left is also read the other way round', () => {
+  // 五福商店 read off a right-to-left board as 店商福五; 仁愛公 as 公愛仁
+  assert.ok(matches({ n: '五福商店', t: 'poi' }, ['店商福五']));
+  assert.ok(matches({ n: '仁愛公園', t: 'park' }, ['公愛仁']) || score({ n: '仁愛公', t: 'poi' }, ['公愛仁']) >= M.SZ_SIGN_MIN);
+  // as read, too
+  assert.ok(matches({ n: '五福商店', t: 'poi' }, ['五福商店']));
+  // only a line of such characters alone: not a Latin line, nor a line too long to be a board
+  const lines = M._szSignLines(['ABC', '店商福五', '一二三四五六七八九十一二三'], norm, 12);
+  assert.ok(lines.some((l) => l.raw === '五福商店'));
+  assert.ok(!lines.some((l) => l.raw === 'CBA') && !lines.some((l) => l.raw === '三二一十九八七六五四三二一'));
+  // a line cut as small print is not tried reversed either
+  const cut = M._szSignLines(['A1', 'B2', { text: '店商福五', weight: 0.1 }], norm, 2);
+  assert.ok(!cut.some((l) => l.raw === '五福商店'));
+  // the reversed reading never takes a line's place
+  const many = M._szSignLines(['店商福五', 'A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7', 'H8'], norm, 8);
+  assert.ok(['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7'].every((x) => many.some((l) => l.raw === x)));
+});
+
+ok('a vertical Chinese board read one character at a time is one line, top to bottom', () => {
+  const box = (text, x, y, w = 40, h = 40) => ({ text, box: { x, y, width: w, height: h }, confidence: 0.9 });
+  const texts = (items) => L._szSignLineGroups(items).map((l) => l.text);
+  // 郭 over 乾 over 香 (tw-5002's shop name)
+  assert.deepStrictEqual(texts([box('郭', 100, 0), box('乾', 102, 46), box('香', 99, 92)]), ['郭乾香']);
+  // a leaning column weighs as its characters, not its outline
+  const lean = L._szSignLineGroups([box('五', 0, 0), box('福', 15, 45), box('商', 30, 90), box('店', 45, 135)]);
+  assert.deepStrictEqual(lean.map((l) => [l.text, l.size]), [['五福商店', 40]]);
+  // a character far below, or one of another size, or a digit: not of the column
+  assert.deepStrictEqual(texts([box('郭', 0, 0), box('乾', 0, 300)]).length, 2);
+  assert.deepStrictEqual(texts([box('郭', 0, 0), box('乾', 0, 46, 100, 100)]).length, 2);
+  assert.deepStrictEqual(texts([box('郭', 0, 0), box('7', 0, 46)]).length, 2);
+  // a horizontal board read one character at a time stays one horizontal line
+  assert.deepStrictEqual(texts([box('五', 0, 0), box('福', 46, 0), box('商', 92, 0), box('店', 138, 0)]), ['五福商店']);
+});
+
 console.log(`${pass} passed`);

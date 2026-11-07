@@ -140,10 +140,11 @@ function _szSignLineGroups(items) {
     line.items.push(it);
     _szSignOutline(line);
   });
+  lines = _szSignColumns(lines);
   _szSignHouseNumber(lines);
   return lines.sort(function (a, b) { return a.y - b.y; }).map(function (L) {
     var rtl = L.items.filter(function (it) { return SZ_SIGN_RTL[it.script]; }).length * 2 > L.items.length;
-    L.items.sort(function (a, b) { return rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
+    L.items.sort(function (a, b) { return L.column ? a.box.y - b.box.y : rtl ? b.box.x - a.box.x : a.box.x - b.box.x; });
     var text = '', seen = '', join = function (a, t) {
       return a + (a && !(SZ_SIGN_NOSPACE.test(a.slice(-1)) && SZ_SIGN_NOSPACE.test(t.charAt(0))) ? ' ' : '') + t;
     };
@@ -153,8 +154,37 @@ function _szSignLineGroups(items) {
     });
     var cyrText = _szSignCyrillic(text, false, L.items.some(function (it) { return it.cyr; })), asRead = _szSignCyrillic(seen, true);
     return { text: cyrText, box: { x: L.x, y: L.y, width: L.width, height: L.height }, rtl: rtl,
-             size: L.vertical ? L.width : L.height, asRead: asRead !== cyrText ? asRead : '' };
+             // a column's size: its widest character (a leaning column's outline is wider)
+             size: L.column ? Math.max.apply(null, L.items.map(function (it) { return it.box.width; }))
+               : L.vertical ? L.width : L.height, asRead: asRead !== cyrText ? asRead : '' };
   });
+}
+// A vertical Chinese or Japanese signboard read one character at a time
+// ("郭" over "乾" over "香"): lines of one such character each, stacked in
+// one column (their boxes of about one size, overlapping across by half or
+// more, a small gap between them), are one line, read top to bottom.
+var SZ_SIGN_CJK_CHAR = /^[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]$/u;
+function _szSignColumns(lines) {
+  var one = function (L) { return L.items.length === 1 && SZ_SIGN_CJK_CHAR.test(String(L.items[0].text).trim()); };
+  var cands = lines.filter(one).sort(function (a, b) { return a.y - b.y; });
+  var used = [], out = lines.filter(function (L) { return !one(L); });
+  cands.forEach(function (L) {
+    if (used.indexOf(L) >= 0) return;
+    var col = [L], last = L;
+    cands.forEach(function (M) {
+      if (M === last || used.indexOf(M) >= 0 || col.indexOf(M) >= 0) return;
+      var a = last.items[0].box, b = M.items[0].box;
+      var across = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      var gap = b.y - (a.y + a.height), size = Math.max(a.height, b.height) / Math.min(a.height, b.height);
+      if (b.y > a.y && across >= 0.5 * Math.min(a.width, b.width) && gap <= 0.6 * Math.max(a.height, b.height) &&
+          size <= 1.5) { col.push(M); last = M; }
+    });
+    if (col.length < 2) { out.push(L); return; }
+    var merged = { items: [], vertical: true, column: true };
+    col.forEach(function (M) { used.push(M); merged.items.push(M.items[0]); _szSignOutline(merged); });
+    out.push(merged);
+  });
+  return out;
 }
 // A line's words with letters when most of them are Cyrillic.
 function _szSignCyrWords(items) {

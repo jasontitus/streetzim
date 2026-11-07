@@ -125,7 +125,7 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    words, without numbers and with a Cyrillic word other than a type:
    "2 КОСЫГИНА" / "18 УЛИЦА"; of several such lines, the lowest. A line
    naming the street ("22 ВУЛИЦЯ ХРЕЩАТИК") keeps its number. A box of two letters or more at least 1.5 times as tall as
-   wide is a vertical line of its own. A Cyrillic recognizer may give Latin or Greek letters that look
+   wide is a vertical line of its own; lines of one Chinese or Japanese character each, stacked in one column (boxes of about one size, overlapping across by half, a small gap between them), are one line read top to bottom (a vertical board read a character at a time: "郭" over "乾" over "香"). A Cyrillic recognizer may give Latin or Greek letters that look
    the same ("BYЛИЦЯ", "КОСbIГИНА"): in a word with Cyrillic letters, or a
    word of such look-alikes alone on a line most of whose words are
    Cyrillic, they are read as the Cyrillic ones; the search also looks for
@@ -151,7 +151,7 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    "Тверской бульвар" does not outrank "1-й Тверской-Ямской переулок" on a
    sign reading "1-й ТВЕРСКОЙ-ЯМСК ПЕРЕУЛОК" or "...нереулок". Right-to-left
    lines are also
-   tried with their words reversed. On a line of several words, a name of
+   tried with their words reversed, and a line of 2 to 12 Chinese or Japanese characters alone with its characters reversed, as an old right-to-left signboard reads ("店商福五" for 五福商店): another reading, never in a line's place. On a line of several words, a name of
    five letters or fewer must be one of them ("Mace" is not on a sign
    reading "Manama Central Market", though "mana-mace-ntral" holds it).
    Records are ranked by similarity (to the tenth power, so a near miss

@@ -553,6 +553,11 @@ function _szSignScore(rec, lines, norm) {
 // A right-to-left line is also tried with its words the other way round:
 // a recognizer may give them in visual order.
 var SZ_SIGN_RTL_TEXT = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+// An old Chinese or Japanese signboard is written right to left ("店商福五"
+// read for 五福商店, "公愛仁" for 仁愛公): a line of such characters alone,
+// 2 to 12 of them, is also tried the other way round, as another reading
+// (an `extra`: never in a line's place).
+var SZ_SIGN_CJK_LINE = /^[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]{2,12}$/u;
 function _szSignLines(texts, norm, max) {
   var out = [], seen = {};
   function add(raw, weight) {
@@ -579,6 +584,10 @@ function _szSignLines(texts, norm, max) {
   }
   out.sort(function (a, b) { return b.weight - a.weight || b.text.length - a.text.length; });
   out = out.slice(0, max || 8);
+  // the lines kept, of CJK characters alone, also the other way round
+  out.forEach(function (L) {
+    if (SZ_SIGN_CJK_LINE.test(L.raw.trim())) extras.push({ text: Array.from(L.raw.trim()).reverse().join(''), weight: L.weight, extra: true });
+  });
   extras.forEach(function (x) { add(x.text, x.weight > 0 ? Math.min(1, x.weight) : 1); });
   return out;
 }
