@@ -44,6 +44,58 @@ function score(rec, texts) {
 }
 const matches = (rec, texts) => score(rec, texts) >= M.SZ_SIGN_MIN;
 
+ok('a name that is only a street type is no match for a line with other words', () => {
+  // records named شارع / طريق / خیابان / Street exist; the sign's street is another
+  assert.ok(!matches({ n: 'شارع', t: 'street' }, ['شارع طهون']));
+  assert.ok(!matches({ n: 'طريق', t: 'street' }, ['طريق الملاك']));
+  assert.ok(!matches({ n: 'خیابان', t: 'street' }, ['خيابان وليعصر']));
+  assert.ok(!matches({ n: 'Shari`', nn: 'شارع', t: 'place' }, ['شارع طهون']));
+  assert.ok(!matches({ n: 'Street', t: 'poi' }, ['Main Street']));
+  assert.ok(!matches({ n: '大道', t: 'street' }, ['光復大道']));
+  // a type with a number, or two type words, is a name
+  assert.ok(matches({ n: 'شارع 14', t: 'street' }, ['شارع 14 حي الياسمين']));
+  assert.ok(matches({ n: 'Street 22', t: 'street' }, ['Street 22 Block 3']));
+  assert.ok(matches({ n: 'Avenue Road', t: 'street' }, ['Avenue Road Bloor St W']));
+  assert.ok(matches({ n: 'Court Street', t: 'street' }, ['COURT STREET Brooklyn']));
+  // a line of the type and its number joined by a hyphen is still the type alone
+  assert.ok(matches({ n: 'Street', t: 'street' }, ['Street-22']));
+  // the street of the sign's name still matches, and a line of the type alone (or with its number)
+  assert.ok(matches({ n: 'شارع طهون', t: 'street' }, ['شارع طهون']));
+  assert.ok(matches({ n: 'Main Street', t: 'street' }, ['Main Street']));
+  assert.ok(matches({ n: 'شارع', t: 'street' }, ['شارع']));
+  assert.ok(matches({ n: 'شارع', t: 'street' }, ['شارع 22']));
+});
+
+ok('a village word is a type: the village of the sign before the place called قرية', () => {
+  const lines = M._szSignLines(['قرية ارادن'], norm, 12);
+  assert.strictEqual(M._szSignScore({ n: 'قرية', t: 'place' }, lines, norm), null);
+  assert.ok(M._szSignScore({ n: 'أرادن', t: 'poi' }, lines, norm).sim === 1);
+  assert.ok(matches({ n: 'مدينة', t: 'place' }, ['مدينة']));
+});
+
+ok('a line with the name in two scripts is all the record\'s', () => {
+  const lines = M._szSignLines(['H1 豊平公園 Toyohira koen'], norm, 12);
+  const park = M._szSignScore({ n: '豊平公園', nl: 'Toyohira koen', t: 'poi' }, lines, norm);
+  const town = M._szSignScore({ n: '豊平', nl: 'Toyohira', t: 'place' }, lines, norm);
+  assert.ok(park.cover > 0.85, JSON.stringify(park));
+  assert.ok(park.cover > town.cover + 0.3, JSON.stringify([park, town]));
+  // one script twice is one name read: a Latin name and its Latin translation add nothing
+  const one = M._szSignScore({ n: 'Toyohira koen', ln: { en: 'Toyohira Park' }, t: 'poi' },
+    M._szSignLines(['Toyohira koen Toyohira Park 1234567'], norm, 12), norm);
+  assert.ok(one.cover < 0.5, JSON.stringify(one));
+  // a shop named by its type in two languages is not the named shop's line
+  const generic = M._szSignScore({ n: 'صيدلية', ln: { en: 'Pharmacy' }, t: 'poi' }, M._szSignLines(['صيدلية النور Al Noor Pharmacy'], norm, 12), norm);
+  assert.strictEqual(generic.cover, 'pharmacy'.length / 'صيدليةالنورalnoorpharmacy'.length);   // its longer name alone
+  const bank = M._szSignScore({ n: '中国银行', nl: 'Bank of China', t: 'poi' }, M._szSignLines(['中国银行 BANK OF CHINA'], norm, 12), norm);
+  assert.strictEqual(bank.cover, 1);
+});
+
+ok('a modern line of 13 characters or more is not read reversed', () => {
+  // 广州市越秀区东山口地铁站附近商店 reversed holds 山东; 京东电器城… holds 东京
+  assert.ok(!matches({ n: '山东', t: 'admin' }, ['广州市越秀区东山口地铁站附近商店']));
+  assert.ok(!matches({ n: '东京', t: 'place' }, ['京东电器城北京朝阳大悦城旗舰店']));
+});
+
 ok('a sign is compared folded, without spaces, Arabic and Persian letters alike', () => {
   assert.strictEqual(M._szSignText('Königstraße 12', norm), 'konigstraße12');
   assert.strictEqual(M._szSignText('خيابان وليعصر', norm), M._szSignText('خیابان ولیعصر', norm));

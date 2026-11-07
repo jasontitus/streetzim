@@ -134,6 +134,12 @@ def result_names(r: dict[str, Any]) -> list[str]:
     return [x for x in (name, own) if norm(x)]
 
 
+def _scripts(s: str) -> set[str]:
+    """The scripts of a text's letters, by the first word of each letter's
+    Unicode name ("CJK", "LATIN", "ARABIC", "HIRAGANA" ...)."""
+    return {unicodedata.name(c, "?").split()[0] for c in s if c.isalpha()}
+
+
 def label_lines(rec: dict[str, Any]) -> list[str]:
     return [ln.get("text", "") for ln in rec.get("lines") or [] if norm(ln.get("text", ""))]
 
@@ -149,7 +155,15 @@ def score(rec: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     rows = raw.get("results") or []
     names = [r.get("name", "") for r in rows]
     wanted = wanted_names(rec)
-    exact = {norm(x) for x in want_lines}
+    # A label line, each part of one that gives several places ("Damanhour /
+    # Alexandria", parts of 3 letters or more: not "24/7"), and two label
+    # lines in different scripts that one record names together ("中国银行"
+    # and "BANK OF CHINA": "中国银行 Bank of China"; not "MAIN" and "ST").
+    exact = {norm(x) for x in want_lines} | \
+        {norm(p) for x in want_lines if "/" in x for p in x.split("/") if sum(c.isalpha() for c in norm(p)) >= 3} | \
+        {norm(a + b) for a in want_lines for b in want_lines
+         if a != b and min(len(norm(a)), len(norm(b))) >= 3 and _scripts(a).isdisjoint(_scripts(b))}
+    exact.discard("")
     queries = wanted + want_lines + [ln.get("latin", "") for ln in rec.get("lines") or [] if ln.get("latin")]
 
     def found(k: int) -> bool:
@@ -232,7 +246,11 @@ def overlay_for(arc: Any, records: list[dict[str, Any]], models: Path, dest: Pat
 
 
 def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: Path, out: Path,
-               how: str, at_photo: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
+               how: str, at_photo: bool = False,
+               given: dict[str, list[Any]] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Each photo through the reader on this map. `given`: what the
+    recognizers read for each photo in an earlier run, searched again in
+    place of reading (photos without it are left out)."""
     from libzim.reader import Archive
 
     from cloud.serve_zim_entries import make_handler
@@ -246,9 +264,10 @@ def run_region(zim: Path, records: list[dict[str, Any]], set_dir: Path, models: 
     photos = out / f"photos-{region}.json"
     photos.write_text(json.dumps([dict({"id": r["id"], "path": str(set_dir / r["file"])},
                                        **({"at": r["location"]} if at_photo and r.get("location") else {}),
-                                       **({"part": r["part"]} if isinstance(r.get("part"), list) and len(r["part"]) == 4 else {}))
-                                  for r in records]), encoding="utf-8")
-    env = dict(os.environ, ZIM_ORIGIN=f"http://127.0.0.1:{srv.server_address[1]}", PHOTOS=str(photos))
+                                       **({"part": r["part"]} if isinstance(r.get("part"), list) and len(r["part"]) == 4 else {}),
+                                       **({"items": given[r["id"]]} if given is not None else {}))
+                                  for r in records if given is None or given.get(r["id"])]), encoding="utf-8")
+    env = dict(os.environ, ZIM_ORIGIN=f"http://127.0.0.1:{srv.server_address[1]}", PHOTOS=str(photos), ITEMS="keep")
     raws: list[dict[str, Any]] = []
 
     def take(out: str | bytes | None) -> None:
@@ -339,6 +358,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="put the map where each photo was taken (its `location`) first, as a phone with its "
                          "user's position does; photos with no location as usual")
     ap.add_argument("--score", type=Path, help="score the results saved in this folder again")
+    ap.add_argument("--replay", type=Path,
+                    help="search again what the recognizers read in this earlier run (its raw.jsonl), "
+                         "with today's viewer, in place of reading the photos: a search change in minutes")
     args = ap.parse_args(argv)
     records = [json.loads(x) for x in (args.set / "manifest.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
     if args.ids:
@@ -362,6 +384,16 @@ def main(argv: list[str] | None = None) -> int:
                 notes[r["region"]] = ", ".join(r.get("recognizers") or [])
     else:
         from streetzim import ocr as _ocr
+        given: dict[str, list[Any]] | None = None
+        replayed: dict[str, list[str]] = {}
+        if args.replay:
+            given = {}
+            for line in (args.replay / "raw.jsonl").read_text(encoding="utf-8").splitlines():
+                r = json.loads(line)
+                if r.get("id") and r.get("items"):
+                    given[r["id"]] = r["items"]
+                    replayed[r["region"]] = r.get("recognizers") or []
+            records = [r for r in records if r["id"] in given]
         models = out / "models"
         if not (models / _ocr.MANIFEST_ENTRY).exists():
             _ocr.export(str(models), _ocr.all_models())
@@ -376,7 +408,11 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{region}: no osm-{region}-<date>.zim in {args.maps}", flush=True)
                     continue
                 print(f"{region}: {len(recs)} photos on {zim.name}", flush=True)
-                got, names = run_region(zim, recs, args.set, models, out, args.recognizers, args.at_photo)
+                got, names = run_region(zim, recs, args.set, models, out, args.recognizers, args.at_photo, given)
+                if given is not None:       # read by the earlier run's recognizers
+                    names = replayed.get(region, names)
+                    for r in got:
+                        r["recognizers"] = names
                 notes[region] = ", ".join(names)
                 for r in got:
                     fh.write(json.dumps(r, ensure_ascii=False) + "\n")

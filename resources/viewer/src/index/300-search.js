@@ -517,6 +517,26 @@ function _szSignCorner(cands) {
   pair.several = at.length > 1;
   return pair;
 }
+// A name that is a type and nothing more, one word (a record named "شارع",
+// "طريق", "Street", "خیابان"; there are such) is no match for a line with
+// other words: "شارع طهون" is a street of that name, not the one called
+// شارع. A name with a number ("شارع 14") or of two words ("Avenue Road",
+// "Court Street") is a name. As one word each, folded as _szSignText folds them.
+var SZ_SIGN_BARE_TYPES = ['خیابان', 'کوچه', 'بلوار', 'میدان', 'بزرگراه', 'زقاق', 'درب', 'حارة', 'شارع',
+                          'طريق', 'ممر', 'جادة', 'سكة', 'ساحة', 'دوار', 'רחוב', 'שדרות', 'דרך',
+                          'قرية', 'مدينة', 'منطقة', 'حي', '大道', '大街', '马路', '馬路', '路口', '通り', '道路'];
+var _szSignBareSet = null;
+// Whether the words (folded) are street types and numbers only.
+function _szSignBareType(words, norm) {
+  if (!_szSignBareSet || _szSignBareSet.norm !== norm) {
+    _szSignBareSet = { norm: norm, set: {} };
+    Object.keys(SZ_SIGN_TYPES).concat(SZ_SIGN_BARE_TYPES).forEach(function (w) {
+      _szSignBareSet.set[_szSignText(w, norm)] = 1;
+    });
+  }
+  var set = _szSignBareSet.set;
+  return words.length > 0 && words.every(function (w) { return set[w] === 1 || /^\p{Nd}+$/u.test(w); });
+}
 function _szSignScore(rec, lines, norm) {
   var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [], blade = {};
   if (rec.t === 'street') forms.slice().forEach(function (f) {
@@ -530,13 +550,15 @@ function _szSignScore(rec, lines, norm) {
       forms.push(u); dropped.push(en); blade[forms.length - 1] = true;
     }
   });
-  var best = null, bestValue = 0;
+  var best = null, bestValue = 0, hits = {};
   for (var f = 0; f < forms.length; f++) {
     var name = _szSignText(forms[f], function (x) { return x; });
     if (!/\p{L}/u.test(name)) continue;   // a name of digits only ("1000") is no sign's place
+    var bare = _szSignBareType([name], norm);   // the whole name, folded: one type word
     for (var l = 0; l < lines.length; l++) {
       var L = lines[l];
       if (blade[f] && !_szSignBlade(L, name, dropped[f - own])) continue;
+      if (bare && !_szSignBareType(_szSignWords(L.raw, norm), norm)) continue;
       if (name.length <= 5 && L.words && L.words.length > 1 && L.words.indexOf(name) < 0) continue;
       if (f >= own && !blade[f] && (name.length < 0.6 * (L.core != null ? L.core : L.text.length) ||
           (L.types || []).some(function (t) { return dropped[f - own].indexOf(t) < 0; }))) continue;
@@ -544,10 +566,45 @@ function _szSignScore(rec, lines, norm) {
       if (s < SZ_SIGN_MIN) continue;
       var w = L.weight || 1, cover = Math.min(1, name.length / L.text.length);
       var value = s * w * (0.4 + 0.6 * cover);
+      if (f < own) (hits[l] = hits[l] || []).push({ len: name.length, sim: s, scripts: _szSignScripts(name), name: name });
       if (value > bestValue) { bestValue = value; best = { sim: s, weight: w, cover: cover, line: L.raw }; }
     }
   }
+  // A sign that gives the name in two scripts on one line ("中国银行 BANK OF
+  // CHINA", "豊平公園 Toyohira koen") names the record twice: the line is
+  // that much more the record's. Its own names only, in scripts no other
+  // counted name uses (two Latin spellings of one name are one name read).
+  for (var k in hits) {
+    var H = hits[k].sort(function (a, b) { return b.sim * b.len - a.sim * a.len; }), used = {}, len = 0, sim = 0;
+    H.forEach(function (h, i) {
+      if (!h.scripts.length || h.scripts.some(function (x) { return used[x]; })) return;
+      // a second name only as most (80%) of the line's letters in its script:
+      // "Pharmacy" of a shop named صيدلية is not "Al Noor Pharmacy"
+      if (i > 0 && h.len < 0.8 * _szSignScriptLetters(lines[k].text, h.scripts)) return;
+      h.scripts.forEach(function (x) { used[x] = 1; });
+      len += h.len; sim = sim || h.sim;
+    });
+    var L2 = lines[k], w2 = L2.weight || 1, cover2 = Math.min(1, len / L2.text.length), value2 = sim * w2 * (0.4 + 0.6 * cover2);
+    if (value2 > bestValue) { bestValue = value2; best = { sim: sim, weight: w2, cover: cover2, line: L2.raw }; }
+  }
   return best;
+}
+// How many of a folded line's letters are in `scripts` (_szSignScripts).
+function _szSignScriptLetters(text, scripts) {
+  var n = 0;
+  Array.from(text).forEach(function (c) { if (_szSignScripts(c).some(function (x) { return scripts.indexOf(x) >= 0; })) n++; });
+  return n;
+}
+// The scripts of a folded name's letters, as the sign reader tells them
+// apart (Han and kana are one: a Japanese name mixes them).
+function _szSignScripts(name) {
+  var out = [];
+  [['Latn', /\p{Script=Latin}/u], ['Cyrl', /\p{Script=Cyrillic}/u], ['Arab', /\p{Script=Arabic}/u],
+   ['Hebr', /\p{Script=Hebrew}/u], ['Grek', /\p{Script=Greek}/u], ['Hang', /\p{Script=Hangul}/u],
+   ['Jpan', /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u]].forEach(function (x) {
+    if (x[1].test(name)) out.push(x[0]);
+  });
+  return out;
 }
 
 // A right-to-left line is also tried with its words the other way round:

@@ -14,7 +14,8 @@
 // what is printed is that reading (`whole`: the first one's lines). Prints one JSON line per photo:
 // {id, status, lines, field, verdict: {kind, text}, results: [{name, shown,
 // sign: the row's label, lat, lon, type}], ms, errors}; status
-// is the reader's (searched, none, failed) or "timeout".
+// is the reader's (searched, none, failed) or "timeout"; with ITEMS=keep,
+// `items`: what the recognizers read, one list per read.
 // PLAYWRIGHT_CORE, CHROME_PATH, BROWSER_LIBS: as tools/langpack/builder_e2e.mjs.
 import fs from 'node:fs';
 
@@ -58,6 +59,12 @@ try {
       await pg.evaluate(([lat, lon]) => window.__szMap.jumpTo({ center: [lon, lat], zoom: 15 }), ph.at);
       await pg.waitForTimeout(500);
     }
+    // What the recognizers read, kept (ITEMS=keep), or given in place of
+    // reading (ph.items, from a run that kept them: tools/ocr_photos.py --replay).
+    await pg.evaluate(([keep, give]) => {
+      window.__szSignKept = [];
+      window.__szSignItems = { keep: keep ? (items) => window.__szSignKept.push(items) : null, give };
+    }, [process.env.ITEMS === 'keep', ph.items || null]);
     await pg.setInputFiles('#search-photo-file', ph.path);
     const settled = () => pg.waitForFunction(() =>
       /^(searched|none|failed)$/.test(document.getElementById('ocr-sheet').getAttribute('data-sz-ocr') || ''),
@@ -86,6 +93,7 @@ try {
                        lat: +r.getAttribute('data-lat'), lon: +r.getAttribute('data-lon'),
                        type: r.getAttribute('data-type') || '' })),
     }));
+    if (process.env.ITEMS === 'keep') got.items = await pg.evaluate(() => window.__szSignKept);
     // The field is the line searched for only after a search (else the last photo's).
     if (got.status !== 'searched') got.field = '';
     const out = { id: ph.id, ...got, ...(whole ? { whole, part: ph.part } : {}), status: done ? got.status : 'timeout', ms: Date.now() - t0,

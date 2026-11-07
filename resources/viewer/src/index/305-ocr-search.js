@@ -2133,7 +2133,11 @@ function initSignSearch(map, config) {
     var image = drawPart(part, readCanvas);
     readK = image.k;
     paint([]);
-    return readBoth(image).then(function (items) {
+    // tools/ocr_photos.mjs: what the recognizers read, kept to search again
+    // (__szSignItems.keep), or given in its place (.give, one per read).
+    var hook = window.__szSignItems, given = hook && hook.give && hook.give.length ? hook.give.shift() : null;
+    return (given ? Promise.resolve(given) : readBoth(image)).then(function (items) {
+      if (hook && hook.keep) hook.keep(items);
       if (rs !== readSeq) return;   // another photo or part since: not this sheet's
       var lines = _szSignLineGroups(items);
       dbg('sign reader: ' + lines.length + ' lines in ' + (Date.now() - t0) + ' ms');

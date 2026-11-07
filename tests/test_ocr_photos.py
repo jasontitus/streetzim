@@ -92,6 +92,20 @@ def test_a_result_is_found_by_its_own_script_name_and_the_signs_lines() -> None:
     assert not op.score(rec, other)["found3"]
 
 
+def test_a_record_naming_two_label_lines_or_one_of_a_lines_places_is_found() -> None:
+    def found(lines: list[str], name: str) -> bool:
+        rec = _rec(lines=[{"text": t} for t in lines], expect={"query": "", "record": ""})
+        return op.score(rec, {"status": "searched", "lines": [], "field": "",
+                              "results": [{"name": name, "shown": ""}]})["found1"]
+    assert found(["中国银行", "BANK OF CHINA"], "中国银行 Bank of China")
+    assert found(["Damanhour / Alexandria"], "Alexandria")
+    # two lines of one script are two names, not one ("MAIN" "ST" is not Main St)
+    assert not found(["MAIN", "ST", "PHARMACY"], "Main St")
+    assert not found(["MAIN STREET", "PHARMACY"], "Main Street Pharmacy")
+    # a part of fewer than 3 letters is no place ("Open 24/7")
+    assert not found(["Open 24/7"], "7")
+
+
 def test_the_place_by_its_coordinates_not_its_name() -> None:
     """A hotel key's hotel is the one at expect.near, not one of its name elsewhere."""
     rec = _rec(id="kc-1", kind="key card", lines=[{"text": "Hotel Ibis"}],

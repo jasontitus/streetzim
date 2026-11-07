@@ -237,6 +237,18 @@ the Latin/CJK one and those of its photos' scripts.
 Per photo: `read` (the share of the labelled `lines` read, each 80% of its
 letters in order), `query` (the line searched for is the labelled one),
 `found@1` and `found@3` (the labelled place among the first results, by
-`expect.record` or `expect.query`). `<out>/report.md` has the table per map,
-per kind and per photo; `<out>/raw.jsonl` what the reader read and found.
-Compare two viewers by running both and reading the reports side by side.
+`expect.record` or `expect.query`; a result named as one of a label line's
+parts, "Alexandria" of "Damanhour / Alexandria", or as two label lines in
+two scripts together, "中国银行 Bank of China", counts). `<out>/report.md`
+has the table per map, per kind and per photo; `<out>/raw.jsonl` what the
+reader read and found, with each read's boxes (`items`).
+
+Reading is most of a run's time. To compare search or label changes,
+replay a run's reads instead of reading again: the viewer takes them from
+`window.__szSignItems.give` in place of the recognizers, so only the
+search and the labels run (Bahrain: the same results, about 8 times faster):
+
+    python3 tools/ocr_photos.py ... --out <new> --replay <earlier out>
+
+The replay keeps the earlier run's recognizers per map and runs only the
+photos it read.

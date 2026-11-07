@@ -161,12 +161,20 @@ grows from 2.9 MB to 25.6 MB. Each other recognizer adds about 7 MB (Korean
    lines are also
    tried with their words reversed, and a line of 2 to 12 Chinese or Japanese characters alone with its characters reversed, as an old right-to-left signboard reads ("店商福五" for 五福商店): another reading, never in a line's place. On a line of several words, a name of
    five letters or fewer must be one of them ("Mace" is not on a sign
-   reading "Manama Central Market", though "mana-mace-ntral" holds it).
+   reading "Manama Central Market", though "mana-mace-ntral" holds it). A
+   name that is one type word and nothing more (records named "شارع",
+   "طريق", "قرية", "Street", "大道" exist) matches only a line of types and
+   numbers: "طريق الملاك" is that street, not the one called طريق; "شارع 14"
+   and "Avenue Road" are names.
    Records are ranked by similarity (to the tenth power, so a near miss
    on screen does not beat an exact name further away), times the line's
    prominence (its letters' height against the sign's tallest: the street
    name before the town in small print), times how much of the line the
-   name covers ("Manama Central Market" before "Manama"), plus a type
+   name covers ("Manama Central Market" before "Manama"; a line giving
+   the record's names in two scripts, "豊平公園 Toyohira koen" or "中国银行
+   BANK OF CHINA", is covered by both, each later one only where it is most
+   (80%) of the line's letters in its script, so a shop named "صيدلية" /
+   "Pharmacy" does not take "صيدلية النور Al Noor Pharmacy"), plus a type
    bonus, then by proximity, as typed searches are. The photo screen names
    the first result: its name as written, big, to hold against the sign by
    eye (for someone who cannot read the script), its other name (Latin,
@@ -371,6 +379,9 @@ offline builds. To change a model, edit `OCR_MODELS` and run `--ocr`.
 - `tests/viewer_ocr_js.test.mjs`: line grouping, the fuzzy match, the
   labels and the photo frame's geometry (fit, zoom, the part shown, a
   part's boxes on the whole photo), as they ship.
+- `tests/test_viewer_top_level_names.py`: no top-level name is declared
+  in two of the viewer's index parts (one script once built: the later
+  declaration replaces the earlier).
 - `tools/ocr_photos.py`: the labelled photo set (docs/ocr-test-set.md) read
   by each photo's own map with today's viewer; a record's `part` reads only
   that part, as Search this part does.
