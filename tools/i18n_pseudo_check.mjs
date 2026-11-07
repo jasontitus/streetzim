@@ -45,7 +45,7 @@ const MACHINE_ALL = LANGS.filter((l) => table(l)._machine === true);
 // (read from the page itself, once the browser is up).
 let MACHINE = [];
 let LANGS_HERE = [];
-const RTL = ['ar', 'fa', 'he', 'glk', 'mzn'];
+const RTL = ['ar', 'fa', 'he', 'glk', 'mzn', 'ur'];
 const FOOD = process.env.CHIP || 'food';
 const pt = (s, d) => (s || d).split(',').map(Number);
 const ORIGIN = pt(process.env.ORIGIN, '43.7396,7.4246');

@@ -30,7 +30,8 @@ PARTS = ROOT / "resources" / "viewer" / "src" / "index"
 PLACES = ROOT / "resources" / "viewer" / "places.html"
 
 # Plural categories each language's table must give (Intl.PluralRules).
-PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "other"},
+PLURAL_FORMS = {"ta": {"one", "other"}, "te": {"one", "other"}, "kn": {"one", "other"}, "ml": {"one", "other"}, "bn": {"one", "other"}, "as": {"one", "other"}, "or": {"one", "other"}, "ne": {"one", "other"}, "mr": {"one", "other"}, "gu": {"one", "other"}, "pa": {"one", "other"}, "ur": {"one", "other"},
+                "de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "other"},
                 "fr": {"one", "other"}, "ja": {"other"}, "ko": {"other"},
                 "th": {"other"}, "zh": {"other"},
                 "ar": {"zero", "one", "two", "few", "many", "other"}, "fa": {"one", "other"},
@@ -113,13 +114,14 @@ PLURAL_FORMS = {"de": {"one", "other"}, "el": {"one", "other"}, "es": {"one", "o
 # Tables made by machine translation (their "_machine": true shows the note);
 # German is reviewed by a person.
 MACHINE = {"el", "es", "fr", "ja", "ko", "th", "zh",
-           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi", "bs", "hr", "mk", "sl", "sr", "bg", "cs", "hu", "ro", "sk", "et", "fi", "is", "lt", "lv", "da", "fy", "lb", "mt", "sc", "az", "hy", "ka", "ku", "sq", "ca", "cy", "eu", "ga", "gl", "no", "af", "am", "bi", "din", "ff", "fj", "ha", "haw", "hif", "ht", "ig", "jam", "jv", "kab", "kg", "ln", "ms", "my", "ny", "om", "pap", "pcm", "rm", "sg", "sn", "so", "su", "sw", "ti", "tl", "tpi", "ty", "xh", "yo", "zu", "av", "ce", "glk", "mzn", "zgh"}
+           "ar", "fa", "he", "hi", "id", "it", "nl", "pl", "pt", "ru", "sv", "tr", "uk", "vi", "bs", "hr", "mk", "sl", "sr", "bg", "cs", "hu", "ro", "sk", "et", "fi", "is", "lt", "lv", "da", "fy", "lb", "mt", "sc", "az", "hy", "ka", "ku", "sq", "ca", "cy", "eu", "ga", "gl", "no", "af", "am", "bi", "din", "ff", "fj", "ha", "haw", "hif", "ht", "ig", "jam", "jv", "kab", "kg", "ln", "ms", "my", "ny", "om", "pap", "pcm", "rm", "sg", "sn", "so", "su", "sw", "ti", "tl", "tpi", "ty", "xh", "yo", "zu", "av", "ce", "glk", "mzn", "zgh",
+           "ta", "te", "kn", "ml", "bn", "as", "or", "ne", "mr", "gu", "pa", "ur"}
 # The core languages (docs/language-packs.md): the viewer has a UI table for
 # each, so a merged map in any of them shows its interface in that language.
 CORE = {"ar", "de", "el", "es", "fa", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl",
         "pt", "ru", "th", "tr", "uk", "vi", "zh"}
 # Written right to left: runtime.js SZ_RTL_LANGS gives the page dir="rtl".
-RTL = {"ar", "fa", "he", "glk", "mzn"}
+RTL = {"ar", "fa", "he", "glk", "mzn", "ur"}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 

@@ -60,7 +60,9 @@ NATIVE = {"ar": "العربية", "de": "Deutsch", "el": "Ελληνικά", "en
           "mzn": "مازِرونی", "ny": "Chichewa", "om": "Afaan Oromoo", "pap": "Papiamentu", "pcm": "Naijá",
           "sg": "Sängö", "sn": "chiShona", "so": "Soomaali", "su": "Basa Sunda", "sw": "Kiswahili", "ti": "ትግርኛ",
           "tl": "Tagalog", "tpi": "Tok Pisin", "ty": "Reo Tahiti", "xh": "isiXhosa", "yo": "Yorùbá",
-          "zgh": "ⵜⴰⵎⴰⵣⵉⵖⵜ", "zu": "isiZulu"}
+          "zgh": "ⵜⴰⵎⴰⵣⵉⵖⵜ", "zu": "isiZulu",
+          "as": "অসমীয়া", "bn": "বাংলা", "gu": "ગુજરાતી", "kn": "ಕನ್ನಡ", "ml": "മലയാളം", "mr": "मराठी",
+          "ne": "नेपाली", "or": "ଓଡ଼ିଆ", "pa": "ਪੰਜਾਬੀ", "ta": "தமிழ்", "te": "తెలుగు", "ur": "اردو"}
 
 
 # Per entry (plan review M-3): what a visitor downloads besides the base

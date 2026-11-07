@@ -118,10 +118,41 @@ def _check_translations(lang):
                          + " (tools/check_site_i18n.py)")
 
 
+# A language whose site.<lang>.json says "_maps_only": true (the languages
+# of maps in India and their neighbours, which have no page of their own
+# otherwise) gets a home page listing only the maps that have a version in
+# it, and pages for those maps alone; while no map has one, no pages at all
+# (build_page drops it from LANGUAGES, so no picker, alternate link or
+# sitemap entry points at a page that is not there).
+MAPS_ONLY = set()
+# {lang: ids of the maps with a version in it}, for the maps-only languages
+# (build_page): the map pages they have.
+_MAPS_ONLY_PAGES: dict = {}
+
+
+def _maps_only_flag(lang):
+    """Whether site.<lang>.json says "_maps_only": true (the _ keys are
+    dropped from site_text, so read the file itself)."""
+    try:
+        with open(os.path.join(I18N_DIR, f"site.{lang}.json"), encoding="utf-8") as f:
+            return json.load(f).get("_maps_only") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def has_page(lang, path):
+    """Whether the site has `path` ("" for the home page, "maps/<id>/") in
+    `lang`: every language has every page, but a maps-only one only its own
+    maps' pages."""
+    if lang not in MAPS_ONLY or not path.startswith("maps/"):
+        return True
+    return path.split("/")[1] in _MAPS_ONLY_PAGES.get(lang, ())
+
+
 def site_languages():
     """[(code, name in that language, path under web/)]: English first, then
     each language with both translation files, by code (each checked:
-    _check_translations)."""
+    _check_translations); a maps-only one (MAPS_ONLY) as well."""
     out = [("en", site_text("en")["lang_name"], "")]
     try:
         names = sorted(os.listdir(I18N_DIR))
@@ -131,11 +162,16 @@ def site_languages():
         m = re.fullmatch(r"site\.([a-z]{2,3})\.json", n)
         if m and m.group(1) != "en" and os.path.isfile(os.path.join(I18N_DIR, f"regions.{m.group(1)}.json")):
             _check_translations(m.group(1))
+            if _maps_only_flag(m.group(1)):
+                MAPS_ONLY.add(m.group(1))
             out.append((m.group(1), site_text(m.group(1))["lang_name"], f"{m.group(1)}/"))
     return out
 
 
 LANGUAGES = site_languages()
+# Every language with a translation; LANGUAGES is it less the maps-only
+# languages with no map yet (build_page sets it for each build).
+ALL_LANGUAGES = list(LANGUAGES)
 
 
 def region_text(lang, region):
@@ -1513,6 +1549,25 @@ def render_tier_header(label: str) -> str:
     )
 
 
+def maps_only_pages(maps):
+    """Set _MAPS_ONLY_PAGES (each maps-only language's maps: live English maps
+    with a version in it, _has_version) and return the maps-only languages
+    with no page this build: no such map and no live map made in it."""
+    for lang in MAPS_ONLY:
+        _MAPS_ONLY_PAGES[lang] = {e["region"]["id"] for e in maps
+                                  if e["live"] and e["region"].get("language", "en") == "en" and _has_version(e, lang)}
+        unnamed = sorted(rid for rid in _MAPS_ONLY_PAGES[lang] if rid not in _i18n_file("regions", lang))
+        if unnamed:
+            print(f"  WARNING [{lang}] maps with a version but no name in regions.{lang}.json "
+                  f"(listed in English): {unnamed}")
+    made_in = {e["region"].get("language") for e in maps if e["live"]}
+    dropped = [code for code, _n, _s in ALL_LANGUAGES
+               if code in MAPS_ONLY and not _MAPS_ONLY_PAGES.get(code) and code not in made_in]
+    if dropped:
+        print(f"Maps-only languages with no map in them yet (no pages): {dropped}")
+    return dropped
+
+
 def build_page():
     LIBRARY.clear()                       # this build's live maps only
     archive_items = fetch_archive_items()
@@ -1579,6 +1634,8 @@ def build_page():
     print(f"Builder links: {len(builder)} regions published in web/build/recipes/"
           + ("" if preview else " (off: no proxy)"))
     maps = collect_maps(archive_items, builder, preview)
+    dropped = maps_only_pages(maps)
+    LANGUAGES[:] = [x for x in ALL_LANGUAGES if x[0] not in dropped]
     for lang, _name, sub in LANGUAGES:
         _write_page(maps, lang, sub, preview, builder_on=bool(builder))
     write_map_pages(maps, preview, builder_on=bool(builder))
@@ -1605,6 +1662,8 @@ def render_lang_picker(lang, path=""):
     in every language."""
     links = []
     for code, name, sub in LANGUAGES:
+        if not has_page(code, path):
+            continue
         cur = ' aria-current="page"' if code == lang else ""
         links.append(f'<a href="/{sub}{path}" hreflang="{code}" lang="{code}"{cur}>{escape(name)}</a>')
     # Folded: 22 names take seven rows of a phone's screen. The links stay in
@@ -1620,7 +1679,8 @@ def render_head_links(lang, path="", title="", description=""):
     x-default (English), and Open Graph title, description and URL."""
     url = f"{SITE_URL}{_sub(lang)}{path}"
     out = [f'<link rel="canonical" href="{url}">']
-    out += [f'<link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}{path}">' for code, _n, sub in LANGUAGES]
+    out += [f'<link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}{path}">' for code, _n, sub in LANGUAGES
+            if has_page(code, path)]
     out.append(f'<link rel="alternate" hreflang="x-default" href="{SITE_URL}{path}">')
     out.append('<meta property="og:type" content="website">')
     out.append('<meta property="og:site_name" content="StreetZim">')
@@ -1830,6 +1890,13 @@ def _version(e, lang):
     return lang_versions(e["region"]["id"]).get(lang) if e.get("build_ok") else None
 
 
+def _has_version(e, lang):
+    """Whether a live map has a version in `lang` a page can offer: the map
+    in that language with its size (the map page offers none without)."""
+    v = _version(e, lang)
+    return bool(v and v.get("size"))
+
+
 def _original(e):
     """(href, fallback or None) of a live map's own file: the build worker's
     copy with today's viewer where there is one (fresh_viewer), archive.org's
@@ -1916,6 +1983,9 @@ def _write_page(maps, lang, sub, preview=False, builder_on=True):
     for e in maps:
         if not _on_page(e["region"], lang):
             continue
+        if lang in MAPS_ONLY and e["region"]["id"] not in _MAPS_ONLY_PAGES.get(lang, ()) \
+                and e["region"].get("language", "en") != lang:
+            continue                      # a maps-only language lists its maps alone
         if e["region"].get("language", "en") != lang and region_text(lang, e["region"])[0] in native:
             print(f"  [{lang}] {e['region']['id']}: listed as the map made in {lang} of the same name")
             continue
@@ -2068,7 +2138,7 @@ def render_map_page(e, lang, template, parts, preview=False, builder_on=True):
     body.append('<ul class="map-feats">' + "".join(f"<li>{f}</li>" for f in feats) + "</ul>")
     body.append(render_kiwix_guide(lang))
     others = [f'<li><a href="/{sub}maps/{rid}/" hreflang="{code}" lang="{code}">{escape(lname)}</a></li>'
-              for code, lname, sub in LANGUAGES if code != lang]
+              for code, lname, sub in LANGUAGES if code != lang and has_page(code, f"maps/{rid}/")]
     body.append(f'<h2>{t(lang, "mp_other_langs_h2")}</h2>')
     body.append('<ul class="other-langs">' + "".join(others) + "</ul>")
     path = f"maps/{rid}/"
@@ -2103,7 +2173,8 @@ def write_map_pages(maps, preview=False, builder_on=True):
     n = 0
     for lang, _name, sub in LANGUAGES:
         root = os.path.join(SCRIPT_DIR, sub, "maps")
-        for e in live:
+        mine = [e for e in live if has_page(lang, f"maps/{e['region']['id']}/")]
+        for e in mine:
             d = os.path.join(root, e["region"]["id"])
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "index.html"), "w", encoding="utf-8") as f:
@@ -2118,6 +2189,10 @@ def write_map_pages(maps, preview=False, builder_on=True):
             if old not in known and os.path.isfile(os.path.join(p, "index.html")):
                 shutil.rmtree(p)
                 print(f"  [{lang}] removed the page of {old} (no longer in REGIONS)")
+            elif (lang in MAPS_ONLY and old in known and not has_page(lang, f"maps/{old}/")
+                  and old in {e["region"]["id"] for e in live} and os.path.isfile(os.path.join(p, "index.html"))):
+                shutil.rmtree(p)
+                print(f"  [{lang}] removed the page of {old} (no version in {lang} now)")
     print(f"Map pages: {len(live)} maps in {len(LANGUAGES)} languages ({n} pages)")
 
 
@@ -2125,7 +2200,9 @@ def remove_dropped_languages():
     """The pages of a language no longer in web/i18n/: web/<code>/ holding
     only what this script writes there (index.html, maps/) goes; anything
     else in it keeps the folder."""
-    keep = {code for code, _n, _s in LANGUAGES}
+    # ALL_LANGUAGES: a maps-only language with no map just now (an archive.org
+    # hiccup) keeps its pages; the picker, hreflang and sitemap leave it out.
+    keep = {code for code, _n, _s in ALL_LANGUAGES}
     for code in sorted(os.listdir(SCRIPT_DIR)):
         d = os.path.join(SCRIPT_DIR, code)
         if (re.fullmatch(r"[a-z]{2,3}", code) and code not in keep and os.path.isdir(d)
@@ -2145,9 +2222,11 @@ def write_sitemap(maps):
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">']
     for path, lastmod in pages:
         alts = [f'    <xhtml:link rel="alternate" hreflang="{code}" href="{SITE_URL}{sub}{path}"/>'
-                for code, _n, sub in LANGUAGES]
+                for code, _n, sub in LANGUAGES if has_page(code, path)]
         alts.append(f'    <xhtml:link rel="alternate" hreflang="x-default" href="{SITE_URL}{path}"/>')
-        for _code, _n, sub in LANGUAGES:
+        for code, _n, sub in LANGUAGES:
+            if not has_page(code, path):
+                continue
             out.append("  <url>")
             out.append(f"    <loc>{SITE_URL}{sub}{path}</loc>")
             if lastmod:
@@ -2157,7 +2236,7 @@ def write_sitemap(maps):
     out.append("</urlset>")
     with open(os.path.join(SCRIPT_DIR, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
-    print(f"Sitemap: {len(pages) * len(LANGUAGES)} pages")
+    print(f"Sitemap: {sum(has_page(c, p) for p, _l in pages for c, _n, _s in LANGUAGES)} pages")
 
 
 def deploy():

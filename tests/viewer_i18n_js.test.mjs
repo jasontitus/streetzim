@@ -19,7 +19,7 @@ const ZH = table('zh');
 const NEW_MACHINE = ['el', 'es', 'fr', 'ja', 'ko'];
 // The core languages' tables added 2026-10-21 (docs/i18n.md), and Swedish.
 const CORE_NEW = ['ar', 'fa', 'he', 'hi', 'id', 'it', 'nl', 'pl', 'pt', 'ru', 'sv', 'tr', 'uk', 'vi'];
-const RTL = ['ar', 'fa', 'he', 'glk', 'mzn'];
+const RTL = ['ar', 'fa', 'he', 'glk', 'mzn', 'ur'];
 // Every table in resources/viewer/i18n but English.
 const ALL = fs.readdirSync(`${REPO}/resources/viewer/i18n`)
   .filter((n) => /^[a-z]{2,3}\.json$/.test(n) && n !== 'en.json').map((n) => n.slice(0, -5)).sort();

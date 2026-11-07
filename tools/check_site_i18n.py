@@ -100,12 +100,15 @@ def check_site(en: dict, tr: dict, label: str) -> list[str]:
     return problems
 
 
-def check_regions(en: dict, tr: dict, label: str) -> list[str]:
+def check_regions(en: dict, tr: dict, label: str, maps_only: bool = False) -> list[str]:
+    """A maps-only language (its site.<lang>.json says "_maps_only": true)
+    names only the maps it has versions of: a map it lacks is no problem."""
     problems = []
     ids = {k for k in en if not k.startswith("_")}
     have = {k for k in tr if not k.startswith("_")}
     for k in sorted(ids - have):
-        problems.append(f"{label}: {k}: missing")
+        if not maps_only:
+            problems.append(f"{label}: {k}: missing")
     for k in sorted(have - ids):
         problems.append(f"{label}: {k}: not in regions.en.json")
     for k in sorted(ids & have):
@@ -132,7 +135,12 @@ def main(argv: list[str]) -> int:
     en_regions = json.loads((SRC / "regions.en.json").read_text(encoding="utf-8"))
     problems: list[str] = []
     for lang in langs:
-        for kind, en, check in (("site", en_site, check_site), ("regions", en_regions, check_regions)):
+        try:
+            maps_only = json.loads((a.dir / f"site.{lang}.json").read_text(encoding="utf-8")).get("_maps_only") is True
+        except (OSError, ValueError, AttributeError):
+            maps_only = False
+        for kind, en, check in (("site", en_site, check_site),
+                                ("regions", en_regions, lambda e, t, lab: check_regions(e, t, lab, maps_only))):
             p = a.dir / f"{kind}.{lang}.json"
             try:
                 tr = json.loads(p.read_text(encoding="utf-8"))

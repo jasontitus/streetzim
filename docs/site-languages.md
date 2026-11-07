@@ -71,6 +71,29 @@ Add `site.<lang>.json` and `regions.<lang>.json`. If the language is written
 right to left, add it to `RTL_LANGS` in `generate.py`. Then add it to `LANGS`
 in `tests/test_site_languages.py`.
 
+## Languages of the maps alone
+
+A language of a region's maps that has no full site (Tamil, Telugu, Kannada,
+Malayalam, Bengali, Assamese, Odia, Nepali, Marathi, Gujarati, Punjabi and
+Urdu, so far) gets a site of its own maps: its `site.<lang>.json` says
+`"_maps_only": true`, and its `regions.<lang>.json` names only the maps of
+its region (`tools/check_site_i18n.py` asks no other map of it). Its home
+page lists only the maps that have a version in it (the map in that
+language, with its size: the build worker's file, or the builder page when
+the worker cannot serve it, as on any other page) and the maps made in it; it has pages for those maps
+alone. Nothing links a page it does not have: the language picker, the
+`hreflang` links and the sitemap leave it out of every other map's page.
+While no map has a version in it, it is in no picker, `hreflang` link or
+sitemap, and a language that never had one has no pages; one whose maps are
+out a while (archive.org down) keeps the pages it had, unlinked, rather than
+losing them. A map whose version is gone loses its page at the next build.
+A listed map with no name in `regions.<lang>.json` is listed in English, with
+a warning in the build's output
+(`web/generate.py` `MAPS_ONLY`, `has_page`; `tests/test_site_maps_only.py`).
+People who read those languages search in them, where little else offers an
+offline map: the page's title and description are in the language, with the
+maps' names in its script.
+
 ## Search engines
 
 Every page carries its canonical URL, `hreflang` links to all its language

@@ -128,8 +128,14 @@ SAME_AS_ENGLISH = {"fr": {"Satellite"}, "it": {"Satellite"}, "id": {"Kiwix PWA (
                    "nl": {"nightly builds"}}
 
 
+# Languages whose site lists only the maps that have a version in them
+# (site.<lang>.json "_maps_only"; test_site_maps_only.py).
+MAPS_ONLY = {"as", "bn", "gu", "kn", "ml", "mr", "ne", "or", "pa", "ta", "te", "ur"}
+
+
 def test_every_language_is_translated_in_full():
-    assert {code for code, _n, _s in gen.LANGUAGES} == LANGS
+    assert {code for code, _n, _s in gen.ALL_LANGUAGES} == LANGS | MAPS_ONLY
+    assert gen.MAPS_ONLY == MAPS_ONLY
     assert check_site_i18n.main([]) == 0
 
 
