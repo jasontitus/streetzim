@@ -244,6 +244,13 @@ Latin name already).
   2,333 from wiki objects alone. It costs a full extraction (Switzerland
   2,911 s, mostly assigning location context), so it suits a single
   country; `build-region-fast.sh` takes it as `STREETZIM_SEARCH_CACHE`.
+  `python tools/ml_search_cache.py <id>` makes one from
+  `world-data/regions/<id>.ml.mbtiles` with the tiles' languages (its
+  `.langs`) into `search_cache/ml-<date>/<id>/`; the runner takes it from a
+  `STREETZIM_SEARCH_CACHE=…` line in `rebuild-par/env/<id>`. It is what gives
+  streets their names in the region's sign languages (above): the world
+  cache carries no tile names. Measured 2026-11-07: Egypt 146 s, Taiwan 503
+  s, Ukraine 986 s; cities under a minute.
   Its features are the region tiles', not the world tiles': Switzerland's
   had 7.8% more POIs (a station's bays and stop positions, each a POI of
   the same name: "Luzern Bahnhof" 22 times), which the search pass's

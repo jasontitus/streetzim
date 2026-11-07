@@ -94,6 +94,17 @@ comparison, libzim's check and every MD5 read afresh: about seven reads of
 the file, 11 min for California, half an hour for Brazil): the periodic
 full check. Both publish the same bytes (tests/langpack/test_fresh_viewer.py).
 
+Run it with the build host's environment, as the pack queue has it:
+`. ops/langpack/host-env.sh && langpack_env_check && "$PYTHON" ops/langpack/fresh_all.py ...`.
+Without it the gates find no kiwix-serve, browser or node and fall back to
+the system Python, which lacks `zstandard`: every map fails its gates and
+nothing is published (2026-11-07, twice), which is safe but wasted.
+
+A download through the worker is a stopgap: it reads archive.org's file
+through the build worker, within the worker's daily budget. A map that
+needs today's viewer for long is better rebuilt or re-uploaded with it, so
+its archive.org file itself is current and the Download a plain link.
+
 ## What it does not change
 
 - archive.org's file, its torrent and the mirrors keep the viewer the map
