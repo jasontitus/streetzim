@@ -448,3 +448,17 @@ def test_the_location_fallback_keeps_each_city_of_a_multipoint(tmp_path, monkeyp
         return lookup(lat, lon)
     assert "Springfield" in at(3400, 3400) and "Springfield" in at(600, 600)
     assert "Shelbyville" in at(2600, 2600)
+
+
+def test_a_merged_street_knows_the_languages_its_pieces_disagree_on():
+    from streetzim.search_extract import merge_street_records
+    def piece(lat, names):
+        return {"name": "Main", "type": "street", "subtype": "minor", "location": "X",
+                "lat": lat, "lon": 31.0, **({"names": names} if names else {})}
+    [m] = merge_street_records([piece(30.0, {"fr": "Rue A", "ar": "شارع"}),
+                                piece(30.005, {"fr": "rue a"}), piece(30.01, None)])
+    assert "_names_differ" not in m          # one name once folded; a piece without one agrees
+    [m] = merge_street_records([piece(30.0, {"fr": "Rue A", "ar": "شارع"}), piece(30.005, {"fr": "Rue B"})])
+    assert m["_names_differ"] == ["fr"]
+    # its names stay the survivor's: a build in French still shows one
+    assert m["names"] in ({"fr": "Rue A", "ar": "شارع"}, {"fr": "Rue B"})

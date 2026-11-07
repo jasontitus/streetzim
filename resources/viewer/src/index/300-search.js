@@ -483,8 +483,20 @@ function _szCorners(as, bs) {
   });
   return out;
 }
+// The streets among the records found, as _szSignCorner takes them: each
+// with its match (`scores`: record -> _szSignScore's) and its point.
+function _szSignCornerCands(found, scores) {
+  return (found || []).filter(function (r) { return r.t === 'street'; }).map(function (r) {
+    var sc = scores.get(r) || {};
+    if (sc.ln && sc.own) sc = sc.own;   // its own name on the sign makes it a blade
+    return { rec: r, line: sc.line, weight: sc.weight, sim: sc.sim, ln: !!sc.ln, lat: +r.a, lon: +r.o };
+  });
+}
 function _szSignCorner(cands) {
-  var c = (cands || []).filter(function (x) { return x && x.sim >= 1 && isFinite(x.lat) && isFinite(x.lon); });
+  // A street matched by a name in another language only is no blade of a
+  // corner: an Arabic and French sign of one street must not pair it with
+  // a nearby street that has the French name.
+  var c = (cands || []).filter(function (x) { return x && x.sim >= 1 && !x.ln && isFinite(x.lat) && isFinite(x.lon); });
   var best = null, bestKm = SZ_SIGN_CORNER_KM;
   var dist = function (a, b) {
     var dy = (a[0] - b[0]) * 111.2, dx = (a[1] - b[1]) * 111.2 * Math.cos(a[0] * Math.PI / 180);
@@ -538,19 +550,22 @@ function _szSignBareType(words, norm) {
   return words.length > 0 && words.every(function (w) { return set[w] === 1 || /^\p{Nd}+$/u.test(w); });
 }
 function _szSignScore(rec, lines, norm) {
-  var forms = _szSearchForms(rec, norm).slice(), own = forms.length, dropped = [], blade = {};
-  if (rec.t === 'street') forms.slice().forEach(function (f) {
+  var all = _szSearchForms(rec, norm), forms = all.slice(), own = forms.length, dropped = [], blade = {};
+  // each form's own name (`from`: the form a type was dropped from), and
+  // whether that is a name in another language only (`ln`)
+  var from = [], viaLn = function (f) { var o = f < own ? f : from[f]; return !!(all.lang && all.lang[o]); };
+  if (rec.t === 'street') forms.slice().forEach(function (f, fi) {
     var gone = [];
     var t = String(f).replace(SZ_SIGN_DROP_TYPE, function (m, sp, w) { gone.push(_szSignTypeOf(w)); return ' '; })
       .replace(/\s+/g, ' ').trim();
-    if (t !== f && (t.match(/\p{Script=Cyrillic}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); }
+    if (t !== f && (t.match(/\p{Script=Cyrillic}/gu) || []).length >= 4 && forms.indexOf(t) < 0) { forms.push(t); dropped.push(gone); from[forms.length - 1] = fi; }
     var en = [];
     var u = String(f).replace(SZ_SIGN_EN_DROP, function (m, w) { en.push(SZ_SIGN_EN_TYPE_OF[String(w).toLowerCase()]); return ''; }).trim();
     if (u !== f && (u.match(/\p{Script=Latin}/gu) || []).length >= 3 && forms.indexOf(u) < 0) {
-      forms.push(u); dropped.push(en); blade[forms.length - 1] = true;
+      forms.push(u); dropped.push(en); blade[forms.length - 1] = true; from[forms.length - 1] = fi;
     }
   });
-  var best = null, bestValue = 0, hits = {};
+  var best = null, bestValue = 0, hits = {}, ownBest = null, ownValue = 0;
   for (var f = 0; f < forms.length; f++) {
     var name = _szSignText(forms[f], function (x) { return x; });
     if (!/\p{L}/u.test(name)) continue;   // a name of digits only ("1000") is no sign's place
@@ -566,8 +581,9 @@ function _szSignScore(rec, lines, norm) {
       if (s < SZ_SIGN_MIN) continue;
       var w = L.weight || 1, cover = Math.min(1, name.length / L.text.length);
       var value = s * w * (0.4 + 0.6 * cover);
-      if (f < own) (hits[l] = hits[l] || []).push({ len: name.length, sim: s, scripts: _szSignScripts(name), name: name });
-      if (value > bestValue) { bestValue = value; best = { sim: s, weight: w, cover: cover, line: L.raw }; }
+      if (f < own) (hits[l] = hits[l] || []).push({ len: name.length, sim: s, scripts: _szSignScripts(name), name: name, ln: viaLn(f) });
+      if (value > bestValue) { bestValue = value; best = { sim: s, weight: w, cover: cover, line: L.raw, ln: viaLn(f) }; }
+      if (!viaLn(f) && value > ownValue) { ownValue = value; ownBest = { sim: s, weight: w, line: L.raw }; }
     }
   }
   // A sign that gives the name in two scripts on one line ("中国银行 BANK OF
@@ -575,18 +591,21 @@ function _szSignScore(rec, lines, norm) {
   // that much more the record's. Its own names only, in scripts no other
   // counted name uses (two Latin spellings of one name are one name read).
   for (var k in hits) {
-    var H = hits[k].sort(function (a, b) { return b.sim * b.len - a.sim * a.len; }), used = {}, len = 0, sim = 0;
+    var H = hits[k].sort(function (a, b) { return b.sim * b.len - a.sim * a.len; }), used = {}, len = 0, sim = 0, ln = true;
     H.forEach(function (h, i) {
       if (!h.scripts.length || h.scripts.some(function (x) { return used[x]; })) return;
       // a second name only as most (80%) of the line's letters in its script:
       // "Pharmacy" of a shop named صيدلية is not "Al Noor Pharmacy"
       if (i > 0 && h.len < 0.8 * _szSignScriptLetters(lines[k].text, h.scripts)) return;
       h.scripts.forEach(function (x) { used[x] = 1; });
-      len += h.len; sim = sim || h.sim;
+      len += h.len; sim = sim || h.sim; ln = ln && h.ln;
     });
     var L2 = lines[k], w2 = L2.weight || 1, cover2 = Math.min(1, len / L2.text.length), value2 = sim * w2 * (0.4 + 0.6 * cover2);
-    if (value2 > bestValue) { bestValue = value2; best = { sim: sim, weight: w2, cover: cover2, line: L2.raw }; }
+    if (value2 > bestValue) { bestValue = value2; best = { sim: sim, weight: w2, cover: cover2, line: L2.raw, ln: ln }; }
   }
+  // found by another language's name: its best match by a name of its own
+  // too (`own`), for a corner (_szSignCornerCands)
+  if (best && best.ln && ownBest) best.own = ownBest;
   return best;
 }
 // How many of a folded line's letters are in `scripts` (_szSignScripts).
@@ -1990,10 +2009,7 @@ var SEARCH_SHARDS = (function () {
     return streamFilterChunks(prefixes, '', accept, hasDigits && !!opts.admit).then(function(found) {
       if (typeof opts.prune === 'function') found = opts.prune(found, words);
       // two street blades: their corner first (_szSignCorner)
-      var corner = _szSignCorner(found.filter(function(r) { return r.t === 'street'; }).map(function(r) {
-        var sc = scores.get(r) || {};
-        return { rec: r, line: sc.line, weight: sc.weight, sim: sc.sim, lat: +r.a, lon: +r.o };
-      }));
+      var corner = _szSignCorner(_szSignCornerCands(found, scores));
       var scored = scoreResults(found, '', function(item) {
         var sc = scores.get(item) || { sim: 0, weight: 0, cover: 0 };
         if (corner && item === corner[0]) return 1e6;

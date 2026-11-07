@@ -174,14 +174,15 @@ def test_record_names_include_ln_once():
 
 # --- through search pass 1 -------------------------------------------------
 
-def _bucket(tmp_path, feats, refs, langs):
+def _bucket(tmp_path, feats, refs, langs, street_langs=None):
     path = tmp_path / "search.jsonl"
     path.write_text("".join(json.dumps(f, ensure_ascii=False) + "\n" for f in feats),
                     encoding="utf-8")
     (tmp_path / "chunks").mkdir()
     return W._search_bucket(search_features_path=str(path), wikidata_data=None,
                             wiki_cross_refs=refs, loc_lookup=None, _bundled_set=set(),
-                            chunk_tmp=str(tmp_path / "chunks"), ln_languages=langs)
+                            chunk_tmp=str(tmp_path / "chunks"), ln_languages=langs,
+                            street_languages=street_langs)
 
 
 def _chunk(tmp_path, prefix):
@@ -230,6 +231,75 @@ def test_streets_get_no_ln(tmp_path):
     assert not (tmp_path / "chunks" / "rh.jsonl").exists() or all(
         "ln" not in r for r in _chunk(tmp_path, "rh"))
     assert all("ln" not in r for r in _chunk(tmp_path, "ru"))
+
+
+# --- streets: their own names in the languages of the region's signs ------
+
+EGYPT = {"tileLanguages": ["ar", "de", "fr", "ru", "zh"], "regionLanguages": ["ar"]}
+PHARAONS = {"name": "Al Faranah Street", "name_native": "شارع الفراعنه", "type": "street",
+            "lat": 30.13, "lon": 31.29, "names": {"ar": "شارع الفراعنه", "fr": "Rue Pharaons",
+                                                  "ru": "улица Фараонов"}}
+
+
+def test_street_languages_are_the_regions_and_french(monkeypatch):
+    monkeypatch.delenv("STREETZIM_SEARCH_LN", raising=False)
+    monkeypatch.delenv("STREETZIM_SEARCH_STREET_LN", raising=False)
+    monkeypatch.delenv("STREETZIM_SEARCH_LN_LANGUAGES", raising=False)
+    assert W.search_street_languages(EGYPT) == ["ar", "fr"]
+    # Israel: Hebrew and Arabic signs (French beside Arabic, as in the
+    # Levant); the Russian names are on none
+    assert W.search_street_languages({"tileLanguages": ["ar", "fr", "he", "ru"],
+                                      "regionLanguages": ["ar", "he", "en"]}) == ["ar", "fr", "he"]
+    # French only beside Arabic: not Japan's or Ukraine's streets
+    assert W.search_street_languages({"tileLanguages": ["fr", "ja", "ru"], "regionLanguages": ["ja"]}) == ["ja"]
+    assert W.search_street_languages({"tileLanguages": ["fr", "uk", "ru"], "regionLanguages": "uk"}) == ["uk"]
+    assert W.search_street_languages({"regionLanguages": ["ar"]}) == []     # not language-ready
+    assert W.search_street_languages({}) == []
+    monkeypatch.setenv("STREETZIM_SEARCH_STREET_LN", "0")
+    assert W.search_street_languages(EGYPT) == []
+
+
+def test_a_street_carries_its_own_names_not_the_ones_it_shows():
+    assert W.street_names_in(PHARAONS, ["ar", "fr"]) == {"fr": "Rue Pharaons"}
+    assert W.street_names_in(PHARAONS, []) == {}
+    assert W.street_names_in(dict(PHARAONS, type="poi"), ["ar", "fr"]) == {}
+    assert W.street_names_in(dict(PHARAONS, names={"fr": "AL FARANAH STREET"}), ["fr"]) == {}
+
+
+def test_no_name_in_a_language_the_pieces_disagree_on():
+    assert W.street_names_in(dict(PHARAONS, _names_differ=["fr"]), ["ar", "fr"]) == {}
+
+
+def test_a_wider_ln_is_kept(monkeypatch):
+    """STREETZIM_SEARCH_LN_TYPES with streets: their ln in every search
+    language, which the street rule does not narrow."""
+    rec = W.search_record(PHARAONS, None, ["fr", "ru"], {"street"}, None, ["fr"])
+    assert rec["ln"] == {"fr": "Rue Pharaons", "ru": "улица Фараонов"}
+
+
+def test_a_street_found_by_its_french_name(tmp_path):
+    _bucket(tmp_path, [PHARAONS], {}, ["ar", "fr", "ru"], ["ar", "fr"])
+    [r] = [r for r in _chunk(tmp_path, "ph") if r["t"] == "street"]
+    assert r["n"] == "Al Faranah Street" and r["ln"] == {"fr": "Rue Pharaons"}
+
+
+def test_a_street_takes_no_names_from_the_lookup(tmp_path):
+    """The names lookup leaves roads out; a street named like a village
+    there is not that village."""
+    plain = {k: v for k, v in PHARAONS.items() if k != "names"}
+    refs = {("al faranah street", int(round(30.13 * 1e4)), int(round(31.29 * 1e4))):
+            {"names": {"fr": "Village"}}}
+    _bucket(tmp_path, [plain], refs, ["ar", "fr"], ["ar", "fr"])
+    assert all("ln" not in r for r in _chunk(tmp_path, "al"))
+
+
+def test_the_in_memory_path_names_streets_too(monkeypatch):
+    c = _Creator()
+    W._add_search_in_memory(c, _Item, search_features=[dict(PHARAONS)], loc_lookup=None,
+                            ln_languages=["ar", "fr"], street_languages=["ar", "fr"])
+    rows = [r for k, v in c.items.items() if k.startswith("search-data/") and k.endswith(".json")
+            for r in json.loads(v) if isinstance(r, dict) and r.get("t") == "street"]
+    assert rows and all(r.get("ln") == {"fr": "Rue Pharaons"} for r in rows)
 
 
 # --- the PBF side -----------------------------------------------------------
@@ -379,6 +449,7 @@ def test_the_build_takes_the_languages_from_map_config(tmp_path, monkeypatch):
 
     def spy(**kw):
         got["ln"] = kw.get("ln_languages")
+        got["street"] = kw.get("street_languages")
         raise RuntimeError("stop")
     monkeypatch.setattr(W, "_search_bucket", spy)
     for cfg, want in (({"tileLanguages": ["de"], "regionLanguages": ["de", "rm"]}, ["de", "rm"]),
@@ -391,6 +462,7 @@ def test_the_build_takes_the_languages_from_map_config(tmp_path, monkeypatch):
                           routing_graph_path=None, address_count=0, overture_sources=None,
                           overture_themes=None, xapian_mode="libzim", chunk_tmp=str(tmp_path))
         assert got["ln"] == want
+        assert got["street"] == [x for x in want if x in ("de", "rm", "fr")]
     assert real is not None
 
 

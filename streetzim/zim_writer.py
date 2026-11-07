@@ -355,7 +355,8 @@ def _title_text(text):
 # Record types that name places in the visitor's language (`ln`): what a
 # visitor looks up by its name in their own language. Streets and addresses
 # are left out (their names are rarely translated, and they are most of a
-# map's records). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides;
+# map's records); a street carries only the names of its region's street
+# signs (search_street_languages). STREETZIM_SEARCH_LN_TYPES (comma-separated) overrides;
 # STREETZIM_SEARCH_LN_LANGUAGES caps the languages (streetzim.languages
 # .search_languages). Measured (docs/search-records.md): Poland's search
 # chunks +1.7% and 289 new 2-character keys (manifest ~+5 KB), Greece's
@@ -379,6 +380,44 @@ def search_ln_languages(map_config):
         return []
     return search_languages(map_config.get("tileLanguages"),
                             map_config.get("regionLanguages"))
+
+
+def search_street_languages(map_config):
+    """The languages a build's STREET records carry `ln` in: the ones of
+    search_ln_languages that a street sign of the region is written in, its
+    region languages, and French where Arabic is one of them (Egypt's, the
+    Maghreb's and the Levant's second sign language): "RUE PHARAONS" under
+    "شارع الفراعنة". Not the other tile
+    languages (the Russian names of Israeli streets are on no sign), never
+    English (a record's `n` is already the English or Latin name). A street
+    takes only its own tags (its tile feature's `names`; never the names
+    lookup, which leaves roads out, nor another street of the same name).
+    STREETZIM_SEARCH_STREET_LN=0 turns it off."""
+    if os.environ.get("STREETZIM_SEARCH_STREET_LN", "1") == "0" or not map_config:
+        return []
+    region = map_config.get("regionLanguages") or []
+    region = [region] if isinstance(region, str) else list(region)
+    sign = set(region) | ({"fr"} if "ar" in region else set())
+    return [x for x in search_ln_languages(map_config) if x in sign]
+
+
+def street_names_in(feat, languages):
+    """`ln` of a street record: its own name:<lang> for `languages`
+    (search_street_languages), each only when it is none of the names the
+    record already has (n, nn, nl, folded as the search folds), nor in a
+    language the pieces of a merged street disagree on (`_names_differ`,
+    merge_street_records)."""
+    if not languages or feat.get("type") != "street":
+        return {}
+    from cloud.search_shards import norm as _fold
+    shown, native, latin = shown_names(feat)
+    have = {_fold(x) for x in (shown, native, latin) if x}
+    differ = set(feat.get("_names_differ") or ())
+    out = {}
+    for lang, v in localized_names(feat, None, languages, types={"street"}).items():
+        if v and _fold(v) not in have and lang not in differ:
+            out[lang] = v
+    return out
 
 
 def _ln_types():
@@ -1417,6 +1456,7 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
                            loc_lookup=loc_lookup, _bundled_set=_bundled_set,
                            chunk_tmp=chunk_tmp, page_types=page_types,
                            ln_languages=search_ln_languages(map_config),
+                           street_languages=search_street_languages(map_config),
                            ln_name_refs=ln_name_refs)
         _search_emit_chunks(creator, MapItem,
                             split_hot_search_chunks_mb=split_hot_search_chunks_mb,
@@ -1447,7 +1487,8 @@ def _add_search(creator, MapItem, *, mbtiles_path, search_features_path,
         _add_search_in_memory(creator, MapItem, search_features=search_features,
                               loc_lookup=loc_lookup, page_types=page_types,
                               wiki_cross_refs=wiki_cross_refs, corpus=corpus,
-                              ln_languages=search_ln_languages(map_config))
+                              ln_languages=search_ln_languages(map_config),
+                              street_languages=search_street_languages(map_config))
 
 
 def _tile_credit(tile_metadata):
@@ -2597,7 +2638,7 @@ def _add_routing_graph(creator, MapItem, *, routing_graph_path, routing_graph_ch
                  + (f" + {routing_graph_chunk_mb} MB chunks" if routing_graph_chunk_mb else ""))
 
 
-def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None):
+def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None, street_languages=None):
     """The search record (docs/search-records.md) of search feature `feat`,
     as search pass 1 writes it; `wiki`: its wiki cross-ref entry (for an
     admin area, admin_wiki()), or None. `ln_languages` (search_ln_languages):
@@ -2632,6 +2673,10 @@ def search_record(feat, wiki=None, ln_languages=None, ln_types=None, named=None)
         rec["nl"] = latin
     if ln_languages:
         ln = localized_names(feat, wiki, ln_languages, ln_types, named)
+        if ln:
+            rec["ln"] = ln
+    if street_languages and rec["t"] == "street" and "ln" not in rec:   # a wider ln (LN_TYPES) stays
+        ln = street_names_in(feat, street_languages)
         if ln:
             rec["ln"] = ln
     for ov_key in ("ws", "p", "soc", "brand", "wd", "cat", "source"):
@@ -2725,12 +2770,13 @@ def near_duplicate_plan(search_features_path, match):
     return drop, takes
 
 
-def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None, ln_name_refs=None):
+def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_lookup, _bundled_set, chunk_tmp, page_types=KIWIX_PAGE_TYPES, ln_languages=None, ln_name_refs=None, street_languages=None):
     """Search pass 1: stream the search JSONL into per-prefix and per-category
     chunk files in `chunk_tmp`, plus the Xapian candidates file.
     `ln_languages`: search_ln_languages() of the build; `ln_name_refs`: the
     names lookup (addresses.extract_name_tags_pbf), matched as the wiki
-    cross-refs are (feature_wiki, names_link)."""
+    cross-refs are (feature_wiki, names_link). `street_languages`
+    (search_street_languages): a street's own names in those."""
     _ln_t = _ln_types() if ln_languages else None
     _name_refs = ln_name_refs if ln_languages else None
     _name_folded = wiki_folded_index(_name_refs, names_link) if _name_refs else None
@@ -2856,7 +2902,7 @@ def _search_bucket(*, search_features_path, wikidata_data, wiki_cross_refs, loc_
                 if wiki:
                     wiki_fields_added += 1
                 # The record shape and its rounding: search_record.
-                rec = search_record(feat, wiki, ln_languages, _ln_t, named)
+                rec = search_record(feat, wiki, ln_languages, _ln_t, named, street_languages)
                 if "ln" in rec:
                     ln_added += 1
                 if wiki:
@@ -3611,7 +3657,7 @@ def _search_xapian_pages(creator, MapItem, *, xapian_mode, xapian_path, total_fe
 
 def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                           page_types=KIWIX_PAGE_TYPES, wiki_cross_refs=None,
-                          corpus=None, ln_languages=None):
+                          corpus=None, ln_languages=None, street_languages=None):
     """Search for an in-memory feature list (small builds and tests). Its
     Kiwix pages are written in every --xapian mode; `corpus`
     (--xapian=builder) gets their xapianbuilder documents. `ln_languages`:
@@ -3654,6 +3700,10 @@ def _add_search_in_memory(creator, MapItem, *, search_features, loc_lookup,
                 rec["q"] = wiki["wikidata"]
         if ln_languages:
             _ln = localized_names(f, None, ln_languages, _ln_t)
+            if _ln:
+                rec["ln"] = _ln
+        if street_languages and f.get("type") == "street" and "ln" not in rec:
+            _ln = street_names_in(f, street_languages)
             if _ln:
                 rec["ln"] = _ln
         # Under its other names too, as _search_bucket does.

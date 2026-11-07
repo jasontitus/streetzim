@@ -144,7 +144,9 @@ Latin name already).
   out.
 - **Which records:** `place`, `admin`, `airport`, `peak`, `park`, `water`
   and `poi` (`zim_writer.LN_TYPES`; `STREETZIM_SEARCH_LN_TYPES` overrides,
-  an empty value meaning none); not streets or addresses. An admin area's
+  an empty value meaning none); not addresses. Streets carry `ln` in the
+  languages their signs are written in, not every search language (below).
+  An admin area's
   names travel as `lnames` (not `names`, which a build in another language
   shows as the record's name); a salvage build (`--skip-address-extract`)
   keeps the admin rows, and so the `lnames`, of the build whose search
@@ -189,6 +191,31 @@ Latin name already).
   second language (`SZ_LANG2`, a merged language-pack ZIM) shows `ln[lang]`
   first (`""`: `nn`), beside `nn` (or `n` when that is the same): "Genf ·
   Genève". The Find page matches them too.
+- **Streets:** a bilingual street sign ("شارع الفراعنة" over "RUE
+  PHARAONS", Hebrew, Arabic and English in Israel) is often read best in
+  its second language, and a photo search can only find the street under
+  a name it has. A street record carries `ln` in its map's search
+  languages that are also its region languages, and French where Arabic
+  is one (Egypt's, the Maghreb's and the Levant's second sign language):
+  `zim_writer.search_street_languages`; Egypt ar and fr, west-asia ar, fr,
+  he and the rest of its region's, never the Russian names of Israeli
+  streets; Japan or Ukraine no French. A street that already carries `ln`
+  (`STREETZIM_SEARCH_LN_TYPES` with `street`) keeps it. Only the street's own tile names (search features extracted
+  with `STREETZIM_TILE_LANGUAGES`), never the names lookup or another
+  street of the same name; a name the record already has (`n`, `nn`, `nl`,
+  folded) is left out, and so is one in which the pieces of a merged
+  street (`merge_street_records`) give two names once folded
+  (`_names_differ`; the street's `names` stay the survivor's, which a build
+  in that language shows). In the photo search a street matches as a
+  blade of a corner (`_szSignCorner`) by a name of its own only: its best
+  match by one (`own`) when another language's name scored higher, so a
+  two-blade Arabic and French corner sign stands, and an Arabic and French
+  sign of one street does not pair it with a nearby street that has its
+  French name. Measured in OSM: Egypt's streets have 129 distinct French names
+  (its `n` is already `name:en`), north-africa's Arabic streets 30,465,
+  west-asia's Hebrew streets 24,513 Arabic ones. A search cache without
+  tile names (the world cache) gives streets none.
+  `STREETZIM_SEARCH_STREET_LN=0` turns it off.
 - **Off:** `STREETZIM_SEARCH_LN=0`, or any map that is not language-ready
   (no `tileLanguages`): no `ln`, byte for byte as before.
 - **Caps:** `STREETZIM_SEARCH_LN_TYPES` (record types) and

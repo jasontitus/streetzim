@@ -26,7 +26,7 @@ const M = new Function(
   slice(HTML, 'var SZ_SIGN_TYPES = {', '\nvar SZ_SIGN_FILLER') +      // the street types, 305-ocr-search.js's
   slice(HTML, '// BEGIN admin-search', '// END admin-search') +
   slice(HTML, '// BEGIN sign-match', '// END sign-match') +
-  '\nreturn { _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignCorner, _szCrossing, _szCornerQuery, _szStreetStarts, _szCorners, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
+  '\nreturn { _szSignCornerCands, _szSignText, _szSignWords, _szEditsWithin, _szSignSimilarity, _szSignScore, _szSignCorner, _szCrossing, _szCornerQuery, _szStreetStarts, _szCorners, _szSignLines, _szBigrams, SZ_SIGN_MIN, SZ_SIGN_DROP_TYPE, SZ_SIGN_LINE_TYPE };')();
 const LN = HTML.slice(HTML.indexOf('function _szLnPairs('), HTML.indexOf('\n}\n', HTML.indexOf('function _szLnPairs(')) + 3);
 const L = new Function(LN + slice(HTML, '// BEGIN sign-lines', '// END sign-lines') +
   slice(HTML, '// BEGIN sign-env', '// END sign-env') +
@@ -545,13 +545,43 @@ ok('a name in another language counts (ln)', () => {
   assert.ok(matches({ n: 'Geneva', ln: { de: 'Genf', ru: 'Женева' }, t: 'place' }, ['Женева']));
 });
 
+ok('a street found by its name in another language says so, and is no blade of a corner', () => {
+  const lines = M._szSignLines(['شلرع افر عن', 'RUE PHARAONS'], norm, 12);
+  const st = { n: 'Al Faranah Street', nn: 'شارع الفراعنه', ln: { fr: 'Rue Pharaons' }, t: 'street' };
+  const sc = M._szSignScore(st, lines, norm);
+  assert.ok(sc && sc.sim === 1 && sc.ln === true && sc.line === 'RUE PHARAONS', JSON.stringify(sc));
+  assert.strictEqual(M._szSignScore({ n: 'Rue Pharaons', t: 'street' }, lines, norm).ln, false);
+  // an Arabic + French sign of one street: the Arabic line finds it, the French line a
+  // neighbour carrying that French name; the two are no corner
+  const a = { rec: { n: 'Al Faranah Street' }, line: 'شارع الفراعنة', sim: 1, weight: 1, ln: false, lat: 30.0, lon: 31.0 };
+  const b = { rec: { n: 'Other Street' }, line: 'RUE PHARAONS', sim: 1, weight: 1, ln: true, lat: 30.001, lon: 31.0 };
+  assert.strictEqual(M._szSignCorner([a, b]), null);
+  assert.ok(M._szSignCorner([a, Object.assign({}, b, { ln: false })]));
+  // as the search hands them over: the records found and their matches
+  const ra = { n: 'Al Faranah Street', t: 'street', a: 30.0, o: 31.0 }, rb = { n: 'Other Street', t: 'street', a: 30.001, o: 31.0 };
+  const scores = new Map([[ra, { line: 'شارع الفراعنة', sim: 1, weight: 1, ln: false }], [rb, { line: 'RUE PHARAONS', sim: 1, weight: 1, ln: true }]]);
+  const cands = M._szSignCornerCands([ra, rb, { n: 'Cafe', t: 'poi', a: 30, o: 31 }], scores);
+  assert.deepStrictEqual(cands.map((x) => [x.rec.n, x.ln]), [['Al Faranah Street', false], ['Other Street', true]]);
+  assert.strictEqual(M._szSignCorner(cands), null);
+  // a two-blade bilingual corner: the French lines (bigger) find both streets by their
+  // French names, the Arabic lines by their own; the corner stands
+  const blades = M._szSignLines([{ text: 'شارع الفراعنة', weight: 0.8 }, { text: 'RUE DES PHARAONS', weight: 1 },
+                                 { text: 'شارع النيل', weight: 0.8 }, { text: 'RUE DU NIL', weight: 1 }], norm, 12);
+  const pa = { n: 'Pharaohs Street', nn: 'شارع الفراعنة', ln: { fr: 'Rue des Pharaons' }, t: 'street', a: 30.0, o: 31.0 };
+  const pb = { n: 'Nile Street', nn: 'شارع النيل', ln: { fr: 'Rue du Nil' }, t: 'street', a: 30.001, o: 31.0 };
+  const sa = M._szSignScore(pa, blades, norm);
+  assert.ok(sa.ln && sa.own && sa.own.line === 'شارع الفراعنة', JSON.stringify(sa));
+  const two = M._szSignCorner(M._szSignCornerCands([pa, pb], new Map([[pa, sa], [pb, M._szSignScore(pb, blades, norm)]])));
+  assert.ok(two && [two[0].n, two[1].n].sort().join() === 'Nile Street,Pharaohs Street', JSON.stringify(two));
+});
+
 ok('the sign\'s big text outweighs its small print', () => {
   const lines = M._szSignLines([{ text: 'Monaco', weight: 0.7 }, { text: 'Rue Paradis', weight: 1 }], norm, 12);
   assert.deepStrictEqual(lines.map((l) => l.text), ['rueparadis', 'monaco']);
   assert.deepStrictEqual(M._szSignScore({ n: 'Monaco', t: 'admin' }, lines, norm),
-                         { sim: 1, weight: 0.7, cover: 1, line: 'Monaco' });
+                         { sim: 1, weight: 0.7, cover: 1, line: 'Monaco', ln: false });
   assert.deepStrictEqual(M._szSignScore({ n: 'Rue Paradis', t: 'street' }, lines, norm),
-                         { sim: 1, weight: 1, cover: 1, line: 'Rue Paradis' });
+                         { sim: 1, weight: 1, cover: 1, line: 'Rue Paradis', ln: false });
 });
 
 ok('a name covering the whole line before one covering part of it; short names are whole words', () => {

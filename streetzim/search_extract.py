@@ -1397,8 +1397,24 @@ def merge_street_records(records):
         elif i in keep:
             rec = dict(records[i])
             rec["_pts"] = keep[i]
+            differ = _names_that_differ([records[j] for j in root_members])
+            if differ:
+                rec["_names_differ"] = differ
             out.append(rec)
     return out
+
+
+def _names_that_differ(pieces):
+    """The languages in which a merged street's pieces give two names
+    (`names`, folded as the search folds them): the street carries no
+    search name in those (zim_writer.street_names_in). Its `names` stay
+    the survivor's, as a build in another language shows them."""
+    from cloud.search_shards import norm
+    seen = {}
+    for p in pieces:
+        for lang, v in (p.get("names") or {}).items():
+            seen.setdefault(lang, set()).add(norm(v))
+    return sorted(lang for lang, vs in seen.items() if len(vs) > 1)
 
 
 def merge_streets_in_file(path):
