@@ -140,7 +140,7 @@ def main(argv: list[str]) -> int:
         except (OSError, ValueError, AttributeError):
             maps_only = False
         for kind, en, check in (("site", en_site, check_site),
-                                ("regions", en_regions, lambda e, t, lab: check_regions(e, t, lab, maps_only))):
+                                ("regions", en_regions, lambda e, t, lab, mo=maps_only: check_regions(e, t, lab, mo))):
             p = a.dir / f"{kind}.{lang}.json"
             try:
                 tr = json.loads(p.read_text(encoding="utf-8"))
