@@ -74,11 +74,35 @@ SCRIPT_RANGES: dict[str, tuple[tuple[int, int], ...]] = {
     "Tfng": ((0x2D30, 0x2D7F),),
 }
 # A script gets its recognizer when at least this share of the named
-# records sampled use it, or when it is the most used script. Every other
-# recognizer also reads unaccented Latin, so Latin needs more beside
-# another script: brand names in Bangkok do not add 21 MB to Thailand.
+# records sampled use it, or when it is the most used script.
 MIN_SHARE = 0.05
-MIN_SHARE_LATIN = 0.25
+# Latin's recognizer beside another: the others read Latin far worse than it
+# (the 2026-11 world photo set: Latin lines read 63% on Iran's Arabic-only
+# map, 77% on Egypt's, about 90% wherever Latin's recognizer was there), and
+# signs carry English or French beside their own script.
+MIN_SHARE_LATIN = 0.05
+# A region language's script (map-config regionLanguages) is on its signs
+# though the map's names may give it little (North Africa's names are mostly
+# Latin; its signs Arabic and French): the region's first language brings its
+# recognizer whatever the share, any other one from MIN_SHARE_LANGUAGE.
+# The list also holds languages spoken at home that signs do not use (Arabic
+# in France and Turkey, Urdu across India), whose script the names show next
+# to nothing of: France 0.00%, India South 0.01%, Turkey 0.20%, against
+# Arabic in North Africa 2.6%, the Himalayas 1.3%, Central Asia 0.65%.
+MIN_SHARE_LANGUAGE = 0.005
+LANGUAGE_SCRIPT = {
+    "ar": "Arab", "fa": "Arab", "ur": "Arab", "ps": "Arab", "ckb": "Arab", "sd": "Arab", "ug": "Arab",
+    "ks": "Arab", "skr": "Arab", "glk": "Arab", "mzn": "Arab", "ary": "Arab", "arz": "Arab",
+    "ru": "Cyrl", "uk": "Cyrl", "be": "Cyrl", "bg": "Cyrl", "sr": "Cyrl", "mk": "Cyrl", "kk": "Cyrl",
+    "ky": "Cyrl", "tg": "Cyrl", "mn": "Cyrl", "tt": "Cyrl", "ba": "Cyrl", "ce": "Cyrl", "os": "Cyrl",
+    "el": "Grek", "zh": "Hani", "ja": "Hani", "ko": "Hang", "th": "Thai",
+    "hi": "Deva", "mr": "Deva", "ne": "Deva", "mai": "Deva", "bho": "Deva", "new": "Deva", "doi": "Deva",
+    "ta": "Taml", "te": "Telu",
+    # scripts no recognizer reads: named in the build log when they qualify
+    "he": "Hebr", "ka": "Geor", "hy": "Armn", "am": "Ethi", "ti": "Ethi", "bn": "Beng", "as": "Beng",
+    "gu": "Gujr", "or": "Orya", "kn": "Knda", "ml": "Mlym", "si": "Sinh", "lo": "Laoo", "bo": "Tibt",
+    "dz": "Tibt", "my": "Mymr", "km": "Khmr", "dv": "Thaa", "zgh": "Tfng",
+}
 SAMPLE = 200_000
 
 
@@ -187,10 +211,13 @@ def check_scripts(scripts: Iterable[str], lock: dict[str, Any] | None = None) ->
 
 def choose_models(counts: Counter[str], total: int, *,
                   scripts: Iterable[str] | None = None,
+                  languages: Iterable[str] | None = None,
                   lock: dict[str, Any] | None = None) -> Plan:
     """The recognizers for the scripts in ``counts`` (or ``scripts``, when
     given: --ocr-scripts): each script used by at least MIN_SHARE of the
-    ``total`` names, and the most used one, mapped to its recognizer;
+    ``total`` names (Latin MIN_SHARE_LATIN), the most used one, the script of
+    the region's first language and those of its other ``languages`` used by
+    MIN_SHARE_LANGUAGE (LANGUAGE_SCRIPT), mapped to their recognizers;
     Latin's when nothing else qualifies."""
     by_script = recognizers_by_script(lock)
     if scripts is not None:
@@ -200,6 +227,10 @@ def choose_models(counts: Counter[str], total: int, *,
         wanted = [s for i, s in enumerate(ranked)
                   if i == 0 or (total and counts[s] / total
                                 >= (MIN_SHARE_LATIN if s == "Latn" else MIN_SHARE))]
+        for i, lang in enumerate(languages or ()):
+            s = LANGUAGE_SCRIPT.get(str(lang).split("-")[0].lower())
+            if s and s not in wanted and (i == 0 or (total and counts[s] / total >= MIN_SHARE_LANGUAGE)):
+                wanted.append(s)
     recs: list[str] = []
     unread: list[str] = []
     for s in wanted:
@@ -215,10 +246,12 @@ def choose_models(counts: Counter[str], total: int, *,
 
 def plan_for(features: str | Iterable[dict[str, Any]] | None, *,
              scripts: Iterable[str] | None = None,
+             languages: Iterable[str] | None = None,
              lock: dict[str, Any] | None = None) -> Plan:
-    """The models for a map whose search records are ``features``."""
+    """The models for a map whose search records are ``features`` and
+    whose region languages are ``languages``."""
     counts, total = count_scripts(native_names(features))
-    plan = choose_models(counts, total, scripts=scripts, lock=lock)
+    plan = choose_models(counts, total, scripts=scripts, languages=languages, lock=lock)
     shares = ", ".join(f"{s} {100 * c / total:.0f}%" for s, c in counts.most_common(6)) if total else "none"
     print(f"  OCR: names' scripts: {shares}; recognizers: {', '.join(plan.recognizers)}")
     if plan.unread:

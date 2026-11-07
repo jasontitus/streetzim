@@ -71,10 +71,11 @@ def test_one_recognizer_per_script_used():
     assert _plan(["서울"] * 9 + ["몽골"]).detector == "det"
 
 
-def test_latin_beside_another_script_needs_a_quarter_of_the_names():
-    # every recognizer reads plain Latin: brands in Bangkok add no model
-    assert _plan(["ถนนสีลม"] * 90 + ["Starbucks"] * 10).recognizers == ("thai",)
-    assert _plan(["ถนนสีลม"] * 70 + ["Starbucks"] * 30).recognizers == ("thai", "latin-cjk")
+def test_latin_beside_another_script_needs_what_the_others_need():
+    # the others read Latin far worse than Latin's own (Iran's Arabic-only map
+    # read 63% of the Latin lines on the world photo set; about 90% with it)
+    assert _plan(["ถนนสีลม"] * 96 + ["Starbucks"] * 4).recognizers == ("thai",)
+    assert _plan(["ถนนสีลม"] * 90 + ["Starbucks"] * 10).recognizers == ("thai", "latin-cjk")
     # other scripts need 5%
     assert _plan(["Москва"] * 96 + ["Αθήνα"] * 4).recognizers == ("cyrillic",)
     assert _plan(["Москва"] * 94 + ["Αθήνα"] * 6).recognizers == ("cyrillic", "greek")
@@ -182,3 +183,34 @@ def test_export_writes_the_zim_entries_to_a_folder(tmp_path, offline):
                 *(r["model"] for r in manifest["rec"]), *(r["dict"] for r in manifest["rec"])):
         assert (tmp_path / rel).is_file(), rel
     assert ocr.main(["export", str(tmp_path / "x"), "--scripts", "Hebr"]) == 1
+
+
+def test_a_region_languages_script_comes_with_the_map():
+    """North Africa's names are mostly Latin, its signs Arabic and French:
+    the region's first language brings its script's recognizer whatever its
+    share, the others theirs from MIN_SHARE_LANGUAGE of the names."""
+    from streetzim import ocr
+    counts, total = ocr.count_scripts(["Boulevard Mohammed V"] * 97 + ["شارع"] * 3)
+    assert ocr.choose_models(counts, total).recognizers == ("latin-cjk",)
+    assert ocr.choose_models(counts, total, languages=["ar", "fr", "ber"]).recognizers == ("latin-cjk", "arabic")
+    # Korea: Korean names, Latin and Chinese on its signs (ko only adds nothing new)
+    counts, total = ocr.count_scripts(["세종대로"] * 90 + ["Sejong-daero"] * 10)
+    assert ocr.choose_models(counts, total, languages=["ko"]).recognizers == ("korean", "latin-cjk")
+    # a later language spoken at home, its script hardly in the names, adds none
+    # (France: fr,ar; India South: Urdu at 0.01%); one at 0.5% does
+    counts, total = ocr.count_scripts(["Rue de la Gare"] * 1000)
+    assert ocr.choose_models(counts, total, languages=["fr", "ar"]).recognizers == ("latin-cjk",)
+    counts, total = ocr.count_scripts(["Rue de la Gare"] * 996 + ["شارع"] * 4)
+    assert ocr.choose_models(counts, total, languages=["fr", "ar"]).recognizers == ("latin-cjk",)
+    counts, total = ocr.count_scripts(["Rue de la Gare"] * 995 + ["شارع"] * 5)
+    assert ocr.choose_models(counts, total, languages=["fr", "ar"]).recognizers == ("latin-cjk", "arabic")
+    # the first language whatever its share: India South's Telugu at 0.02%
+    counts, total = ocr.count_scripts(["MG Road"] * 9998 + ["రోడ్డు"] * 2)
+    plan = ocr.choose_models(counts, total, languages=["te", "ta", "kn", "ml", "en", "hi", "ur"])
+    assert plan.recognizers == ("latin-cjk", "telugu") and plan.unread == ()
+    # a script no recognizer reads is named (Kannada first), an unknown code adds nothing
+    counts, total = ocr.count_scripts(["Main Street"] * 100)
+    plan = ocr.choose_models(counts, total, languages=["kn", "xx", "ur"])
+    assert plan.recognizers == ("latin-cjk",) and plan.unread == ("Knda",)
+    # --ocr-scripts still decides alone
+    assert ocr.choose_models(counts, total, scripts=["Cyrl"], languages=["ar"]).recognizers == ("cyrillic",)

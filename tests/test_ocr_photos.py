@@ -203,3 +203,26 @@ def test_overlay_for_a_map_without_the_reader_gets_latin_and_the_photos_scripts(
     assert b"<html" in (dest / "index.html").read_bytes()[:400].lower()
     assert op.overlay_for(Archive(str(base)), [{"scripts": ["Arab"]}], models, tmp_path / "ov2", "all") == \
         ["latin-cjk", "korean", "arabic", "greek"]
+
+
+def test_overlay_plan_gives_the_recognizers_a_map_built_now_gets(tmp_path: Path) -> None:
+    """--recognizers plan: its names' scripts and region languages, as a build
+    chooses (North Africa: Latin names, Arabic its first language)."""
+    pytest.importorskip("libzim")
+    from libzim.reader import Archive
+
+    from tests.langpack import lpzims
+    z = tmp_path / "osm-testland-2026-10-13.zim"
+    recs = [{"n": "Boulevard Mohammed V"}] * 97 + [{"n": "شارع"}] * 3
+    lpzims.write_base(z, extra={"search-data/manifest.json": {"chunks": {"bo": 1}}, "search-data/bo.json": recs},
+                      cfg_extra={"regionLanguages": ["ar", "fr"]})
+    models = tmp_path / "models"
+    (models / "ocr").mkdir(parents=True)
+    full = {"version": 1, "det": {"model": "ocr/det.onnx"},
+            "rec": [{"name": n, "model": f"ocr/{n}.onnx"} for n in ("latin-cjk", "korean", "arabic", "greek")]}
+    (models / "ocr" / "manifest.json").write_text(json.dumps(full), encoding="utf-8")
+    assert op.overlay_for(Archive(str(z)), [{"scripts": ["Grek"]}], models, tmp_path / "ov", "plan") == \
+        ["latin-cjk", "arabic"]
+    lpzims.write_base(z2 := tmp_path / "osm-testland-2026-10-14.zim",
+                      extra={"search-data/manifest.json": {"chunks": {"bo": 1}}, "search-data/bo.json": recs})
+    assert op.overlay_for(Archive(str(z2)), [], models, tmp_path / "ov2", "plan") == ["latin-cjk"]

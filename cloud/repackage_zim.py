@@ -389,7 +389,12 @@ def _ocr_plan(src, scripts: list[str] | None = None):
     streetzim.ocr.plan_for chooses them for a build."""
     from streetzim import ocr as _ocr
     counts, total = _ocr.count_scripts(_ocr_names(src))
-    plan = _ocr.choose_models(counts, total, scripts=scripts)
+    try:
+        cfg = json.loads(bytes(src.get_entry_by_path("map-config.json").get_item().content))
+    except (KeyError, RuntimeError, ValueError):
+        cfg = {}
+    langs = cfg.get("regionLanguages") if isinstance(cfg, dict) else None
+    plan = _ocr.choose_models(counts, total, scripts=scripts, languages=langs if isinstance(langs, list) else None)
     shares = ", ".join(f"{s} {100 * c / total:.0f}%" for s, c in counts.most_common(6)) if total else "none"
     print(f"  OCR: names' scripts: {shares}; recognizers: {', '.join(plan.recognizers)}")
     if plan.unread:

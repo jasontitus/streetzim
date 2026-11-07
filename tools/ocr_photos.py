@@ -31,9 +31,9 @@ phone's photo picker would. Each photo is scored on:
 
 Recognizers: a map's own (its ocr/manifest.json) when it has the reader;
 else the Latin/CJK one and those reading the scripts of its photos (what a
-map built with --ocr would most likely carry); --recognizers all for every
-one. Writes OUT/raw.jsonl (what the reader did), OUT/scores.jsonl and
-OUT/report.md. Needs NODE (or node on PATH), PLAYWRIGHT_CORE, CHROME_PATH
+map built with --ocr would most likely carry); --recognizers plan for
+those a map built now gets, all for every one. Writes OUT/raw.jsonl (what
+the reader did), OUT/scores.jsonl and OUT/report.md. Needs NODE (or node on PATH), PLAYWRIGHT_CORE, CHROME_PATH
 (and BROWSER_LIBS where chromium needs them).
 """
 from __future__ import annotations
@@ -196,6 +196,11 @@ def overlay_for(arc: Any, records: list[dict[str, Any]], models: Path, dest: Pat
     own = map_entry(arc, _ocr.MANIFEST_ENTRY)
     if how == "all":
         names = [r["name"] for r in full["rec"]]
+    elif how == "plan":         # what a build or `repackage_zim.py --add-ocr` gives it today
+        from cloud.repackage_zim import _ocr_names
+        counts, total = _ocr.count_scripts(_ocr_names(arc))
+        langs = cfg.get("regionLanguages")
+        names = list(_ocr.choose_models(counts, total, languages=langs if isinstance(langs, list) else None).recognizers)
     elif own:
         names = [r["name"] for r in json.loads(own)["rec"]]
     else:
@@ -322,7 +327,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, help="where results go (required unless --score)")
     ap.add_argument("--regions", help="only these maps (comma-separated)")
     ap.add_argument("--ids", help="only these photos (comma-separated)")
-    ap.add_argument("--recognizers", choices=("map", "all"), default="map")
+    ap.add_argument("--recognizers", choices=("map", "plan", "all"), default="map",
+                    help="the map's own (else those of its photos' scripts), those a map built now "
+                         "gets (plan), or every one")
     ap.add_argument("--at-photo", action="store_true",
                     help="put the map where each photo was taken (its `location`) first, as a phone with its "
                          "user's position does; photos with no location as usual")

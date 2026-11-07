@@ -1938,7 +1938,8 @@ def _write_zim(
     ocr_plan = None
     if getattr(args, "ocr", False):
         from streetzim import ocr as _ocr
-        ocr_plan = _ocr.plan_for(search_features, scripts=_ocr_scripts(args))
+        ocr_plan = _ocr.plan_for(search_features, scripts=_ocr_scripts(args),
+                                 languages=getattr(args, "region_languages", None))
     create_zim(
         output_path=output_path,
         tiles=tiles,

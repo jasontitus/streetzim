@@ -51,15 +51,23 @@ only when it is there.
 | `tamil` | Tamil | PP-OCRv5 mobile, Tamil | 7.9 MB |
 | `telugu` | Telugu | PP-OCRv5 mobile, Telugu | 7.9 MB |
 
-Every recognizer except `latin-cjk` also reads unaccented Latin, so the
-English line of a bilingual sign is read in any of them.
+Every recognizer except `latin-cjk` also reads unaccented Latin, but far
+worse than `latin-cjk` does: on the 2026-11 world photo set, Latin lines were
+read 63% on Iran's Arabic-only map and 77% on Egypt's, about 90% wherever
+`latin-cjk` was there.
 
 **Which recognizers.** `streetzim/ocr.py` counts the scripts of the map's
 own names: each search record's `name_native`, else its `name`, for the
 first 200,000 records. A script gets its recognizer when at least 5% of
-the names use it, or when it is the most used. Latin needs 25% when another
-script leads, because the other recognizers read plain Latin already: brand
-names in Bangkok do not add 21 MB to Thailand. Scripts with no recognizer
+the names use it (Latin too: tourist areas' signs and addresses carry it),
+when it is the most used, or when it is the script of the region's first
+language (map-config `regionLanguages`, which every language-ready build
+records: North Africa's names are mostly Latin, its signs Arabic and
+French), or of another of its languages that 0.5% of the names use. The
+list also holds languages spoken at home that signs do not use, whose
+script the names hardly show (Arabic in France 0.00%, Urdu in India South
+0.01%, against Arabic in North Africa 2.6%): each recognizer is about 8 MB
+and one more model that may misread a sign. Scripts with no recognizer
 (Hebrew, Georgian, Armenian, Ethiopic, Bengali, Gurmukhi, Gujarati, Oriya,
 Kannada, Malayalam, Sinhala, Khmer, Lao, Burmese, Tibetan, Thaana,
 Tifinagh) are named in the build log. Signs in them are read only where they
