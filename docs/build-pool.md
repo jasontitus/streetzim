@@ -14,12 +14,15 @@ Measured 2026-11-07 on the build host (`/storage/streetzim`):
 | `overture_cache` | 111 GB | yes | Overture removes old releases: the backup is their only copy |
 | `search_cache` | 58 GB | yes | |
 | `wikidata_cache` | 2.5 GB | yes | |
-| `terrain_cache`, `terrain_cache_10m` | being measured (millions of files) | yes, as tar shards by region box | millions of small objects are slow and costly |
+| `terrain_cache` | 22.5 M files (size not measured: `du` ran past 2 h) | yes, as tar shards by region box | millions of small objects are slow and costly |
+| `terrain_cache_10m` | 4.8 GB, 0.86 M files | yes, as tar shards | |
+| `satellite_cache_avif_256`, `satellite_cache_sources` | 26.6 M and 8.0 M files (size not measured) | the encoded tiles, as tar shards; sources only if re-encoding matters | refetching is slow and rate-limited |
+| `coastline`, `landcover`, `wiki_articles_cache` | 2.1 GB, 38 MB, 114 MB | yes | |
 | `wiki-src` (Wikipedia ZIMs; English 124 GB) | 768 GB | the dated files builds pin | Kiwix drops old dumps |
 | `langpack-work` | 1.0 TB | `wpcache` only | the rest is derived |
 | operational state (`rebuild-par/env`, queue lists, `cloud/*.tsv`, pending and reship tables) | small | yes | not in git |
 
-About 2.5–3+ TB. Bucket `streetzimcache` (Hetzner Object Storage); its key
+About 2.5–3 TB plus terrain and satellite tiles; all of `/storage` holds 9.3 TB, so those are at most a few TB more. Size them with a sampled count before the first upload. Bucket `streetzimcache` (Hetzner Object Storage); its key
 lives only in `~/.config/rclone/rclone.conf` on the build host (mode 600),
 never in the repo. The bucket wants versioning or object lock, or a project
 of its own: a key copied to a build machine can otherwise delete it.
