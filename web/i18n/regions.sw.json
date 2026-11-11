@@ -1,0 +1,14 @@
+{
+  "central-africa": {
+    "title": "Afrika ya Kati",
+    "description": "JK Kongo, Kameruni, Chad, Jamhuri ya Afrika ya Kati, Gabon, Kongo, Guinea ya Ikweta, Angola na Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; bonde la mto Kongo, Bonde la Ufa la Albertine."
+  },
+  "east-africa": {
+    "title": "Afrika Mashariki",
+    "description": "Kenya, Tanzania, Uganda, Ethiopia, Rwanda, Burundi, Somalia na Sudan Kusini — Nairobi, Dar es Salaam, Addis Ababa, Kampala, Kigali, Mombasa, Zanzibar, Mlima Kilimanjaro, Serengeti na Ziwa Victoria."
+  },
+  "horn-of-africa": {
+    "title": "Pembe ya Afrika",
+    "description": "Ethiopia, Somalia, Eritrea, Jibuti, Sudan Kusini na kaskazini mwa Kenya — Addis Ababa, Mogadishu, Asmara, Jiji la Jibuti, Juba; nyanda za juu za Ethiopia, Bonde la Ufa, pwani ya Bahari ya Shamu."
+  }
+}

@@ -73,9 +73,10 @@ in `tests/test_site_languages.py`.
 
 ## Languages of the maps alone
 
-A language of a region's maps that has no full site (Tamil, Telugu, Kannada,
-Malayalam, Bengali, Assamese, Odia, Nepali, Marathi, Gujarati, Punjabi and
-Urdu, so far) gets a site of its own maps: its `site.<lang>.json` says
+A language of a region's maps that has no full site (the languages of India
+and its neighbours, and the regional languages of Europe, the Caucasus,
+Africa, the Caribbean and the Pacific: every file in `web/i18n/` that says
+`"_maps_only": true`) gets a site of its own maps: its `site.<lang>.json` says
 `"_maps_only": true`, and its `regions.<lang>.json` names only the maps of
 its region (`tools/check_site_i18n.py` asks no other map of it). Its home
 page lists only the maps that have a version in it (the map in that
@@ -134,3 +135,8 @@ versions plus `x-default` (English), and its title and description in its
 language. The sitemap lists the same links. `robots.txt` names the sitemap;
 submit it once in Google Search Console (the site is verified there through
 `web/googlec2f20a1e7fb53c4a.html`).
+
+Eight of the maps' languages have no site text yet, because a translation
+good enough to publish could not be made without a speaker: Avar, Dinka,
+Fulfulde, Gilaki, Kikongo, Mazanderani, Tahitian and Standard Moroccan
+Tamazight. They have no pages.

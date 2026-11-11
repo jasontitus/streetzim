@@ -1,0 +1,14 @@
+{
+  "caucasus": {
+    "title": "Qefqasya",
+    "description": "Qefqasya — Gurcistan, Ermenistan û Azerbaycan, bi Qefqasyaya Rûsyayê ya başûr û rojhilatê Tirkiyeyê re. Tiflîs, Êrîvan, Bakû, Batûmî, rêzeçiyayên Qefqasya Mezin, Çiyayê Elbrûs, Gola Sevanê û perava Deryaya Xezerê."
+  },
+  "iran": {
+    "title": "Îran",
+    "description": "Îran — ji Deryaya Xezerê heta Kendava Farsê, bi Tehran, Îsfehan, Şîraz û Meşhedê re."
+  },
+  "turkey": {
+    "title": "Tirkiye",
+    "description": "Tirkiye — Stenbol, Enqere, Îzmîr, Bursa, Antalya, Konya, Dîlok, Trabzon, Kapadokya, Pamukkale, Efes, Bosfor, perava Egeyê û deşta bilind a Anatolyayê."
+  }
+}

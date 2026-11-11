@@ -1,0 +1,14 @@
+{
+  "caucasus": {
+    "title": "Qafqaz",
+    "description": "Qafqaz — Gürcüstan, Ermənistan və Azərbaycan, həmçinin Rusiyanın Şimali Qafqaz hissəsi və Türkiyənin şərqi. Tbilisi, İrəvan, Bakı, Batumi, Böyük Qafqaz sıra dağları, Elbrus dağı, Göyçə (Sevan) gölü və Xəzər sahili."
+  },
+  "central-asia": {
+    "title": "Mərkəzi Asiya",
+    "description": "Mərkəzi Asiya — Qazaxıstan, Özbəkistan, Türkmənistan, Tacikistan, Qırğızıstan, Əfqanıstan və Qafqaz. Almatı, Daşkənd, Bişkek, Aşqabad, Düşənbə, Kabil, Pamir dağları və İpək yolu."
+  },
+  "iran": {
+    "title": "İran",
+    "description": "İran — Xəzər dənizindən Fars körfəzinədək; Tehran, İsfahan, Şiraz və Məşhəd daxil olmaqla."
+  }
+}

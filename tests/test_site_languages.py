@@ -137,7 +137,11 @@ SAME_AS_ENGLISH = {"fr": {"Satellite"}, "it": {"Satellite"}, "id": {"Kiwix PWA (
 
 # Languages whose site lists only the maps that have a version in them
 # (site.<lang>.json "_maps_only"; test_site_maps_only.py).
-MAPS_ONLY = {"as", "bn", "gu", "kn", "ml", "mr", "ne", "or", "pa", "ta", "te", "ur"}
+MAPS_ONLY = {"af", "am", "as", "az", "bg", "bi", "bn", "bs", "ca", "ce", "cs", "cy", "da", "et", "eu", "fi",
+             "fj", "fy", "ga", "gl", "gu", "ha", "haw", "hif", "hr", "ht", "hu", "hy", "ig", "is", "jam",
+             "ka", "kn", "ku", "lb", "ln", "lt", "lv", "mk", "ml", "mr", "ne", "no", "ny", "om", "or", "pa",
+             "pap", "pcm", "rm", "ro", "sc", "sk", "sl", "sn", "so", "sq", "sr", "sv", "sw", "ta", "te",
+             "ti", "tpi", "ur", "xh", "yo", "zu"}
 
 
 def test_every_language_is_translated_in_full():

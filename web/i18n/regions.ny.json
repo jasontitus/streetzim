@@ -1,0 +1,10 @@
+{
+  "central-africa": {
+    "title": "Pakati pa Africa",
+    "description": "DR Congo, Cameroon, Chad, Central African Republic, Gabon, Congo, Equatorial Guinea, Angola ndi Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; chigwa cha mtsinje wa Congo ndi Albertine Rift."
+  },
+  "southern-africa": {
+    "title": "Kumwera kwa Africa",
+    "description": "South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho ndi Eswatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, Kalahari, Kruger ndi dera la Cape."
+  }
+}
