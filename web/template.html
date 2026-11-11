@@ -316,7 +316,7 @@
   .hero-credit { margin: 10px 0 0; max-width: none; padding-inline-end: 32%; font-size: 11.5px; color: var(--text-faint); }
   .feature-clip .clip-credit { margin: 8px 0 0; max-width: none; font-size: 11.5px; color: var(--text-faint); }
   .clips {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 18px; margin: 30px 0 0;
   }
   .clip {
@@ -893,6 +893,13 @@
         <figcaption>
           <h3>{{t:tour_zoom_h}}</h3>
           <p>{{t:tour_zoom_p}}</p>
+        </figcaption>
+      </figure>
+      <figure class="clip">
+        <a class="clip-media" href="{{m:tour-discover.mp4}}" data-video data-poster="{{m:poster-discover.webp}}" data-credit="{{mc:tour-discover.mp4}}" data-caption="{{a:gal_find}}" aria-label="{{a:gal_find}}"><img src="{{m:poster-discover.webp}}" alt="" loading="lazy"><span class="play"></span></a>
+        <figcaption>
+          <h3>{{t:gal_find}}</h3>
+          <p>{{t:feat_wiki_p}}</p>
         </figcaption>
       </figure>
       <figure class="clip">

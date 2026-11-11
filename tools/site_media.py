@@ -55,6 +55,7 @@ VIDEOS = {
     "tour-photo.mp4": ("photo-search-seven-scripts.mp4", ["-vf", "scale=1600:900:flags=lanczos", "-crf", "25"]),
     "tour-zoom.mp4": ("zoom-to-building-kyiv.mp4", ["-vf", "scale=1280:720:flags=lanczos", "-crf", "27"]),
     "tour-terrain.mp4": ("3d-terrain-tehran.mp4", ["-vf", "scale=1280:720:flags=lanczos", "-crf", "28"]),
+    "tour-discover.mp4": ("discover-kyiv.mp4", ["-vf", "scale=1280:720:flags=lanczos", "-crf", "27"]),
     "tour-drive.mp4": ("driving-directions-kyiv.mp4", ["-vf", "scale=540:1168:flags=lanczos", "-crf", "28"]),
     # The home page's opening loop: Tehran from hillshade to 3D terrain to
     # satellite imagery, after the clip's English caption has left the screen.
@@ -72,6 +73,7 @@ POSTERS = {
     "poster-photo.webp": ("shots:photo-search-seven-scripts.png", None, 1600),
     "poster-zoom.webp": ("videos:zoom-to-building-kyiv.mp4", 19.5, 1280),
     "poster-terrain.webp": ("videos:3d-terrain-tehran.mp4", 21, 1280),
+    "poster-discover.webp": ("videos:discover-kyiv.mp4", 6.5, 1280),
     "poster-drive.webp": ("videos:driving-directions-kyiv.mp4", 20, 540),
     "poster-hero.webp": ("videos:3d-terrain-tehran.mp4", 5.8, 960),
 }
@@ -167,7 +169,7 @@ CREDITS = {
 }
 # Photos a clip shows that its poster or name does not say.
 VIDEO_CREDITS = {"tour-photo.mp4": ["ukrainian", "greek", "arabic", "japanese", "korean", "chinese", "english"],
-                 "tour-terrain.mp4": ["sat"], "hero-loop.mp4": ["sat"]}
+                 "tour-terrain.mp4": ["sat"], "hero-loop.mp4": ["sat"], "tour-discover.mp4": ["gate"]}
 
 # The README's pictures. An animated preview: (source clip, ffmpeg arguments
 # before the input, filter, quality); a still: (source, width).

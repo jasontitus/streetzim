@@ -44,7 +44,7 @@ photo of a landmark. The sign photos were cropped.
 | `sign-korean`, `photo-search-korean-*`, `tour-photo`, `docs/readme/photo-search.webp` | [street sign, Seoul](https://gongu.copyright.or.kr/gongu/wrt/wrt/view.do?wrtSn=11077093&menuNo=200018) | 민지애 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `sign-chinese`, `tour-photo`, `docs/readme/photo-search.webp` | [street sign, Taipei: "Road name sign of Lane 53, Zhulun Street, Taipei 20080816"](https://commons.wikimedia.org/wiki/File:Road_name_sign_of_Lane_53,_Zhulun_Street,_Taipei_20080816.jpg) | Tianmu peter | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | `sign-english`, `tour-photo`, `docs/readme/photo-search.webp` | [restaurant front, Washington, DC: "Metropolitan Square - Washington DC - Old Ebbitt Grill"](https://commons.wikimedia.org/wiki/File:Metropolitan_Square_-_Washington_DC_-_Old_Ebbitt_Grill.JPG) | Tim1965 | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
-| `kyiv-11-wikipedia-article-*` | [Golden Gate, Kyiv](https://commons.wikimedia.org/wiki/File:Golden_Gate_Kiev_2018_G1.jpg) | George Chernilevsky | public domain |
+| `kyiv-11-wikipedia-article-*`, `tour-discover` | [Golden Gate, Kyiv](https://commons.wikimedia.org/wiki/File:Golden_Gate_Kiev_2018_G1.jpg) | George Chernilevsky | public domain |
 
 Each sign's poster (`poster-sign-*`, `poster-photo`) shows the same photo as
 its clip. A clip or screenshot that shows a share-alike photo (CC BY-SA 3.0

@@ -413,6 +413,11 @@
    "h": 1688,
    "w": 780
   },
+  "poster-discover.webp": {
+   "file": "poster-discover.a8e75275.webp",
+   "h": 720,
+   "w": 1280
+  },
   "poster-drive.webp": {
    "file": "poster-drive.980e6504.webp",
    "h": 1168,
@@ -567,6 +572,11 @@
    "file": "tehran-search-persian-800.296f0725.webp",
    "h": 450,
    "w": 800
+  },
+  "tour-discover.mp4": {
+   "file": "tour-discover.0bdbed9f.mp4",
+   "h": 720,
+   "w": 1280
   },
   "tour-drive.mp4": {
    "file": "tour-drive.3a05abca.mp4",
@@ -1046,6 +1056,7 @@
   "photo-search-japanese-1-read-780.webp": "53ddd725ce872e7a",
   "photo-search-korean-1-read-390.webp": "0fd33853d0d15a6e",
   "photo-search-korean-1-read-780.webp": "9db588cbd5702c32",
+  "poster-discover.webp": "c57bee7b956a66db",
   "poster-drive.webp": "cebf86e28950f672",
   "poster-hero.webp": "299dff07f4900ca1",
   "poster-photo.webp": "a49c92d8d5dcd5f3",
@@ -1077,6 +1088,7 @@
   "tehran-hillshade-800.webp": "9122012d557a81a1",
   "tehran-search-persian-1600.webp": "adff9e4e13d70824",
   "tehran-search-persian-800.webp": "70a65abf0e7e9a30",
+  "tour-discover.mp4": "3e5cd875a594c699",
   "tour-drive.mp4": "d137cdeef24ed8eb",
   "tour-photo.mp4": "c52b3c1df0e37f4f",
   "tour-terrain.mp4": "2838e18b2d46a663",
@@ -1167,6 +1179,9 @@
  "video_credits": {
   "hero-loop.mp4": [
    "sat"
+  ],
+  "tour-discover.mp4": [
+   "gate"
   ],
   "tour-photo.mp4": [
    "ukrainian",
