@@ -26,7 +26,8 @@ PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 TAG = re.compile(r"<\s*/?\s*[a-zA-Z!?]")
 # Text a translation keeps word for word: the satellite imagery's required
 # attribution (EOX's licence names its form).
-VERBATIM = {"src_sat": ["https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021)"]}
+_EOX = "https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021)"
+VERBATIM = {"src_sat": [_EOX], "credit_sat": [_EOX]}
 
 
 class _Markup(HTMLParser):

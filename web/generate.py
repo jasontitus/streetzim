@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
@@ -1694,7 +1695,8 @@ def render_head_links(lang, path="", title="", description=""):
 
 # The English strings a page in another language replaces with its own (the
 # map list's intro and step 2 say what its downloads are: the map in that language).
-LANG_VARIANTS = {"maps_intro": "maps_intro_lang", "step2_p": "step2_p_lang"}
+LANG_VARIANTS = {"maps_intro": "maps_intro_lang", "step2_p": "step2_p_lang",
+                 "langs_step2_p": "langs_step2_p_lang"}
 
 
 def fill_text(template, lang, **values):
@@ -1892,7 +1894,8 @@ def _version(e, lang):
 
 def _has_version(e, lang):
     """Whether a live map has a version in `lang` a page can offer: the map
-    in that language with its size (the map page offers none without)."""
+    in that language with its size. A card, a map's page and the counts of
+    maps per language all go by this."""
     v = _version(e, lang)
     return bool(v and v.get("size"))
 
@@ -1933,7 +1936,7 @@ def render_lang_card(e, lang, preview=False, builder_on=True):
     region = e["region"]
     rid = region["id"]
     name, desc = region_text(lang, region)
-    v = _version(e, lang)
+    v = _version(e, lang) if _has_version(e, lang) else None
     page = f"/{_sub(lang)}maps/{rid}/"
     href, fb = _original(e)
     date_html = ""
@@ -1957,7 +1960,7 @@ def render_lang_card(e, lang, preview=False, builder_on=True):
         links.append(_a(_preview_href(e), t(lang, "card_preview"), "btn-secondary",
                         title=t_attr(lang, "card_preview_title"), track="preview", rid=rid, name=name))
     links.append(f'<a class="btn btn-secondary" href="{page}">{t(lang, "card_map_page")}</a>')
-    size = fmt_size(lang, v["size"] if v and v["size"] else e["size"])
+    size = fmt_size(lang, v["size"] if v else e["size"])
     return f"""      <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title"><a href="{page}">{escape(name)}</a></div>
@@ -1970,14 +1973,217 @@ def render_lang_card(e, lang, preview=False, builder_on=True):
       </div>"""
 
 
-def _write_page(maps, lang, sub, preview=False, builder_on=True):
-    """Render and write one language's home page (web/<sub>index.html). An
-    English map whose name in the language is that of a map made in it (the
-    German "Schweiz und die Alpen") is listed once, as the map made in it; its
-    page in the language (/<lang>/maps/<id>/) still offers its version."""
-    def title_key(e):
-        return re.sub(r"&[a-z]+;", " ", region_text(lang, e["region"])[0]).strip().casefold()
-    by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
+# The pictures and clips of the home page, in web/media/ (tools/site_media.py
+# makes them). media.json names each file as the page asks for it
+# ("tour-zoom.mp4") and as it is stored: the stored name carries a hash of
+# the bytes, so a browser may keep a file for good. It also lists the
+# screenshots of the gallery, the phone screens of the language versions,
+# the photo-search clips, and whose photos and imagery they show.
+MEDIA_PATH = os.path.join(SCRIPT_DIR, "media", "media.json")
+_MEDIA: dict = {}
+
+# The captions a screenshot can have (media.json's "caption").
+GALLERY_CAPTIONS = (
+    "gal_city", "gal_building", "gal_place", "gal_find", "gal_search", "gal_route", "gal_turns",
+    "gal_drive", "gal_satellite", "gal_dark", "gal_hillshade", "gal_terrain", "gal_terrain_sat",
+    "gal_wiki_layer", "gal_article", "gal_photo", "gal_photo_found", "gal_lang")
+
+
+def media():
+    """web/media/media.json, read once."""
+    if not _MEDIA:
+        with open(MEDIA_PATH, encoding="utf-8") as f:
+            _MEDIA.update(json.load(f))
+    return _MEDIA
+
+
+def media_file(name):
+    """(URL, width, height) of a picture or clip of the page. KeyError for a
+    name media.json lacks: a page must not ask for a file that is not there."""
+    f = media()["files"][name]
+    return "/media/" + f["file"], f["w"], f["h"]
+
+
+def _place_name(lang, region_id):
+    """A map's name in a language, as plain text."""
+    region = next((r for r in REGIONS if r["id"] == region_id), None)
+    if region is None:
+        raise ValueError(f"media.json: no map {region_id!r}")
+    return plain_text(region_text(lang, region)[0])
+
+
+def _endonym(code):
+    """A language's own name for itself."""
+    if code not in {c for c, _name, _sub in ALL_LANGUAGES}:
+        raise ValueError(f"media.json: {code!r} is not a language of the site")
+    return site_text(code)["lang_name"]
+
+
+def media_caption(lang, entry):
+    """What a screenshot shows, and of which map: "Dark theme · Kyiv"."""
+    key = entry["caption"]
+    if key not in GALLERY_CAPTIONS:
+        raise ValueError(f"media.json: unknown caption {key!r}")
+    what = t(lang, key, language=_endonym(entry["lang"])) if entry.get("lang") else t(lang, key)
+    if "{" in what:
+        raise ValueError(f"media.json: the caption {key!r} names a language and the entry has none")
+    return f"{plain_text(what)} · {_place_name(lang, entry['region'])}"
+
+
+def media_credit(lang, credit_ids):
+    """Whose photo or imagery a picture shows, as one line of plain text
+    ("" when all of it is ours and the map's)."""
+    out = []
+    for cid in credit_ids:
+        c = media()["credits"][cid]
+        if c["kind"] == "imagery":
+            out.append(t(lang, "credit_sat_short"))
+        elif c.get("licence"):
+            out.append(t(lang, "credit_photo", author=c["author"], licence=c["licence"][0]))
+        else:
+            out.append(t(lang, "credit_photo_pd", author=c["author"]))
+    return plain_text(" · ".join(out))
+
+
+def fill_media(html, lang):
+    """{{m:name}} in a template: that file's URL. {{mc:name}}: whose photo or
+    imagery that clip shows, for an attribute."""
+    html = re.sub(r"\{\{mc:([a-z0-9.-]+)\}\}",
+                  lambda m: escape(media_credit(lang, media()["video_credits"][m.group(1)])), html)
+    return re.sub(r"\{\{m:([a-z0-9.-]+)\}\}", lambda m: media_file(m.group(1))[0], html)
+
+
+def _img(name, alt, lazy=True, extra=""):
+    url, w, h = media_file(name)
+    return (f'<img src="{url}" width="{w}" height="{h}" alt="{escape(alt)}"'
+            + (' loading="lazy"' if lazy else "") + extra + ">")
+
+
+def render_stats(lang, live_count, n_langs):
+    """The two numbers under the map finder, each a link to its section."""
+    return ('      <div class="stats">'
+            f'<a href="#maps"><b>{live_count}</b> {t(lang, "nav_maps")}</a>'
+            f'<a href="#languages"><b>{n_langs}</b> {t(lang, "nav_langs")}</a></div>')
+
+
+def render_hero_phone(lang):
+    """The phone beside the clip at the top: the same screen in one language
+    after another (the first is loaded with the page, the rest when shown)."""
+    faces = []
+    for i, entry in enumerate(media()["langs"]):
+        code, name = entry["lang"], _endonym(entry["lang"])
+        url, w, h = media_file(entry["shots"][0]["small"])
+        src = f'class="on" src="{url}"' if i == 0 else f'data-src="{url}"'
+        faces.append(f'<img {src} width="{w}" height="{h}" alt="{escape(name)}" '
+                     f'lang="{code}" data-name="{escape(name)}">')
+    first = media()["langs"][0]["lang"]
+    return ('      <div class="hero-phone"><div class="frame" id="hero-phone">' + "".join(faces) + "</div>"
+            f'<span class="phone-tag" lang="{first}">{escape(_endonym(first))}</span></div>')
+
+
+def render_signs(lang):
+    """The photo-search clips, one per script: each opens in the viewer."""
+    out = []
+    for s in media()["signs"]:
+        name = _endonym(s["lang"])
+        caption = escape(f"{name} · {_place_name(lang, s['region'])}")
+        credit = escape(media_credit(lang, s["credits"]))
+        out.append(
+            f'      <a class="sign" href="{media_file(s["video"])[0]}" data-video '
+            f'data-poster="{media_file(s["poster"])[0]}" data-caption="{caption}" data-credit="{credit}">'
+            + _img(s["poster"], f"{name} · {_place_name(lang, s['region'])}")
+            + f'<span class="play"></span><span class="sign-label" lang="{s["lang"]}">{escape(name)}</span></a>')
+    return '    <div class="signs">\n' + "\n".join(out) + "\n    </div>"
+
+
+def render_gallery(lang):
+    """The row of screenshots: each a small picture that opens the large one."""
+    out = []
+    for g in media()["gallery"]:
+        caption, credit = media_caption(lang, g), media_credit(lang, g["credits"])
+        srcset = ""
+        if g["kind"] == "wide":
+            small, large = media_file(g["small"]), media_file(g["large"])
+            srcset = f' srcset="{small[0]} {small[1]}w, {large[0]} {large[1]}w" sizes="(max-width: 640px) 88vw, 711px"'
+        out.append(
+            f'    <figure class="shot shot-{g["kind"]}"><a href="{media_file(g["large"])[0]}" data-shot '
+            f'data-caption="{escape(caption)}" data-credit="{escape(credit)}">'
+            + _img(g["small"], caption, extra=srcset) + "</a>"
+            f"<figcaption>{escape(caption)}"
+            + (f"<small>{escape(credit)}</small>" if credit else "") + "</figcaption></figure>")
+    return "\n".join(out)
+
+
+def render_lang_demo(lang):
+    """One map in six scripts: a phone screen per language; the viewer flips
+    through these and the second screen of each."""
+    out = []
+    for entry in media()["langs"]:
+        name = _endonym(entry["lang"])
+        caption = escape(f"{name} · {_place_name(lang, entry.get('region', 'kyiv'))}")
+        links = []
+        for i, shot in enumerate(entry["shots"]):
+            a = f'<a href="{media_file(shot["large"])[0]}" data-shot data-caption="{caption}"'
+            links.append(a + ">" + _img(shot["small"], name) + "</a>" if i == 0 else a + " hidden></a>")
+        out.append(f'      <figure class="lang-shot">{"".join(links)}'
+                   f'<figcaption lang="{entry["lang"]}">{escape(name)}</figcaption></figure>')
+    return '    <div class="lang-shots">\n' + "\n".join(out) + "\n    </div>"
+
+
+def render_lang_grid(lang, counts):
+    """Every language of the site as a tile: its name and how many maps are
+    ready in it, linking to its page."""
+    links = []
+    for code, name, sub in LANGUAGES:
+        cur = ' aria-current="page"' if code == lang else ""
+        links.append(f'<a href="/{sub}" hreflang="{code}" lang="{code}"{cur}>'
+                     f'<span>{escape(name)}</span><b>{counts.get(code, 0)}</b></a>')
+    return ('    <div class="lang-grid">\n'
+            f'<nav class="lang-picker" aria-label="{t_attr(lang, "langs_grid_h")}">'
+            + "".join(links) + "</nav>\n    </div>")
+
+
+def render_tier_chips(lang, labels):
+    """A button per section of the list of maps, and one for all of them."""
+    chips = [f'<button type="button" class="chip" data-tier="all" aria-pressed="true">{t(lang, "tier_all")}</button>']
+    chips += [f'<button type="button" class="chip" data-tier="{i}" aria-pressed="false">{escape(label)}</button>'
+              for i, label in enumerate(labels)]
+    return (f'    <div class="chips" role="group" aria-label="{t_attr(lang, "tier_all")}">'
+            + "".join(chips) + "</div>")
+
+
+def render_credits(lang):
+    """Whose work the clips and screenshots show: the sign of each photo
+    search, the photo of the gate, the satellite imagery."""
+    def link(href, label):
+        return f'<a href="{escape(href)}" target="_blank" rel="noopener">{escape(label)}</a>'
+    m = media()
+    credits = m["credits"]
+    shown = {cid for part in (m["signs"], m["gallery"]) for entry in part for cid in entry["credits"]}
+    shown.update(cid for ids in m["video_credits"].values() for cid in ids)
+    unlisted = sorted(shown - {cid for s in m["signs"] for cid in s["credits"]} - {"gate", "sat"})
+    if unlisted:
+        raise ValueError(f"media.json: {unlisted} are credited under a picture or clip and have no line "
+                         "in the list of credits (render_credits)")
+    out = []
+    for s in m["signs"]:
+        for cid in s["credits"]:
+            c = credits[cid]
+            author = link(c["source"], c["author"])
+            place = escape(_place_name(lang, s["region"]))
+            out.append(t(lang, "credit_sign", place=place, author=author, licence=link(c["licence"][1], c["licence"][0]))
+                       if c.get("licence") else t(lang, "credit_sign_pd", place=place, author=author))
+    gate = credits["gate"]
+    out.append(t(lang, "credit_gate", author=link(gate["source"], gate["author"])))
+    out.append(t(lang, "credit_sat"))
+    return "\n".join(f"        <li>{line}</li>" for line in out)
+
+
+def _page_entries(maps, lang, quiet=False):
+    """The maps a language's home page lists. An English map whose name in
+    the language is that of a map made in it (the German "Schweiz und die
+    Alpen") is listed once, as the map made in it."""
+    out = []
     native = {region_text(lang, e["region"])[0] for e in maps
               if lang != "en" and e["region"].get("language", "en") == lang}
     for e in maps:
@@ -1987,17 +2193,44 @@ def _write_page(maps, lang, sub, preview=False, builder_on=True):
                 and e["region"].get("language", "en") != lang:
             continue                      # a maps-only language lists its maps alone
         if e["region"].get("language", "en") != lang and region_text(lang, e["region"])[0] in native:
-            print(f"  [{lang}] {e['region']['id']}: listed as the map made in {lang} of the same name")
+            if not quiet:
+                print(f"  [{lang}] {e['region']['id']}: listed as the map made in {lang} of the same name")
             continue
+        out.append(e)
+    return out
+
+
+def lang_map_counts(maps):
+    """{language: how many maps its home page offers in that language}: the
+    maps made in it and, on a page other than the English one, the English
+    maps with a version in it."""
+    counts = {}
+    for code, _name, _sub in LANGUAGES:
+        counts[code] = sum(
+            1 for e in _page_entries(maps, code, quiet=True)
+            if e["live"] and (code == "en" or e["region"].get("language", "en") == code or _has_version(e, code)))
+    return counts
+
+
+def _write_page(maps, lang, sub, preview=False, builder_on=True):
+    """Render and write one language's home page (web/<sub>index.html). An
+    English map whose name in the language is that of a map made in it is
+    listed once (_page_entries); its page in the language
+    (/<lang>/maps/<id>/) still offers its version."""
+    def title_key(e):
+        return re.sub(r"&[a-z]+;", " ", region_text(lang, e["region"])[0]).strip().casefold()
+    by_tier: dict[str, list] = {tid: [] for tid, _ in TIERS}
+    for e in _page_entries(maps, lang):
         by_tier[e["region"]["tier"]].append(e)
     cards = []
+    tier_labels = []
     live_count = upcoming_count = 0
     for tier_id, tier_label in TIERS:
         group = sorted(by_tier.get(tier_id) or [], key=title_key)
         if not group:
             continue
-        cards.append(render_tier_header(tier_label if lang == "en"
-                                        else t(lang, "tier_" + tier_id.replace("-", "_"))))
+        tier_labels.append(tier_label if lang == "en" else t(lang, "tier_" + tier_id.replace("-", "_")))
+        cards.append(render_tier_header(tier_labels[-1]))
         for e in group:
             region = e["region"]
             if not e["live"]:
@@ -2031,6 +2264,18 @@ def _write_page(maps, lang, sub, preview=False, builder_on=True):
     html = html.replace("{{LANG_PICKER}}", render_lang_picker(lang))
     html = html.replace("{{HEAD_LINKS}}", render_head_links(
         lang, "", t_attr(lang, "html_title"), t_attr(lang, "meta_description")))
+    counts = lang_map_counts(maps)
+    for mark, block in (
+            ("{{STATS}}", render_stats(lang, live_count, sum(1 for n in counts.values() if n))),
+            ("{{HERO_PHONE}}", render_hero_phone(lang)),
+            ("{{SIGNS}}", render_signs(lang)),
+            ("{{GALLERY}}", render_gallery(lang)),
+            ("{{LANG_DEMO}}", render_lang_demo(lang)),
+            ("{{LANG_GRID}}", render_lang_grid(lang, counts)),
+            ("{{TIER_CHIPS}}", render_tier_chips(lang, tier_labels)),
+            ("{{CREDITS}}", render_credits(lang))):
+        html = html.replace(mark, block)
+    html = fill_media(html, lang)
     rest = html.replace("{{MAPS}}", "")
     if "{{" in rest:
         raise ValueError(f"[{lang}] the page has an unfilled placeholder: "
@@ -2053,7 +2298,10 @@ MAP_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "map_template.html")
 
 def template_parts(path=None):
     """What the map pages share with the home page (template.html): its
-    stylesheet, its analytics script and its download-fallback script."""
+    stylesheet, its analytics script and its download-fallback script.
+    "css_url" is /site.css as a map page asks for it: with a digest of the
+    stylesheet, so a page made after a change never draws with the sheet of
+    before it out of a browser's cache."""
     with open(path or TEMPLATE_PATH, encoding="utf-8") as f:
         tpl = f.read()
     css = re.search(r"<style>\n(.*?)</style>", tpl, re.S)
@@ -2062,7 +2310,9 @@ def template_parts(path=None):
     if not (css and analytics and len(fallback) == 1):
         raise ValueError("template.html: its <style>, analytics <script type=module> or download-fallback "
                          "<script> (a[data-fallback]) is not where write_map_pages looks for it")
-    return {"css": css.group(1), "analytics": analytics.group(0), "fallback": fallback[0]}
+    digest = hashlib.sha256(css.group(1).encode("utf-8")).hexdigest()[:8]
+    return {"css": css.group(1), "css_url": f"/site.css?v={digest}", "analytics": analytics.group(0),
+            "fallback": fallback[0]}
 
 
 def write_site_css():
@@ -2094,9 +2344,7 @@ def render_map_page(e, lang, template, parts, preview=False, builder_on=True):
     rid = region["id"]
     name, desc = region_text(lang, region)
     ename = escape(name)
-    v = _version(e, lang) if lang != "en" else None
-    if v and not v["size"]:
-        v = None
+    v = _version(e, lang) if lang != "en" and _has_version(e, lang) else None
     href, fb = _original(e)
     body = [f'<p class="lead">{t(lang, "mp_lead", name=ename)}</p>', f"<p>{desc}</p>",
             f'<h2>{t(lang, "mp_download_h2")}</h2>', '<div class="map-dl">']
@@ -2148,7 +2396,7 @@ def render_map_page(e, lang, template, parts, preview=False, builder_on=True):
     html = template
     for k, val in (("{{LANG}}", lang), ("{{DIR}}", _dir_attr(lang)), ("{{TITLE}}", title),
                    ("{{DESCRIPTION}}", description), ("{{HEAD_LINKS}}", render_head_links(lang, path, title, description)),
-                   ("{{ANALYTICS}}", parts["analytics"]), ("{{LANG_PICKER}}", render_lang_picker(lang, path)),
+                   ("{{ANALYTICS}}", parts["analytics"]), ("{{CSS}}", parts["css_url"]), ("{{LANG_PICKER}}", render_lang_picker(lang, path)),
                    ("{{HOME}}", f"/{_sub(lang)}"), ("{{ALL_MAPS}}", t(lang, "mp_all_maps")),
                    ("{{H1}}", t(lang, "mp_h1", name=ename)), ("{{FOOTER}}", t(lang, "footer")),
                    ("{{FALLBACK}}", parts["fallback"])):

@@ -2,6 +2,11 @@
 
 [![CI](https://github.com/jasontitus/streetzim/actions/workflows/ci.yml/badge.svg)](https://github.com/jasontitus/streetzim/actions/workflows/ci.yml)
 
+<p align="center">
+  <a href="https://streetzim.web.app/#videos"><img src="docs/readme/photo-search.webp" width="100%" alt="Seven phones side by side. On each, a photo of a sign in a different script (Ukrainian, Greek, Arabic, Japanese, Korean, Chinese, English) is read and the place it names is shown on the map."></a>
+  <br><sub>Search with a photo, with no network: seven maps read a sign in seven scripts and look for the place it names.</sub>
+</p>
+
 StreetZim packages OpenStreetMap data into a single [ZIM](https://wiki.openzim.org/wiki/ZIM_file_format)
 file that opens in [Kiwix](https://kiwix.org) (iOS, Android, desktop) or in a
 browser, with no network at all. A ZIM contains:
@@ -21,6 +26,37 @@ the browser.
 
 [CHANGELOG.md](CHANGELOG.md) lists what StreetZim can do and when each feature
 arrived.
+
+## What it looks like
+
+Each map below is a single file, running with the network off. The
+full-length clips, more screenshots and the maps themselves are at
+<https://streetzim.web.app>.
+
+<p align="center">
+  <a href="https://streetzim.web.app/#videos"><img src="docs/readme/zoom.webp" width="48%" alt="The map flies from the whole of Kyiv down to one building, tilts and turns, then opens the place card of the Golden Gate."></a>
+  <a href="https://streetzim.web.app/#gallery"><img src="docs/readme/terrain.webp" width="48%" alt="The mountains north of Tehran in 3D, with satellite imagery draped over the terrain."></a>
+  <br><sub>From the whole of Kyiv down to one building and its place card · 3D terrain with satellite imagery: the mountains above Tehran</sub>
+</p>
+<p align="center">
+  <a href="https://streetzim.web.app/#videos"><img src="docs/readme/driving.webp" width="23%" alt="A phone following a route across Kyiv turn by turn."></a>
+  <a href="https://streetzim.web.app/#languages"><img src="docs/readme/arabic.webp" width="23%" alt="Directions in Cairo on a phone, with the interface and the street names in Arabic, laid out right to left."></a>
+  <a href="https://streetzim.web.app/#languages"><img src="docs/readme/hindi.webp" width="23%" alt="Directions in Kyiv on a phone, with the interface in Hindi."></a>
+  <a href="https://streetzim.web.app/#languages"><img src="docs/readme/japanese.webp" width="23%" alt="The place card of the Golden Gate in Kyiv on a phone, with the interface and the Wikipedia summary in Japanese."></a>
+  <br><sub>Turn-by-turn directions, routed on the phone (simulated GPS, partly time lapse) · Cairo in Arabic · Kyiv in Hindi · Kyiv in Japanese</sub>
+</p>
+
+The published maps come in many languages: interface, search, Wikipedia
+articles, and place names where the map data has them in that language
+([docs/language-sets.md](docs/language-sets.md) lists them;
+[docs/languages.md](docs/languages.md) is how to build one).
+
+The pictures show map data © OpenStreetMap contributors. The satellite
+imagery is EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH
+(Contains modified Copernicus Sentinel data 2021), under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/):
+non-commercial use only. The signs are other people's photos:
+[docs/media-credits.md](docs/media-credits.md) names each one.
 
 ## Quick start (build Monaco in about a minute)
 
@@ -229,6 +265,10 @@ and the known technical debt.
 ## Licence
 
 **Code:** MIT (see [LICENSE](LICENSE)).
+
+**Pictures and clips** (`docs/readme/`, `web/media/`): not MIT. They show the
+data below and other people's photos, under those licences
+([docs/media-credits.md](docs/media-credits.md)).
 
 **Data in the ZIM files:**
 

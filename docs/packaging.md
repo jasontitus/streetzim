@@ -96,6 +96,12 @@ old paths in the checkout so the build host, ops scripts and `python
 create_osm_zim.py` keep working, and ship only the `streetzim` package.
 Not done yet; do not publish until it is.
 
+**Also before a release: the README's pictures.** `pyproject.toml` gives
+`README.md` as the project description, and its pictures are paths in the
+repository (`docs/readme/...`), which PyPI cannot show. Give the package a
+description without them, or write those paths as full
+`raw.githubusercontent.com` addresses of the tagged release.
+
 ## Coverage
 
 CI's `checks` job runs `tests/` and `ops/tests/` under pytest-cov

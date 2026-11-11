@@ -6,6 +6,7 @@
 <title>{{t:html_title}}</title>
 <meta name="description" content="{{a:meta_description}}">
 {{HEAD_LINKS}}
+<script>document.documentElement.className += ' js';</script>
 <!-- Firebase Analytics — only on the public marketing landing page.
      Removed from the /drive/ PWA so the maintainer's debugging
      sessions don't fire tracking events. -->
@@ -41,72 +42,187 @@
   });
 </script>
 <style>
+  /* One stylesheet for the home page and, as /site.css, every map's own page
+     (web/generate.py write_site_css). Dark only. Every rule starts at two
+     spaces: tests read the rules by that shape. Spacing uses logical
+     properties so right-to-left pages mirror, and no heading is letter-spaced
+     or upper-cased: the pages are written in 34 languages and many scripts. */
   :root {
     --bg: #0b1220;
+    --bg-2: #0e1729;
     --bg-card: #131c2e;
     --bg-card-hover: #182339;
     --text: #e6edf7;
-    --text-dim: #94a3b8;
-    --text-faint: #64748b;
+    --text-dim: #9fb0c7;
+    --text-faint: #7f8ea3;
     --accent: #3b82f6;
     --accent-hover: #60a5fa;
+    --accent-strong: #2563eb;
+    --warm: #ffc27a;
     --border: rgba(255,255,255,0.08);
     --border-strong: rgba(255,255,255,0.16);
-    --max-w: 980px;
+    --max-w: 1160px;
+    --bar-h: 56px;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   html, body {
     margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Noto Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
   .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+  .container.narrow { max-width: 860px; }
 
-  header {
-    padding: 40px 0 28px;
+  /* The bar at the top of every page: name, sections, language, maps. */
+  .topbar {
+    position: sticky; top: 0; z-index: 30;
+    background: rgba(11,18,32,0.9);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(11,18,32,0) 100%);
   }
-  /* Language picker: top right of the header, one link per page language. */
-  .lang-menu {
-    display: flex; flex-direction: column; align-items: flex-end;
-    margin: -16px 0 12px; font-size: 13px;
+  .topbar .container {
+    position: relative;
+    display: flex; align-items: center; gap: 14px;
+    min-height: var(--bar-h);
   }
+  .brand { font-size: 19px; font-weight: 700; color: var(--text); white-space: nowrap; }
+  .brand:hover { color: var(--text); text-decoration: none; }
+  .accent { color: var(--accent-hover); }
+  .topnav { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; margin-inline-start: 10px; }
+  .topnav a {
+    padding: 6px 10px; border-radius: 8px;
+    font-size: 14px; color: var(--text-dim); white-space: nowrap;
+  }
+  .topnav a:hover { color: var(--text); background: rgba(255,255,255,0.06); text-decoration: none; }
+  .topbar-cta { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; padding: 8px 14px; border-radius: 10px; }
+  .topbar-cta svg { width: 15px; height: 15px; flex: none; }
+
+  /* Language menu: a button in the bar, the languages in a panel under it.
+     The same links, as tiles with a count of maps, are the grid in the
+     languages section (.lang-grid). */
+  .lang-menu { margin-inline-start: auto; font-size: 14px; }
   .lang-menu summary {
-    cursor: pointer; list-style: none; padding: 3px 12px; border-radius: 999px;
-    color: var(--text-dim); border: 1px solid var(--border-strong);
+    display: flex; align-items: center; gap: 7px;
+    cursor: pointer; list-style: none; padding: 6px 12px; border-radius: 999px;
+    color: var(--text-dim); border: 1px solid var(--border-strong); white-space: nowrap;
   }
-  .lang-menu summary::before { content: "\1F310\00a0"; }
+  .lang-menu summary::before {
+    content: ""; width: 15px; height: 15px; flex: none;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239fb0c7' stroke-width='1.8'%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3Cpath d='M2.5 12h19M12 2.5c3 3.2 3 15.800 0 19M12 2.5c-3 3.2-3 15.800 0 19'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  .lang-menu summary::after {
+    content: ""; width: 7px; height: 7px; margin-block-start: -4px;
+    border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor;
+    transform: rotate(45deg);
+  }
   .lang-menu summary::-webkit-details-marker { display: none; }
-  .lang-menu[open] summary, .lang-menu summary:hover { color: var(--accent-hover); }
-  .lang-picker {
-    display: flex; justify-content: flex-end; gap: 4px; flex-wrap: wrap;
-    margin: 8px 0 0; max-width: 640px;
+  .lang-menu[open] summary, .lang-menu summary:hover { color: var(--text); border-color: var(--text-faint); }
+  .lang-menu .lang-picker {
+    position: absolute; inset-block-start: calc(100% + 6px); inset-inline-end: 24px;
+    width: min(600px, calc(100% - 32px)); max-height: calc(100vh - var(--bar-h) - 24px); overflow: auto;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 2px;
+    padding: 10px; border-radius: 14px;
+    background: var(--bg-card); border: 1px solid var(--border-strong);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
   }
-  .lang-picker a {
-    padding: 3px 10px; border-radius: 999px;
-    color: var(--text-dim); text-decoration: none;
-    border: 1px solid transparent;
+  .lang-menu .lang-picker a {
+    padding: 7px 10px; border-radius: 8px;
+    color: var(--text-dim); border: 1px solid transparent;
   }
-  .lang-picker a:hover { color: var(--accent-hover); border-color: rgba(59,130,246,0.35); }
+  .lang-picker a:hover { color: var(--text); background: rgba(255,255,255,0.06); text-decoration: none; }
   .lang-picker a[aria-current="page"] {
-    color: var(--accent-hover); background: rgba(59,130,246,0.12);
-    border-color: rgba(59,130,246,0.25);
+    color: var(--text); background: rgba(59,130,246,0.16);
+    border-color: rgba(59,130,246,0.45);
   }
+  .lang-grid .lang-picker {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;
+  }
+  .lang-grid .lang-picker a {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; border-radius: 10px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text); font-size: 15px;
+  }
+  .lang-grid .lang-picker a:hover { background: var(--bg-card-hover); border-color: var(--border-strong); }
+  .lang-grid .lang-picker b {
+    padding: 1px 8px; border-radius: 999px;
+    background: rgba(255,255,255,0.07); color: var(--text-dim);
+    font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+
   h1 {
-    font-size: 38px; font-weight: 700; letter-spacing: -0.02em;
-    margin: 0 0 10px;
+    font-size: clamp(31px, 4.4vw, 52px); font-weight: 700; line-height: 1.15;
+    margin: 0 0 14px;
   }
-  h1 .accent { color: var(--accent); }
   .tagline {
-    font-size: 19px; color: var(--text-dim);
-    max-width: 640px; margin: 0;
+    font-size: 18px; color: var(--text-dim);
+    max-width: 600px; margin: 0;
   }
-  .badges {
-    margin-top: 24px; display: flex; gap: 8px; flex-wrap: wrap;
+
+  /* Top of the home page: what it is, a way straight to a map, and the map
+     itself moving. */
+  .hero {
+    padding: 52px 0 60px;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(900px 480px at 88% -10%, rgba(59,130,246,0.22), transparent 62%),
+      radial-gradient(700px 420px at -6% 112%, rgba(255,194,122,0.07), transparent 60%),
+      var(--bg);
+  }
+  .hero-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 44px; align-items: center;
+  }
+  .eyebrow {
+    display: inline-block; margin: 0 0 14px; padding: 4px 12px; border-radius: 999px;
+    background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.25);
+    color: var(--accent-hover); font-size: 13px; font-weight: 500;
+  }
+  .finder { display: none; position: relative; gap: 8px; margin: 26px 0 0; max-width: 560px; }
+  .js .finder { display: flex; }
+  #finder-q {
+    flex: 1 1 auto; min-width: 0; padding: 13px 16px;
+    font: inherit; font-size: 16px;
+    border: 1px solid var(--border-strong); border-radius: 12px;
+    background: var(--bg-card); color: var(--text);
+    -webkit-text-fill-color: var(--text);
+  }
+  #finder-q::placeholder { color: var(--text-faint); opacity: 1; }
+  #finder-q::-webkit-search-cancel-button { filter: invert(1) opacity(0.6); }
+  #finder-q:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .finder .btn { font-size: 15px; font-weight: 600; padding: 12px 18px; border-radius: 12px; }
+  .finder-list {
+    position: absolute; z-index: 5; inset-inline: 0; inset-block-start: calc(100% + 6px);
+    margin: 0; padding: 6px; list-style: none; border-radius: 12px;
+    background: var(--bg-card); border: 1px solid var(--border-strong);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  }
+  .finder-list button {
+    display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 9px 12px; border: 0; border-radius: 8px;
+    background: none; color: var(--text); font: inherit; font-size: 15px; text-align: start;
+    cursor: pointer;
+  }
+  .finder-list button:hover, .finder-list button:focus-visible { background: var(--bg-card-hover); outline: none; }
+  .finder-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .finder-list small { color: var(--text-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0 0; }
+  .stats a {
+    display: flex; flex-direction: column; gap: 1px; min-width: 96px;
+    padding: 8px 16px 9px; border-radius: 12px; line-height: 1.2;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+    color: var(--text-dim); font-size: 14px;
+  }
+  .stats a:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+  .stats b { font-size: 24px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .apps {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-top: 22px; font-size: 13.5px; color: var(--text-dim);
   }
   .badge {
     display: inline-block;
@@ -127,29 +243,204 @@
     text-decoration: none;
   }
 
+  /* A screen in a frame: the wide one is a desktop, the tall one a phone. */
+  .frame {
+    position: relative; overflow: hidden;
+    border-radius: 14px; border: 1px solid var(--border-strong);
+    background: #0a0f1a;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .frame-wide { aspect-ratio: 16 / 9; }
+  .frame video, .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .hero-art { position: relative; padding-block: 14px 44px; padding-inline-end: 9%; }
+  .hero-phone { position: absolute; inset-block-end: 0; inset-inline-end: 0; width: 27%; }
+  .hero-phone .frame { aspect-ratio: 390 / 844; border-radius: 18px; border: 3px solid #2a3852; }
+  .hero-phone img { position: absolute; inset: 0; opacity: 0; transition: opacity 0.6s; }
+  .hero-phone img.on { opacity: 1; }
+  .phone-tag {
+    position: absolute; inset-block-start: -13px; inset-inline-end: 10px;
+    padding: 3px 11px; border-radius: 999px;
+    background: var(--accent-strong); color: #fff;
+    font-size: 12.5px; font-weight: 600; line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  }
+  .media-toggle {
+    position: absolute; inset-block-end: 10px; inset-inline-start: 10px;
+    width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--border-strong); background: rgba(11,18,32,0.72);
+    cursor: pointer;
+  }
+  .media-toggle::before {
+    content: ""; position: absolute; inset: 15px 16px;
+    border-inline: 4px solid #fff;
+  }
+  .media-toggle.paused::before {
+    inset: 14px 15px 14px 18px;
+    border-style: solid; border-width: 8px 0 8px 12px;
+    border-color: transparent transparent transparent #fff;
+  }
+
   section {
-    padding: 40px 0;
+    padding: 60px 0;
     border-bottom: 1px solid var(--border);
   }
-  section.maps-section { padding-top: 28px; }
+  section.band { background: var(--bg-2); }
+  section.maps-section { padding-top: 52px; }
   section:last-of-type { border-bottom: none; }
+  section[id], #credits { scroll-margin-top: calc(var(--bar-h) + 8px); }
+  #map-list { scroll-margin-top: var(--bar-h); }
   h2 {
-    font-size: 26px; font-weight: 700; letter-spacing: -0.01em;
-    margin: 0 0 20px;
+    font-size: clamp(25px, 3vw, 33px); font-weight: 700; line-height: 1.2;
+    margin: 0 0 14px;
   }
   h3 {
-    font-size: 17px; font-weight: 600;
+    font-size: 18px; font-weight: 600;
     margin: 24px 0 8px;
     color: var(--text);
   }
   p { margin: 0 0 16px; color: var(--text-dim); }
-  p.lead { color: var(--text); font-size: 17px; }
+  p.lead { color: var(--text); font-size: 18px; max-width: 780px; }
+  p.note { font-size: 13.5px; }
   a { color: var(--accent-hover); text-decoration: none; }
   a:hover { color: var(--accent); text-decoration: underline; }
+  .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+  .section-head p { margin-bottom: 0; }
+
+  /* Clips. The first plays in the page; the cards and the signs open theirs
+     in the viewer (a plain link to the file where there is no script). */
+  .feature-clip { margin: 30px 0 0; }
+  .feature-clip h3 { margin: 0 0 6px; font-size: 22px; }
+  .feature-clip p { max-width: 780px; }
+  .feature-clip .frame { margin-top: 18px; }
+  .feature-clip video { background: #000; }
+  .feature-clip .clip-credit { margin: 8px 0 0; max-width: none; font-size: 11.5px; color: var(--text-faint); }
+  .clips {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px; margin: 30px 0 0;
+  }
+  .clip {
+    margin: 0; overflow: hidden;
+    display: flex; flex-direction: column;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .clip-media { position: relative; display: block; aspect-ratio: 16 / 10; background: #0a0f1a; }
+  .clip-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .clip-tall img { object-position: top; }
+  .clip figcaption { padding: 14px 18px 16px; }
+  .clip h3 { margin: 0 0 4px; font-size: 16.5px; }
+  .clip p { margin: 0; font-size: 14px; }
+  .play {
+    position: absolute; inset: 0; margin: auto;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: rgba(11,18,32,0.72); border: 1.5px solid rgba(255,255,255,0.85);
+    transition: transform 0.15s, background 0.15s;
+  }
+  .play::before {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    transform: translate(-36%, -50%);
+    border-style: solid; border-width: 10px 0 10px 17px;
+    border-color: transparent transparent transparent #fff;
+  }
+  a:hover > .play { transform: scale(1.08); background: var(--accent-strong); }
+  .signs-head { margin-top: 44px; }
+  .signs {
+    display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 12px; margin: 16px 0 18px;
+  }
+  .sign {
+    position: relative; display: block; overflow: hidden;
+    aspect-ratio: 390 / 844; border-radius: 12px;
+    border: 1px solid var(--border-strong); background: #0a0f1a;
+  }
+  .sign img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .sign .play { width: 40px; height: 40px; }
+  .sign .play::before { border-width: 7px 0 7px 12px; }
+  .sign-label {
+    position: absolute; inset-inline: 0; inset-block-end: 0;
+    padding: 24px 6px 8px; text-align: center;
+    background: linear-gradient(transparent, rgba(5,9,18,0.94));
+    color: #fff; font-size: 13px; font-weight: 600;
+  }
+
+  /* Screenshots: one row to flip through, edge to edge. */
+  .strip-nav { display: none; gap: 8px; flex: none; }
+  .js .strip-nav { display: flex; }
+  .round {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--border-strong); background: var(--bg-card); color: var(--text);
+    cursor: pointer;
+  }
+  .round:hover { background: var(--bg-card-hover); border-color: var(--text-faint); }
+  .round svg { width: 18px; height: 18px; }
+  [dir="rtl"] .flip { transform: scaleX(-1); }
+  .strip {
+    --shot-h: 400px;
+    --edge: max(24px, calc((100% - var(--max-w)) / 2 + 24px));
+    display: flex; gap: 16px; overflow-x: auto;
+    margin-top: 26px; padding: 4px var(--edge) 16px;
+    scroll-snap-type: x proximity; scroll-padding-inline: var(--edge);
+    scrollbar-width: thin; scrollbar-color: #2a3a57 transparent;
+  }
+  .shot { flex: 0 0 auto; margin: 0; display: flex; flex-direction: column; scroll-snap-align: start; }
+  .shot a {
+    display: block; overflow: hidden; border-radius: 12px;
+    border: 1px solid var(--border-strong); background: #0a0f1a;
+  }
+  .shot a:hover { border-color: var(--accent-hover); }
+  .shot img { display: block; height: var(--shot-h); width: auto; }
+  .shot figcaption {
+    width: 0; min-width: 100%; padding: 8px 2px 0;
+    font-size: 13px; line-height: 1.4; color: var(--text-dim);
+  }
+  .shot small, .lb-cap small { display: block; font-size: 11.5px; color: var(--text-faint); }
+  .lightbox {
+    width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none;
+    margin: 0; padding: 0; border: 0;
+    background: rgba(5,9,18,0.97); color: var(--text);
+  }
+  .lightbox[open] {
+    display: grid; align-items: center;
+    grid-template: "prev stage next" minmax(0, 1fr) "cap cap cap" auto / 68px minmax(0, 1fr) 68px;
+  }
+  .lightbox::backdrop { background: rgba(5,9,18,0.9); }
+  .lb-stage {
+    grid-area: stage; height: 100%; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 58px 0 6px;
+  }
+  .lb-stage img, .lb-stage video {
+    max-width: 100%; max-height: 100%; width: auto; height: auto;
+    border-radius: 10px; background: #000;
+  }
+  .lb-prev { grid-area: prev; justify-self: center; }
+  .lb-next { grid-area: next; justify-self: center; }
+  .lb-close { position: absolute; inset-block-start: 10px; inset-inline-end: 14px; z-index: 2; }
+  .lb-cap {
+    grid-area: cap; min-height: 66px; margin: 0; padding: 8px 20px 16px;
+    text-align: center; font-size: 14.5px; color: var(--text);
+  }
+  .lb-count { color: var(--text-faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+  /* The same map in six scripts. */
+  .lang-shots {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 14px; margin: 34px 0 12px;
+  }
+  .lang-shot { margin: 0; }
+  .lang-shot a:not([hidden]) {
+    display: block; overflow: hidden; border-radius: 14px;
+    border: 1px solid var(--border-strong); background: #0a0f1a;
+  }
+  .lang-shot a:hover { border-color: var(--accent-hover); }
+  .lang-shot img { display: block; width: 100%; height: auto; }
+  .lang-shot figcaption { padding-top: 8px; text-align: center; font-size: 15px; font-weight: 600; color: var(--text); }
+  .lang-grid { margin: 14px 0 12px; }
+  .lang-grid-head { margin-top: 40px; }
 
   .features {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 16px;
     margin-top: 24px;
   }
@@ -170,9 +461,9 @@
 
   .maps {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
     gap: 14px;
-    margin-top: 16px;
+    margin-top: 8px;
   }
   /* Tier dividers — emitted as `<h3>` elements between groups of
      map-cards. `grid-column: 1 / -1` makes them span every column
@@ -181,17 +472,15 @@
   .maps-tier-header {
     grid-column: 1 / -1;
     margin: 24px 0 4px;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
     color: var(--text-dim);
     border-top: 1px solid var(--border);
     padding-top: 18px;
   }
   .maps-tier-header:first-child {
-    /* No top rule for the first header — the parent `<h2>Download a
-       map</h2>` already separates this section from the page header. */
+    /* No top rule for the first header — the filter above it already
+       separates the list from the rest of the section. */
     border-top: none;
     padding-top: 4px;
     margin-top: 8px;
@@ -203,12 +492,18 @@
      nothing: the input was unstyled, and — the reported symptom — the filter
      did not filter, because `.map-card { display: flex }` below outranks the
      UA stylesheet's `[hidden] { display: none }` and the override that was
-     supposed to beat it never applied. Keep them at top level. */
-  .maps-filter { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; }
+     supposed to beat it never applied. Keep them at top level.
+     The box stays under the top bar while the list scrolls. */
+  .maps-filter {
+    position: sticky; top: var(--bar-h); z-index: 20;
+    display: flex; align-items: center; gap: 12px;
+    margin: 14px 0 0; padding: 10px 0;
+    background: var(--bg);
+  }
   #map-filter {
-    flex: 1 1 auto; max-width: 420px; padding: 10px 12px;
-    font-size: 16px; /* 16px or iOS zooms the page on focus */
-    border: 1px solid var(--border, #d8d8d8); border-radius: 8px;
+    flex: 1 1 auto; max-width: 520px; padding: 11px 14px;
+    font: inherit; font-size: 16px; /* 16px or iOS zooms the page on focus */
+    border: 1px solid var(--border-strong, #d8d8d8); border-radius: 10px;
     /* The palette is dark-only. `background: #fff; color: inherit` put the
        page's near-white --text on a white field -- white on white, reported
        2026-09-27. Nobody saw it earlier because the whole block was nested
@@ -221,8 +516,25 @@
   /* Safari draws its own clear button in the text colour; make it visible. */
   #map-filter::-webkit-search-cancel-button { filter: invert(1) opacity(0.6); }
   #map-filter:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .maps-filter-count { font-size: 13px; opacity: 0.7; white-space: nowrap; }
+  .maps-filter-count { font-size: 13px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .maps [hidden] { display: none !important; }
+  /* One button per group of maps; with the box they narrow the list together. */
+  .chips { display: none; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+  .js .chips { display: flex; }
+  .chip {
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--border-strong); background: transparent;
+    color: var(--text-dim); font: inherit; font-size: 13px; white-space: nowrap;
+    cursor: pointer;
+  }
+  .chip:hover { color: var(--text); border-color: var(--text-faint); }
+  .chip[aria-pressed="true"] {
+    background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.5);
+    color: var(--text);
+  }
+  .maps-none { margin: 28px 0; text-align: center; }
+  .map-card { scroll-margin-top: calc(var(--bar-h) + 96px);
+  }
   .map-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -249,8 +561,8 @@
   .map-card-title a:hover { color: var(--accent-hover); }
   .map-card-note { font-size: 12px; color: var(--text-faint); margin: 0 0 10px; line-height: 1.4; }
   .map-card-size {
-    font-size: 12px; font-weight: 500;
-    color: var(--text-faint);
+    font-size: 12.5px; font-weight: 600;
+    color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -282,28 +594,29 @@
   .badge-terrain   { background: #2f2418; color: #e3c18a; border-color: #4d3a25; }
   .badge-satellite { background: #2a1f3a; color: #c2a8ff; border-color: #3e2e58; }
   .badge-wiki      { background: #2a2a2a; color: #d0d0d0; border-color: #3c3c3c; }
-  .badge-photo     { background: #3a2a14; color: #ffc27a; border-color: #5a4220; }
+  .badge-photo     { background: #3a2a14; color: var(--warm); border-color: #5a4220; }
   .map-card-links {
-    display: flex; gap: 8px; flex-wrap: wrap;
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
     margin-top: auto;
   }
   .btn {
     display: inline-block;
-    padding: 5px 10px;
-    border-radius: 6px;
-    font-size: 11.5px; font-weight: 500;
+    padding: 6px 11px;
+    border-radius: 8px;
+    font-family: inherit; font-size: 12px; font-weight: 500;
     text-decoration: none;
-    transition: all 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
     border: 1px solid transparent;
     white-space: nowrap;
+    cursor: pointer;
   }
   .btn-primary {
-    background: var(--accent);
-    color: white;
+    background: var(--accent-strong);
+    color: #fff;
   }
   .btn-primary:hover {
-    background: var(--accent-hover);
-    color: white; text-decoration: none;
+    background: var(--accent);
+    color: #fff; text-decoration: none;
   }
   .btn-secondary {
     background: transparent;
@@ -315,11 +628,13 @@
     border-color: var(--text-faint);
     text-decoration: none;
   }
+  /* A card's download is the button to find: larger than the links beside it. */
+  .map-card-links .btn-primary { font-size: 13.5px; font-weight: 600; padding: 7px 16px; }
   .map-card.upcoming {
     opacity: 0.55;
   }
   .map-card.upcoming .map-card-size {
-    color: var(--accent);
+    color: var(--accent-hover);
   }
 
   .steps {
@@ -357,11 +672,14 @@
     font-size: 14px;
   }
   .licenses ul {
-    margin: 0; padding-left: 18px;
+    margin: 0; padding-inline-start: 18px;
     color: var(--text-dim);
   }
   .licenses li { margin: 6px 0; }
   .licenses strong { color: var(--text); }
+  .licenses h3 { margin: 0 0 8px; font-size: 16px; }
+  .licenses p { margin: 0 0 10px; }
+  .licenses ul + p { margin: 12px 0 0; }
 
   .source-list {
     display: grid;
@@ -393,23 +711,29 @@
   }
 
   .updated {
-    text-align: right;
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--text-faint);
-    margin: 0 0 12px;
+    margin: 0;
   }
   .feature-key {
     font-size: 13px;
     color: var(--text-dim);
     line-height: 1.9;
-    margin: 12px 0 18px;
+    margin: 12px 0 10px;
   }
   .feature-key .map-badge { margin: 0 4px 0 6px; }
 
   /* A map's own page (/maps/<id>/, /<lang>/maps/<id>/: web/generate.py write_map_pages) */
+  .page-head {
+    padding: 28px 0 22px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(11,18,32,0) 100%);
+  }
+  .page-head h1 { font-size: clamp(26px, 3.4vw, 38px); margin-bottom: 0; }
+  .page-head + section { padding-top: 30px; }
   .crumbs { font-size: 13px; color: var(--text-faint); margin: 0 0 8px; }
   .crumbs a { color: var(--text-dim); }
-  .map-page h2 { margin-top: 28px; }
+  .map-page h2 { margin-top: 28px; font-size: 24px; }
   .map-dl { display: grid; gap: 6px; justify-items: start; }
   .map-dl .btn { font-size: 15px; padding: 10px 16px; white-space: normal; }
   .map-dl p { margin: 0 0 10px; font-size: 14px; color: var(--text-dim); }
@@ -432,33 +756,210 @@
   /* Phones: card buttons and store badges tall enough to tap (44 px). */
   @media (pointer: coarse) {
     .btn { padding: 11px 14px; font-size: 13px; }
+    .map-card-links .btn-primary { padding: 11px 18px; font-size: 14px; }
     .badge { padding: 10px 14px; }
+    .chip { padding: 10px 14px; }
+    .lang-menu summary { padding: 9px 12px; }
+    .lang-menu .lang-picker a { padding: 11px 10px; }
   }
-  @media (max-width: 600px) {
-    h1 { font-size: 34px; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .hero-phone img, .play { transition: none; }
+  }
+  @media (max-height: 480px) {
+    .maps-filter { position: static; }
+  }
+  @media (max-width: 1000px) {
+    .topnav { display: none; }
+    .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+    .signs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .lang-shots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .clips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
     .tagline { font-size: 17px; }
-    section { padding: 36px 0; }
-    header { padding: 48px 0 32px; }
+    section { padding: 44px 0; }
+    section.maps-section { padding-top: 40px; }
+    .hero { padding: 34px 0 44px; }
+    .topbar .container { gap: 10px; }
+    .topbar-cta { padding: 9px 11px; min-width: 44px; justify-content: center; }
+    .topbar-cta span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .lang-menu .lang-picker { inset-inline-end: 16px; }
+    .finder { flex-wrap: wrap; }
+    .finder .btn { flex: 1 1 100%; text-align: center; }
+    .finder-list { inset-block-start: calc(100% + 6px); }
+    .clips { grid-template-columns: minmax(0, 1fr); }
+    .signs { gap: 8px; }
+    .sign .play { width: 32px; height: 32px; }
+    .sign-label { font-size: 11.5px; overflow-wrap: anywhere; }
+    .section-head { flex-wrap: wrap; }
+    .strip-nav { margin-inline-start: auto; }
+    .strip { --shot-h: 300px; --edge: 16px; gap: 12px; }
+    .lightbox[open] { grid-template-columns: 0 minmax(0, 1fr) 0; }
+    .lb-prev, .lb-next { position: absolute; grid-area: auto; inset-block-end: 12px; z-index: 2; }
+    .lb-prev { inset-inline-start: 12px; }
+    .lb-next { inset-inline-end: 12px; }
+    .lb-cap { padding-inline: 64px; min-height: 76px; }
+    .lang-shots {
+      grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 44%;
+      overflow-x: auto; margin-inline: -16px; padding-inline: 16px; padding-block-end: 8px; scroll-padding-inline: 16px;
+      scroll-snap-type: x proximity;
+    }
+    .lang-shot { scroll-snap-align: start; }
+    .lang-grid .lang-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .chips {
+      flex-wrap: nowrap; overflow-x: auto;
+      margin-inline: -16px; padding-inline: 16px; scrollbar-width: none;
+    }
+    .maps-filter { flex-wrap: wrap; gap: 4px 12px; }
+    #map-filter { max-width: none; flex-basis: 100%; }
   }
 </style>
 </head>
 <body>
 
-<header>
+<div class="topbar">
   <div class="container">
+    <a class="brand" href="#top">Street<span class="accent">Zim</span></a>
+    <nav class="topnav" aria-label="{{a:nav_aria}}">
+      <a href="#videos">{{t:nav_videos}}</a>
+      <a href="#gallery">{{t:nav_gallery}}</a>
+      <a href="#languages">{{t:nav_langs}}</a>
+      <a href="#howto">{{t:howto_h2}}</a>
+    </nav>
 {{LANG_PICKER}}
-    <h1>Street<span class="accent">Zim</span></h1>
-    <p class="tagline">{{t:tagline}}</p>
-    <div class="badges">
-      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="{{a:badge_ios_title}}">iOS</a>
-      <a class="badge" href="https://play.google.com/store/apps/details?id=org.kiwix.kiwixmobile" target="_blank" rel="noopener" title="{{a:badge_android_title}}">Android</a>
-      <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="{{a:badge_mac_title}}">macOS</a>
-      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="{{a:badge_pwa_title}}">Windows</a>
-      <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="{{a:badge_pwa_title}}">Linux</a>
-      <span class="badge">{{t:badge_free}}</span>
+    <a class="btn btn-primary topbar-cta" href="#maps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span>{{t:maps_h2}}</span></a>
+  </div>
+</div>
+
+<header class="hero" id="top">
+  <div class="container hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow">{{t:badge_free}}</p>
+      <h1>{{t:hero_h1}}</h1>
+      <p class="tagline">{{t:tagline}}</p>
+      <form class="finder" id="finder" action="#maps" role="search">
+        <input id="finder-q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="{{a:finder_placeholder}}"
+               aria-label="{{a:filter_aria}}">
+        <button class="btn btn-primary" type="submit">{{t:finder_btn}}</button>
+        <ul id="finder-list" class="finder-list" hidden></ul>
+      </form>
+{{STATS}}
+      <div class="apps">
+        <span>{{t:hero_apps}}</span>
+        <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="{{a:badge_ios_title}}">iOS</a>
+        <a class="badge" href="https://play.google.com/store/apps/details?id=org.kiwix.kiwixmobile" target="_blank" rel="noopener" title="{{a:badge_android_title}}">Android</a>
+        <a class="badge" href="https://apps.apple.com/us/app/kiwix/id997079563" target="_blank" rel="noopener" title="{{a:badge_mac_title}}">macOS</a>
+        <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="{{a:badge_pwa_title}}">Windows</a>
+        <a class="badge" href="https://pwa.kiwix.org/" target="_blank" rel="noopener" title="{{a:badge_pwa_title}}">Linux</a>
+      </div>
+    </div>
+    <div class="hero-art">
+      <div class="frame frame-wide">
+        <video id="hero-video" muted loop playsinline preload="none" tabindex="-1" aria-hidden="true"
+               poster="{{m:poster-hero.webp}}" data-src="{{m:hero-loop.mp4}}"></video>
+        <button type="button" id="hero-toggle" class="media-toggle paused" hidden
+                aria-label="{{a:media_play}}" data-play="{{a:media_play}}" data-pause="{{a:media_pause}}"></button>
+      </div>
+{{HERO_PHONE}}
     </div>
   </div>
 </header>
+
+<section class="band" id="videos">
+  <div class="container">
+    <h2>{{t:tour_h2}}</h2>
+    <p class="lead">{{t:tour_lead}}</p>
+
+    <div class="feature-clip">
+      <h3>{{t:tour_photo_h}}</h3>
+      <p>{{t:tour_photo_p}}</p>
+      <p class="note"><span class="map-badge badge-photo">{{t:badge_photo}}</span> {{t:tour_photo_note}}</p>
+      <div class="frame frame-wide">
+        <video controls playsinline preload="none" poster="{{m:poster-photo.webp}}">
+          <source src="{{m:tour-photo.mp4}}" type="video/mp4">
+        </video>
+      </div>
+      <p class="note clip-credit">{{mc:tour-photo.mp4}}</p>
+    </div>
+
+    <div class="clips">
+      <figure class="clip">
+        <a class="clip-media" href="{{m:tour-zoom.mp4}}" data-video data-poster="{{m:poster-zoom.webp}}" data-caption="{{a:tour_zoom_h}}" aria-label="{{a:tour_zoom_h}}"><img src="{{m:poster-zoom.webp}}" alt="" loading="lazy"><span class="play"></span></a>
+        <figcaption>
+          <h3>{{t:tour_zoom_h}}</h3>
+          <p>{{t:tour_zoom_p}}</p>
+        </figcaption>
+      </figure>
+      <figure class="clip">
+        <a class="clip-media clip-tall" href="{{m:tour-drive.mp4}}" data-video data-poster="{{m:poster-drive.webp}}" data-caption="{{a:tour_drive_h}}" aria-label="{{a:tour_drive_h}}"><img src="{{m:poster-drive.webp}}" alt="" loading="lazy"><span class="play"></span></a>
+        <figcaption>
+          <h3>{{t:tour_drive_h}}</h3>
+          <p>{{t:tour_drive_p}}</p>
+        </figcaption>
+      </figure>
+      <figure class="clip">
+        <a class="clip-media" href="{{m:tour-terrain.mp4}}" data-video data-poster="{{m:poster-terrain.webp}}" data-credit="{{mc:tour-terrain.mp4}}" data-caption="{{a:tour_terrain_h}}" aria-label="{{a:tour_terrain_h}}"><img src="{{m:poster-terrain.webp}}" alt="" loading="lazy"><span class="play"></span></a>
+        <figcaption>
+          <h3>{{t:tour_terrain_h}}</h3>
+          <p>{{t:tour_terrain_p}}</p>
+        </figcaption>
+      </figure>
+    </div>
+
+    <h3 class="signs-head">{{t:tour_signs_h}}</h3>
+    <p>{{t:tour_signs_p}}</p>
+{{SIGNS}}
+    <p class="note">{{t:tour_credits}}</p>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="container section-head">
+    <div>
+      <h2>{{t:gallery_h2}}</h2>
+      <p class="lead">{{t:gallery_lead}}</p>
+    </div>
+    <div class="strip-nav">
+      <button type="button" class="round" data-strip="prev" aria-label="{{a:gal_prev}}"><svg class="flip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button type="button" class="round" data-strip="next" aria-label="{{a:gal_next}}"><svg class="flip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
+  </div>
+  <div class="strip" id="shots" tabindex="0" role="group" aria-label="{{a:gallery_h2}}">
+{{GALLERY}}
+  </div>
+</section>
+
+<section class="band" id="languages">
+  <div class="container">
+    <h2>{{t:langs_h2}}</h2>
+    <p class="lead">{{t:langs_lead}}</p>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">1</span>
+        <h4>{{t:langs_step1_h}}</h4>
+        <p>{{t:langs_step1_p}}</p>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <h4>{{t:langs_step2_h}}</h4>
+        <p>{{t:langs_step2_p}}</p>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <h4>{{t:langs_step3_h}}</h4>
+        <p>{{t:langs_step3_p}}</p>
+      </div>
+    </div>
+{{LANG_DEMO}}
+    <p class="note">{{t:langs_demo_note}}</p>
+    <h3 class="lang-grid-head">{{t:langs_grid_h}}</h3>
+{{LANG_GRID}}
+    <p class="note">{{t:langs_grid_note}}</p>
+  </div>
+</section>
 
 <section class="maps-section" id="maps">
   <div class="container">
@@ -486,15 +987,18 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .catch(function() { /* offline / file:// preview — stamp stays "…" */ });
 </script>
 
+    <div id="map-list"></div>
     <div class="maps-filter">
       <input id="map-filter" type="search" autocomplete="off" spellcheck="false"
              placeholder="{{a:filter_placeholder}}"
              aria-label="{{a:filter_aria}}">
       <span id="map-filter-count" class="maps-filter-count" aria-live="polite" data-fmt="{{a:filter_count}}"></span>
     </div>
+{{TIER_CHIPS}}
     <div class="maps">
 {{MAPS}}
     </div>
+    <p id="map-none" class="maps-none" hidden>{{t:filter_none}}</p>
 <script>
 /* A map's Download with today's viewer: the build worker serves it, made
    from the map's archive.org file and a new viewer (tools/langpack/
@@ -529,31 +1033,51 @@ document.addEventListener('click', function (e) {
 /* Client-side filter over the rendered cards. ~70 maps in five sections was
    a long scan with no way to search -- typing "france" now narrows to it.
    Matches the title AND the description, so "coast", "alps" or "danube"
-   find regions whose name does not contain the word. Section headers hide
-   when every card under them is filtered out. */
+   find regions whose name does not contain the word. The buttons under the
+   box narrow to one section; box and buttons apply together. Section headers
+   hide when every card under them is filtered out. */
 (function () {
   var input = document.getElementById('map-filter');
   var counter = document.getElementById('map-filter-count');
   var grid = document.querySelector('.maps');
   if (!input || !grid) return;
+  var none = document.getElementById('map-none');
+  var chips = [].slice.call(document.querySelectorAll('.chip[data-tier]'));
   var cards = [].slice.call(grid.querySelectorAll('.map-card'));
-  var headers = [].slice.call(grid.querySelectorAll('.maps-tier-header'));
+  var kids = [].slice.call(grid.children);
   var total = cards.length;
   // Index once: lowercase title + description per card.
   var hay = cards.map(function (c) {
     return (c.textContent || '').toLowerCase().replace(/\s+/g, ' ');
   });
+  // The section a card is in: the number of the header above it, from 0.
+  var tierOf = [], section = -1;
+  kids.forEach(function (el) {
+    if (el.classList.contains('maps-tier-header')) section++;
+    else if (el.classList.contains('map-card')) tierOf[cards.indexOf(el)] = String(section);
+  });
+  var tier = 'all';
+  function setTier(value) {
+    tier = value;
+    chips.forEach(function (c) {
+      c.setAttribute('aria-pressed', c.getAttribute('data-tier') === tier ? 'true' : 'false');
+    });
+  }
   function apply() {
     var q = input.value.trim().toLowerCase();
-    var shown = 0;
+    var shown = 0, anywhere = 0;
     for (var i = 0; i < cards.length; i++) {
-      var hit = !q || hay[i].indexOf(q) !== -1;
+      var match = !q || hay[i].indexOf(q) !== -1;
+      var hit = match && (tier === 'all' || tierOf[i] === tier);
+      if (match) anywhere++;
       cards[i].hidden = !hit;
       if (hit) shown++;
     }
+    // A search that finds nothing in the chosen section, but something in
+    // another, shows that: the buttons must not hide a map that exists.
+    if (!shown && anywhere && tier !== 'all') { setTier('all'); apply(); return; }
     // A header is only useful if something under it survived. Walk the grid
     // in document order: each header owns the cards until the next header.
-    var kids = [].slice.call(grid.children);
     var currentHeader = null, seen = 0;
     for (var j = 0; j <= kids.length; j++) {
       var el = kids[j];
@@ -566,7 +1090,8 @@ document.addEventListener('click', function (e) {
       }
       if (el && el.classList && el.classList.contains('map-card') && !el.hidden) seen++;
     }
-    counter.textContent = q ? (counter.getAttribute('data-fmt') || '{shown} / {total}').replace('{shown}', shown).replace('{total}', total) : '';
+    counter.textContent = (q || tier !== 'all') ? (counter.getAttribute('data-fmt') || '{shown} / {total}').replace('{shown}', shown).replace('{total}', total) : '';
+    if (none) none.hidden = shown !== 0;
   }
   input.addEventListener('input', apply);
   input.addEventListener('search', apply);
@@ -574,12 +1099,15 @@ document.addEventListener('click', function (e) {
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { input.value = ''; apply(); }
   });
+  chips.forEach(function (c) {
+    c.addEventListener('click', function () { setTier(c.getAttribute('data-tier')); apply(); });
+  });
 })();
 </script>
   </div>
 </section>
 
-<section>
+<section class="band">
   <div class="container">
     <h2>{{t:what_h2}}</h2>
     <p class="lead">{{t:what_lead}}</p>
@@ -614,7 +1142,7 @@ document.addEventListener('click', function (e) {
   </div>
 </section>
 
-<section>
+<section id="howto">
   <div class="container">
     <h2>{{t:howto_h2}}</h2>
     <div class="steps">
@@ -637,7 +1165,7 @@ document.addEventListener('click', function (e) {
   </div>
 </section>
 
-<section>
+<section class="band">
   <div class="container">
     <h2>{{t:sources_h2}}</h2>
     <p>{{t:sources_intro}}</p>
@@ -650,6 +1178,14 @@ document.addEventListener('click', function (e) {
         <li>{{t:src_place}}</li>
         <li>{{t:src_code}}</li>
       </ul>
+    </div>
+    <div class="licenses" id="credits">
+      <h3>{{t:credits_h}}</h3>
+      <p>{{t:credits_intro}}</p>
+      <ul>
+{{CREDITS}}
+      </ul>
+      <p>{{t:credits_sa}}</p>
     </div>
   </div>
 </section>
@@ -688,6 +1224,200 @@ document.addEventListener('click', function (e) {
     {{t:footer}}
   </div>
 </footer>
+
+<dialog id="lightbox" class="lightbox" aria-label="{{a:gallery_h2}}">
+  <button type="button" class="round lb-close" data-lb="close" aria-label="{{a:gal_close}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <button type="button" class="round lb-prev" data-lb="prev" aria-label="{{a:gal_prev}}"><svg class="flip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <div class="lb-stage" id="lb-stage"></div>
+  <button type="button" class="round lb-next" data-lb="next" aria-label="{{a:gal_next}}"><svg class="flip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+  <p class="lb-cap"><span id="lb-caption"></span><small id="lb-credit"></small><span id="lb-count" class="lb-count"></span></p>
+</dialog>
+<script>
+/* The page's own behaviour, each part on its own and none of it needed to
+   read the page or download a map: the language menu, the moving pictures at
+   the top, the map finder, the row of screenshots and the viewer that shows
+   a screenshot or a clip full size. */
+(function () {
+  var doc = document, root = doc.documentElement;
+  var rtl = root.getAttribute('dir') === 'rtl';
+  var calm = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+             !!(navigator.connection && navigator.connection.saveData);
+  function all(sel, from) { return [].slice.call((from || doc).querySelectorAll(sel)); }
+  function plain(e) { return !(e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey); }
+
+  // Language menu: closes on a click outside it and on Escape.
+  var menu = doc.querySelector('.lang-menu');
+  if (menu) {
+    doc.addEventListener('click', function (e) {
+      if (menu.open && !menu.contains(e.target)) menu.open = false;
+    });
+    doc.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
+    });
+  }
+
+  // The clip at the top: silent, looping, fetched only when it will play
+  // (not with reduced motion or data saving), with a button to stop it.
+  var hero = doc.getElementById('hero-video'), toggle = doc.getElementById('hero-toggle');
+  if (hero && toggle) {
+    var label = function () {
+      toggle.classList.toggle('paused', hero.paused);
+      toggle.setAttribute('aria-label', toggle.getAttribute(hero.paused ? 'data-play' : 'data-pause'));
+    };
+    var start = function () {
+      if (!hero.getAttribute('src')) hero.src = hero.getAttribute('data-src');
+      var p = hero.play();
+      if (p && p.catch) p.catch(function () {});
+    };
+    toggle.hidden = false;
+    toggle.addEventListener('click', function () { if (hero.paused) start(); else hero.pause(); });
+    hero.addEventListener('play', label);
+    hero.addEventListener('pause', label);
+    label();
+    if (!calm) start();
+  }
+
+  // The phone beside it: the same map in one language after another.
+  var phone = doc.getElementById('hero-phone');
+  if (phone && !calm) {
+    var faces = all('img', phone), tag = phone.parentNode.querySelector('.phone-tag'), face = 0;
+    if (faces.length > 1) setInterval(function () {
+      if (doc.hidden || (hero && hero.paused)) return;
+      var n = (face + 1) % faces.length, next = faces[n];
+      var show = function () {
+        faces[face].classList.remove('on');
+        next.classList.add('on');
+        if (tag) { tag.textContent = next.getAttribute('data-name'); tag.lang = next.lang; }
+        face = n;
+      };
+      if (next.getAttribute('src')) show();
+      else { next.onload = function () { next.onload = null; show(); }; next.src = next.getAttribute('data-src'); }
+    }, 4000);
+  }
+
+  // Map finder at the top: suggests maps by name as you type; choosing one,
+  // or sending the box, hands the words to the filter of the list below.
+  var finder = doc.getElementById('finder'), box = doc.getElementById('finder-q');
+  var list = doc.getElementById('finder-list'), filter = doc.getElementById('map-filter');
+  if (finder && box && list && filter) {
+    var maps = all('.maps .map-card').filter(function (c) {
+      return !c.classList.contains('upcoming');
+    }).map(function (c) {
+      var t = c.querySelector('.map-card-title'), s = c.querySelector('.map-card-size');
+      return { card: c, title: t ? t.textContent.trim() : '', size: s ? s.textContent.trim() : '',
+               text: (c.textContent || '').toLowerCase().replace(/\s+/g, ' ') };
+    });
+    var go = function (words, card) {
+      list.hidden = true;
+      filter.value = words;
+      filter.dispatchEvent(new Event('input', { bubbles: true }));
+      // To the filter box, so the maps found are on the screen at once.
+      (card || doc.getElementById('map-list') || doc.getElementById('maps')).scrollIntoView();
+      if (!window.matchMedia('(pointer: coarse)').matches) filter.focus({ preventScroll: true });
+    };
+    var suggest = function () {
+      var q = box.value.trim().toLowerCase();
+      list.textContent = '';
+      if (!q) { list.hidden = true; return; }
+      var named = maps.filter(function (m) { return m.title.toLowerCase().indexOf(q) !== -1; });
+      var other = maps.filter(function (m) { return named.indexOf(m) === -1 && m.text.indexOf(q) !== -1; });
+      named.concat(other).slice(0, 6).forEach(function (m) {
+        var li = doc.createElement('li'), b = doc.createElement('button');
+        var name = doc.createElement('span'), size = doc.createElement('small');
+        b.type = 'button';
+        name.textContent = m.title;
+        size.textContent = m.size;
+        b.appendChild(name); b.appendChild(size);
+        b.addEventListener('click', function () { box.value = m.title; go(m.title, m.card); });
+        li.appendChild(b); list.appendChild(li);
+      });
+      list.hidden = !list.firstChild;
+    };
+    box.addEventListener('input', suggest);
+    box.addEventListener('focus', suggest);
+    finder.addEventListener('submit', function (e) { e.preventDefault(); go(box.value.trim()); });
+    finder.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { list.hidden = true; return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      var options = all('button', list);
+      if (list.hidden || !options.length) return;
+      var i = options.indexOf(doc.activeElement) + (e.key === 'ArrowDown' ? 1 : -1);
+      e.preventDefault();
+      if (i < 0) box.focus(); else options[Math.min(i, options.length - 1)].focus();
+    });
+    doc.addEventListener('click', function (e) { if (!finder.contains(e.target)) list.hidden = true; });
+    finder.addEventListener('focusout', function (e) { if (e.relatedTarget && !finder.contains(e.relatedTarget)) list.hidden = true; });
+  }
+
+  // Screenshots: the round buttons move the row most of a screen at a time.
+  var strip = doc.getElementById('shots');
+  if (strip) all('[data-strip]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var way = (b.getAttribute('data-strip') === 'next' ? 1 : -1) * (rtl ? -1 : 1);
+      strip.scrollBy({ left: way * strip.clientWidth * 0.8, behavior: calm ? 'auto' : 'smooth' });
+    });
+  });
+
+  // Viewer: a screenshot or a clip full size, with the ones before and after
+  // it a button, an arrow key or a swipe away. Screenshots flip through
+  // screenshots and clips through clips. Where <dialog> is missing the links
+  // stay plain links to the files.
+  var viewer = doc.getElementById('lightbox');
+  if (viewer && typeof viewer.showModal === 'function') {
+    var stage = doc.getElementById('lb-stage'), caption = doc.getElementById('lb-caption');
+    var credit = doc.getElementById('lb-credit'), count = doc.getElementById('lb-count');
+    var items = [], at = 0, x0 = null;
+    var show = function (i) {
+      at = (i + items.length) % items.length;
+      var a = items[at], el;
+      if (a.hasAttribute('data-video')) {
+        el = doc.createElement('video');
+        el.controls = true; el.autoplay = true; el.playsInline = true;
+        el.setAttribute('playsinline', '');
+        if (a.getAttribute('data-poster')) el.poster = a.getAttribute('data-poster');
+      } else {
+        el = doc.createElement('img');
+        el.alt = a.getAttribute('data-caption') || '';
+      }
+      el.src = a.href;
+      stage.textContent = '';
+      stage.appendChild(el);
+      caption.textContent = a.getAttribute('data-caption') || '';
+      credit.textContent = a.getAttribute('data-credit') || '';
+      count.textContent = items.length > 1 ? (at + 1) + ' / ' + items.length : '';
+    };
+    var step = function (way) { if (items.length > 1) show(at + way); };
+    doc.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-shot], a[data-video]');
+      if (!a || !plain(e)) return;
+      e.preventDefault();
+      items = all(a.hasAttribute('data-video') ? 'a[data-video]' : 'a[data-shot]');
+      show(items.indexOf(a));
+      viewer.showModal();
+    });
+    viewer.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-lb]'), what = b && b.getAttribute('data-lb');
+      if (what === 'prev') step(-1);
+      else if (what === 'next') step(1);
+      else if (what === 'close' || e.target === viewer || e.target === stage) viewer.close();
+    });
+    // The close event arrives a moment after the viewer shuts; by then it may be open again.
+    viewer.addEventListener('close', function () { if (!viewer.open) stage.textContent = ''; });
+    viewer.addEventListener('keydown', function (e) {
+      if (e.target.tagName === 'VIDEO') return;       // the arrows seek a clip that has the focus
+      if (e.key === 'ArrowRight') step(rtl ? -1 : 1);
+      else if (e.key === 'ArrowLeft') step(rtl ? 1 : -1);
+    });
+    stage.addEventListener('touchstart', function (e) { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+    stage.addEventListener('touchend', function (e) {
+      if (x0 === null) return;
+      var dx = e.changedTouches[0].clientX - x0;
+      x0 = null;
+      if (Math.abs(dx) > 50) step((dx < 0 ? 1 : -1) * (rtl ? -1 : 1));
+    }, { passive: true });
+  }
+})();
+</script>
 
 </body>
 </html>

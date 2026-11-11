@@ -1,0 +1,1181 @@
+{
+ "credits": {
+  "arabic": {
+   "author": "Warren LeMay",
+   "kind": "sign",
+   "lang": "ar",
+   "licence": [
+    "CC0 1.0",
+    "https://creativecommons.org/publicdomain/zero/1.0/"
+   ],
+   "source": "https://commons.wikimedia.org/wiki/File:Signage,_Egyptian_Museum,_al-Q%C4%81hirah,_CG,_EGY_(40942409173).jpg"
+  },
+  "chinese": {
+   "author": "Tianmu peter",
+   "kind": "sign",
+   "lang": "zh",
+   "licence": [
+    "CC BY 3.0",
+    "https://creativecommons.org/licenses/by/3.0/"
+   ],
+   "source": "https://commons.wikimedia.org/wiki/File:Road_name_sign_of_Lane_53,_Zhulun_Street,_Taipei_20080816.jpg"
+  },
+  "english": {
+   "author": "Tim1965",
+   "kind": "sign",
+   "lang": "en",
+   "licence": [
+    "CC BY-SA 3.0",
+    "https://creativecommons.org/licenses/by-sa/3.0/"
+   ],
+   "source": "https://commons.wikimedia.org/wiki/File:Metropolitan_Square_-_Washington_DC_-_Old_Ebbitt_Grill.JPG"
+  },
+  "gate": {
+   "author": "George Chernilevsky",
+   "kind": "photo",
+   "licence": null,
+   "source": "https://commons.wikimedia.org/wiki/File:Golden_Gate_Kiev_2018_G1.jpg"
+  },
+  "greek": {
+   "author": "Chabe01",
+   "kind": "sign",
+   "lang": "el",
+   "licence": [
+    "CC BY-SA 4.0",
+    "https://creativecommons.org/licenses/by-sa/4.0/"
+   ],
+   "source": "https://commons.wikimedia.org/wiki/File:Plaque_Rue_Kodrou_-_Ath%C3%A8nes_(GRA1)_-_2022-03-25_-_1.jpg"
+  },
+  "japanese": {
+   "author": "ねこねーちゃん",
+   "kind": "sign",
+   "lang": "ja",
+   "licence": [
+    "CC BY-SA 4.0",
+    "https://creativecommons.org/licenses/by-sa/4.0/"
+   ],
+   "source": "https://api.panoramax.xyz/#focus=pic&pic=f7ff2e78-4eaf-4c58-95ee-7267ff520343"
+  },
+  "korean": {
+   "author": "민지애",
+   "kind": "sign",
+   "lang": "ko",
+   "licence": [
+    "CC BY 4.0",
+    "https://creativecommons.org/licenses/by/4.0/"
+   ],
+   "source": "https://gongu.copyright.or.kr/gongu/wrt/wrt/view.do?wrtSn=11077093&menuNo=200018"
+  },
+  "persian": {
+   "author": "BABAK1985",
+   "kind": "sign",
+   "lang": "fa",
+   "licence": [
+    "CC BY-SA 4.0",
+    "https://creativecommons.org/licenses/by-sa/4.0/"
+   ],
+   "source": "https://commons.wikimedia.org/wiki/File:Central_Mosque_of_Tehran3.jpg"
+  },
+  "sat": {
+   "kind": "imagery"
+  },
+  "ukrainian": {
+   "author": "AnatolyPm",
+   "kind": "sign",
+   "lang": "uk",
+   "licence": null,
+   "source": "https://commons.wikimedia.org/wiki/File:%D0%9A%D1%80%D0%B0%D1%81%D0%B8%D0%BB%D1%96%D0%B2%D1%81%D1%8C%D0%BA%D0%B0_1.jpg"
+  }
+ },
+ "files": {
+  "athens-search-greek-1600.webp": {
+   "file": "athens-search-greek-1600.53f95cf2.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "athens-search-greek-800.webp": {
+   "file": "athens-search-greek-800.d5e1c29b.webp",
+   "h": 450,
+   "w": 800
+  },
+  "cairo-ar-3-route-390.webp": {
+   "file": "cairo-ar-3-route-390.3c87eef1.webp",
+   "h": 844,
+   "w": 390
+  },
+  "cairo-ar-3-route-780.webp": {
+   "file": "cairo-ar-3-route-780.5895b8cc.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "cairo-ar-4-directions-390.webp": {
+   "file": "cairo-ar-4-directions-390.4cf198b2.webp",
+   "h": 844,
+   "w": 390
+  },
+  "cairo-ar-4-directions-780.webp": {
+   "file": "cairo-ar-4-directions-780.34d68e91.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "cairo-search-arabic-1600.webp": {
+   "file": "cairo-search-arabic-1600.0f87652d.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "cairo-search-arabic-800.webp": {
+   "file": "cairo-search-arabic-800.a4e23c2c.webp",
+   "h": 450,
+   "w": 800
+  },
+  "hero-loop.mp4": {
+   "file": "hero-loop.e4590d58.mp4",
+   "h": 540,
+   "w": 960
+  },
+  "kyiv-01-whole-city-1600.webp": {
+   "file": "kyiv-01-whole-city-1600.e4e3c0aa.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-01-whole-city-800.webp": {
+   "file": "kyiv-01-whole-city-800.458619b2.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-03-building-level-tilted-1600.webp": {
+   "file": "kyiv-03-building-level-tilted-1600.608a0110.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-03-building-level-tilted-800.webp": {
+   "file": "kyiv-03-building-level-tilted-800.9d6caeaa.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-05-place-card-1600.webp": {
+   "file": "kyiv-05-place-card-1600.3896e060.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-05-place-card-800.webp": {
+   "file": "kyiv-05-place-card-800.ee8fd7eb.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-06-satellite-1600.webp": {
+   "file": "kyiv-06-satellite-1600.4fa4f72d.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-06-satellite-800.webp": {
+   "file": "kyiv-06-satellite-800.ad6ed18e.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-07-food-and-drink-1600.webp": {
+   "file": "kyiv-07-food-and-drink-1600.dd4b777c.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-07-food-and-drink-800.webp": {
+   "file": "kyiv-07-food-and-drink-800.ba862fc7.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-08-dark-theme-1600.webp": {
+   "file": "kyiv-08-dark-theme-1600.98ab7acf.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-08-dark-theme-800.webp": {
+   "file": "kyiv-08-dark-theme-800.d7b96794.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-10-wikipedia-layer-1600.webp": {
+   "file": "kyiv-10-wikipedia-layer-1600.3ad15b02.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-10-wikipedia-layer-800.webp": {
+   "file": "kyiv-10-wikipedia-layer-800.ae504ab4.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-11-wikipedia-article-1600.webp": {
+   "file": "kyiv-11-wikipedia-article-1600.c0f04151.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "kyiv-11-wikipedia-article-800.webp": {
+   "file": "kyiv-11-wikipedia-article-800.ed4342d9.webp",
+   "h": 450,
+   "w": 800
+  },
+  "kyiv-ar-2-place-390.webp": {
+   "file": "kyiv-ar-2-place-390.f3395461.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-ar-2-place-780.webp": {
+   "file": "kyiv-ar-2-place-780.36d11fb6.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-ar-4-directions-780.webp": {
+   "file": "kyiv-ar-4-directions-780.e4a055c7.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-he-2-place-390.webp": {
+   "file": "kyiv-he-2-place-390.1bb6fb08.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-he-2-place-780.webp": {
+   "file": "kyiv-he-2-place-780.a48848b8.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-he-4-directions-780.webp": {
+   "file": "kyiv-he-4-directions-780.ff8840f1.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-hi-2-place-390.webp": {
+   "file": "kyiv-hi-2-place-390.0a95ab17.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-hi-2-place-780.webp": {
+   "file": "kyiv-hi-2-place-780.f523b1be.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-hi-4-directions-390.webp": {
+   "file": "kyiv-hi-4-directions-390.c29adcd9.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-hi-4-directions-780.webp": {
+   "file": "kyiv-hi-4-directions-780.2383da62.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-ja-2-place-390.webp": {
+   "file": "kyiv-ja-2-place-390.ecba634e.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-ja-2-place-780.webp": {
+   "file": "kyiv-ja-2-place-780.593fd823.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-ja-4-directions-780.webp": {
+   "file": "kyiv-ja-4-directions-780.5d461f22.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-phone-01-search-ukrainian-390.webp": {
+   "file": "kyiv-phone-01-search-ukrainian-390.396d8bb4.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-phone-01-search-ukrainian-780.webp": {
+   "file": "kyiv-phone-01-search-ukrainian-780.dcc073ad.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-phone-03-route-390.webp": {
+   "file": "kyiv-phone-03-route-390.583da499.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-phone-03-route-780.webp": {
+   "file": "kyiv-phone-03-route-780.c11bc00e.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-phone-04-directions-list-390.webp": {
+   "file": "kyiv-phone-04-directions-list-390.9db4c1a4.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-phone-04-directions-list-780.webp": {
+   "file": "kyiv-phone-04-directions-list-780.06bdeef5.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-phone-05-driving-390.webp": {
+   "file": "kyiv-phone-05-driving-390.ab39ee38.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-phone-05-driving-780.webp": {
+   "file": "kyiv-phone-05-driving-780.13f99054.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-th-3-route-390.webp": {
+   "file": "kyiv-th-3-route-390.33140494.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-th-3-route-780.webp": {
+   "file": "kyiv-th-3-route-780.122b45f2.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-th-4-directions-390.webp": {
+   "file": "kyiv-th-4-directions-390.01ecdad7.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-th-4-directions-780.webp": {
+   "file": "kyiv-th-4-directions-780.34bc371c.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-zh-2-place-390.webp": {
+   "file": "kyiv-zh-2-place-390.afd8a667.webp",
+   "h": 844,
+   "w": 390
+  },
+  "kyiv-zh-2-place-780.webp": {
+   "file": "kyiv-zh-2-place-780.821ffc55.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "kyiv-zh-4-directions-780.webp": {
+   "file": "kyiv-zh-4-directions-780.948e3cbb.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "osaka-search-japanese-1600.webp": {
+   "file": "osaka-search-japanese-1600.41afba20.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "osaka-search-japanese-800.webp": {
+   "file": "osaka-search-japanese-800.50946e68.webp",
+   "h": 450,
+   "w": 800
+  },
+  "photo-search-arabic-1-read-390.webp": {
+   "file": "photo-search-arabic-1-read-390.864a617c.webp",
+   "h": 844,
+   "w": 390
+  },
+  "photo-search-arabic-1-read-780.webp": {
+   "file": "photo-search-arabic-1-read-780.28c319ff.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "photo-search-arabic-2-place-390.webp": {
+   "file": "photo-search-arabic-2-place-390.7b2924de.webp",
+   "h": 844,
+   "w": 390
+  },
+  "photo-search-arabic-2-place-780.webp": {
+   "file": "photo-search-arabic-2-place-780.ff4302c6.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "photo-search-greek-1-read-390.webp": {
+   "file": "photo-search-greek-1-read-390.d55e722b.webp",
+   "h": 844,
+   "w": 390
+  },
+  "photo-search-greek-1-read-780.webp": {
+   "file": "photo-search-greek-1-read-780.99726fc8.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "photo-search-japanese-1-read-390.webp": {
+   "file": "photo-search-japanese-1-read-390.d8d7751b.webp",
+   "h": 844,
+   "w": 390
+  },
+  "photo-search-japanese-1-read-780.webp": {
+   "file": "photo-search-japanese-1-read-780.84183d2b.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "photo-search-korean-1-read-390.webp": {
+   "file": "photo-search-korean-1-read-390.de9d3581.webp",
+   "h": 844,
+   "w": 390
+  },
+  "photo-search-korean-1-read-780.webp": {
+   "file": "photo-search-korean-1-read-780.0bcaf1aa.webp",
+   "h": 1688,
+   "w": 780
+  },
+  "poster-drive.webp": {
+   "file": "poster-drive.980e6504.webp",
+   "h": 1168,
+   "w": 540
+  },
+  "poster-hero.webp": {
+   "file": "poster-hero.f6d59941.webp",
+   "h": 540,
+   "w": 960
+  },
+  "poster-photo.webp": {
+   "file": "poster-photo.51a0b1fe.webp",
+   "h": 1000,
+   "w": 1600
+  },
+  "poster-sign-arabic.webp": {
+   "file": "poster-sign-arabic.864a617c.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-chinese.webp": {
+   "file": "poster-sign-chinese.3a79c0ce.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-english.webp": {
+   "file": "poster-sign-english.07e43650.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-greek.webp": {
+   "file": "poster-sign-greek.d55e722b.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-japanese.webp": {
+   "file": "poster-sign-japanese.d8d7751b.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-korean.webp": {
+   "file": "poster-sign-korean.de9d3581.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-persian.webp": {
+   "file": "poster-sign-persian.0cd3edb4.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-sign-ukrainian.webp": {
+   "file": "poster-sign-ukrainian.8b1629e4.webp",
+   "h": 844,
+   "w": 390
+  },
+  "poster-terrain.webp": {
+   "file": "poster-terrain.4fe29da2.webp",
+   "h": 720,
+   "w": 1280
+  },
+  "poster-zoom.webp": {
+   "file": "poster-zoom.2b34f502.webp",
+   "h": 720,
+   "w": 1280
+  },
+  "seoul-3d-terrain-1600.webp": {
+   "file": "seoul-3d-terrain-1600.f944210d.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "seoul-3d-terrain-800.webp": {
+   "file": "seoul-3d-terrain-800.d93a15fc.webp",
+   "h": 450,
+   "w": 800
+  },
+  "sign-arabic.mp4": {
+   "file": "sign-arabic.63548c7b.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-chinese.mp4": {
+   "file": "sign-chinese.e56e3e16.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-english.mp4": {
+   "file": "sign-english.264decc0.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-greek.mp4": {
+   "file": "sign-greek.7f8aadff.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-japanese.mp4": {
+   "file": "sign-japanese.57b3c4d8.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-korean.mp4": {
+   "file": "sign-korean.f5fa4345.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-persian.mp4": {
+   "file": "sign-persian.7525862c.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "sign-ukrainian.mp4": {
+   "file": "sign-ukrainian.1038da65.mp4",
+   "h": 844,
+   "w": 390
+  },
+  "taipei-3d-terrain-satellite-1600.webp": {
+   "file": "taipei-3d-terrain-satellite-1600.139bc5e9.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "taipei-3d-terrain-satellite-800.webp": {
+   "file": "taipei-3d-terrain-satellite-800.28fc2b57.webp",
+   "h": 450,
+   "w": 800
+  },
+  "tehran-3d-terrain-satellite-1600.webp": {
+   "file": "tehran-3d-terrain-satellite-1600.49c542ab.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "tehran-3d-terrain-satellite-800.webp": {
+   "file": "tehran-3d-terrain-satellite-800.1f417d94.webp",
+   "h": 450,
+   "w": 800
+  },
+  "tehran-hillshade-1600.webp": {
+   "file": "tehran-hillshade-1600.0142ce05.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "tehran-hillshade-800.webp": {
+   "file": "tehran-hillshade-800.d546ca2a.webp",
+   "h": 450,
+   "w": 800
+  },
+  "tehran-search-persian-1600.webp": {
+   "file": "tehran-search-persian-1600.d0d9a4a1.webp",
+   "h": 900,
+   "w": 1600
+  },
+  "tehran-search-persian-800.webp": {
+   "file": "tehran-search-persian-800.296f0725.webp",
+   "h": 450,
+   "w": 800
+  },
+  "tour-drive.mp4": {
+   "file": "tour-drive.3a05abca.mp4",
+   "h": 1168,
+   "w": 540
+  },
+  "tour-photo.mp4": {
+   "file": "tour-photo.d75ec2f1.mp4",
+   "h": 900,
+   "w": 1600
+  },
+  "tour-terrain.mp4": {
+   "file": "tour-terrain.b2fb2d09.mp4",
+   "h": 720,
+   "w": 1280
+  },
+  "tour-zoom.mp4": {
+   "file": "tour-zoom.72ed87e6.mp4",
+   "h": 720,
+   "w": 1280
+  }
+ },
+ "gallery": [
+  {
+   "caption": "gal_city",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-01-whole-city-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-01-whole-city-800.webp"
+  },
+  {
+   "caption": "gal_search",
+   "credits": [],
+   "kind": "phone",
+   "lang": null,
+   "large": "kyiv-phone-01-search-ukrainian-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-phone-01-search-ukrainian-390.webp"
+  },
+  {
+   "caption": "gal_building",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-03-building-level-tilted-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-03-building-level-tilted-800.webp"
+  },
+  {
+   "caption": "gal_place",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-05-place-card-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-05-place-card-800.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "ar",
+   "large": "kyiv-ar-2-place-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-ar-2-place-390.webp"
+  },
+  {
+   "caption": "gal_find",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-07-food-and-drink-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-07-food-and-drink-800.webp"
+  },
+  {
+   "caption": "gal_route",
+   "credits": [],
+   "kind": "phone",
+   "lang": null,
+   "large": "kyiv-phone-03-route-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-phone-03-route-390.webp"
+  },
+  {
+   "caption": "gal_turns",
+   "credits": [],
+   "kind": "phone",
+   "lang": null,
+   "large": "kyiv-phone-04-directions-list-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-phone-04-directions-list-390.webp"
+  },
+  {
+   "caption": "gal_drive",
+   "credits": [],
+   "kind": "phone",
+   "lang": null,
+   "large": "kyiv-phone-05-driving-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-phone-05-driving-390.webp"
+  },
+  {
+   "caption": "gal_satellite",
+   "credits": [
+    "sat"
+   ],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-06-satellite-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-06-satellite-800.webp"
+  },
+  {
+   "caption": "gal_dark",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-08-dark-theme-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-08-dark-theme-800.webp"
+  },
+  {
+   "caption": "gal_hillshade",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "tehran-hillshade-1600.webp",
+   "region": "tehran",
+   "small": "tehran-hillshade-800.webp"
+  },
+  {
+   "caption": "gal_terrain_sat",
+   "credits": [
+    "sat"
+   ],
+   "kind": "wide",
+   "lang": null,
+   "large": "tehran-3d-terrain-satellite-1600.webp",
+   "region": "tehran",
+   "small": "tehran-3d-terrain-satellite-800.webp"
+  },
+  {
+   "caption": "gal_terrain",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "seoul-3d-terrain-1600.webp",
+   "region": "seoul",
+   "small": "seoul-3d-terrain-800.webp"
+  },
+  {
+   "caption": "gal_terrain_sat",
+   "credits": [
+    "sat"
+   ],
+   "kind": "wide",
+   "lang": null,
+   "large": "taipei-3d-terrain-satellite-1600.webp",
+   "region": "taipei",
+   "small": "taipei-3d-terrain-satellite-800.webp"
+  },
+  {
+   "caption": "gal_search",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "cairo-search-arabic-1600.webp",
+   "region": "cairo",
+   "small": "cairo-search-arabic-800.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "ar",
+   "large": "cairo-ar-3-route-780.webp",
+   "region": "cairo",
+   "small": "cairo-ar-3-route-390.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "ar",
+   "large": "cairo-ar-4-directions-780.webp",
+   "region": "cairo",
+   "small": "cairo-ar-4-directions-390.webp"
+  },
+  {
+   "caption": "gal_photo",
+   "credits": [
+    "arabic"
+   ],
+   "kind": "phone",
+   "lang": null,
+   "large": "photo-search-arabic-1-read-780.webp",
+   "region": "cairo",
+   "small": "photo-search-arabic-1-read-390.webp"
+  },
+  {
+   "caption": "gal_photo_found",
+   "credits": [
+    "arabic"
+   ],
+   "kind": "phone",
+   "lang": null,
+   "large": "photo-search-arabic-2-place-780.webp",
+   "region": "cairo",
+   "small": "photo-search-arabic-2-place-390.webp"
+  },
+  {
+   "caption": "gal_search",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "osaka-search-japanese-1600.webp",
+   "region": "osaka",
+   "small": "osaka-search-japanese-800.webp"
+  },
+  {
+   "caption": "gal_photo",
+   "credits": [
+    "japanese"
+   ],
+   "kind": "phone",
+   "lang": null,
+   "large": "photo-search-japanese-1-read-780.webp",
+   "region": "osaka",
+   "small": "photo-search-japanese-1-read-390.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "ja",
+   "large": "kyiv-ja-2-place-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-ja-2-place-390.webp"
+  },
+  {
+   "caption": "gal_search",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "athens-search-greek-1600.webp",
+   "region": "athens",
+   "small": "athens-search-greek-800.webp"
+  },
+  {
+   "caption": "gal_photo",
+   "credits": [
+    "greek"
+   ],
+   "kind": "phone",
+   "lang": null,
+   "large": "photo-search-greek-1-read-780.webp",
+   "region": "athens",
+   "small": "photo-search-greek-1-read-390.webp"
+  },
+  {
+   "caption": "gal_search",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "tehran-search-persian-1600.webp",
+   "region": "tehran",
+   "small": "tehran-search-persian-800.webp"
+  },
+  {
+   "caption": "gal_photo",
+   "credits": [
+    "korean"
+   ],
+   "kind": "phone",
+   "lang": null,
+   "large": "photo-search-korean-1-read-780.webp",
+   "region": "seoul",
+   "small": "photo-search-korean-1-read-390.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "he",
+   "large": "kyiv-he-2-place-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-he-2-place-390.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "hi",
+   "large": "kyiv-hi-4-directions-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-hi-4-directions-390.webp"
+  },
+  {
+   "caption": "gal_wiki_layer",
+   "credits": [],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-10-wikipedia-layer-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-10-wikipedia-layer-800.webp"
+  },
+  {
+   "caption": "gal_article",
+   "credits": [
+    "gate"
+   ],
+   "kind": "wide",
+   "lang": null,
+   "large": "kyiv-11-wikipedia-article-1600.webp",
+   "region": "kyiv",
+   "small": "kyiv-11-wikipedia-article-800.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "th",
+   "large": "kyiv-th-4-directions-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-th-4-directions-390.webp"
+  },
+  {
+   "caption": "gal_lang",
+   "credits": [],
+   "kind": "phone",
+   "lang": "zh",
+   "large": "kyiv-zh-2-place-780.webp",
+   "region": "kyiv",
+   "small": "kyiv-zh-2-place-390.webp"
+  }
+ ],
+ "langs": [
+  {
+   "lang": "ar",
+   "shots": [
+    {
+     "large": "kyiv-ar-2-place-780.webp",
+     "small": "kyiv-ar-2-place-390.webp"
+    },
+    {
+     "large": "kyiv-ar-4-directions-780.webp"
+    }
+   ]
+  },
+  {
+   "lang": "he",
+   "shots": [
+    {
+     "large": "kyiv-he-2-place-780.webp",
+     "small": "kyiv-he-2-place-390.webp"
+    },
+    {
+     "large": "kyiv-he-4-directions-780.webp"
+    }
+   ]
+  },
+  {
+   "lang": "hi",
+   "shots": [
+    {
+     "large": "kyiv-hi-2-place-780.webp",
+     "small": "kyiv-hi-2-place-390.webp"
+    },
+    {
+     "large": "kyiv-hi-4-directions-780.webp"
+    }
+   ]
+  },
+  {
+   "lang": "th",
+   "shots": [
+    {
+     "large": "kyiv-th-3-route-780.webp",
+     "small": "kyiv-th-3-route-390.webp"
+    },
+    {
+     "large": "kyiv-th-4-directions-780.webp"
+    }
+   ]
+  },
+  {
+   "lang": "ja",
+   "shots": [
+    {
+     "large": "kyiv-ja-2-place-780.webp",
+     "small": "kyiv-ja-2-place-390.webp"
+    },
+    {
+     "large": "kyiv-ja-4-directions-780.webp"
+    }
+   ]
+  },
+  {
+   "lang": "zh",
+   "shots": [
+    {
+     "large": "kyiv-zh-2-place-780.webp",
+     "small": "kyiv-zh-2-place-390.webp"
+    },
+    {
+     "large": "kyiv-zh-4-directions-780.webp"
+    }
+   ]
+  }
+ ],
+ "made_from": {
+  "athens-search-greek-1600.webp": "9227e96688b91688",
+  "athens-search-greek-800.webp": "b9d5a7d9532e14f1",
+  "cairo-ar-3-route-390.webp": "1de85245313a1244",
+  "cairo-ar-3-route-780.webp": "aeb8d5d034a118b4",
+  "cairo-ar-4-directions-390.webp": "05e147188db8cde6",
+  "cairo-ar-4-directions-780.webp": "db8dd301481fa540",
+  "cairo-search-arabic-1600.webp": "32938fdf74f4678b",
+  "cairo-search-arabic-800.webp": "56d2a4cd2e9065d1",
+  "hero-loop.mp4": "8d93524347e7371a",
+  "kyiv-01-whole-city-1600.webp": "f36ff4154500fe1d",
+  "kyiv-01-whole-city-800.webp": "163a735d31e90115",
+  "kyiv-03-building-level-tilted-1600.webp": "98c8a19901a9853c",
+  "kyiv-03-building-level-tilted-800.webp": "4f489d2474479686",
+  "kyiv-05-place-card-1600.webp": "8e82eab3be2aeabd",
+  "kyiv-05-place-card-800.webp": "a7b5049f56aaf6a7",
+  "kyiv-06-satellite-1600.webp": "5980be5a75552f13",
+  "kyiv-06-satellite-800.webp": "4561b2440809d619",
+  "kyiv-07-food-and-drink-1600.webp": "5e7a6ef20ae8adda",
+  "kyiv-07-food-and-drink-800.webp": "0cf9cdad15bab1f4",
+  "kyiv-08-dark-theme-1600.webp": "362f68205eb66114",
+  "kyiv-08-dark-theme-800.webp": "2b7daaa0b0ae5b7b",
+  "kyiv-10-wikipedia-layer-1600.webp": "d3d14602fd48649f",
+  "kyiv-10-wikipedia-layer-800.webp": "06047f55dc8e4822",
+  "kyiv-11-wikipedia-article-1600.webp": "612dcff5229f0714",
+  "kyiv-11-wikipedia-article-800.webp": "20721e91d2e2b792",
+  "kyiv-ar-2-place-390.webp": "09c3ae786c7003f4",
+  "kyiv-ar-2-place-780.webp": "efc24637f31a687b",
+  "kyiv-ar-4-directions-780.webp": "4debaa86d2c7c361",
+  "kyiv-he-2-place-390.webp": "20f0d95ed0b11675",
+  "kyiv-he-2-place-780.webp": "1304465a665b0fa9",
+  "kyiv-he-4-directions-780.webp": "3c87cae63cc89a12",
+  "kyiv-hi-2-place-390.webp": "b590c8d3ef2ff9b6",
+  "kyiv-hi-2-place-780.webp": "14bb9482cd386dac",
+  "kyiv-hi-4-directions-390.webp": "3665b53db730420a",
+  "kyiv-hi-4-directions-780.webp": "9155286cad9f2243",
+  "kyiv-ja-2-place-390.webp": "370fbb3722739668",
+  "kyiv-ja-2-place-780.webp": "11796ecffdb485c3",
+  "kyiv-ja-4-directions-780.webp": "843de4848733b925",
+  "kyiv-phone-01-search-ukrainian-390.webp": "50aa1533e2921d41",
+  "kyiv-phone-01-search-ukrainian-780.webp": "0c2e6990f81fe706",
+  "kyiv-phone-03-route-390.webp": "1155849f70864440",
+  "kyiv-phone-03-route-780.webp": "eec3dc2d033c15a4",
+  "kyiv-phone-04-directions-list-390.webp": "fdb6cc06d9fa5739",
+  "kyiv-phone-04-directions-list-780.webp": "cf21b7af27f78862",
+  "kyiv-phone-05-driving-390.webp": "8c99bc532c00529f",
+  "kyiv-phone-05-driving-780.webp": "823e06af0d237661",
+  "kyiv-th-3-route-390.webp": "acc4e624c11c46ea",
+  "kyiv-th-3-route-780.webp": "a9b3dbf175cf367d",
+  "kyiv-th-4-directions-390.webp": "cf9e362669170e17",
+  "kyiv-th-4-directions-780.webp": "c38afb6e8dc00eaa",
+  "kyiv-zh-2-place-390.webp": "7b02daaafce6a20d",
+  "kyiv-zh-2-place-780.webp": "ee1040c4b5a7c468",
+  "kyiv-zh-4-directions-780.webp": "6c270aa5b99d5730",
+  "osaka-search-japanese-1600.webp": "af94df282fb2a0ce",
+  "osaka-search-japanese-800.webp": "25fe511907377555",
+  "photo-search-arabic-1-read-390.webp": "e7cb1bd9d9a988a6",
+  "photo-search-arabic-1-read-780.webp": "850960556e0fb6ca",
+  "photo-search-arabic-2-place-390.webp": "93beb1083f110ea1",
+  "photo-search-arabic-2-place-780.webp": "6267e34768de0b99",
+  "photo-search-greek-1-read-390.webp": "e073aee1e18a98d9",
+  "photo-search-greek-1-read-780.webp": "c601f8dfd888adfd",
+  "photo-search-japanese-1-read-390.webp": "829e8a35b343fd2e",
+  "photo-search-japanese-1-read-780.webp": "53ddd725ce872e7a",
+  "photo-search-korean-1-read-390.webp": "0fd33853d0d15a6e",
+  "photo-search-korean-1-read-780.webp": "9db588cbd5702c32",
+  "poster-drive.webp": "cebf86e28950f672",
+  "poster-hero.webp": "27f376b304840dfd",
+  "poster-photo.webp": "a49c92d8d5dcd5f3",
+  "poster-sign-arabic.webp": "04f3ddb1b610dc78",
+  "poster-sign-chinese.webp": "06a87b1ec747cf38",
+  "poster-sign-english.webp": "2aa7e68b6703eb28",
+  "poster-sign-greek.webp": "5b552ff06550071b",
+  "poster-sign-japanese.webp": "927ff9b96d60de68",
+  "poster-sign-korean.webp": "2ee81c26cc1b0836",
+  "poster-sign-persian.webp": "134232af8492b86d",
+  "poster-sign-ukrainian.webp": "36897a8fa8b5d3bc",
+  "poster-terrain.webp": "16acfb8ce07cae1d",
+  "poster-zoom.webp": "00a0436f94882c29",
+  "seoul-3d-terrain-1600.webp": "d6d825867438a24a",
+  "seoul-3d-terrain-800.webp": "0ac57992385653bd",
+  "sign-arabic.mp4": "ba57c7a9c60ee6bf",
+  "sign-chinese.mp4": "dcd6133d5fcf370a",
+  "sign-english.mp4": "326ede8c1285cbd8",
+  "sign-greek.mp4": "b35f937450faf6f9",
+  "sign-japanese.mp4": "6b41d81e40631143",
+  "sign-korean.mp4": "c9a015d10e4d2436",
+  "sign-persian.mp4": "758276cb63aaae75",
+  "sign-ukrainian.mp4": "ee9a18065597e7b0",
+  "taipei-3d-terrain-satellite-1600.webp": "925458065bb5282c",
+  "taipei-3d-terrain-satellite-800.webp": "520c8f2308c6c983",
+  "tehran-3d-terrain-satellite-1600.webp": "0a2ae5bd36240410",
+  "tehran-3d-terrain-satellite-800.webp": "b0e4d1b02746b4fb",
+  "tehran-hillshade-1600.webp": "f80e0ca1db6fc18a",
+  "tehran-hillshade-800.webp": "9122012d557a81a1",
+  "tehran-search-persian-1600.webp": "adff9e4e13d70824",
+  "tehran-search-persian-800.webp": "70a65abf0e7e9a30",
+  "tour-drive.mp4": "d137cdeef24ed8eb",
+  "tour-photo.mp4": "c52b3c1df0e37f4f",
+  "tour-terrain.mp4": "2838e18b2d46a663",
+  "tour-zoom.mp4": "c7ba5072c7637428"
+ },
+ "signs": [
+  {
+   "credits": [
+    "ukrainian"
+   ],
+   "id": "ukrainian",
+   "lang": "uk",
+   "poster": "poster-sign-ukrainian.webp",
+   "region": "kyiv",
+   "video": "sign-ukrainian.mp4"
+  },
+  {
+   "credits": [
+    "greek"
+   ],
+   "id": "greek",
+   "lang": "el",
+   "poster": "poster-sign-greek.webp",
+   "region": "athens",
+   "video": "sign-greek.mp4"
+  },
+  {
+   "credits": [
+    "arabic"
+   ],
+   "id": "arabic",
+   "lang": "ar",
+   "poster": "poster-sign-arabic.webp",
+   "region": "cairo",
+   "video": "sign-arabic.mp4"
+  },
+  {
+   "credits": [
+    "persian"
+   ],
+   "id": "persian",
+   "lang": "fa",
+   "poster": "poster-sign-persian.webp",
+   "region": "tehran",
+   "video": "sign-persian.mp4"
+  },
+  {
+   "credits": [
+    "japanese"
+   ],
+   "id": "japanese",
+   "lang": "ja",
+   "poster": "poster-sign-japanese.webp",
+   "region": "osaka",
+   "video": "sign-japanese.mp4"
+  },
+  {
+   "credits": [
+    "korean"
+   ],
+   "id": "korean",
+   "lang": "ko",
+   "poster": "poster-sign-korean.webp",
+   "region": "seoul",
+   "video": "sign-korean.mp4"
+  },
+  {
+   "credits": [
+    "chinese"
+   ],
+   "id": "chinese",
+   "lang": "zh",
+   "poster": "poster-sign-chinese.webp",
+   "region": "taipei",
+   "video": "sign-chinese.mp4"
+  },
+  {
+   "credits": [
+    "english"
+   ],
+   "id": "english",
+   "lang": "en",
+   "poster": "poster-sign-english.webp",
+   "region": "washington-dc",
+   "video": "sign-english.mp4"
+  }
+ ],
+ "video_credits": {
+  "tour-photo.mp4": [
+   "ukrainian",
+   "greek",
+   "arabic",
+   "japanese",
+   "korean",
+   "chinese",
+   "english"
+  ],
+  "tour-terrain.mp4": [
+   "sat"
+  ]
+ }
+}

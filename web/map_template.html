@@ -6,21 +6,28 @@
 <title>{{TITLE}}</title>
 <meta name="description" content="{{DESCRIPTION}}">
 {{HEAD_LINKS}}
-<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="{{CSS}}">
 {{ANALYTICS}}
 </head>
 <body>
 
-<header>
+<div class="topbar">
   <div class="container">
+    <a class="brand" href="{{HOME}}">Street<span class="accent">Zim</span></a>
 {{LANG_PICKER}}
+    <a class="btn btn-primary topbar-cta" href="{{HOME}}#maps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span>{{ALL_MAPS}}</span></a>
+  </div>
+</div>
+
+<header class="page-head">
+  <div class="container narrow">
     <p class="crumbs"><a href="{{HOME}}">StreetZim</a> › <a href="{{HOME}}#maps">{{ALL_MAPS}}</a></p>
     <h1>{{H1}}</h1>
   </div>
 </header>
 
 <section>
-  <div class="container map-page">
+  <div class="container narrow map-page">
 {{BODY}}
   </div>
 </section>
@@ -31,5 +38,18 @@
   </div>
 </footer>
 {{FALLBACK}}
+<script>
+/* The language menu closes on a click outside it and on Escape. */
+(function () {
+  var menu = document.querySelector('.lang-menu');
+  if (!menu) return;
+  document.addEventListener('click', function (e) {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
+  });
+})();
+</script>
 </body>
 </html>

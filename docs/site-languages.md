@@ -94,6 +94,39 @@ People who read those languages search in them, where little else offers an
 offline map: the page's title and description are in the language, with the
 maps' names in its script.
 
+## Clips and screenshots
+
+The home page shows clips and screenshots of real maps: the clip and the
+phone at the top, the clips under "See it in action", the gallery, and the
+phone screens of the language versions. The files are in `web/media/`, each with its content hash
+in its name, because the site serves `/media/` as never changing
+(`firebase.json`). `web/media/media.json` lists them under the names the
+pages use, with each picture's size, caption and credits; the host keeps
+that file to itself.
+
+`tools/site_media.py` makes the folder and the manifest from capture output
+(its docstring has the arguments), and with `--readme` the README's pictures
+in `docs/readme/`. Run it again after new captures and commit what it
+changed; a file no page shows any more is removed.
+
+`web/template.html` names a file as `{{m:name}}` (its URL) and a clip's
+credit as `{{mc:name}}`; the generator writes the gallery, the sign clips
+and the language screens from the manifest. A name the manifest lacks stops
+the build.
+
+A caption is a key of `site.en.json` (`gal_*`), so every language shows it in
+its own words, followed by the map's name in that language.
+`GALLERY_CAPTIONS` in `generate.py` lists the keys; a caption that is not
+among them stops the build.
+
+Whoever's photo or imagery a picture shows is named with it: under a
+gallery picture and under the clip that plays in the page, in the viewer for
+a clip or picture that opens there, and in the list at the foot of the page
+(`credits_*`, `credit_*`). The satellite imagery's credit is the same in every language
+(`VERBATIM` in `tools/check_site_i18n.py`). `docs/media-credits.md` is the
+same list for the repository. `tests/test_site_media.py` keeps the folder,
+the manifest, the pages and that list in step.
+
 ## Search engines
 
 Every page carries its canonical URL, `hreflang` links to all its language

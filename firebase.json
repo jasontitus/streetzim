@@ -21,13 +21,20 @@
       "i18n/**",
       "watch-and-deploy.sh",
       "watch-and-deploy.log",
-      "drive/viewer/.version"
+      "drive/viewer/.version",
+      "media/media.json"
     ],
     "headers": [
       {
         "source": "**/*.html",
         "headers": [
           { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
+      },
+      {
+        "source": "/media/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
         ]
       },
       {

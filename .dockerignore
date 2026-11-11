@@ -41,3 +41,5 @@ rust/**/target-*/
 # The sign reader's labelled photos (docs/ocr-test-set.md): a few hundred MB
 # the build never reads.
 /tests/fixtures/ocr-signs/
+# The README's pictures: the build never reads them.
+/docs/readme/

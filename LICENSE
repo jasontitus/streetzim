@@ -66,8 +66,18 @@ each subject to its own license terms:
    Details: https://www.wikidata.org/wiki/Wikidata:Licensing
 
 6. Wikipedia Extracts
-   License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+   License: Creative Commons Attribution-ShareAlike 4.0 International
+            (CC BY-SA 4.0)
    Details: https://en.wikipedia.org/wiki/Wikipedia:Copyrights
+
+===============================================================================
+
+PICTURES AND VIDEO CLIPS
+
+The pictures and clips in docs/readme/ and web/media/ are not covered by the
+MIT license above. They show maps made of the data listed here, and some show
+other people's photographs; docs/media-credits.md names each one and its
+license.
 
 ===============================================================================
 

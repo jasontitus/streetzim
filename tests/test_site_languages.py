@@ -3,6 +3,7 @@ page per language listing every map in its words, a page per map per
 language, the links between the versions (hreflang, the picker, the
 sitemap), and the downloads in each language (the build worker's file, the
 builder page when it cannot serve it)."""
+import hashlib
 import importlib.util
 import json
 import re
@@ -121,11 +122,17 @@ NAMES = {
     "github.com/jasontitus/streetzim", "github.com/kiwix/kiwix-android", "github.com/kiwix/kiwix-apple",
     "github.com/kiwix/kiwix-desktop", "github.com/kiwix/kiwix-js-pwa",
     "https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021) —",
-    "(CC0)", "(CC BY-SA 3.0).", "Copernicus GLO-30 DEM — © DLR / Airbus,", "Open Source", "MB", "GB",
+    "(CC0)", "(CC BY-SA 4.0).", "Copernicus GLO-30 DEM — © DLR / Airbus,", "Open Source", "MB", "GB",
+    "https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2021),",
+    # whose photos the clips and screenshots show, and under which licences
+    "AnatolyPm", "BABAK1985", "Chabe01", "George Chernilevsky", "Tianmu peter", "Tim1965", "Warren LeMay",
+    "CC BY 3.0", "CC BY 4.0", "CC BY-SA 3.0", "CC BY-SA 4.0", "CC0 1.0",
+    # each sign clip is labelled with its language's own name
+    "English",
 }
 # Words a language writes as English does.
 SAME_AS_ENGLISH = {"fr": {"Satellite"}, "it": {"Satellite"}, "id": {"Kiwix PWA (Windows & Linux)"},
-                   "nl": {"nightly builds"}}
+                   "nl": {"nightly builds", "Screenshots"}, "de": {"Videos", "Screenshots"}}
 
 
 # Languages whose site lists only the maps that have a version in them
@@ -227,7 +234,10 @@ def test_each_map_has_a_page_in_each_language(site, lang):
     assert gen.t(lang, "kg_h2") in page and gen.t(lang, "kg_android_1") in page and gen.t(lang, "kg_ios_3") in page
     others = re.search(r'<ul class="other-langs">(.*?)</ul>', page).group(1)
     assert len(re.findall(r"<li>", others)) == len(LANGS) - 1 and f'hreflang="{lang}"' not in others
-    assert "a[data-fallback]" in page and 'href="/site.css"' in page
+    assert "a[data-fallback]" in page
+    # the stylesheet is asked for by its content: new markup never meets the cached sheet of before
+    css_digest = hashlib.sha256((site / "site.css").read_bytes()).hexdigest()[:8]
+    assert f'<link rel="stylesheet" href="/site.css?v={css_digest}">' in page and page.count("site.css") == 1
     egypt = _page(site, lang, f"maps/{WITHOUT}")
     assert "/build/?region=egypt" not in egypt and "archive.org/download/streetzim-egypt/" in egypt
     if lang != "en":
