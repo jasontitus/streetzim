@@ -49,8 +49,8 @@ env:
 jobs:
   checks:
     runs-on: ubuntu-24.04
-    # ~40 min of tests since the 52 viewer UI tables (2026-10-26)
-    timeout-minutes: 50
+    # ~47 min of tests by 2026-11-10 (viewer UI tables, the site's 90 languages)
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
