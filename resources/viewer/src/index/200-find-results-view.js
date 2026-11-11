@@ -136,6 +136,7 @@ function renderFindResultsFromStash(map) {
           try { map._closeWikidataPopup(); } catch (e3) {}
         }
         _scrollCarouselTo(idx);
+        _setActiveResult(map, idx, /*flyTo*/false);
       });
     })(i);
     _findResultsState.markers.push(marker);

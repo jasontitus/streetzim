@@ -970,8 +970,15 @@ function _scrollCarouselTo(idx) {
   // the search bar off screen with no way back.
   var tr = track.getBoundingClientRect(), cr = card.getBoundingClientRect();
   var dx = (cr.left + cr.width / 2) - (tr.left + tr.width / 2);
-  if (typeof track.scrollBy === 'function') track.scrollBy({ left: dx, behavior: 'smooth' });
-  else track.scrollLeft += dx;
+  // A smooth scroll stops at the first card on the way (the cards say
+  // scroll-snap-stop:always, for swipes), so only a neighbour is reached
+  // that way. A card further off (a tapped pin's) is jumped to.
+  var from = _findCenteredCardIdx();
+  if (from >= 0 && Math.abs(idx - from) <= 1 && typeof track.scrollBy === 'function') {
+    track.scrollBy({ left: dx, behavior: 'smooth' });
+    return;
+  }
+  track.scrollLeft += dx;
 }
 
 function _setActiveResult(map, idx, flyTo) {
