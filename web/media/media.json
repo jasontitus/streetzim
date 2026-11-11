@@ -129,7 +129,7 @@
    "w": 800
   },
   "hero-loop.mp4": {
-   "file": "hero-loop.e4590d58.mp4",
+   "file": "hero-loop.145022c5.mp4",
    "h": 540,
    "w": 960
   },
@@ -419,7 +419,7 @@
    "w": 540
   },
   "poster-hero.webp": {
-   "file": "poster-hero.f6d59941.webp",
+   "file": "poster-hero.52068e7e.webp",
    "h": 540,
    "w": 960
   },
@@ -989,7 +989,7 @@
   "cairo-ar-4-directions-780.webp": "db8dd301481fa540",
   "cairo-search-arabic-1600.webp": "32938fdf74f4678b",
   "cairo-search-arabic-800.webp": "56d2a4cd2e9065d1",
-  "hero-loop.mp4": "8d93524347e7371a",
+  "hero-loop.mp4": "ae0d516e13bace34",
   "kyiv-01-whole-city-1600.webp": "f36ff4154500fe1d",
   "kyiv-01-whole-city-800.webp": "163a735d31e90115",
   "kyiv-03-building-level-tilted-1600.webp": "98c8a19901a9853c",
@@ -1047,7 +1047,7 @@
   "photo-search-korean-1-read-390.webp": "0fd33853d0d15a6e",
   "photo-search-korean-1-read-780.webp": "9db588cbd5702c32",
   "poster-drive.webp": "cebf86e28950f672",
-  "poster-hero.webp": "27f376b304840dfd",
+  "poster-hero.webp": "299dff07f4900ca1",
   "poster-photo.webp": "a49c92d8d5dcd5f3",
   "poster-sign-arabic.webp": "04f3ddb1b610dc78",
   "poster-sign-chinese.webp": "06a87b1ec747cf38",
@@ -1165,6 +1165,9 @@
   }
  ],
  "video_credits": {
+  "hero-loop.mp4": [
+   "sat"
+  ],
   "tour-photo.mp4": [
    "ukrainian",
    "greek",

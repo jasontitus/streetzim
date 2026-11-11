@@ -313,6 +313,7 @@
   .feature-clip p { max-width: 780px; }
   .feature-clip .frame { margin-top: 18px; }
   .feature-clip video { background: #000; }
+  .hero-credit { margin: 10px 0 0; max-width: none; padding-inline-end: 32%; font-size: 11.5px; color: var(--text-faint); }
   .feature-clip .clip-credit { margin: 8px 0 0; max-width: none; font-size: 11.5px; color: var(--text-faint); }
   .clips {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -864,6 +865,7 @@
                 aria-label="{{a:media_play}}" data-play="{{a:media_play}}" data-pause="{{a:media_pause}}"></button>
       </div>
 {{HERO_PHONE}}
+      <p class="note hero-credit">{{mc:hero-loop.mp4}}</p>
     </div>
   </div>
 </header>

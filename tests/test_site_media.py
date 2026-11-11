@@ -360,6 +360,9 @@ def test_each_picture_with_someone_elses_work_says_whose(site):
         if clip == "tour-photo.mp4":                             # plays in the page: the line under it
             credit = re.search(rf'<source src="{url}"[^>]*>\s*</video>\s*</div>\s*'
                                r'<p class="note clip-credit">([^<]*)</p>', page).group(1)
+        elif clip == "hero-loop.mp4":                            # the opening loop: the line under it
+            assert f'data-src="{gen.media_file(clip)[0]}"' in page
+            credit = re.search(r'<p class="note hero-credit">([^<]*)</p>', page).group(1)
         else:
             a = re.search(rf'<a class="clip-media" href="{url}"[^>]*>', page).group(0)
             credit = re.search(r'data-credit="([^"]*)"', a).group(1)

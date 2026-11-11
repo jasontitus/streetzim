@@ -56,12 +56,12 @@ VIDEOS = {
     "tour-zoom.mp4": ("zoom-to-building-kyiv.mp4", ["-vf", "scale=1280:720:flags=lanczos", "-crf", "27"]),
     "tour-terrain.mp4": ("3d-terrain-tehran.mp4", ["-vf", "scale=1280:720:flags=lanczos", "-crf", "28"]),
     "tour-drive.mp4": ("driving-directions-kyiv.mp4", ["-vf", "scale=540:1168:flags=lanczos", "-crf", "28"]),
-    # The home page's opening loop: the fly-in, tilt and turn of the zoom
-    # clip, after its English caption has left the screen.
-    "hero-loop.mp4": ("zoom-to-building-kyiv.mp4", [
-        "-ss", "4.4", "-t", "16", "-vf",
+    # The home page's opening loop: Tehran from hillshade to 3D terrain to
+    # satellite imagery, after the clip's English caption has left the screen.
+    "hero-loop.mp4": ("3d-terrain-tehran.mp4", [
+        "-ss", "5.2", "-t", "19.2", "-vf",
         "fps=24,scale=960:540:flags=lanczos,fade=t=in:st=0:d=0.5:color=0x0b1220,"
-        "fade=t=out:st=15.5:d=0.5:color=0x0b1220", "-crf", "30"]),
+        "fade=t=out:st=18.7:d=0.5:color=0x0b1220", "-crf", "30"]),
 }
 SIGN_SCRIPTS = ["ukrainian", "greek", "arabic", "persian", "japanese", "korean", "chinese", "english"]
 for _s in SIGN_SCRIPTS:
@@ -73,7 +73,7 @@ POSTERS = {
     "poster-zoom.webp": ("videos:zoom-to-building-kyiv.mp4", 19.5, 1280),
     "poster-terrain.webp": ("videos:3d-terrain-tehran.mp4", 21, 1280),
     "poster-drive.webp": ("videos:driving-directions-kyiv.mp4", 20, 540),
-    "poster-hero.webp": ("videos:zoom-to-building-kyiv.mp4", 4.9, 960),
+    "poster-hero.webp": ("videos:3d-terrain-tehran.mp4", 5.8, 960),
 }
 for _s in SIGN_SCRIPTS:
     POSTERS[f"poster-sign-{_s}.webp"] = (f"shots:photo-search-{_s}-1-read.png", None, 390)
@@ -167,7 +167,7 @@ CREDITS = {
 }
 # Photos a clip shows that its poster or name does not say.
 VIDEO_CREDITS = {"tour-photo.mp4": ["ukrainian", "greek", "arabic", "japanese", "korean", "chinese", "english"],
-                 "tour-terrain.mp4": ["sat"]}
+                 "tour-terrain.mp4": ["sat"], "hero-loop.mp4": ["sat"]}
 
 # The README's pictures. An animated preview: (source clip, ffmpeg arguments
 # before the input, filter, quality); a still: (source, width).

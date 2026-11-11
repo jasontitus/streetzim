@@ -353,6 +353,7 @@
   .feature-clip p { max-width: 780px; }
   .feature-clip .frame { margin-top: 18px; }
   .feature-clip video { background: #000; }
+  .hero-credit { margin: 10px 0 0; max-width: none; padding-inline-end: 32%; font-size: 11.5px; color: var(--text-faint); }
   .feature-clip .clip-credit { margin: 8px 0 0; max-width: none; font-size: 11.5px; color: var(--text-faint); }
   .clips {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -900,11 +901,12 @@
     <div class="hero-art">
       <div class="frame frame-wide">
         <video id="hero-video" muted loop playsinline preload="none" tabindex="-1" aria-hidden="true"
-               poster="/media/poster-hero.f6d59941.webp" data-src="/media/hero-loop.e4590d58.mp4"></video>
+               poster="/media/poster-hero.52068e7e.webp" data-src="/media/hero-loop.145022c5.mp4"></video>
         <button type="button" id="hero-toggle" class="media-toggle paused" hidden
                 aria-label="Play" data-play="Play" data-pause="Pause"></button>
       </div>
       <div class="hero-phone"><div class="frame" id="hero-phone"><img class="on" src="/media/kyiv-ar-2-place-390.f3395461.webp" width="390" height="844" alt="العربية" lang="ar" data-name="العربية"><img data-src="/media/kyiv-he-2-place-390.1bb6fb08.webp" width="390" height="844" alt="עברית" lang="he" data-name="עברית"><img data-src="/media/kyiv-hi-2-place-390.0a95ab17.webp" width="390" height="844" alt="हिन्दी" lang="hi" data-name="हिन्दी"><img data-src="/media/kyiv-th-3-route-390.33140494.webp" width="390" height="844" alt="ไทย" lang="th" data-name="ไทย"><img data-src="/media/kyiv-ja-2-place-390.ecba634e.webp" width="390" height="844" alt="日本語" lang="ja" data-name="日本語"><img data-src="/media/kyiv-zh-2-place-390.afd8a667.webp" width="390" height="844" alt="简体中文" lang="zh" data-name="简体中文"></div><span class="phone-tag" lang="ar">العربية</span></div>
+      <p class="note hero-credit">Satellite imagery: EOxCloudless, CC BY-NC-SA 4.0</p>
     </div>
   </div>
 </header>
@@ -1065,7 +1067,7 @@
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs,
       <span class="map-badge badge-photo">Photo search</span> find a place from a photo of a sign.
     </p>
-    <p class="updated">Last updated: 2026-11-11 00:48 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-11-11 01:30 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })

@@ -26,7 +26,8 @@ Pictures that show it carry the same licence:
 
 - `docs/readme/terrain.webp`
 - `web/media/`: `kyiv-06-satellite-*`, `tehran-3d-terrain-satellite-*`,
-  `taipei-3d-terrain-satellite-*`, `tour-terrain.*.mp4`, `poster-terrain.*`
+  `taipei-3d-terrain-satellite-*`, `tour-terrain.*.mp4`, `poster-terrain.*`,
+  `hero-loop.*.mp4`
 
 ## Photos
 
