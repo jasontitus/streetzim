@@ -201,6 +201,7 @@
     margin: 0; padding: 6px; list-style: none; border-radius: 12px;
     background: var(--bg-card); border: 1px solid var(--border-strong);
     box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    max-height: min(60vh, 26rem); overflow-y: auto; overscroll-behavior: contain;
   }
   .finder-list button {
     display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px;
@@ -1330,7 +1331,8 @@ document.addEventListener('click', function (e) {
       if (!q) { list.hidden = true; return; }
       var named = maps.filter(function (m) { return m.title.toLowerCase().indexOf(q) !== -1; });
       var other = maps.filter(function (m) { return named.indexOf(m) === -1 && m.text.indexOf(q) !== -1; });
-      named.concat(other).slice(0, 6).forEach(function (m) {
+      // Every map that matches: the list scrolls ("India" alone finds 13).
+      named.concat(other).forEach(function (m) {
         var li = doc.createElement('li'), b = doc.createElement('button');
         var name = doc.createElement('span'), size = doc.createElement('small');
         b.type = 'button';

@@ -297,6 +297,7 @@
     margin: 0; padding: 6px; list-style: none; border-radius: 12px;
     background: var(--bg-card); border: 1px solid var(--border-strong);
     box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    max-height: min(60vh, 26rem); overflow-y: auto; overscroll-behavior: contain;
   }
   .finder-list button {
     display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px;
@@ -1130,7 +1131,7 @@
       <span class="map-badge badge-wiki">Wikipedia links</span> Wikidata cross-refs,
       <span class="map-badge badge-photo">Photo search</span> find a place from a photo of a sign.
     </p>
-    <p class="updated">Last updated: 2026-11-11 01:58 UTC · build <span id="build-stamp">…</span></p>
+    <p class="updated">Last updated: 2026-11-12 05:22 UTC · build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -1230,15 +1231,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title"><a href="/maps/europe/">Europe</a></div>
-          <div class="map-card-size">56.5 GB</div>
+          <div class="map-card-size">56.4 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-10-12">12 Oct 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-11-07">7 Nov 2026</time></div>
         <p class="map-card-desc">United Kingdom, Ireland, France, Spain, Portugal, Germany, Italy, Netherlands, Belgium, Switzerland, Austria, Poland, Greece, Sweden, Norway, Finland, Denmark, the Baltics, Ukraine, Georgia, Armenia, Azerbaijan, Cyprus, and dozens more.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span></div>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span><span class="map-badge badge-photo">Photo search</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/europe-viewer/en/bebad0da-ef00-5112-a1d6-d972e7edc8f1/osm-europe-2026-10-12.vd362600e.zim" data-fallback="https://archive.org/download/streetzim-europe/osm-europe-2026-10-12.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-10-12.zim" data-track="preview" data-region="europe" data-title="Europe" title="Look at this map in your browser, streamed from archive.org">Preview</a>
-          <a class="btn btn-secondary" href="/torrents/europe.torrent" data-track="torrent" data-region="europe" data-title="Europe">Torrent</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-11-07.zim" data-track="download" data-region="europe" data-title="Europe">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-11-07.zim" data-track="preview" data-region="europe" data-title="Europe" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-europe" data-track="details" data-region="europe" data-title="Europe">Info</a>
         </div>
       </div>
@@ -1545,12 +1545,12 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title"><a href="/maps/korea-mongolia/">Korea &amp; Mongolia</a></div>
           <div class="map-card-size">2.0 GB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-10-27">27 Oct 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-11-11">11 Nov 2026</time></div>
         <p class="map-card-desc">The Korean Peninsula and Mongolia &mdash; Seoul, Busan, Daegu, Incheon, Pyongyang, Ulaanbaatar, Darkhan; the Gobi, the Khangai mountains, the DMZ, and the Sea of Japan coast.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span><span class="map-badge badge-photo">Photo search</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/korea-mongolia-viewer/en/0338e85b-4baa-56fb-aac7-c2d19cf9e408/osm-korea-mongolia-2026-10-27b.v69d3f6a7.zim" data-fallback="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-10-27b.zim" data-track="download" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-10-27b.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea &amp; Mongolia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-11-11.zim" data-track="download" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-11-11.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea &amp; Mongolia" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/build/?region=korea-mongolia" data-track="build" data-region="korea-mongolia" data-title="Korea &amp; Mongolia" title="This map with its labels and Wikipedia in another language, assembled in your browser">Build in another language</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-korea-mongolia" data-track="details" data-region="korea-mongolia" data-title="Korea &amp; Mongolia">Info</a>
         </div>
@@ -1865,16 +1865,15 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title"><a href="/maps/south-korea/">South Korea</a></div>
-          <div class="map-card-size">763 MB</div>
+          <div class="map-card-size">814 MB</div>
         </div>
-        <div class="map-card-date">Updated <time datetime="2026-10-24">24 Oct 2026</time></div>
+        <div class="map-card-date">Updated <time datetime="2026-11-11">11 Nov 2026</time></div>
         <p class="map-card-desc">South Korea &mdash; Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, Jeju Island, the DMZ, Seoraksan, and Hallasan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routing &amp; Directions</span><span class="map-badge badge-overture">Rich place info</span><span class="map-badge badge-terrain">3D Terrain</span><span class="map-badge badge-satellite">Satellite</span><span class="map-badge badge-wiki">Wikipedia links</span><span class="map-badge badge-photo">Photo search</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/south-korea-viewer/en/203611e2-cfe9-50a7-bea0-43869c09cee9/osm-south-korea-2026-10-24b.v69d3f6a7.zim" data-fallback="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-10-24b.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
-          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-10-24b.zim" data-track="preview" data-region="south-korea" data-title="South Korea" title="Look at this map in your browser, streamed from archive.org">Preview</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-11-11.zim" data-track="download" data-region="south-korea" data-title="South Korea">Download</a>
+          <a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-11-11.zim" data-track="preview" data-region="south-korea" data-title="South Korea" title="Look at this map in your browser, streamed from archive.org">Preview</a>
           <a class="btn btn-secondary" href="/build/?region=south-korea" data-track="build" data-region="south-korea" data-title="South Korea" title="This map with its labels and Wikipedia in another language, assembled in your browser">Build in another language</a>
-          <a class="btn btn-secondary" href="/torrents/south-korea.torrent" data-track="torrent" data-region="south-korea" data-title="South Korea">Torrent</a>
           <a class="btn btn-secondary" href="https://archive.org/details/streetzim-south-korea" data-track="details" data-region="south-korea" data-title="South Korea">Info</a>
         </div>
       </div>
@@ -2910,7 +2909,8 @@ document.addEventListener('click', function (e) {
       if (!q) { list.hidden = true; return; }
       var named = maps.filter(function (m) { return m.title.toLowerCase().indexOf(q) !== -1; });
       var other = maps.filter(function (m) { return named.indexOf(m) === -1 && m.text.indexOf(q) !== -1; });
-      named.concat(other).slice(0, 6).forEach(function (m) {
+      // Every map that matches: the list scrolls ("India" alone finds 13).
+      named.concat(other).forEach(function (m) {
         var li = doc.createElement('li'), b = doc.createElement('button');
         var name = doc.createElement('span'), size = doc.createElement('small');
         b.type = 'button';

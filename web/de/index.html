@@ -297,6 +297,7 @@
     margin: 0; padding: 6px; list-style: none; border-radius: 12px;
     background: var(--bg-card); border: 1px solid var(--border-strong);
     box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    max-height: min(60vh, 26rem); overflow-y: auto; overscroll-behavior: contain;
   }
   .finder-list button {
     display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px;
@@ -1130,7 +1131,7 @@
       <span class="map-badge badge-wiki">Wikipedia-Links</span> Artikel und Wikidata-Fakten,
       <span class="map-badge badge-photo">Suche per Foto</span> Orte über das Foto eines Schilds finden.
     </p>
-    <p class="updated">Zuletzt aktualisiert: 2026-11-11 01:58 UTC · Build <span id="build-stamp">…</span></p>
+    <p class="updated">Zuletzt aktualisiert: 2026-11-12 05:22 UTC · Build <span id="build-stamp">…</span></p>
 <script>
 fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
   .then(function(r) { return r.ok ? r.text() : ''; })
@@ -1208,14 +1209,14 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
       <div class="map-card">
         <div class="map-card-head">
           <div class="map-card-title"><a href="/de/maps/europe/">Europa</a></div>
-          <div class="map-card-size">56,5 GB</div>
+          <div class="map-card-size">56,4 GB</div>
         </div>
-        <div class="map-card-date">Stand <time datetime="2026-10-12">12. Okt. 2026</time></div>
+        <div class="map-card-date">Stand <time datetime="2026-11-07">7. Nov. 2026</time></div>
         <p class="map-card-desc">Vereinigtes Königreich, Irland, Frankreich, Spanien, Portugal, Deutschland, Italien, Niederlande, Belgien, Schweiz, Österreich, Polen, Griechenland, Schweden, Norwegen, Finnland, Dänemark, das Baltikum, Ukraine, Georgien, Armenien, Aserbaidschan, Zypern und Dutzende weitere Länder.</p>
-        <div class="map-card-badges"><span class="map-badge badge-nav">Routen &amp; Navigation</span><span class="map-badge badge-overture">Ortsdetails</span><span class="map-badge badge-terrain">3D-Gelände</span><span class="map-badge badge-satellite">Satellitenbilder</span><span class="map-badge badge-wiki">Wikipedia-Links</span></div>
+        <div class="map-card-badges"><span class="map-badge badge-nav">Routen &amp; Navigation</span><span class="map-badge badge-overture">Ortsdetails</span><span class="map-badge badge-terrain">3D-Gelände</span><span class="map-badge badge-satellite">Satellitenbilder</span><span class="map-badge badge-wiki">Wikipedia-Links</span><span class="map-badge badge-photo">Suche per Foto</span></div>
         <p class="map-card-note">Noch nicht auf Deutsch verfügbar: Diese Karte enthält Ortsnamen in der Landessprache und eine englische Bedienoberfläche.</p>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/europe-viewer/en/bebad0da-ef00-5112-a1d6-d972e7edc8f1/osm-europe-2026-10-12.vd362600e.zim" data-fallback="https://archive.org/download/streetzim-europe/osm-europe-2026-10-12.zim" data-track="download" data-region="europe" data-title="Europa">Herunterladen</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-10-12.zim" data-track="preview" data-region="europe" data-title="Europa" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/europe/">Kartenseite</a>
+          <a class="btn btn-primary" href="https://archive.org/download/streetzim-europe/osm-europe-2026-11-07.zim" data-track="download" data-region="europe" data-title="Europa">Herunterladen</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-europe/osm-europe-2026-11-07.zim" data-track="preview" data-region="europe" data-title="Europa" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/europe/">Kartenseite</a>
         </div>
       </div>
       <div class="map-card">
@@ -1398,11 +1399,11 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title"><a href="/de/maps/korea-mongolia/">Korea und die Mongolei</a></div>
           <div class="map-card-size">2,1 GB</div>
         </div>
-        <div class="map-card-date">Stand <time datetime="2026-10-27">27. Okt. 2026</time></div>
+        <div class="map-card-date">Stand <time datetime="2026-11-11">11. Nov. 2026</time></div>
         <p class="map-card-desc">Die Koreanische Halbinsel und die Mongolei — Seoul, Busan, Daegu, Incheon, Pjöngjang, Ulan Bator, Darchan; die Wüste Gobi, das Changai-Gebirge, die Demilitarisierte Zone und die Küste am Japanischen Meer.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routen &amp; Navigation</span><span class="map-badge badge-overture">Ortsdetails</span><span class="map-badge badge-terrain">3D-Gelände</span><span class="map-badge badge-satellite">Satellitenbilder</span><span class="map-badge badge-wiki">Wikipedia-Links</span><span class="map-badge badge-photo">Suche per Foto</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/korea-mongolia/de/9023d11d-d376-5d7b-bc5f-e78c94f5964f/osm_de_korea-mongolia_2026-10-27.v8909de13.zim" data-fallback="/build/?region=korea-mongolia&amp;lang=de&amp;go=1" data-track="download_lang" data-region="korea-mongolia" data-title="Korea und die Mongolei" data-lang="de" title="Diese Karte mit Beschriftung, Suche und Wikipedia auf Deutsch, als eine .zim-Datei">Auf Deutsch herunterladen</a><a class="btn btn-secondary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/korea-mongolia-viewer/en/0338e85b-4baa-56fb-aac7-c2d19cf9e408/osm-korea-mongolia-2026-10-27b.v69d3f6a7.zim" data-fallback="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-10-27b.zim" data-track="download" data-region="korea-mongolia" data-title="Korea und die Mongolei" title="Die Karte im Originalzustand: Ortsnamen in der Landessprache, Bedienoberfläche und Wikipedia auf Englisch">Original</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-10-27b.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea und die Mongolei" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/korea-mongolia/">Kartenseite</a>
+          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/korea-mongolia/de/9023d11d-d376-5d7b-bc5f-e78c94f5964f/osm_de_korea-mongolia_2026-10-27.v8909de13.zim" data-fallback="/build/?region=korea-mongolia&amp;lang=de&amp;go=1" data-track="download_lang" data-region="korea-mongolia" data-title="Korea und die Mongolei" data-lang="de" title="Diese Karte mit Beschriftung, Suche und Wikipedia auf Deutsch, als eine .zim-Datei">Auf Deutsch herunterladen</a><a class="btn btn-secondary" href="https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-11-11.zim" data-track="download" data-region="korea-mongolia" data-title="Korea und die Mongolei" title="Die Karte im Originalzustand: Ortsnamen in der Landessprache, Bedienoberfläche und Wikipedia auf Englisch">Original</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-korea-mongolia/osm-korea-mongolia-2026-11-11.zim" data-track="preview" data-region="korea-mongolia" data-title="Korea und die Mongolei" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/korea-mongolia/">Kartenseite</a>
         </div>
       </div>
       <div class="map-card">
@@ -1772,11 +1773,11 @@ fetch('/drive/build-info.js?t=' + Date.now(), { cache: 'no-store' })
           <div class="map-card-title"><a href="/de/maps/south-korea/">Südkorea</a></div>
           <div class="map-card-size">855 MB</div>
         </div>
-        <div class="map-card-date">Stand <time datetime="2026-10-24">24. Okt. 2026</time></div>
+        <div class="map-card-date">Stand <time datetime="2026-11-11">11. Nov. 2026</time></div>
         <p class="map-card-desc">Südkorea — Seoul, Busan, Incheon, Daegu, Daejeon, Gwangju, Suwon, die Insel Jeju, die Demilitarisierte Zone, der Seoraksan und der Hallasan.</p>
         <div class="map-card-badges"><span class="map-badge badge-nav">Routen &amp; Navigation</span><span class="map-badge badge-overture">Ortsdetails</span><span class="map-badge badge-terrain">3D-Gelände</span><span class="map-badge badge-satellite">Satellitenbilder</span><span class="map-badge badge-wiki">Wikipedia-Links</span><span class="map-badge badge-photo">Suche per Foto</span></div>
         <div class="map-card-links">
-          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/south-korea/de/de986eee-087e-5e38-ad1f-d4bb61347e14/osm_de_south-korea_2026-10-24.v8909de13.zim" data-fallback="/build/?region=south-korea&amp;lang=de&amp;go=1" data-track="download_lang" data-region="south-korea" data-title="Südkorea" data-lang="de" title="Diese Karte mit Beschriftung, Suche und Wikipedia auf Deutsch, als eine .zim-Datei">Auf Deutsch herunterladen</a><a class="btn btn-secondary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/south-korea-viewer/en/203611e2-cfe9-50a7-bea0-43869c09cee9/osm-south-korea-2026-10-24b.v69d3f6a7.zim" data-fallback="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-10-24b.zim" data-track="download" data-region="south-korea" data-title="Südkorea" title="Die Karte im Originalzustand: Ortsnamen in der Landessprache, Bedienoberfläche und Wikipedia auf Englisch">Original</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-10-24b.zim" data-track="preview" data-region="south-korea" data-title="Südkorea" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/south-korea/">Kartenseite</a>
+          <a class="btn btn-primary" href="https://streetzim-build-proxy.tiltastech.workers.dev/merged/south-korea/de/de986eee-087e-5e38-ad1f-d4bb61347e14/osm_de_south-korea_2026-10-24.v8909de13.zim" data-fallback="/build/?region=south-korea&amp;lang=de&amp;go=1" data-track="download_lang" data-region="south-korea" data-title="Südkorea" data-lang="de" title="Diese Karte mit Beschriftung, Suche und Wikipedia auf Deutsch, als eine .zim-Datei">Auf Deutsch herunterladen</a><a class="btn btn-secondary" href="https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-11-11.zim" data-track="download" data-region="south-korea" data-title="Südkorea" title="Die Karte im Originalzustand: Ortsnamen in der Landessprache, Bedienoberfläche und Wikipedia auf Englisch">Original</a><a class="btn btn-secondary" href="/drive/?zim=https://archive.org/download/streetzim-south-korea/osm-south-korea-2026-11-11.zim" data-track="preview" data-region="south-korea" data-title="Südkorea" title="Diese Karte im Browser ansehen, direkt von archive.org">Vorschau</a><a class="btn btn-secondary" href="/de/maps/south-korea/">Kartenseite</a>
         </div>
       </div>
       <div class="map-card">
@@ -2632,7 +2633,8 @@ document.addEventListener('click', function (e) {
       if (!q) { list.hidden = true; return; }
       var named = maps.filter(function (m) { return m.title.toLowerCase().indexOf(q) !== -1; });
       var other = maps.filter(function (m) { return named.indexOf(m) === -1 && m.text.indexOf(q) !== -1; });
-      named.concat(other).slice(0, 6).forEach(function (m) {
+      // Every map that matches: the list scrolls ("India" alone finds 13).
+      named.concat(other).forEach(function (m) {
         var li = doc.createElement('li'), b = doc.createElement('button');
         var name = doc.createElement('span'), size = doc.createElement('small');
         b.type = 'button';
