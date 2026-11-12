@@ -1669,9 +1669,71 @@ def render_lang_picker(lang, path=""):
         links.append(f'<a href="/{sub}{path}" hreflang="{code}" lang="{code}"{cur}>{escape(name)}</a>')
     # Folded: 22 names take seven rows of a phone's screen. The links stay in
     # the page (search engines follow them), shown when it is opened.
-    return (f'    <details class="lang-menu"><summary>{escape(site_text(lang)["lang_name"])}</summary>\n'
+    return (f'    <details class="lang-menu" data-hint="{t_attr(lang, "langs_h2")}" data-close="{t_attr(lang, "gal_close")}">'
+            f'<summary>{escape(site_text(lang)["lang_name"])}</summary>\n'
             f'    <nav class="lang-picker" aria-label="{t_attr(lang, "lang_picker_aria")}">'
-            + "".join(links) + "</nav></details>")
+            + "".join(links) + "</nav></details>\n" + LANG_HINT_JS)
+
+
+# A visitor whose browser asks for other languages of the site is offered
+# them in a bar at the top: the languages they list, and for a country of
+# several languages where phones are often set to English, that country's.
+# Closing the bar keeps it closed (in this browser).
+LANG_HINT_COUNTRIES = {
+    "in": "hi bn te mr ta ur gu kn ml or pa as", "pk": "ur pa", "bd": "bn", "np": "ne",
+    "lk": "ta", "ng": "ha yo ig pcm", "za": "af zu xh", "ke": "sw", "tz": "sw",
+    "et": "am om ti", "ch": "de fr it rm", "be": "nl fr de",
+}
+LANG_HINT_JS = """    <script>(function () {
+  var d = document, menu = d.querySelector('.lang-menu');
+  if (!menu || !window.navigator) return;
+  try { if (localStorage.getItem('sz-lang-hint') === 'closed') return; } catch (e) {}
+  var here = (d.documentElement.lang || 'en').toLowerCase(), countries = %s;
+  var prefs = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
+  var asked = [], extra = [];
+  prefs.forEach(function (p) {
+    var parts = String(p).toLowerCase().split('-');
+    asked.push(parts[0]);
+    var c = parts[parts.length - 1];
+    if (parts.length > 1 && countries[c]) extra = extra.concat(countries[c].split(' '));
+  });
+  if (here !== 'en' && asked.indexOf(here) !== -1) return;
+  var seen = {}, links = [];
+  asked.concat(extra).forEach(function (code) {
+    if (seen[code] || code === here) return;
+    seen[code] = 1;
+    var a = menu.querySelector('.lang-picker a[hreflang="' + code + '"]');
+    if (a) links.push(a);
+  });
+  if (!links.length) return;
+  var bar = d.createElement('div');
+  bar.className = 'lang-hint';
+  bar.setAttribute('role', 'navigation');
+  bar.setAttribute('aria-label', menu.getAttribute('data-hint'));
+  bar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 16px;' +
+    'background:#1d3a72;color:#fff;font-size:15px;line-height:1.4';
+  var label = d.createElement('span');
+  label.textContent = menu.getAttribute('data-hint') + ':';
+  label.style.opacity = '0.85';
+  bar.appendChild(label);
+  links.forEach(function (a) {
+    var b = a.cloneNode(true);
+    b.removeAttribute('aria-current');
+    b.style.cssText = 'color:#fff;font-weight:600;text-decoration:underline;text-underline-offset:3px';
+    bar.appendChild(b);
+  });
+  var x = d.createElement('button');
+  x.type = 'button';
+  x.textContent = '\\u00d7';
+  x.setAttribute('aria-label', menu.getAttribute('data-close'));
+  x.style.cssText = 'margin-inline-start:auto;background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:2px 6px';
+  x.addEventListener('click', function () {
+    bar.remove();
+    try { localStorage.setItem('sz-lang-hint', 'closed'); } catch (e) {}
+  });
+  bar.appendChild(x);
+  d.body.insertBefore(bar, d.body.firstChild);
+})();</script>""" % json.dumps(LANG_HINT_COUNTRIES)
 
 
 def render_head_links(lang, path="", title="", description=""):
