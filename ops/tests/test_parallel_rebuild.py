@@ -14,6 +14,7 @@ BUILD_SCRATCH copy and BUILD_WIKI_ZIM, each run from a copy whose
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -593,31 +594,147 @@ def test_precut_first_group_in_pick_order_and_gates_each_build(tmp_path):
     assert "cut x" not in (tmp_path / "fake.log").read_text()      # only the first group
 
 
-def test_prefetch_runs_before_the_tiles_for_the_small_eligible_regions(tmp_path):
+def _lines(tmp_path):
+    return (tmp_path / "fake.log").read_text().splitlines()
+
+
+def _at(lines, prefix):
+    return next(i for i, ln in enumerate(lines) if ln.startswith(prefix))
+
+
+def test_prefetch_cuts_for_the_small_eligible_regions_in_the_order_their_builds_start(tmp_path):
     """The queue's extracts and search files are cut in one batch
-    (ops/batch_extracts.py) before the tiles: each data region once (a
-    variant's parent), not one already done, not one over PREFETCH_MAX_AREA
-    and not one across the antimeridian (the driver cuts those itself)."""
-    _setup(tmp_path, "## g\na\nv\nbig\nwrap\ndone\n## later\nb\n", variants="v\ta\tno\t13\n")
+    (ops/batch_extracts.py): each data region once (a variant's parent), not
+    one already done, not one over PREFETCH_MAX_AREA and not one across the
+    antimeridian (the driver cuts those itself). Group by group, in the order
+    the workers take each (the smallest, then the largest), so every planet
+    pass holds the extracts of the builds that start next."""
+    _setup(tmp_path, "## g\na\nv\nm\nbig\nwrap\ndone\nz\n## later\nb\nc\nd\n", variants="v\ta\tno\t13\n")
     (tmp_path / "regions.tsv").write_text(
-        "# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nv\tV\t1,2,3,4\tcountry\n"
+        "# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nv\tV\t1,2,3,4\tcountry\nm\tM\t1,2,3,4\tcountry\n"
         "big\tBig\t0,0,60,50\tcontinent\nwrap\tW\t179,-20,-179,-18\tcountry\n"
-        "done\tD\t1,2,3,4\tcountry\nb\tB\t5,5,6,6\tcountry\n")
+        "done\tD\t1,2,3,4\tcountry\nz\tZ\t1,2,3,4\tcountry\nb\tB\t5,5,6,6\tcountry\n"
+        "c\tC\t5,5,6,6\tcountry\nd\tD\t5,5,6,6\tcountry\n")
     (tmp_path / "state" / "status").mkdir()
     (tmp_path / "state" / "status" / "done").write_text("uploaded - - - 1 2 osm-done-2026-01-01.zim\n")
-    regions = tmp_path / "root" / "world-data" / "regions"
-    regions.mkdir(parents=True)
-    (regions / "a.osm.pbf").write_text("pbf")   # so the tiles of a are cut, after the batch
     env = _env(tmp_path, PAR_PRECUT="1", PAR_PREFETCH="1",
-               PAR_PREFETCH_CMD=f'sleep 1; echo "prefetch $PREFETCH_IDS" >> {tmp_path}/fake.log',
+               PAR_PREFETCH_CMD=f'echo "prefetch $PREFETCH_IDS" >> {tmp_path}/fake.log',
                PAR_PRECUT_CMD=f'echo "cut $PRECUT_ID" >> {tmp_path}/fake.log')
     r = _run(tmp_path, env)
     assert r.returncode == 0
-    lines = (tmp_path / "fake.log").read_text().splitlines()
-    pre = [ln for ln in lines if ln.startswith("prefetch")]
-    assert pre == ["prefetch a b"], pre
-    cuts = [i for i, ln in enumerate(lines) if ln.startswith("cut ")]
-    assert cuts and lines.index(pre[0]) < cuts[0], lines
+    pre = [ln for ln in _lines(tmp_path) if ln.startswith("prefetch")]
+    assert pre == ["prefetch a z m b d c"], pre
+
+
+def test_tiles_and_build_wait_for_the_extract_the_batch_is_cutting(tmp_path):
+    """A region's tiles are cut when the batch delivers its extract, not
+    before (they would be left to its build, which would cut its own extract
+    in a planet pass of its own) and not after the whole batch; a region
+    whose extract is there already does not wait behind it, and one the batch
+    never delivers goes to its build once the batch has ended."""
+    _setup(tmp_path, "## g\na\nc\nd\n")
+    (tmp_path / "regions.tsv").write_text(
+        "# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nc\tC\t1,2,3,4\tcountry\nd\tD\t1,2,3,4\tcountry\n")
+    regions = tmp_path / "root" / "world-data" / "regions"
+    regions.mkdir(parents=True)
+    (regions / "d.osm.pbf").write_text("pbf")
+    log = tmp_path / "fake.log"
+    env = _env(tmp_path, PAR_PRECUT="1", PAR_PREFETCH="1",
+               PAR_PREFETCH_CMD=('printf "a\\nc\\n" > "$PREFETCH_PENDING"; sleep 3; '
+                                 f'echo pbf > {regions}/a.osm.pbf; echo c > "$PREFETCH_PENDING"; '
+                                 f'echo "delivered a" >> {log}; sleep 9; echo "prefetch ends" >> {log}'),
+               PAR_PRECUT_CMD=f'echo "cut $PRECUT_ID" >> {log}')
+    assert _run(tmp_path, env).returncode == 0
+    lines = _lines(tmp_path)
+    assert _at(lines, "cut d") < _at(lines, "start d ") < _at(lines, "delivered a"), lines
+    assert _at(lines, "delivered a") < _at(lines, "cut a") < _at(lines, "start a ") < _at(lines, "prefetch ends"), lines
+    assert _at(lines, "prefetch ends") < _at(lines, "start c "), lines
+    assert not [ln for ln in lines if ln.startswith("cut c")]
+    out = (tmp_path / "state" / "run.out").read_text()
+    assert "tiles: waiting for the extracts of a c " in out and "tiles c: extract missing" in out
+    assert not list((tmp_path / "state").glob("prefetch.pending*"))
+
+
+def test_a_build_waits_while_the_batch_has_its_extract_or_search_file_to_cut(tmp_path):
+    """Without tiles too: a region listed in the batch's pending files (its
+    extract, or its search file in the .search twin) does not start, and the
+    workers pass over it for one the batch has dropped from them or never
+    held, the first and the last of the group included."""
+    _setup(tmp_path, "## g\na\nb\nbig\ns\n")
+    (tmp_path / "regions.tsv").write_text(
+        "# id\tname\tbbox\nb\tB\t1,2,3,4\tcountry\na\tA\t1,2,3,4\tcountry\ns\tS\t1,2,3,4\tcountry\n"
+        "big\tBig\t0,0,60,50\tcontinent\n")
+    log = tmp_path / "fake.log"
+    env = _env(tmp_path, PAR_PREFETCH="1",
+               PAR_PREFETCH_CMD=(f'echo "ids $(cat "$PREFETCH_PENDING" | tr "\n" " ")" >> {log}; '
+                                 'echo s > "$PREFETCH_PENDING.search"; echo a > "$PREFETCH_PENDING"; '
+                                 f'sleep 9; echo "prefetch ends" >> {log}'))
+    assert _run(tmp_path, env).returncode == 0
+    lines = _lines(tmp_path)
+    assert "ids a s b " in lines
+    end = _at(lines, "prefetch ends")
+    assert _at(lines, "start big ") < end and _at(lines, "start b ") < end, lines
+    assert end < _at(lines, "start a ") and end < _at(lines, "start s "), lines
+    assert "no region for a free worker yet: " in (tmp_path / "state" / "run.out").read_text()
+
+
+def test_pending_lists_left_by_a_stopped_runner_hold_nothing_back(tmp_path):
+    _setup(tmp_path, "## g\na\n")
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\n")
+    (tmp_path / "state" / "prefetch.pending").write_text("a\n")
+    (tmp_path / "state" / "prefetch.pending.search").write_text("a\n")
+    assert _run(tmp_path, _env(tmp_path), timeout=60).returncode == 0
+    assert _at(_lines(tmp_path), "start a ") >= 0
+
+
+def test_the_real_batch_delivers_what_the_tiles_and_the_driver_look_for(tmp_path):
+    """The runner's own call of ops/batch_extracts.py, with osmium faked on
+    the drivers' PATH: each extract is installed with the marks
+    ops/region-bbox.sh checks and released when its own planet pass ends (the
+    first region's tiles are cut and its build starts while the second pass
+    runs), and each region has its own search file."""
+    _setup(tmp_path, "## g\na\nc\n")
+    rows = "a\tA\t1.0,2.0,3.0,4.0\tcountry\nc\tC\t1.0,2.0,3.0,5.0\tcountry\n"
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\n" + rows)
+    root = tmp_path / "root"
+    for d in ("ops", "cloud", "tmp", "search_cache", "world-data/regions"):
+        (root / d).mkdir(parents=True)
+    ops = RUNNER.parent.parent
+    shutil.copy(ops / "batch_extracts.py", root / "ops")
+    shutil.copy(ops / "region-bbox.sh", root / "ops")
+    (root / "cloud" / "regions.tsv").write_text(rows)
+    (root / "world-data" / "planet-2026-08-31.osm.pbf").write_text("planet")
+    (root / "search_cache" / "world-2026-08-31.s2.jsonl").write_text(
+        '{"name":"in","lat":3.0,"lon":2.0}\n{"name":"out","lat":30.0,"lon":2.0}\n')
+    (root / "search_cache" / "world-2026-08-31.s2.jsonl.schema").write_text('{"search_schema": 2}')
+    (tmp_path / "bin").mkdir()
+    osm = tmp_path / "bin" / "osmium"
+    osm.write_text(f"""#!{sys.executable}
+import json, sys, time
+a = sys.argv[1:]
+cfg = json.load(open(a[a.index("-c") + 1]))
+time.sleep(8 if cfg["extracts"][0]["output"] == "c.osm.pbf" else 2)
+for e in cfg["extracts"]:
+    open(cfg["directory"] + "/" + e["output"], "w").write("pbf")
+open({str(tmp_path / "fake.log")!r}, "a").write("osmium ends " + " ".join(e["output"] for e in cfg["extracts"]) + "\\n")
+""")
+    osm.chmod(0o755)
+    env = _env(tmp_path, PAR_PRECUT="1", PAR_PREFETCH="1", PAR_PREFETCH_BATCH="1", PAR_PY=sys.executable,
+               PAR_PATH=f"{tmp_path}/bin:{os.environ['PATH']}",
+               PAR_PRECUT_CMD=f'echo "cut $PRECUT_ID" >> {tmp_path}/fake.log')
+    assert _run(tmp_path, env).returncode == 0
+    lines = _lines(tmp_path)
+    assert (_at(lines, "osmium ends a.osm.pbf") < _at(lines, "cut a") < _at(lines, "start a ")
+            < _at(lines, "osmium ends c.osm.pbf") < _at(lines, "cut c") < _at(lines, "start c ")), lines
+    reg = root / "world-data" / "regions"
+    assert (reg / "a.osm.pbf.bbox").read_text() == "1.0,2.0,3.0,4.0\n"
+    assert (reg / "a.osm.pbf.strategy").read_text().startswith("smart 3 ")
+    for rid in "ac":
+        assert (reg / f"{rid}.search.jsonl").read_text().count("\n") == 1
+        assert not (reg / f"{rid}.search.jsonl").is_symlink()
+    out = (tmp_path / "state" / "run.out").read_text()
+    assert "prefetch: rc=0" in out and "tiles a: rc=0" in out and "tiles c: rc=0" in out, out
+    assert not list((tmp_path / "state").glob("prefetch.pending*"))
 
 
 def test_prefetch_off_runs_no_batch(tmp_path):
@@ -1236,6 +1353,8 @@ printf '## g\\nv\\n' > "$QUEUE"
 eligible() {{ return 0; }}
 current_group() {{ echo 1; }}
 conflicts_of() {{ echo p; }}
+src_of() {{ echo "$1"; }}
+prefetch_pending() {{ return 1; }}
 # The parent is building at the first look and done at every later one.
 build_running() {{ local c; c=$(cat {cnt}); echo $((c + 1)) > {cnt}; [ "$c" -eq 0 ]; }}
 {pick}

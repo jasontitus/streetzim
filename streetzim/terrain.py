@@ -857,6 +857,23 @@ def _write_vrt_staged(tif_paths, out_path, res=None, want_bbox=None):
         os.unlink(flist_path)
 
 
+def _land_box(plan, dem_dir, glo30_paths):
+    """`plan.bbox` cut back to the cells a DEM was found for.
+
+    fetch_plan_dems has resolved every other cell of the plan as sea, so the
+    mosaic is held to the land it was given and not to the open water around
+    it: Saint Helena, Ascension and Tristan da Cunha are 6 cells of land in a
+    box of 672, and their mosaic rightly ends 2 degrees inside it. What the
+    mosaic is still refused for is a cell at its edge that was fetched and
+    did not make it in (the VRT writer skips a DEM it cannot read); land
+    taken for sea is for the terrain-coverage gate, which asks another DEM."""
+    have = set(glo30_paths)
+    cells = [c for c in plan.glo30_cells if _glo30_path(dem_dir, *c) in have]
+    west, south, east, north = plan.bbox
+    return (max(west, min(lon for _, lon in cells)), max(south, min(lat for lat, _ in cells)),
+            min(east, max(lon for _, lon in cells) + 1), min(north, max(lat for lat, _ in cells) + 1))
+
+
 def plan_vrts(plan, dem_dir, stats=None):
     """Fetch the plan's DEM cells and write its mosaics.
 
@@ -870,7 +887,7 @@ def plan_vrts(plan, dem_dir, stats=None):
         # builds run in parallel and overwrite each other's VRT.
         print("    Building VRT from DEM tiles...")
         glo30_vrt = _write_vrt(glo30_paths, os.path.join(dem_dir, f"mosaic_{plan.vrt_key}.vrt"),
-                               want_bbox=plan.bbox)
+                               want_bbox=_land_box(plan, dem_dir, glo30_paths))
     if low_paths:
         print(f"    Building low-zoom VRT (z{plan.min_zoom}-z{LOWRES_MAX_ZOOM}, "
               f"full squares of the z{plan.low_zoom} tiles)...")

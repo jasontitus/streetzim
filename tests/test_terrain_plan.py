@@ -416,6 +416,31 @@ def test_a_failed_ring_cell_stops_the_build_too(tmp_path, fake_dem):
     assert not os.path.exists(os.path.join(T.dem_sources_dir(), "dem90_N49_E007.tif.nodata"))
 
 
+def test_open_sea_around_islands_is_not_a_short_mosaic(tmp_path, fake_dem, monkeypatch):
+    """A box that is mostly sea gets a mosaic of its land cells, however far
+    inside the box they end; a mosaic that lacks a cell a DEM was found for
+    is still refused."""
+    _, sea, _, _ = fake_dem
+
+    def no_gdal(cmd, **kw):          # this host and CI differ; test the direct writer
+        raise FileNotFoundError(cmd[0])
+    monkeypatch.setattr(T.subprocess, "run", no_gdal)
+    plan = T.TerrainPlan((0.2, 0.2, 7.8, 0.8), 10)
+    land = [(0, 2), (0, 3), (0, 5)]
+    assert set(land) < set(plan.glo30_cells)
+    sea.update(c for c in set(plan.glo30_cells) | set(plan.low_cells) if c not in land)
+    dem = tmp_path / "dem"
+    dem.mkdir()
+    vrt, _low = T.plan_vrts(plan, str(dem))
+    with rasterio.open(vrt) as ds:
+        assert tuple(round(v, 6) for v in ds.bounds) == (2.0, 0.0, 6.0, 1.0)
+    paths = [T._glo30_path(str(dem), *c) for c in land]
+    assert T._land_box(plan, str(dem), paths) == (2, 0.2, 6, 0.8)
+    with pytest.raises(RuntimeError, match=r"does not cover the requested bbox.*east short by 2\.00"):
+        T._write_vrt(paths[:2], str(dem / "short.vrt"), want_bbox=T._land_box(plan, str(dem), paths))
+    assert not (dem / "short.vrt").exists()
+
+
 def test_the_download_budget_stops_a_slow_build(tmp_path, fake_dem, monkeypatch):
     monkeypatch.setenv("TERRAIN_DOWNLOAD_BUDGET_S", "1e-9")
     with pytest.raises(T.DemDownloadError, match="TERRAIN_DOWNLOAD_BUDGET_S"):

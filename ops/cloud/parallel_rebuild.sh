@@ -77,6 +77,12 @@
 #    region of that group starts only once its tiles are cut (or the cut
 #    failed, or was left to the build), so builds never queue on the tile
 #    lock while holding scratch.
+#  * Beside that, cuts the extracts and search files the queued regions
+#    still lack (ops/batch_extracts.py: a few regions to a planet pass, the
+#    regions the workers take first in the first pass; one pass over the
+#    world search file for all). A region starts, and its tiles are cut,
+#    once its own files are there, or the batch has given up on them (its
+#    build then cuts them, as it does for a continent-sized region).
 #
 # Afterwards
 #  * A region ending upload-pending (archive.org had not listed it) is
@@ -146,13 +152,17 @@ WIKI_SRC=${PAR_WIKI_SRC:-$ROOT/wiki-src/wikipedia_en_all_maxi_2026-02.zim}
 WIKI_DIR=${PAR_WIKI_DIR:-/mnt/data/tilemaker/streetzim-wiki}
 PRECUT=${PAR_PRECUT:-1}
 PRECUT_CMD=${PAR_PRECUT_CMD:-}
-# Before the tiles: the queue's extracts and search files, one pass over the
+# Beside the tiles: the queue's extracts and search files, one pass over the
 # planet per few regions and one over the world search file for all of them
 # (ops/batch_extracts.py), instead of a pass per build; regions over
-# PREFETCH_MAX_AREA square degrees are left to their builds.
+# PREFETCH_MAX_AREA square degrees are left to their builds. The batch keeps
+# the regions it has still to cut in PREFETCH_PENDING (extracts) and
+# PREFETCH_PENDING.search (search files), one id a line.
 PREFETCH=${PAR_PREFETCH:-1}
 PREFETCH_CMD=${PAR_PREFETCH_CMD:-}
 PREFETCH_MAX_AREA=${PAR_PREFETCH_MAX_AREA:-2500}
+PREFETCH_BATCH=${PAR_PREFETCH_BATCH:-8}  # regions to a planet pass: 17 at once needed more than 60 GB
+PREFETCH_PENDING=$STATE/prefetch.pending
 PY=${PAR_PY:-$ROOT/venv-linux/bin/python3}
 IA=${PAR_IA:-$ROOT/venv-linux/bin/ia}
 PENDING_EVERY=${PAR_PENDING_EVERY:-600}
@@ -465,7 +475,9 @@ current_group() {  # the regions of the first group with an eligible region, in 
 }
 # The next region for slot $1, in PICKED: worker 0 takes the largest (last)
 # eligible region of the current group, the others the smallest (first); a
-# region sharing tiles with a running build is passed over (WAITING_ON). One
+# region sharing tiles with a running build, or whose extract or search file
+# the batch is still cutting, is passed over (WAITING_ON), so one that is
+# ready does not wait behind it. One
 # call sets both, in this shell: the region and the waiting list from two
 # calls could disagree (a parent's build ending between them), and the
 # queue then read as done with its variant never built.
@@ -480,6 +492,7 @@ pick_region() {
     skip=""
     for c in $(conflicts_of "$id"); do build_running "$c" && skip=$c; done
     if [ -n "$skip" ]; then WAITING_ON="$WAITING_ON $id(shares tiles with $skip)"; continue; fi
+    if prefetch_pending "$(src_of "$id")"; then WAITING_ON="$WAITING_ON $id(being cut)"; continue; fi
     PICKED=$id; return 0
   done
   return 1
@@ -614,6 +627,9 @@ can_start() {  # $1 region; prints why not, returns 1
   if [ "$PRECUT" = 1 ] && [[ " $PRECUT_GROUP " == *" $id "* ]] && [ "$(tiles_state "$id")" = pending ]; then
     echo "its tiles are being cut (one at a time, in the background)"; return 1
   fi
+  if prefetch_pending "$(src_of "$id")"; then
+    echo "its extract and search file are being cut (a few regions to a planet pass, in the background)"; return 1
+  fi
   ! code_moved || { echo "the checkout's code changed since ${HEAD0:0:9} (outside ${FREEZE_IGNORE[*]}) during the round"; return 1; }
   if is_big "$id" && [ "$(big_running)" -ge "$BIG_MAX" ]; then echo "$BIG_MAX big regions already running"; return 1; fi
   free=$(free_gb); mem=$(mem_gb); proj=$(proj_gb "$id")
@@ -686,10 +702,9 @@ wiki_copy() {
 
 # ---- tiles for the first group, in the background -------------------------
 PRECUT_GROUP=""
-precut_order() {  # the first group's eligible regions in the order the workers take them
-  local g ids
-  g=$(current_group); [ -n "$g" ] || return 0
-  ids=$(awk -v want="$g" '/^## / {g++; next} /^[[:space:]]*(#|$)/ {next} (g+0) == want {print $1}' "$QUEUE" \
+group_order() {  # $1 group: its eligible regions in the order the workers take them
+  local ids
+  ids=$(awk -v want="$1" '/^## / {g++; next} /^[[:space:]]*(#|$)/ {next} (g+0) == want {print $1}' "$QUEUE" \
         | while read -r id; do eligible "$id" && echo "$id"; done)
   # Each round: the small regions the other workers take next, then the
   # large one worker 0 takes, so small maps never idle behind a big cut.
@@ -700,63 +715,83 @@ precut_order() {  # the first group's eligible regions in the order the workers 
         if (w > 1 && i <= j) print a[j--]
       }}'
 }
+precut_order() { local g; g=$(current_group); [ -z "$g" ] || group_order "$g"; }
 tiles_state() { local f; for f in ok skip fail; do [ -e "$STATE/tiles/$1.$f" ] && { echo "$f"; return; }; done; echo pending; }
+prefetch_pending() { grep -qxF -- "$1" "$PREFETCH_PENDING" "$PREFETCH_PENDING.search" 2>/dev/null; }
+extract_ready() {  # $1 pbf, $2 bbox: there, cut for this box, with complete multipolygons
+  [ -s "$1" ] || return 1
+  ! { type bbox_stale > /dev/null 2>&1 && bbox_stale "$1" "$2"; } || return 1
+  ! { type pbf_complete > /dev/null 2>&1 && ! pbf_complete "$1"; }
+}
 precut() {
-  local id src bbox pbf rc
+  local id src bbox pbf rc held told=""
   mkdir -p "$STATE/tiles"
   [ -f "$ROOT/ops/region-bbox.sh" ] && . "$ROOT/ops/region-bbox.sh"
-  for id in $PRECUT_GROUP; do
-    [ "$(tiles_state "$id")" = pending ] || continue
-    [ -e "$STATE/STOP" ] && return 0
-    if [ "$(status_of "$id")" = running ]; then : > "$STATE/tiles/$id.skip"; continue; fi
-    src=$(src_of "$id")
-    bbox=$(awk -F'\t' -v id="$id" '$1 == id {print $3; exit}' "$REGISTRY" 2>/dev/null)
-    if [ -z "$bbox" ]; then say "tiles $id: no registry row; left to its build"; : > "$STATE/tiles/$id.skip"; continue; fi
-    pbf="$ROOT/world-data/regions/$src.osm.pbf"
-    if [ ! -s "$pbf" ] || { type bbox_stale > /dev/null 2>&1 && bbox_stale "$pbf" "$bbox"; } \
-       || { type pbf_complete > /dev/null 2>&1 && ! pbf_complete "$pbf"; }; then
-      say "tiles $id: extract missing, cut for another box or without complete multipolygons; left to its build"
-      : > "$STATE/tiles/$id.skip"; continue
-    fi
-    local -a scrub=()
-    mapfile -t scrub < <(scrub_args)
-    if [ -n "$PRECUT_CMD" ]; then
-      env PRECUT_ID="$id" PRECUT_SRC="$src" PRECUT_BBOX="$bbox" bash -c "$PRECUT_CMD" >> "$STATE/logs/tiles.log" 2>&1
-    else
-      (cd "$ROOT" && env "${scrub[@]}" PATH="$DRIVER_PATH" STREETZIM_ML_TILES=1 \
-         "$PY" ops/region-ml-tiles.py --src-id "$src" -- "$id" "$bbox") >> "$STATE/logs/tiles.log" 2>&1
-    fi
-    rc=$?
-    if [ "$rc" = 0 ]; then : > "$STATE/tiles/$id.ok"; else : > "$STATE/tiles/$id.fail"; fi
-    say "tiles $id: rc=$rc ($(tail -1 "$STATE/logs/tiles.log" 2>/dev/null | cut -c1-120))"
+  # In pick order, from the top again after every cut: a region whose extract
+  # the batch is still cutting is passed over until it is there, and the
+  # ones that are ready do not wait for it.
+  while [ ! -e "$STATE/STOP" ]; do
+    held=""
+    for id in $PRECUT_GROUP; do
+      [ "$(tiles_state "$id")" = pending ] || continue
+      [ -e "$STATE/STOP" ] && return 0
+      if [ "$(status_of "$id")" = running ]; then : > "$STATE/tiles/$id.skip"; continue; fi
+      src=$(src_of "$id")
+      bbox=$(awk -F'\t' -v id="$id" '$1 == id {print $3; exit}' "$REGISTRY" 2>/dev/null)
+      if [ -z "$bbox" ]; then say "tiles $id: no registry row; left to its build"; : > "$STATE/tiles/$id.skip"; continue; fi
+      pbf="$ROOT/world-data/regions/$src.osm.pbf"
+      if ! extract_ready "$pbf" "$bbox" 2> /dev/null && grep -qxF -- "$src" "$PREFETCH_PENDING" 2> /dev/null; then
+        held="$held $id"; continue
+      fi
+      if ! extract_ready "$pbf" "$bbox"; then
+        say "tiles $id: extract missing, cut for another box or without complete multipolygons; left to its build"
+        : > "$STATE/tiles/$id.skip"; continue
+      fi
+      local -a scrub=()
+      mapfile -t scrub < <(scrub_args)
+      if [ -n "$PRECUT_CMD" ]; then
+        env PRECUT_ID="$id" PRECUT_SRC="$src" PRECUT_BBOX="$bbox" bash -c "$PRECUT_CMD" >> "$STATE/logs/tiles.log" 2>&1
+      else
+        (cd "$ROOT" && env "${scrub[@]}" PATH="$DRIVER_PATH" STREETZIM_ML_TILES=1 \
+           "$PY" ops/region-ml-tiles.py --src-id "$src" -- "$id" "$bbox") >> "$STATE/logs/tiles.log" 2>&1
+      fi
+      rc=$?
+      if [ "$rc" = 0 ]; then : > "$STATE/tiles/$id.ok"; else : > "$STATE/tiles/$id.fail"; fi
+      say "tiles $id: rc=$rc ($(tail -1 "$STATE/logs/tiles.log" 2>/dev/null | cut -c1-120))"
+      continue 2
+    done
+    [ -n "$held" ] || return 0
+    [ "$held" = "$told" ] || say "tiles: waiting for the extracts of$held (the queue's are being cut, a few to a planet pass)"
+    told=$held; sleep "$POLL"
   done
 }
 
-prefetch() {
-  local id src bbox ids="" rc
-  for id in $(awk '/^[[:space:]]*(#|$)/ {next} {print $1}' "$QUEUE"); do
-    eligible "$id" || continue
+prefetch_ids() {  # the data regions the batch cuts for, in the order their builds start
+  local g id src bbox ids=""
+  for id in $(for ((g = 0; g <= $(grep -c '^## ' "$QUEUE"); g++)); do group_order "$g"; done); do
     src=$(src_of "$id")
     bbox=$(awk -F'\t' -v id="$src" '$1 == id {print $3; exit}' "$REGISTRY" 2>/dev/null)
     [ -n "$bbox" ] || continue
     echo "$bbox" | awk -F, -v max="$PREFETCH_MAX_AREA" '{exit !($1 < $3 && ($3 - $1) * ($4 - $2) <= max)}' || continue
     case " $ids " in *" $src "*) ;; *) ids="$ids $src" ;; esac
   done
-  [ -n "$ids" ] || return 0
-  say "prefetch: extracts and search files for$ids"
+  echo "${ids# }"
+}
+prefetch() {  # $@ the regions
+  local rc
+  say "prefetch: extracts and search files for $*"
   local -a scrub=()
   mapfile -t scrub < <(scrub_args)
   if [ -n "$PREFETCH_CMD" ]; then
-    env PREFETCH_IDS="${ids# }" bash -c "$PREFETCH_CMD" >> "$STATE/logs/prefetch.log" 2>&1
+    env PREFETCH_IDS="$*" PREFETCH_PENDING="$PREFETCH_PENDING" bash -c "$PREFETCH_CMD" >> "$STATE/logs/prefetch.log" 2>&1
   else
-    # shellcheck disable=SC2086  # one argument per region
-    (cd "$ROOT" && env "${scrub[@]}" PATH="$DRIVER_PATH" "$PY" ops/batch_extracts.py --root "$ROOT" -- $ids) \
-      >> "$STATE/logs/prefetch.log" 2>&1
+    (cd "$ROOT" && env "${scrub[@]}" PATH="$DRIVER_PATH" "$PY" ops/batch_extracts.py --root "$ROOT" \
+       --batch "$PREFETCH_BATCH" --pending "$PREFETCH_PENDING" -- "$@") >> "$STATE/logs/prefetch.log" 2>&1
   fi
   rc=$?
+  rm -f "$PREFETCH_PENDING" "$PREFETCH_PENDING.search"
   say "prefetch: rc=$rc ($(tail -1 "$STATE/logs/prefetch.log" 2>/dev/null | cut -c1-120))"
 }
-prepare() { [ "$PREFETCH" != 1 ] || prefetch; [ "$PRECUT" != 1 ] || precut; }
 
 # ---- finishing upload-pending regions --------------------------------------
 pending_loop() {  # runs in the background until the runner exits
@@ -822,9 +857,21 @@ if [ "$PRECUT" = 1 ]; then
   rm -rf "$STATE/tiles"; mkdir -p "$STATE/tiles"
   say "tiles: cutting in this order: $PRECUT_GROUP"
 fi
-[ "$PREFETCH" != 1 ] && [ "$PRECUT" != 1 ] || bg_start prepare
+# Every region of the batch is pending from before the first start, so no
+# build begins on a file the batch is about to deliver (the batch then keeps
+# the lists to what it has still to cut).
+rm -f "$PREFETCH_PENDING" "$PREFETCH_PENDING.search"
+if [ "$PREFETCH" = 1 ]; then
+  PREFETCH_IDS=$(prefetch_ids)
+  if [ -n "$PREFETCH_IDS" ]; then
+    # shellcheck disable=SC2086  # one line, one argument per region
+    { printf '%s\n' $PREFETCH_IDS > "$PREFETCH_PENDING"; bg_start prefetch $PREFETCH_IDS; }
+  fi
+fi
+[ "$PRECUT" != 1 ] || bg_start precut
 last_start=0
 blocked=""
+idle_told=""
 FAILED=""
 while :; do
   reap
@@ -858,6 +905,9 @@ while :; do
       say "$nxt waits: $why"; blocked=$why
     fi
   done
+  if [ -z "$any_cand" ] && [ -n "$WAITING_ALL" ] && [ "$idle_told" != "$WAITING_ALL" ]; then
+    say "no region for a free worker yet:${WAITING_ALL:0:400}"; idle_told=$WAITING_ALL
+  fi
   if [ -n "$any_free" ] && [ -z "$any_cand" ] && [ -z "$started" ] && [ "$(running)" -eq 0 ] && [ -z "$WAITING_ALL" ]; then
     if [ "$(pending_count)" -gt 0 ]; then sleep "$POLL" 7>&-; continue; fi
     say "queue done"
