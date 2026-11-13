@@ -16,7 +16,7 @@
 # (tests/test_library_catalog.py).
 europe	@Europe;Georgia;Armenia;Azerbaijan;Cyprus			
 united-states	United States		East Coast;Midwest;West Coast;Mountain West;California;New York;Florida;North and South Carolina;New York City area;Chicago area;Los Angeles area;Texas;Colorado;San Francisco Bay Area;Washington, D.C.	
-south-america	Colombia;Venezuela;Guyana;Suriname;French Guiana;Ecuador;Peru;Bolivia;Paraguay;Uruguay;Chile;Brazil;Argentina			
+south-america	Colombia;Venezuela;Guyana;Suriname;French Guiana;Ecuador;Peru;Bolivia;Paraguay;Uruguay;Chile;Brazil;Argentina;Falkland Islands			
 africa	@Africa			
 africa-light	@Africa			
 indian-subcontinent	India;Pakistan;Bangladesh;Sri Lanka;Nepal;Bhutan;Maldives			
@@ -32,12 +32,12 @@ india-south	India	South India
 india-south-light	India	South India		
 india-west	India	West India		
 india-west-light	India	West India		
-china	China			
+china	China;Hong Kong;Macao			
 russia	Russia			Asia
-australia-nz	Australia;New Zealand			
+australia-nz	Australia;New Zealand;Norfolk Island			
 southeast-asia	Thailand;Vietnam;Myanmar;Cambodia;Laos;Malaysia;Singapore;Indonesia;Philippines;Brunei;Timor-Leste			
 thailand	Thailand			
-canada	Canada			
+canada	Canada;Saint Pierre and Miquelon			
 west-asia	Turkey;Syria;Lebanon;Israel;Palestine;Jordan;Iraq;Iran;Kuwait;Saudi Arabia;Bahrain;Qatar;United Arab Emirates;Oman;Yemen			
 central-asia	Kazakhstan;Uzbekistan;Turkmenistan;Tajikistan;Kyrgyzstan;Afghanistan;Georgia;Armenia;Azerbaijan			
 korea-mongolia	South Korea;North Korea;Mongolia			
@@ -46,7 +46,7 @@ pacific-islands	Papua New Guinea;Fiji;Solomon Islands;Vanuatu;New Caledonia;Pala
 west-africa	Nigeria;Ghana;Côte d'Ivoire;Senegal;Mali;Burkina Faso;Guinea;Benin;Togo;Sierra Leone;Liberia;Niger			
 southern-africa	South Africa;Namibia;Botswana;Zimbabwe;Mozambique;Zambia;Malawi;Lesotho;Eswatini			
 east-africa	Kenya;Tanzania;Uganda;Ethiopia;Rwanda;Burundi;Somalia;South Sudan			
-central-america-caribbean	Belize;Guatemala;Honduras;El Salvador;Nicaragua;Costa Rica;Panama;Cuba;Jamaica;Haiti;Dominican Republic;Puerto Rico			
+central-america-caribbean	Belize;Guatemala;Honduras;El Salvador;Nicaragua;Costa Rica;Panama;Cuba;Jamaica;Haiti;Dominican Republic;Puerto Rico;Bahamas;Turks and Caicos Islands;Cayman Islands;U.S. Virgin Islands;British Virgin Islands;Anguilla;Saint Martin;Sint Maarten;Saint Barthélemy;Saint Kitts and Nevis;Antigua and Barbuda;Montserrat;Guadeloupe;Dominica;Martinique;Saint Lucia;Saint Vincent and the Grenadines;Barbados;Grenada;Trinidad and Tobago;Aruba;Curaçao;Bonaire			
 himalayas	Nepal;Bhutan;India;Pakistan;China			
 baltics	Estonia;Latvia;Lithuania			
 brazil	Brazil			
@@ -108,4 +108,44 @@ carpathians	Romania;Hungary;Bulgaria
 north-africa	Morocco;Algeria;Tunisia;Libya;Mauritania;Western Sahara			
 horn-of-africa	Ethiopia;Somalia;Eritrea;Djibouti;South Sudan;Kenya			
 central-africa	DR Congo;Cameroon;Chad;Central African Republic;Gabon;Congo;Equatorial Guinea;Angola;Zambia			
-east-polynesia	French Polynesia;Cook Islands			
+east-polynesia	French Polynesia;Cook Islands;Pitcairn			
+west-polynesia	Samoa;American Samoa;Tonga;Niue;Tokelau;Wallis and Futuna			
+mariana-islands	Guam;Northern Mariana Islands			
+greenland	Greenland			
+bermuda	Bermuda			
+belarus	Belarus			
+channel-islands	Jersey;Guernsey			
+faroe-islands	Faroe Islands			
+svalbard	Svalbard and Jan Mayen			
+malta	Malta			
+madagascar-islands	Madagascar;Comoros;Mayotte;Réunion;Mauritius;Seychelles			
+sudan	Sudan			
+cabo-verde	Cabo Verde			
+sao-tome-principe	São Tomé and Príncipe			
+saint-helena	Saint Helena			
+bangladesh	Bangladesh			
+sri-lanka-maldives	Sri Lanka;Maldives			
+vietnam	Vietnam			
+philippines	Philippines			
+indonesia	Indonesia;Timor-Leste			
+malaysia-singapore-brunei	Malaysia;Singapore;Brunei			
+myanmar	Myanmar			
+cambodia-laos	Cambodia;Laos			
+colombia	Colombia			
+venezuela	Venezuela			
+peru	Peru			
+ecuador	Ecuador			
+bolivia	Bolivia			
+chile	Chile			
+paraguay-uruguay	Paraguay;Uruguay			
+guianas	Guyana;Suriname;French Guiana			
+falklands	Falkland Islands			
+australia	Australia			
+new-zealand	New Zealand			
+british-columbia	Canada	British Columbia		
+canadian-prairies	Canada	Alberta, Saskatchewan and Manitoba		
+ontario	Canada	Ontario		
+quebec	Canada	Quebec		
+atlantic-canada	Canada	Atlantic Canada		
+northern-canada	Canada	Yukon, Northwest Territories and Nunavut		
+hong-kong-macau	Hong Kong;Macao			

@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Koonfurta Bartamaha Maraykanka",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi iyo Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson iyo Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samowa iyo Tonga",
+    "description": "Samowa, Samowada Maraykanka, Tonga, Niue, Tokelau, iyo Wallis iyo Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi iyo Mata-Utu; Upolu, Savaiʻi, Tutuila iyo jasiiradaha Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam iyo Jasiiradaha Waqooyiga Mariana",
+    "description": "Guam iyo Jasiiradaha Waqooyiga Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian iyo Rota."
+  },
+  "greenland": {
+    "title": "Griinlaand",
+    "description": "Griinlaand — Nuuk, Sisimiut, Ilulissat, Qaqortoq iyo Tasiilaq; barafka weyn ee dhulka, Ilulissat Icefjord iyo fjord-yada koonfurta."
+  },
+  "bermuda": {
+    "title": "Bermuuda",
+    "description": "Bermuuda — Hamilton, St. George’s iyo Royal Naval Dockyard, degmooyinka jasiiradda iyo xeebaheeda ciidda casaanka khafiifka ah."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno iyo Brest; kaynta Belovezhskaya Pushcha iyo dhiijada Polesia."
+  },
+  "channel-islands": {
+    "title": "Jasiiradaha Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark iyo Herm — St Helier, St Peter Port iyo Gorey."
+  },
+  "faroe-islands": {
+    "title": "Jasiiradaha Faroe",
+    "description": "Jasiiradaha Faroe — Tórshavn, Klaksvík, Runavík iyo siddeed iyo tobanka jasiiradood, tuulooyinkooda, tunnelladooda iyo dhagaxyada dheer ee badda."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard iyo Jan Mayen — Longyearbyen, Barentsburg iyo Ny-Ålesund; barafleyda iyo fjord-yada Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo iyo Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria iyo Saddexda Magaalo."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar iyo Jasiiradaha Badweynta Hindiya",
+    "description": "Madagaskar, Komoros, Mayotte, Réunion, Morishiyos iyo Seyshelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis iyo Victoria."
+  },
+  "sudan": {
+    "title": "Suudaan",
+    "description": "Suudaan — Khartuum, Omdurman, Port Sudan, Kassala, El Obeid iyo Nyala; isugeynta Niilka Buluugga ah iyo Niilka Cad iyo ahraamta Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria iyo tobanka jasiiradood, laga bilaabo Santo Antão ilaa Brava."
+  },
+  "sao-tome-principe": {
+    "title": "Saw Tome iyo Prinsipe",
+    "description": "Saw Tome iyo Prinsipe — São Tomé, Santo António iyo kaymaha roobka iyo xeebaha labada jasiiradood."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension iyo Tristan da Cunha",
+    "description": "Saint Helena, Jasiiradda Ascension iyo Tristan da Cunha — Jamestown, Georgetown iyo Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangaladheesh",
+    "description": "Bangaladheesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet iyo Cox’s Bazar; Sundarbans iyo deltada Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka iyo Maldiifta",
+    "description": "Sri Lanka iyo Maldiifta — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura iyo Malé; dhulka buuraleyda ah, Sigiriya iyo jasiiradaha atoll-ka."
+  },
+  "vietnam": {
+    "title": "Fiyetnaam",
+    "description": "Fiyetnaam — Hanoi, Magaalada Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An iyo Can Tho; Gacanka Ha Long iyo deltada Mekong."
+  },
+  "philippines": {
+    "title": "Filibiin",
+    "description": "Filibiin — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio iyo Zamboanga; Luzon, Visayas, Mindanao iyo Palawan."
+  },
+  "indonesia": {
+    "title": "Indoneesiya iyo Timor-Leste",
+    "description": "Indoneesiya iyo Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar iyo Dili; Java, Sumatra, Bali, Borneo, Sulawesi iyo Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysiya, Singabuur iyo Brunei",
+    "description": "Malaysiya, Singabuur iyo Brunei — Kuala Lumpur, Singabuur, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching iyo Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine iyo Harada Inle; dooxada Irrawaddy iyo buuraha Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kamboodiya iyo Laos",
+    "description": "Kamboodiya iyo Laos — Phnom Penh, Siem Reap iyo Angkor, Battambang, Vientiane, Luang Prabang iyo Pakse; webiga Mekong iyo Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombiya",
+    "description": "Kolombiya — Bogotá, Medellín, Cali, Barranquilla, Cartagena iyo Bucaramanga; buuraha Andes, xeebta Kariibiyaanka iyo Amazon."
+  },
+  "venezuela": {
+    "title": "Fenesuweyla",
+    "description": "Fenesuweyla — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida iyo Ciudad Bolívar; Biyo-dhaca Angel, webiga Orinoco iyo Isla Margarita."
+  },
+  "peru": {
+    "title": "Beeru",
+    "description": "Beeru — Lima, Arequipa, Cusco, Trujillo, Iquitos iyo Puno; Machu Picchu, Harada Titicaca iyo Dooxada Barakaysan."
+  },
+  "ecuador": {
+    "title": "Ikwadoor",
+    "description": "Ikwadoor — Quito, Guayaquil, Cuenca, Manta iyo Baños; Waddada Volkaanooyinka, Amazon iyo Jasiiradaha Galápagos."
+  },
+  "bolivia": {
+    "title": "Boliifiya",
+    "description": "Boliifiya — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre iyo Potosí; Harada Titicaca iyo Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Jili",
+    "description": "Jili — Santiago, Valparaíso, Concepción, Antofagasta, La Serena iyo Punta Arenas; Atacama, Gobolka Harooyinka, Patagonia iyo Jasiiradda Easter."
+  },
+  "paraguay-uruguay": {
+    "title": "Baraguway iyo Uruguway",
+    "description": "Baraguway iyo Uruguway — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este iyo Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyaanayaasha",
+    "description": "Guyana, Suriname iyo Guyaanada Faransiiska — Georgetown, Paramaribo, Cayenne iyo Kourou; Biyo-dhaca Kaieteur iyo kaynta roobka ee Guiana Shield."
+  },
+  "falklands": {
+    "title": "Jasiiradaha Falkland",
+    "description": "Jasiiradaha Falkland — Stanley, Goose Green iyo jasiiradaha East Falkland iyo West Falkland."
+  },
+  "australia": {
+    "title": "Awstaraaliya",
+    "description": "Awstaraaliya — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin iyo Canberra; Great Barrier Reef, Uluru iyo Outback."
+  },
+  "new-zealand": {
+    "title": "Niyuu Siilaand",
+    "description": "Niyuu Siilaand — Auckland, Wellington, Christchurch, Hamilton, Dunedin iyo Queenstown; Buuraha Alps ee Koonfurta, Fiordland iyo Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George iyo Whistler; Buuraha Xeebta, Jasiiradda Vancouver iyo Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Bannaanada Kanada",
+    "description": "Alberta, Saskatchewan iyo Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina iyo Banff; Buuraha Rockies, bannaanada iyo Churchill oo ku taal Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston iyo Thunder Bay; Biyo-dhaca Niagara, Harooyinka Waaweyn iyo Beerta Algonquin."
+  },
+  "quebec": {
+    "title": "Kebek",
+    "description": "Kebek — Montréal, Magaalada Kebek, Laval, Gatineau, Sherbrooke iyo Saguenay; webiga St. Lawrence, buuraha Laurentians iyo Jasiirad-gacmeedka Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Kanadada Atlantigga",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, iyo Newfoundland iyo Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton iyo Charlottetown; Cabot Trail iyo Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Waqooyiga Kanada",
+    "description": "Yukon, Northwest Territories iyo Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City iyo Inuvik; jasiiradaha Arctic Archipelago iyo webiga Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong iyo Makaaw",
+    "description": "Hong Kong iyo Makaaw — Jasiiradda Hong Kong, Kowloon, New Territories, Lantau iyo Jasiirad-gacmeedka Makaaw, Taipa iyo Coloane."
   }
 }

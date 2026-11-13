@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Il sid central dals Stadis Unids",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ed Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson e Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa e Tonga",
+    "description": "Samoa, la Samoa Americana, Tonga, Niue, Tokelau e Wallis e Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi e Mata-Utu; Upolu, Savaiʻi, Tutuila e las inslas da Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam e las Inslas Mariannas dal Nord",
+    "description": "Guam e las Inslas Mariannas dal Nord — Hagåtña, Tamuning, Dededo, Saipan, Tinian e Rota."
+  },
+  "greenland": {
+    "title": "Grönlanda",
+    "description": "La Grönlanda — Nuuk, Sisimiut, Ilulissat, Qaqortoq e Tasiilaq; la cuverta da glatsch, il fjord da glatsch dad Ilulissat ed ils fjords dal sid."
+  },
+  "bermuda": {
+    "title": "Bermudas",
+    "description": "Las Bermudas — Hamilton, St. George’s ed il Royal Naval Dockyard, las pravendas da l’insla e sias spundas da sablun rosa."
+  },
+  "belarus": {
+    "title": "Bielorussia",
+    "description": "La Bielorussia — Minsk, Gomel, Mogilev, Vitebsk, Grodno e Brest; il guaud da Belovezhskaya Pushcha e las palids da la Polesia."
+  },
+  "channel-islands": {
+    "title": "Inslas dal Canal",
+    "description": "Jersey, Guernsey, Alderney, Sark e Herm — St Helier, St Peter Port e Gorey."
+  },
+  "faroe-islands": {
+    "title": "Inslas Feroe",
+    "description": "Las Inslas Feroe — Tórshavn, Klaksvík, Runavík e las otgdesch inslas cun lur vitgs, lur tunnels e lur grips a la mar."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard e Jan Mayen — Longyearbyen, Barentsburg e Ny-Ålesund; ils glatschers ed ils fjords da Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo e Comino — La Valletta, Sliema, St Julian’s, Mdina, Victoria e las Trais Citads."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar e las inslas da l’Ocean Indic",
+    "description": "Madagascar, las Comoras, Mayotte, La Réunion, il Mauritius e las Seychellas — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis e Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Il Sudan — Khartum, Omdurman, Port Sudan, Kassala, El Obeid e Nyala; la confluenza dal Nil Blau e dal Nil Alv e las piramidas da Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cap Verd",
+    "description": "Il Cap Verd — Praia, Mindelo, Santa Maria e las diesch inslas, da Santo Antão fin a Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé e Príncipe",
+    "description": "São Tomé e Príncipe — São Tomé, Santo António ed ils guauds pluvials e las spundas da las duas inslas."
+  },
+  "saint-helena": {
+    "title": "Sontga Helena, Ascension e Tristan da Cunha",
+    "description": "Sontga Helena, l’insla Ascension e Tristan da Cunha — Jamestown, Georgetown ed Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesch",
+    "description": "Il Bangladesch — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet e Cox’s Bazar; ils Sundarbans ed il delta dal Ganges e dal Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka e las Maldivas",
+    "description": "Sri Lanka e las Maldivas — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura e Malé; la regiun da collinas, Sigiriya ed ils atolls."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Il Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An e Can Tho; la Baja da Ha Long ed il delta dal Mekong."
+  },
+  "philippines": {
+    "title": "Filippinas",
+    "description": "Las Filippinas — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio e Zamboanga; Luzon, las Visayas, Mindanao e Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia e Timor da l’Ost",
+    "description": "L’Indonesia ed il Timor da l’Ost — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar e Dili; Java, Sumatra, Bali, Borneo, Sulawesi e la Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaisia, Singapur e Brunei",
+    "description": "La Malaisia, Singapur ed il Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching e Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Il Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine ed il Lai Inle; la val da l’Irrawaddy e las collinas Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodscha e Laos",
+    "description": "La Cambodscha ed il Laos — Phnom Penh, Siem Reap ed Angkor, Battambang, Vientiane, Luang Prabang e Pakse; il Mekong ed il Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Columbia",
+    "description": "La Columbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena e Bucaramanga; las Andas, la costa caribica e l’Amazonas."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "La Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida e Ciudad Bolívar; las cataractas Angel, l’Orinoco e l’Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Il Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos e Puno; Machu Picchu, il Lai Titicaca e la Val Sontga."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "L’Ecuador — Quito, Guayaquil, Cuenca, Manta e Baños; l’Avenida dals Vulcans, l’Amazonas e las Inslas Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "La Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre e Potosí; il Lai Titicaca ed il Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Il Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena e Punta Arenas; l’Atacama, la regiun dals lais, la Patagonia e l’Insla da Pasca."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguai ed Uruguai",
+    "description": "Il Paraguai e l’Uruguai — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este e Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Las Guianas",
+    "description": "La Guyana, il Surinam e la Guiana Franzosa — Georgetown, Paramaribo, Cayenne e Kourou; las cataractas Kaieteur ed il guaud pluvial dal Scut da la Guiana."
+  },
+  "falklands": {
+    "title": "Inslas Falkland",
+    "description": "Las Inslas Falkland — Stanley, Goose Green e las inslas East Falkland e West Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "L’Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin e Canberra; la Gronda Barriera da Corals, Uluru e l’Outback."
+  },
+  "new-zealand": {
+    "title": "Nova Zelanda",
+    "description": "La Nova Zelanda — Auckland, Wellington, Christchurch, Hamilton, Dunedin e Queenstown; las Alps dal Sid, Fiordland e Rotorua."
+  },
+  "british-columbia": {
+    "title": "Columbia Britannica",
+    "description": "La Columbia Britannica — Vancouver, Victoria, Kelowna, Kamloops, Prince George e Whistler; las Coast Mountains, l’Insla da Vancouver e l’Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Prarias dal Canada",
+    "description": "Alberta, Saskatchewan e Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina e Banff; las Muntognas Crappusas, las prarias e Churchill a la Baja da Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "L’Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston e Thunder Bay; las cataractas dal Niagara, ils Gronds Lais ed il parc Algonquin."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Il Québec — Montréal, la citad da Québec, Laval, Gatineau, Sherbrooke e Saguenay; il Son Lurench, las Laurentidas e la peninsla da Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Canada atlantic",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island e Newfoundland e Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton e Charlottetown; il Cabot Trail e la Baja da Fundy."
+  },
+  "northern-canada": {
+    "title": "Canada dal nord",
+    "description": "Il Yukon, ils Territoris dal Nordvest ed il Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ed Inuvik; l’Archipel Arctic ed il flum Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong e Macao",
+    "description": "Hongkong e Macao — l’insla da Hongkong, Kowloon, ils New Territories, Lantau e la peninsla da Macao, Taipa e Coloane."
   }
 }

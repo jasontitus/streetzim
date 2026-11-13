@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Sudul central al SUA",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi și Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson și Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa și Tonga",
+    "description": "Samoa, Samoa Americană, Tonga, Niue, Tokelau și Wallis și Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi și Mata-Utu; Upolu, Savaiʻi, Tutuila și insulele Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam și Insulele Mariane de Nord",
+    "description": "Guam și Insulele Mariane de Nord — Hagåtña, Tamuning, Dededo, Saipan, Tinian și Rota."
+  },
+  "greenland": {
+    "title": "Groenlanda",
+    "description": "Groenlanda — Nuuk, Sisimiut, Ilulissat, Qaqortoq și Tasiilaq; calota glaciară, fiordul de gheață Ilulissat și fiordurile din sud."
+  },
+  "bermuda": {
+    "title": "Bermude",
+    "description": "Bermude — Hamilton, St. George’s și Royal Naval Dockyard, parohiile insulei și plajele sale cu nisip roz."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Moghilev, Vitebsk, Grodno și Brest; pădurea Belovejskaia Pușcea și mlaștinile Polesiei."
+  },
+  "channel-islands": {
+    "title": "Insulele Canalului",
+    "description": "Jersey, Guernsey, Alderney, Sark și Herm — St Helier, St Peter Port și Gorey."
+  },
+  "faroe-islands": {
+    "title": "Insulele Feroe",
+    "description": "Insulele Feroe — Tórshavn, Klaksvík, Runavík și cele optsprezece insule, cu satele, tunelurile și falezele lor."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard și Jan Mayen — Longyearbyen, Barentsburg și Ny-Ålesund; ghețarii și fiordurile din Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo și Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria și cele Trei Orașe."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar și insulele Oceanului Indian",
+    "description": "Madagascar, Comore, Mayotte, Réunion, Mauritius și Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis și Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid și Nyala; confluența Nilului Albastru cu Nilul Alb și piramidele de la Meroe."
+  },
+  "cabo-verde": {
+    "title": "Capul Verde",
+    "description": "Capul Verde — Praia, Mindelo, Santa Maria și cele zece insule, de la Santo Antão la Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé și Príncipe",
+    "description": "São Tomé și Príncipe — São Tomé, Santo António și pădurile tropicale și plajele celor două insule."
+  },
+  "saint-helena": {
+    "title": "Sfânta Elena, Ascension și Tristan da Cunha",
+    "description": "Sfânta Elena, Insula Ascension și Tristan da Cunha — Jamestown, Georgetown și Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet și Cox’s Bazar; Sundarbans și delta Gangelui și Brahmaputrei."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka și Maldive",
+    "description": "Sri Lanka și Maldive — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura și Malé; regiunea muntoasă, Sigiriya și atolii."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An și Can Tho; golful Ha Long și delta Mekongului."
+  },
+  "philippines": {
+    "title": "Filipine",
+    "description": "Filipine — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio și Zamboanga; Luzon, Visayas, Mindanao și Palawan."
+  },
+  "indonesia": {
+    "title": "Indonezia și Timorul de Est",
+    "description": "Indonezia și Timorul de Est — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar și Dili; Java, Sumatra, Bali, Borneo, Sulawesi și Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore și Brunei",
+    "description": "Malaysia, Singapore și Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching și Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine și lacul Inle; valea fluviului Irawadi și dealurile Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodgia și Laos",
+    "description": "Cambodgia și Laos — Phnom Penh, Siem Reap și Angkor, Battambang, Vientiane, Luang Prabang și Pakse; Mekongul și Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Columbia",
+    "description": "Columbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena și Bucaramanga; Anzii, coasta Caraibelor și Amazonia."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida și Ciudad Bolívar; cascada Angel, Orinoco și Insula Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos și Puno; Machu Picchu, lacul Titicaca și Valea Sacră."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta și Baños; Bulevardul Vulcanilor, Amazonia și Insulele Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre și Potosí; lacul Titicaca și Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena și Punta Arenas; Atacama, Regiunea Lacurilor, Patagonia și Insula Paștelui."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay și Uruguay",
+    "description": "Paraguay și Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este și Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyanele",
+    "description": "Guyana, Surinam și Guyana Franceză — Georgetown, Paramaribo, Cayenne și Kourou; cascada Kaieteur și pădurea tropicală a Scutului Guyanez."
+  },
+  "falklands": {
+    "title": "Insulele Falkland",
+    "description": "Insulele Falkland — Stanley, Goose Green și insulele East Falkland și West Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin și Canberra; Marea Barieră de Corali, Uluru și Outback-ul."
+  },
+  "new-zealand": {
+    "title": "Noua Zeelandă",
+    "description": "Noua Zeelandă — Auckland, Wellington, Christchurch, Hamilton, Dunedin și Queenstown; Alpii Sudici, Fiordland și Rotorua."
+  },
+  "british-columbia": {
+    "title": "Columbia Britanică",
+    "description": "Columbia Britanică — Vancouver, Victoria, Kelowna, Kamloops, Prince George și Whistler; Munții Coastei, Insula Vancouver și Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Preeriile canadiene",
+    "description": "Alberta, Saskatchewan și Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina și Banff; Munții Stâncoși, preeriile și Churchill, la Golful Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston și Thunder Bay; Cascada Niagara, Marile Lacuri și Parcul Algonquin."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, orașul Québec, Laval, Gatineau, Sherbrooke și Saguenay; fluviul Sfântul Laurențiu, Munții Laurentini și Peninsula Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Canada Atlantică",
+    "description": "New Brunswick, Nova Scoția, Insula Prințului Eduard și Newfoundland și Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton și Charlottetown; Cabot Trail și Golful Fundy."
+  },
+  "northern-canada": {
+    "title": "Nordul Canadei",
+    "description": "Yukon, Teritoriile de Nord-Vest și Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City și Inuvik; Arhipelagul Arctic Canadian și fluviul Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong și Macao",
+    "description": "Hong Kong și Macao — Insula Hong Kong, Kowloon, Noile Teritorii, Lantau și Peninsula Macao, Taipa și Coloane."
   }
 }

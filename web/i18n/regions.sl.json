@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Južni osrednji del ZDA",
     "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Misisipi in Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson in Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa in Tonga",
+    "description": "Samoa, Ameriška Samoa, Tonga, Niue, Tokelau ter Wallis in Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi in Mata-Utu; Upolu, Savaiʻi, Tutuila in otoki Tonge."
+  },
+  "mariana-islands": {
+    "title": "Guam in Severni Marianski otoki",
+    "description": "Guam in Severni Marianski otoki — Hagåtña, Tamuning, Dededo, Saipan, Tinian in Rota."
+  },
+  "greenland": {
+    "title": "Grenlandija",
+    "description": "Grenlandija — Nuuk, Sisimiut, Ilulissat, Qaqortoq in Tasiilaq; ledeni pokrov, ledeni fjord Ilulissat in fjordi na jugu."
+  },
+  "bermuda": {
+    "title": "Bermudi",
+    "description": "Bermudi — Hamilton, St. George’s in Royal Naval Dockyard, otoške župnije in plaže z rožnatim peskom."
+  },
+  "belarus": {
+    "title": "Belorusija",
+    "description": "Belorusija — Minsk, Gomel, Mogiljov, Vitebsk, Grodno in Brest; Beloveški pragozd in močvirja Polesja."
+  },
+  "channel-islands": {
+    "title": "Kanalski otoki",
+    "description": "Jersey, Guernsey, Alderney, Sark in Herm — St Helier, St Peter Port in Gorey."
+  },
+  "faroe-islands": {
+    "title": "Ferski otoki",
+    "description": "Ferski otoki — Tórshavn, Klaksvík, Runavík in osemnajst otokov z vasmi, predori in morskimi klifi."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard in Jan Mayen — Longyearbyen, Barentsburg in Ny-Ålesund; ledeniki in fjordi Spitsbergov."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo in Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria in Tri mesta."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar in otoki Indijskega oceana",
+    "description": "Madagaskar, Komori, Mayotte, Réunion, Mauritius in Sejšeli — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis in Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Kartum, Omdurman, Port Sudan, Kasala, El Obeid in Njala; sotočje Modrega in Belega Nila ter piramide v Meroë."
+  },
+  "cabo-verde": {
+    "title": "Zelenortski otoki",
+    "description": "Zelenortski otoki — Praia, Mindelo, Santa Maria in deset otokov, od Santo Antão do Brave."
+  },
+  "sao-tome-principe": {
+    "title": "Sao Tome in Principe",
+    "description": "Sao Tome in Principe — São Tomé, Santo António ter deževni gozdovi in plaže obeh otokov."
+  },
+  "saint-helena": {
+    "title": "Sveta Helena, Ascension in Tristan da Cunha",
+    "description": "Sveta Helena, otok Ascension in Tristan da Cunha — Jamestown, Georgetown in Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladeš",
+    "description": "Bangladeš — Daka, Čitagong, Khulna, Radžšahi, Silhet in Cox’s Bazar; Sundarbans in delta Gangesa in Brahmaputre."
+  },
+  "sri-lanka-maldives": {
+    "title": "Šrilanka in Maldivi",
+    "description": "Šrilanka in Maldivi — Kolombo, Kandy, Galle, Džafna, Trincomalee, Anuradhapura in Male; hribovje, Sigirija in atoli."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoj, Hošiminh, Da Nang, Hajfong, Hue, Hoi An in Can Tho; zaliv Ha Long in delta Mekonga."
+  },
+  "philippines": {
+    "title": "Filipini",
+    "description": "Filipini — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio in Zamboanga; Luzon, Visaji, Mindanao in Palawan."
+  },
+  "indonesia": {
+    "title": "Indonezija in Vzhodni Timor",
+    "description": "Indonezija in Vzhodni Timor — Džakarta, Surabaja, Bandung, Medan, Yogyakarta, Denpasar, Makassar in Dili; Java, Sumatra, Bali, Borneo, Sulavezi in Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malezija, Singapur in Brunej",
+    "description": "Malezija, Singapur in Brunej — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malaka, Kota Kinabalu, Kuching in Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Mjanmar",
+    "description": "Mjanmar — Jangon, Mandalaj, Nejpjido, Bagan, Mawlamyine in jezero Inle; dolina Iravadija in hribovje Šan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodža in Laos",
+    "description": "Kambodža in Laos — Phnom Penh, Siem Reap in Angkor, Battambang, Vientiane, Luang Prabang in Pakse; Mekong in Tonle Sap."
+  },
+  "colombia": {
+    "title": "Kolumbija",
+    "description": "Kolumbija — Bogota, Medellín, Cali, Barranquilla, Cartagena in Bucaramanga; Andi, karibska obala in Amazonija."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida in Ciudad Bolívar; Angelov slap, Orinoko in otok Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos in Puno; Machu Picchu, jezero Titikaka in Sveta dolina."
+  },
+  "ecuador": {
+    "title": "Ekvador",
+    "description": "Ekvador — Quito, Guayaquil, Cuenca, Manta in Baños; Avenija vulkanov, Amazonija in Galapaški otoki."
+  },
+  "bolivia": {
+    "title": "Bolivija",
+    "description": "Bolivija — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre in Potosí; jezero Titikaka in Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Čile",
+    "description": "Čile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena in Punta Arenas; Atacama, Jezerska pokrajina, Patagonija in Velikonočni otok."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragvaj in Urugvaj",
+    "description": "Paragvaj in Urugvaj — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este in Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Gvajane",
+    "description": "Gvajana, Surinam in Francoska Gvajana — Georgetown, Paramaribo, Cayenne in Kourou; slap Kaieteur in deževni gozd Gvajanskega ščita."
+  },
+  "falklands": {
+    "title": "Falklandski otoki",
+    "description": "Falklandski otoki — Stanley, Goose Green ter otoka Vzhodni in Zahodni Falkland."
+  },
+  "australia": {
+    "title": "Avstralija",
+    "description": "Avstralija — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin in Canberra; Veliki koralni greben, Uluru in Outback."
+  },
+  "new-zealand": {
+    "title": "Nova Zelandija",
+    "description": "Nova Zelandija — Auckland, Wellington, Christchurch, Hamilton, Dunedin in Queenstown; Južne Alpe, Fiordland in Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britanska Kolumbija",
+    "description": "Britanska Kolumbija — Vancouver, Victoria, Kelowna, Kamloops, Prince George in Whistler; Obalno gorovje, otok Vancouver in Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadske prerije",
+    "description": "Alberta, Saskatchewan in Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina in Banff; Skalno gorovje, prerije in Churchill ob Hudsonovem zalivu."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston in Thunder Bay; Niagarski slapovi, Velika jezera in park Algonquin."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montreal, mesto Quebec, Laval, Gatineau, Sherbrooke in Saguenay; reka Sv. Lovrenca, Laurentidi in polotok Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Atlantska Kanada",
+    "description": "Nova Brunswick, Nova Škotska, Otok princa Edvarda ter Nova Fundlandija in Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton in Charlottetown; Cabot Trail in zaliv Fundy."
+  },
+  "northern-canada": {
+    "title": "Severna Kanada",
+    "description": "Yukon, Severozahodna ozemlja in Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City in Inuvik; Arktično otočje in reka Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong in Macao",
+    "description": "Hongkong in Macao — otok Hongkong, Kowloon, Nova ozemlja, Lantau ter polotok Macao, Taipa in Coloane."
   }
 }

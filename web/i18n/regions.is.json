@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Suður-miðríki Bandaríkjanna",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi og Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson og Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samóa og Tonga",
+    "description": "Samóa, Bandaríska Samóa, Tonga, Niue, Tókelá og Wallis- og Fútúnaeyjar — Apia, Pago Pago, Nukuʻalofa, Alofi og Mata-Utu; Upolu, Savaiʻi, Tutuila og eyjar Tonga."
+  },
+  "mariana-islands": {
+    "title": "Gvam og Norður-Maríanaeyjar",
+    "description": "Gvam og Norður-Maríanaeyjar — Hagåtña, Tamuning, Dededo, Saipan, Tinian og Rota."
+  },
+  "greenland": {
+    "title": "Grænland",
+    "description": "Grænland — Nuuk, Sisimiut, Ilulissat, Qaqortoq og Tasiilaq; jökulbreiðan, ísfjörðurinn við Ilulissat og firðirnir í suðri."
+  },
+  "bermuda": {
+    "title": "Bermúda",
+    "description": "Bermúda — Hamilton, St. George’s og Royal Naval Dockyard, sóknir eyjarinnar og bleiku sandstrendurnar."
+  },
+  "belarus": {
+    "title": "Hvíta-Rússland",
+    "description": "Hvíta-Rússland — Minsk, Homel, Mahiljoú, Vitebsk, Hrodna og Brest; Białowieża-skógurinn og Polesía-mýrarnar."
+  },
+  "channel-islands": {
+    "title": "Ermarsundseyjar",
+    "description": "Jersey, Guernsey, Alderney, Sark og Herm — St Helier, St Peter Port og Gorey."
+  },
+  "faroe-islands": {
+    "title": "Færeyjar",
+    "description": "Færeyjar — Þórshöfn, Klakksvík, Runavík og eyjarnar átján, þorpin, göngin og sjávarbjörgin."
+  },
+  "svalbard": {
+    "title": "Svalbarði",
+    "description": "Svalbarði og Jan Mayen — Longyearbyen, Barentsburg og Ny-Ålesund; jöklar og firðir Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo og Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria og Borgirnar þrjár."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar og eyjar Indlandshafs",
+    "description": "Madagaskar, Kómoreyjar, Mayotte, Réunion, Máritíus og Seychelles-eyjar — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis og Victoria."
+  },
+  "sudan": {
+    "title": "Súdan",
+    "description": "Súdan — Kartúm, Omdurman, Port Sudan, Kassala, El Obeid og Nyala; þar sem Bláa og Hvíta Níl mætast og pýramídarnir í Meroë."
+  },
+  "cabo-verde": {
+    "title": "Grænhöfðaeyjar",
+    "description": "Grænhöfðaeyjar — Praia, Mindelo, Santa Maria og eyjarnar tíu, frá Santo Antão til Brava."
+  },
+  "sao-tome-principe": {
+    "title": "Saó Tóme og Prinsípe",
+    "description": "Saó Tóme og Prinsípe — São Tomé, Santo António og regnskógar og strendur eyjanna tveggja."
+  },
+  "saint-helena": {
+    "title": "Sankti Helena, Ascension og Tristan da Cunha",
+    "description": "Sankti Helena, Ascension-eyja og Tristan da Cunha — Jamestown, Georgetown og Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladess",
+    "description": "Bangladess — Dakka, Chittagong, Khulna, Rajshahi, Sylhet og Cox’s Bazar; Sundarbans og óshólmar Ganges og Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Srí Lanka og Maldíveyjar",
+    "description": "Srí Lanka og Maldíveyjar — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura og Malé; hálendið, Sigiriya og kóralrifseyjarnar."
+  },
+  "vietnam": {
+    "title": "Víetnam",
+    "description": "Víetnam — Hanoí, Ho Chi Minh-borg, Da Nang, Haiphong, Hue, Hoi An og Can Tho; Ha Long-flói og óshólmar Mekong."
+  },
+  "philippines": {
+    "title": "Filippseyjar",
+    "description": "Filippseyjar — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio og Zamboanga; Luzon, Visayas-eyjar, Mindanao og Palawan."
+  },
+  "indonesia": {
+    "title": "Indónesía og Austur-Tímor",
+    "description": "Indónesía og Austur-Tímor — Djakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar og Dili; Jafa, Súmatra, Balí, Borneó, Súlavesí og Papúa."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malasía, Singapúr og Brúnei",
+    "description": "Malasía, Singapúr og Brúnei — Kúala Lúmpúr, Singapúr, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching og Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Mjanmar",
+    "description": "Mjanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine og Inle-vatn; Irrawaddy-dalurinn og Shan-hæðirnar."
+  },
+  "cambodia-laos": {
+    "title": "Kambódía og Laos",
+    "description": "Kambódía og Laos — Phnom Penh, Siem Reap og Angkor, Battambang, Vientiane, Luang Prabang og Pakse; Mekong og Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kólumbía",
+    "description": "Kólumbía — Bogotá, Medellín, Cali, Barranquilla, Cartagena og Bucaramanga; Andesfjöll, Karíbahafsströndin og Amason."
+  },
+  "venezuela": {
+    "title": "Venesúela",
+    "description": "Venesúela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida og Ciudad Bolívar; Englafoss, Orinoco og Isla Margarita."
+  },
+  "peru": {
+    "title": "Perú",
+    "description": "Perú — Lima, Arequipa, Cusco, Trujillo, Iquitos og Puno; Machu Picchu, Titicaca-vatn og Helgi dalurinn."
+  },
+  "ecuador": {
+    "title": "Ekvador",
+    "description": "Ekvador — Quito, Guayaquil, Cuenca, Manta og Baños; Eldfjallabrautin, Amason og Galápagoseyjar."
+  },
+  "bolivia": {
+    "title": "Bólivía",
+    "description": "Bólivía — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre og Potosí; Titicaca-vatn og Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Síle",
+    "description": "Síle — Santiago, Valparaíso, Concepción, Antofagasta, La Serena og Punta Arenas; Atacama, Vatnahéraðið, Patagónía og Páskaeyja."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragvæ og Úrúgvæ",
+    "description": "Paragvæ og Úrúgvæ — Asunción, Ciudad del Este, Encarnación, Montevídeó, Punta del Este og Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Gvæjanalöndin",
+    "description": "Gvæjana, Súrínam og Franska Gvæjana — Georgetown, Paramaribo, Cayenne og Kourou; Kaieteur-foss og regnskógur Gvæjanaskjaldarins."
+  },
+  "falklands": {
+    "title": "Falklandseyjar",
+    "description": "Falklandseyjar — Stanley, Goose Green og eyjarnar Austur- og Vestur-Falkland."
+  },
+  "australia": {
+    "title": "Ástralía",
+    "description": "Ástralía — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin og Canberra; Kóralrifið mikla, Uluru og óbyggðirnar (Outback)."
+  },
+  "new-zealand": {
+    "title": "Nýja-Sjáland",
+    "description": "Nýja-Sjáland — Auckland, Wellington, Christchurch, Hamilton, Dunedin og Queenstown; Suður-Alparnir, Fiordland og Rotorua."
+  },
+  "british-columbia": {
+    "title": "Breska Kólumbía",
+    "description": "Breska Kólumbía — Vancouver, Victoria, Kelowna, Kamloops, Prince George og Whistler; Strandfjöllin, Vancouver-eyja og Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadísku slétturnar",
+    "description": "Alberta, Saskatchewan og Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina og Banff; Klettafjöll, slétturnar og Churchill við Hudsonflóa."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston og Thunder Bay; Niagarafossar, Vötnin miklu og Algonquin-þjóðgarðurinn."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Québecborg, Laval, Gatineau, Sherbrooke og Saguenay; Lárentsfljót, Laurentíufjöll og Gaspé-skaginn."
+  },
+  "atlantic-canada": {
+    "title": "Atlantshafs-Kanada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward-eyja og Nýfundnaland og Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton og Charlottetown; Cabot Trail og Fundy-flói."
+  },
+  "northern-canada": {
+    "title": "Norður-Kanada",
+    "description": "Júkon, Norðvesturhéruðin og Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City og Inuvik; Kanadíski heimskautaeyjaklasinn og Mackenzie-fljót."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong og Makaó",
+    "description": "Hong Kong og Makaó — Hong Kong-eyja, Kowloon, Nýju landsvæðin, Lantau og Makaóskagi, Taipa og Coloane."
   }
 }

@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Sid-Santral Etazini",
     "description": "Teksas, Oklahoma, Akansas, Lwizyàn, Kentucky, Tennessee, Misisipi ak Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, Nouvèl Orleyan, Louisville, Nashville, Memphis, Jackson ak Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa ak Tonga",
+    "description": "Samoa, Samoa Ameriken, Tonga, Niue, Tokelau ak Wallis e Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi ak Mata-Utu; Upolu, Savaiʻi, Tutuila ak zile Tonga yo."
+  },
+  "mariana-islands": {
+    "title": "Gwam ak Zile Mariyàn Nò yo",
+    "description": "Gwam ak Zile Mariyàn Nò yo — Hagåtña, Tamuning, Dededo, Saipan, Tinian ak Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq ak Tasiilaq; gwo kouch glas la, fyò glas Ilulissat la ak fyò nan sid yo."
+  },
+  "bermuda": {
+    "title": "Bèmid",
+    "description": "Bèmid — Hamilton, St. George’s ak ansyen chantye marin wayal la, pawas zile a ak plaj sab woz li yo."
+  },
+  "belarus": {
+    "title": "Byelorisi",
+    "description": "Byelorisi — Minsk, Gomel, Mogilev, Vitebsk, Grodno ak Brest; forè Belovezhskaya Pushcha ak marekaj Polesia yo."
+  },
+  "channel-islands": {
+    "title": "Zile Lamanch yo",
+    "description": "Jersey, Guernsey, Alderney, Sark ak Herm — St Helier, St Peter Port ak Gorey."
+  },
+  "faroe-islands": {
+    "title": "Zile Faroe yo",
+    "description": "Zile Faroe yo — Tórshavn, Klaksvík, Runavík ak dizuit zile yo, ak bouk yo, tinèl yo ak falèz bò lanmè yo."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard ak Jan Mayen — Longyearbyen, Barentsburg ak Ny-Ålesund; glasye ak fyò Spitsbergen yo."
+  },
+  "malta": {
+    "title": "Malt",
+    "description": "Malt, Gozo ak Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria ak Twa Vil yo."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar ak zile Oseyan Endyen yo",
+    "description": "Madagaskar, Komò, Mayòt, Larenyon, Moris ak Sechèl — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis ak Victoria."
+  },
+  "sudan": {
+    "title": "Soudan",
+    "description": "Soudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid ak Nyala; kote Nil Ble ak Nil Blan kontre ak piramid Meroë yo."
+  },
+  "cabo-verde": {
+    "title": "Kap Vè",
+    "description": "Kap Vè — Praia, Mindelo, Santa Maria ak dis zile yo, soti Santo Antão rive Brava."
+  },
+  "sao-tome-principe": {
+    "title": "Sao Tome ak Prensip",
+    "description": "Sao Tome ak Prensip — São Tomé, Santo António ak forè twopikal ak plaj de zile yo."
+  },
+  "saint-helena": {
+    "title": "Sent Elèn, Asansyon ak Tristan da Cunha",
+    "description": "Sent Elèn, Zile Asansyon ak Tristan da Cunha — Jamestown, Georgetown ak Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladèch",
+    "description": "Bangladèch — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet ak Cox’s Bazar; Sundarbans ak delta Gang ak Brahmapoutra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka ak Maldiv",
+    "description": "Sri Lanka ak Maldiv — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura ak Malé; zòn mòn yo, Sigiriya ak atòl yo."
+  },
+  "vietnam": {
+    "title": "Vyetnam",
+    "description": "Vyetnam — Hanoi, Vil Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An ak Can Tho; Bè Ha Long ak delta Mekong."
+  },
+  "philippines": {
+    "title": "Filipin",
+    "description": "Filipin — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio ak Zamboanga; Luzon, Visayas, Mindanao ak Palawan."
+  },
+  "indonesia": {
+    "title": "Endonezi ak Timò Lès",
+    "description": "Endonezi ak Timò Lès — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar ak Dili; Java, Sumatra, Bali, Bòneo, Sulawesi ak Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malezi, Singapou ak Brunei",
+    "description": "Malezi, Singapou ak Brunei — Kuala Lumpur, Singapou, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching ak Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanma",
+    "description": "Myanma — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine ak Lak Inle; fon larivyè Irrawaddy ak mòn Shan yo."
+  },
+  "cambodia-laos": {
+    "title": "Kanbòdj ak Laos",
+    "description": "Kanbòdj ak Laos — Phnom Penh, Siem Reap ak Angkor, Battambang, Vientiane, Luang Prabang ak Pakse; Mekong ak Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolonbi",
+    "description": "Kolonbi — Bogotá, Medellín, Cali, Barranquilla, Cartagena ak Bucaramanga; mòn Andes yo, kòt Karayib la ak Amazoni."
+  },
+  "venezuela": {
+    "title": "Venezwela",
+    "description": "Venezwela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida ak Ciudad Bolívar; Chit Angel, Orinoco ak Zile Margarita."
+  },
+  "peru": {
+    "title": "Pewou",
+    "description": "Pewou — Lima, Arequipa, Cusco, Trujillo, Iquitos ak Puno; Machu Picchu, Lak Titicaca ak Vale Sakre a."
+  },
+  "ecuador": {
+    "title": "Ekwatè",
+    "description": "Ekwatè — Quito, Guayaquil, Cuenca, Manta ak Baños; Avni Vòlkan yo, Amazoni ak Zile Galápagos yo."
+  },
+  "bolivia": {
+    "title": "Bolivi",
+    "description": "Bolivi — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre ak Potosí; Lak Titicaca ak Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chili",
+    "description": "Chili — Santiago, Valparaíso, Concepción, Antofagasta, La Serena ak Punta Arenas; Atacama, Rejyon Lak yo, Patagoni ak Zile Pak."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragwe ak Irigwe",
+    "description": "Paragwe ak Irigwe — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este ak Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Giyàn yo",
+    "description": "Giyana, Sirinam ak Giyàn Franse — Georgetown, Paramaribo, Kayèn ak Kourou; Chit Kaieteur ak forè twopikal Plato Giyàn nan."
+  },
+  "falklands": {
+    "title": "Zile Malwin yo",
+    "description": "Zile Malwin yo (Falkland) — Stanley, Goose Green ak zile East Falkland ak West Falkland."
+  },
+  "australia": {
+    "title": "Ostrali",
+    "description": "Ostrali — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin ak Canberra; Gran Baryè Koray la, Uluru ak Outback la."
+  },
+  "new-zealand": {
+    "title": "Nouvèl Zeland",
+    "description": "Nouvèl Zeland — Auckland, Wellington, Christchurch, Hamilton, Dunedin ak Queenstown; Alp Sid yo, Fiordland ak Rotorua."
+  },
+  "british-columbia": {
+    "title": "Kolonbi Britanik",
+    "description": "Kolonbi Britanik — Vancouver, Victoria, Kelowna, Kamloops, Prince George ak Whistler; Mòn Kòt yo, Zile Vancouver ak Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Preri Kanadyen yo",
+    "description": "Alberta, Saskatchewan ak Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina ak Banff; Mòn Woche yo, preri yo ak Churchill bò Bè Hudson."
+  },
+  "ontario": {
+    "title": "Ontaryo",
+    "description": "Ontaryo — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston ak Thunder Bay; Chit Niagara, Gwo Lak yo ak Pak Algonquin."
+  },
+  "quebec": {
+    "title": "Kebèk",
+    "description": "Kebèk — Monreyal, vil Kebèk, Laval, Gatineau, Sherbrooke ak Saguenay; Sen Lowan, Laurentides ak Penensil Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Kanada Atlantik",
+    "description": "Nouvo Brunswick, Nouvèl Ekòs, Zile Prens Edward ak Tèrnèv ak Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton ak Charlottetown; Cabot Trail ak Bè Fundy."
+  },
+  "northern-canada": {
+    "title": "Nò Kanada",
+    "description": "Yukon, Teritwa Nòdwès yo ak Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ak Inuvik; Achipèl Aktik la ak Rivyè Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong ak Makao",
+    "description": "Hong Kong ak Makao — Zile Hong Kong, Kowloon, Nouvo Teritwa yo, Lantau ak Penensil Makao, Taipa ak Coloane."
   }
 }

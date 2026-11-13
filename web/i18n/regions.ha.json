@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Jihohin Kudu ta Tsakiya na Amurka",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi da Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson da Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samowa da Tonga",
+    "description": "Samowa, Samowa ta Amurka, Tonga, Niue, Tokelau, da Wallis da Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi da Mata-Utu; Upolu, Savaiʻi, Tutuila da tsibiran Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam da Tsibiran Mariana ta Arewa",
+    "description": "Guam da Tsibiran Mariana ta Arewa — Hagåtña, Tamuning, Dededo, Saipan, Tinian da Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq da Tasiilaq; babban ƙanƙarar ƙasar, Ilulissat Icefjord da fjord-fjord na kudu."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s da Royal Naval Dockyard, gundumomin tsibirin da rairayin bakin teku masu ruwan hoda."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno da Brest; dajin Belovezhskaya Pushcha da fadamun Polesia."
+  },
+  "channel-islands": {
+    "title": "Tsibiran Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark da Herm — St Helier, St Peter Port da Gorey."
+  },
+  "faroe-islands": {
+    "title": "Tsibiran Faroe",
+    "description": "Tsibiran Faroe — Tórshavn, Klaksvík, Runavík da tsibirai goma sha takwas, ƙauyukansu, ramukan hanya da tsaunukan bakin teku."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard da Jan Mayen — Longyearbyen, Barentsburg da Ny-Ålesund; ƙanƙara da fjord-fjord na Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo da Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria da Birane Uku."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar da Tsibiran Tekun Indiya",
+    "description": "Madagaskar, Komoros, Mayotte, Réunion, Moris da Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis da Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid da Nyala; haɗuwar Kogin Nilu Shuɗi da Nilu Fari da dalan Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria da tsibirai goma, daga Santo Antão zuwa Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé da Príncipe",
+    "description": "São Tomé da Príncipe — São Tomé, Santo António da dazuzzukan ruwan sama da rairayin bakin teku na tsibiran biyu."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension da Tristan da Cunha",
+    "description": "Saint Helena, Tsibirin Ascension da Tristan da Cunha — Jamestown, Georgetown da Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet da Cox’s Bazar; Sundarbans da yankin bakin kogin Ganges da Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka da Maldives",
+    "description": "Sri Lanka da Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura da Malé; ƙasar tuddai, Sigiriya da tsibiran atoll."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Birnin Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An da Can Tho; Gaɓar Ha Long da yankin bakin kogin Mekong."
+  },
+  "philippines": {
+    "title": "Filipin",
+    "description": "Filipin — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio da Zamboanga; Luzon, Visayas, Mindanao da Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesiya da Timor-Leste",
+    "description": "Indonesiya da Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar da Dili; Java, Sumatra, Bali, Borneo, Sulawesi da Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaisiya, Singapore da Brunei",
+    "description": "Malaisiya, Singapore da Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching da Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine da Tafkin Inle; kwarin Irrawaddy da tuddan Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodiya da Laos",
+    "description": "Kambodiya da Laos — Phnom Penh, Siem Reap da Angkor, Battambang, Vientiane, Luang Prabang da Pakse; Kogin Mekong da Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombiya",
+    "description": "Kolombiya — Bogotá, Medellín, Cali, Barranquilla, Cartagena da Bucaramanga; tsaunukan Andes, gaɓar Karibiya da Amazon."
+  },
+  "venezuela": {
+    "title": "Benezuwela",
+    "description": "Benezuwela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida da Ciudad Bolívar; Angel Falls, Kogin Orinoco da Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos da Puno; Machu Picchu, Tafkin Titicaca da Kwari Mai Tsarki."
+  },
+  "ecuador": {
+    "title": "Ekwador",
+    "description": "Ekwador — Quito, Guayaquil, Cuenca, Manta da Baños; Hanyar Duwatsu Masu Aman Wuta, Amazon da Tsibiran Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolibiya",
+    "description": "Bolibiya — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre da Potosí; Tafkin Titicaca da Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Cile",
+    "description": "Cile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena da Punta Arenas; Atacama, yankin tafkuna, Patagonia da Tsibirin Easter."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay da Uruguay",
+    "description": "Paraguay da Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este da Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Ƙasashen Guiana",
+    "description": "Guyana, Suriname da Guiana ta Faransa — Georgetown, Paramaribo, Cayenne da Kourou; Kaieteur Falls da dajin ruwan sama na Guiana Shield."
+  },
+  "falklands": {
+    "title": "Tsibiran Falkland",
+    "description": "Tsibiran Falkland — Stanley, Goose Green da tsibiran East Falkland da West Falkland."
+  },
+  "australia": {
+    "title": "Ostareliya",
+    "description": "Ostareliya — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin da Canberra; Great Barrier Reef, Uluru da Outback."
+  },
+  "new-zealand": {
+    "title": "Sabuwar Zelandiya",
+    "description": "Sabuwar Zelandiya — Auckland, Wellington, Christchurch, Hamilton, Dunedin da Queenstown; Southern Alps, Fiordland da Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George da Whistler; Coast Mountains, Tsibirin Vancouver da Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Filayen Prairie na Kanada",
+    "description": "Alberta, Saskatchewan da Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina da Banff; tsaunukan Rockies, filayen prairie da Churchill a gaɓar Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston da Thunder Bay; Niagara Falls, Manyan Tafkuna da Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Birnin Quebec, Laval, Gatineau, Sherbrooke da Saguenay; Kogin St. Lawrence, tsaunukan Laurentians da yankin Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Kanada ta Atlantika",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, da Newfoundland da Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton da Charlottetown; Cabot Trail da Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Arewacin Kanada",
+    "description": "Yukon, Northwest Territories da Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City da Inuvik; tsibiran Arctic Archipelago da Kogin Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong da Macau",
+    "description": "Hong Kong da Macau — Tsibirin Hong Kong, Kowloon, New Territories, Lantau da yankin Macau, Taipa da Coloane."
   }
 }

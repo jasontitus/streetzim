@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Södra centrala USA",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi och Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson och Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa och Tonga",
+    "description": "Samoa, Amerikanska Samoa, Tonga, Niue, Tokelau samt Wallis- och Futunaöarna — Apia, Pago Pago, Nukuʻalofa, Alofi och Mata-Utu; Upolu, Savaiʻi, Tutuila och Tongas öar."
+  },
+  "mariana-islands": {
+    "title": "Guam och Nordmarianerna",
+    "description": "Guam och Nordmarianerna — Hagåtña, Tamuning, Dededo, Saipan, Tinian och Rota."
+  },
+  "greenland": {
+    "title": "Grönland",
+    "description": "Grönland — Nuuk, Sisimiut, Ilulissat, Qaqortoq och Tasiilaq; inlandsisen, Ilulissats isfjord och fjordarna i söder."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s och Royal Naval Dockyard, öns socknar och dess rosa sandstränder."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Homel, Mahiljoŭ, Vitsebsk, Hrodna och Brest; Białowieżaskogen och Polesiens träsk."
+  },
+  "channel-islands": {
+    "title": "Kanalöarna",
+    "description": "Jersey, Guernsey, Alderney, Sark och Herm — St Helier, St Peter Port och Gorey."
+  },
+  "faroe-islands": {
+    "title": "Färöarna",
+    "description": "Färöarna — Torshamn, Klaksvík, Runavík och de arton öarna med sina byar, tunnlar och fågelberg."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard och Jan Mayen — Longyearbyen, Barentsburg och Ny-Ålesund; Spetsbergens glaciärer och fjordar."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo och Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria och de Tre städerna."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar och öarna i Indiska oceanen",
+    "description": "Madagaskar, Komorerna, Mayotte, Réunion, Mauritius och Seychellerna — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis och Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid och Nyala; Blå och Vita Nilens sammanflöde och pyramiderna i Meroë."
+  },
+  "cabo-verde": {
+    "title": "Kap Verde",
+    "description": "Kap Verde — Praia, Mindelo, Santa Maria och de tio öarna, från Santo Antão till Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé och Príncipe",
+    "description": "São Tomé och Príncipe — São Tomé, Santo António och de två öarnas regnskogar och stränder."
+  },
+  "saint-helena": {
+    "title": "Sankta Helena, Ascension och Tristan da Cunha",
+    "description": "Sankta Helena, Ascension och Tristan da Cunha — Jamestown, Georgetown och Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet och Cox’s Bazar; Sundarbans och Ganges–Brahmaputradeltat."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka och Maldiverna",
+    "description": "Sri Lanka och Maldiverna — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura och Malé; höglandet, Sigiriya och atollerna."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh-staden, Da Nang, Haiphong, Hue, Hoi An och Can Tho; Ha Longbukten och Mekongdeltat."
+  },
+  "philippines": {
+    "title": "Filippinerna",
+    "description": "Filippinerna — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio och Zamboanga; Luzon, Visayas, Mindanao och Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesien och Östtimor",
+    "description": "Indonesien och Östtimor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar och Dili; Java, Sumatra, Bali, Borneo, Sulawesi och Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore och Brunei",
+    "description": "Malaysia, Singapore och Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacka, Kota Kinabalu, Kuching och Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine och Inlesjön; Irrawaddydalen och Shanbergen."
+  },
+  "cambodia-laos": {
+    "title": "Kambodja och Laos",
+    "description": "Kambodja och Laos — Phnom Penh, Siem Reap och Angkor, Battambang, Vientiane, Luang Prabang och Pakse; Mekong och Tonle Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena och Bucaramanga; Anderna, Karibiska kusten och Amazonas."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida och Ciudad Bolívar; Angelfallet, Orinoco och Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos och Puno; Machu Picchu, Titicacasjön och Den heliga dalen."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta och Baños; Vulkanernas aveny, Amazonas och Galápagosöarna."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre och Potosí; Titicacasjön och Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena och Punta Arenas; Atacama, Sjöregionen, Patagonien och Påskön."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay och Uruguay",
+    "description": "Paraguay och Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este och Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyanaländerna",
+    "description": "Guyana, Surinam och Franska Guyana — Georgetown, Paramaribo, Cayenne och Kourou; Kaieteurfallen och Guyanaskoldens regnskog."
+  },
+  "falklands": {
+    "title": "Falklandsöarna",
+    "description": "Falklandsöarna — Stanley, Goose Green och öarna Östfalkland och Västfalkland."
+  },
+  "australia": {
+    "title": "Australien",
+    "description": "Australien — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin och Canberra; Stora barriärrevet, Uluru och vildmarken Outback."
+  },
+  "new-zealand": {
+    "title": "Nya Zeeland",
+    "description": "Nya Zeeland — Auckland, Wellington, Christchurch, Hamilton, Dunedin och Queenstown; Sydalperna, Fiordland och Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George och Whistler; Coast Mountains, Vancouver Island och Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadas prärieprovinser",
+    "description": "Alberta, Saskatchewan och Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina och Banff; Klippiga bergen, prärien och Churchill vid Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston och Thunder Bay; Niagarafallen, Stora sjöarna och Algonquin Park."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, staden Québec, Laval, Gatineau, Sherbrooke och Saguenay; Saint Lawrencefloden, Laurentiderna och Gaspéhalvön."
+  },
+  "atlantic-canada": {
+    "title": "Atlantiska Kanada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island samt Newfoundland och Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton och Charlottetown; Cabot Trail och Fundybukten."
+  },
+  "northern-canada": {
+    "title": "Norra Kanada",
+    "description": "Yukon, Northwestterritorierna och Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City och Inuvik; Kanadensiska arktiska ögruppen och Mackenziefloden."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong och Macao",
+    "description": "Hongkong och Macao — Hongkongön, Kowloon, New Territories, Lantau samt Macaohalvön, Taipa och Coloane."
   }
 }

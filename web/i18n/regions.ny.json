@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Pakati-Kumwera kwa United States",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ndi Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ndi Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa ndi Tonga",
+    "description": "Samoa, American Samoa, Tonga, Niue, Tokelau, ndi Wallis ndi Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi ndi Mata-Utu; Upolu, Savaiʻi, Tutuila ndi zilumba za Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam ndi Zilumba za Kumpoto kwa Mariana",
+    "description": "Guam ndi Zilumba za Kumpoto kwa Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian ndi Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq ndi Tasiilaq; chipale chofewa chachikulu, Ilulissat Icefjord ndi ma fjord akumwera."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s ndi Royal Naval Dockyard, madera a chilumbachi ndi magombe ake a mchenga wapinki."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno ndi Brest; nkhalango ya Belovezhskaya Pushcha ndi madambo a Polesia."
+  },
+  "channel-islands": {
+    "title": "Zilumba za Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark ndi Herm — St Helier, St Peter Port ndi Gorey."
+  },
+  "faroe-islands": {
+    "title": "Zilumba za Faroe",
+    "description": "Zilumba za Faroe — Tórshavn, Klaksvík, Runavík ndi zilumba khumi ndi zisanu ndi zitatu, midzi yake, mumphanga mwa misewu ndi matanthwe a m'nyanja."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard ndi Jan Mayen — Longyearbyen, Barentsburg ndi Ny-Ålesund; madzi oundana ndi ma fjord a Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo ndi Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria ndi Mizinda Itatu."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar ndi Zilumba za Nyanja ya Indian",
+    "description": "Madagascar, Comoros, Mayotte, Réunion, Mauritius ndi Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis ndi Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid ndi Nyala; pomwe mtsinje wa Blue Nile ndi White Nile imakumana ndi mapiramidi a Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria ndi zilumba khumi, kuchokera ku Santo Antão mpaka ku Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé ndi Príncipe",
+    "description": "São Tomé ndi Príncipe — São Tomé, Santo António ndi nkhalango zamvula ndi magombe a zilumba ziwirizi."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension ndi Tristan da Cunha",
+    "description": "Saint Helena, Chilumba cha Ascension ndi Tristan da Cunha — Jamestown, Georgetown ndi Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet ndi Cox’s Bazar; Sundarbans ndi delta ya Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka ndi Maldives",
+    "description": "Sri Lanka ndi Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura ndi Malé; dera la mapiri, Sigiriya ndi ma atoll."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An ndi Can Tho; Ha Long Bay ndi delta ya Mekong."
+  },
+  "philippines": {
+    "title": "Philippines",
+    "description": "Philippines — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio ndi Zamboanga; Luzon, Visayas, Mindanao ndi Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia ndi Timor-Leste",
+    "description": "Indonesia ndi Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar ndi Dili; Java, Sumatra, Bali, Borneo, Sulawesi ndi Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore ndi Brunei",
+    "description": "Malaysia, Singapore ndi Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching ndi Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine ndi nyanja ya Inle; chigwa cha Irrawaddy ndi mapiri a Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia ndi Laos",
+    "description": "Cambodia ndi Laos — Phnom Penh, Siem Reap ndi Angkor, Battambang, Vientiane, Luang Prabang ndi Pakse; mtsinje wa Mekong ndi Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena ndi Bucaramanga; mapiri a Andes, gombe la Caribbean ndi Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida ndi Ciudad Bolívar; mathithi a Angel, mtsinje wa Orinoco ndi Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos ndi Puno; Machu Picchu, nyanja ya Titicaca ndi Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta ndi Baños; Avenue of the Volcanoes, Amazon ndi Zilumba za Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre ndi Potosí; nyanja ya Titicaca ndi Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena ndi Punta Arenas; Atacama, dera la nyanja, Patagonia ndi Easter Island."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay ndi Uruguay",
+    "description": "Paraguay ndi Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este ndi Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Ma Guiana",
+    "description": "Guyana, Suriname ndi French Guiana — Georgetown, Paramaribo, Cayenne ndi Kourou; mathithi a Kaieteur ndi nkhalango zamvula za Guiana Shield."
+  },
+  "falklands": {
+    "title": "Zilumba za Falkland",
+    "description": "Zilumba za Falkland — Stanley, Goose Green ndi zilumba za East Falkland ndi West Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin ndi Canberra; Great Barrier Reef, Uluru ndi Outback."
+  },
+  "new-zealand": {
+    "title": "New Zealand",
+    "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin ndi Queenstown; Southern Alps, Fiordland ndi Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George ndi Whistler; Coast Mountains, Chilumba cha Vancouver ndi Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Zigwa za Canada",
+    "description": "Alberta, Saskatchewan ndi Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina ndi Banff; mapiri a Rockies, zigwa ndi Churchill ku Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston ndi Thunder Bay; mathithi a Niagara, Great Lakes ndi Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke ndi Saguenay; mtsinje wa St. Lawrence, mapiri a Laurentians ndi Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Canada ya ku Atlantic",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, ndi Newfoundland ndi Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton ndi Charlottetown; Cabot Trail ndi Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Kumpoto kwa Canada",
+    "description": "Yukon, Northwest Territories ndi Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ndi Inuvik; zilumba za Arctic Archipelago ndi mtsinje wa Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong ndi Macau",
+    "description": "Hong Kong ndi Macau — Hong Kong Island, Kowloon, New Territories, Lantau ndi Macau Peninsula, Taipa ndi Coloane."
   }
 }

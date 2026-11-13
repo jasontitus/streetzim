@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Saot Senta blong Yunaeted Stet",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi mo Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson mo Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa mo Tonga",
+    "description": "Samoa, Amerikan Samoa, Tonga, Niue, Tokelau mo Wallis mo Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi mo Mata-Utu; Upolu, Savaiʻi, Tutuila mo ol aelan blong Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam mo Not Mariana Aelan",
+    "description": "Guam mo Not Mariana Aelan — Hagåtña, Tamuning, Dededo, Saipan, Tinian mo Rota."
+  },
+  "greenland": {
+    "title": "Grinlan",
+    "description": "Grinlan — Nuuk, Sisimiut, Ilulissat, Qaqortoq mo Tasiilaq; bigfala ae blong ston, Ilulissat Icefjord mo ol fjord long saot."
+  },
+  "bermuda": {
+    "title": "Bemuda",
+    "description": "Bemuda — Hamilton, St. George’s mo Royal Naval Dockyard, ol pares blong aelan mo ol sanbij blong hem we oli gat pink san."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno mo Brest; bus blong Belovezhskaya Pushcha mo ol swamp blong Polesia."
+  },
+  "channel-islands": {
+    "title": "Ol Aelan blong Jenel",
+    "description": "Jersey, Guernsey, Alderney, Sark mo Herm — St Helier, St Peter Port mo Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faroe Aelan",
+    "description": "Faroe Aelan — Tórshavn, Klaksvík, Runavík mo ol eitin aelan, ol vilej, ol tanel mo ol bigfala klif blong solwota blong olgeta."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard mo Jan Mayen — Longyearbyen, Barentsburg mo Ny-Ålesund; ol glasia mo ol fjord blong Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo mo Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria mo Tri Siti."
+  },
+  "madagascar-islands": {
+    "title": "Madagaska mo ol Aelan blong Indian Osen",
+    "description": "Madagaska, Komoros, Mayotte, Réunion, Morisos mo Seisel — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis mo Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid mo Nyala; ples we Blu Nael mo Waet Nael i joen, mo ol piramid blong Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria mo ol ten aelan, stat long Santo Antão go kasem Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé mo Príncipe",
+    "description": "São Tomé mo Príncipe — São Tomé, Santo António mo ol bus mo sanbij blong tufala aelan."
+  },
+  "saint-helena": {
+    "title": "Sen Helena, Asensen mo Tristan da Cunha",
+    "description": "Sen Helena, Asensen Aelan mo Tristan da Cunha — Jamestown, Georgetown mo Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Banglades",
+    "description": "Banglades — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet mo Cox’s Bazar; Sundarbans mo delta blong Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka mo Maldives",
+    "description": "Sri Lanka mo Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura mo Malé; ol hil kantri, Sigiriya mo ol atol."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh Siti, Da Nang, Hai Phong, Hue, Hoi An mo Can Tho; Ha Long Bei mo Mekong Delta."
+  },
+  "philippines": {
+    "title": "Filipin",
+    "description": "Filipin — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio mo Zamboanga; Luzon, Visayas, Mindanao mo Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia mo Timor-Leste",
+    "description": "Indonesia mo Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar mo Dili; Java, Sumatra, Bali, Borneo, Sulawesi mo Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapoa mo Brunei",
+    "description": "Malaysia, Singapoa mo Brunei — Kuala Lumpur, Singapoa, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching mo Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine mo Inle Lek; vali blong Irrawaddy mo ol hil blong Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodia mo Laos",
+    "description": "Kambodia mo Laos — Phnom Penh, Siem Reap mo Angkor, Battambang, Vientiane, Luang Prabang mo Pakse; Mekong mo Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombia",
+    "description": "Kolombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena mo Bucaramanga; ol Andes, kos blong Karibian mo Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida mo Ciudad Bolívar; Angel Wotafol, Orinoco mo Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos mo Puno; Machu Picchu, Lek Titicaca mo Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ekwador",
+    "description": "Ekwador — Quito, Guayaquil, Cuenca, Manta mo Baños; Rod blong ol Volkeno, Amazon mo ol Galápagos Aelan."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre mo Potosí; Lek Titicaca mo Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Jile",
+    "description": "Jile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena mo Punta Arenas; Atacama, Lek Distrik, Patagonia mo Ista Aelan."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay mo Uruguay",
+    "description": "Paraguay mo Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este mo Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Ol Guiana",
+    "description": "Guyana, Suriname mo Franis Guiana — Georgetown, Paramaribo, Cayenne mo Kourou; Kaieteur Wotafol mo bus blong Guiana Shield."
+  },
+  "falklands": {
+    "title": "Falklan Aelan",
+    "description": "Falklan Aelan — Stanley, Goose Green mo ol aelan blong Is Falklan mo Wes Falklan."
+  },
+  "australia": {
+    "title": "Ostrelia",
+    "description": "Ostrelia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin mo Canberra; Great Barrier Reef, Uluru mo Outback."
+  },
+  "new-zealand": {
+    "title": "Niu Silan",
+    "description": "Niu Silan — Auckland, Wellington, Christchurch, Hamilton, Dunedin mo Queenstown; Southern Alps, Fiordland mo Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George mo Whistler; Coast Mountains, Vancouver Aelan mo Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Ol Prairie blong Kanada",
+    "description": "Alberta, Saskatchewan mo Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina mo Banff; ol Rocky Mountains, ol prairie mo Churchill long Hudson Bei."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston mo Thunder Bay; Niagara Wotafol, ol Great Lakes mo Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec Siti, Laval, Gatineau, Sherbrooke mo Saguenay; St. Lawrence Reva, ol Laurentians mo Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Atlantik Kanada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Aelan mo Newfoundland mo Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton mo Charlottetown; Cabot Trail mo Bei blong Fundy."
+  },
+  "northern-canada": {
+    "title": "Not Kanada",
+    "description": "Yukon, Northwest Territories mo Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City mo Inuvik; Arctic Archipelago mo Mackenzie Reva."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong mo Macau",
+    "description": "Hong Kong mo Macau — Hong Kong Aelan, Kowloon, New Territories, Lantau mo Macau Peninsula, Taipa mo Coloane."
   }
 }

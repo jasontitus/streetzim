@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Sentro-zùit di Estadonan Uni",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi i Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson i Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa i Tonga",
+    "description": "Samoa, Samoa Merikano, Tonga, Niue, Tokelau, i Wallis i Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi i Mata-Utu; Upolu, Savaiʻi, Tutuila i e islanan di Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam i Islanan Mariana di Nort",
+    "description": "Guam i Islanan Mariana di Nort — Hagåtña, Tamuning, Dededo, Saipan, Tinian i Rota."
+  },
+  "greenland": {
+    "title": "Groenlandia",
+    "description": "Groenlandia — Nuuk, Sisimiut, Ilulissat, Qaqortoq i Tasiilaq; e kapa di glas, e Fiordo di Glas di Ilulissat i e fiordonan di zùit."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s i e Royal Naval Dockyard, e parokianan di e isla i su playanan di santu kòrá."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno i Brest; e mondi di Belovezhskaya Pushcha i e pantanonan di Polesia."
+  },
+  "channel-islands": {
+    "title": "Islanan di Kanal",
+    "description": "Jersey, Guernsey, Alderney, Sark i Herm — St Helier, St Peter Port i Gorey."
+  },
+  "faroe-islands": {
+    "title": "Islanan Faroe",
+    "description": "Islanan Faroe — Tórshavn, Klaksvík, Runavík i e diesocho islanan, nan pueblonan, túnelnan i kantilnan na laman."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard i Jan Mayen — Longyearbyen, Barentsburg i Ny-Ålesund; e glasiarnan i fiordonan di Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo i Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria i e Tres Siudatnan."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar i e Islanan di Oséano Indio",
+    "description": "Madagaskar, Komoro, Mayotte, Réunion, Mauritius i Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis i Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid i Nyala; kaminda Nilo Blou i Nilo Blanku ta topa i e piramidenan di Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria i e dies islanan, for di Santo Antão te Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé i Príncipe",
+    "description": "São Tomé i Príncipe — São Tomé, Santo António i e mondinan tropikal i playanan di e dos islanan."
+  },
+  "saint-helena": {
+    "title": "Santa Helena, Ascension i Tristan da Cunha",
+    "description": "Santa Helena, Isla Ascension i Tristan da Cunha — Jamestown, Georgetown i Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet i Cox’s Bazar; e Sundarbans i e delta di Ganges i Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka i Maldivas",
+    "description": "Sri Lanka i Maldivas — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura i Malé; e region di seru, Sigiriya i e atolnan."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Siudat Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An i Can Tho; Baia di Ha Long i e Delta di Mekong."
+  },
+  "philippines": {
+    "title": "Filipinas",
+    "description": "Filipinas — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio i Zamboanga; Luzon, Visayas, Mindanao i Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia i Timor-Leste",
+    "description": "Indonesia i Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar i Dili; Java, Sumatra, Bali, Borneo, Sulawesi i Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malasia, Singapur i Brunei",
+    "description": "Malasia, Singapur i Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching i Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine i Lago Inle; e vaye di Irrawaddy i e serunan di Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodja i Laos",
+    "description": "Kambodja i Laos — Phnom Penh, Siem Reap i Angkor, Battambang, Vientiane, Luang Prabang i Pakse; e Mekong i e Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena i Bucaramanga; e Andes, e kosta di Karibe i e Amazonas."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida i Ciudad Bolívar; Salto Angel, e Orinoco i Isla Margarita."
+  },
+  "peru": {
+    "title": "Perú",
+    "description": "Perú — Lima, Arequipa, Cusco, Trujillo, Iquitos i Puno; Machu Picchu, Lago Titicaca i e Vaye Sagrado."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta i Baños; e Avenida di Volkannan, e Amazonas i Islanan Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre i Potosí; Lago Titicaca i e Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena i Punta Arenas; e Atacama, e Region di Lago, Patagonia i Isla di Pasku."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay i Uruguay",
+    "description": "Paraguay i Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este i Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "E Guyananan",
+    "description": "Guyana, Surinam i Guyana Franses — Georgetown, Paramaribo, Cayenne i Kourou; Kaieteur Falls i e mondi tropikal di e Skudo di Guyana."
+  },
+  "falklands": {
+    "title": "Islanan Falkland",
+    "description": "Islanan Falkland — Stanley, Goose Green i e islanan East Falkland i West Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin i Canberra; e Great Barrier Reef, Uluru i e Outback."
+  },
+  "new-zealand": {
+    "title": "Nueva Zelandia",
+    "description": "Nueva Zelandia — Auckland, Wellington, Christchurch, Hamilton, Dunedin i Queenstown; e Alpnan di Zùit, Fiordland i Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George i Whistler; e Coast Mountains, Isla Vancouver i e Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Prairienan di Canada",
+    "description": "Alberta, Saskatchewan i Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina i Banff; e Rocky Mountains, e prairienan i Churchill na Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston i Thunder Bay; Niagara Falls, e Lagonan Grandi i Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Siudat di Quebec, Laval, Gatineau, Sherbrooke i Saguenay; e St. Lawrence, e Laurentides i e Peninsula di Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Canada Atlántiko",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, i Newfoundland i Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton i Charlottetown; e Cabot Trail i Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Nort di Canada",
+    "description": "Yukon, Northwest Territories i Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City i Inuvik; e Arkipielago Ártiko i riu Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong i Macau",
+    "description": "Hong Kong i Macau — Isla di Hong Kong, Kowloon, New Territories, Lantau i e Peninsula di Macau, Taipa i Coloane."
   }
 }

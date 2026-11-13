@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Estatu Batuetako hego-erdialdea",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi eta Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson eta Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa eta Tonga",
+    "description": "Samoa, Samoa Estatubatuarra, Tonga, Niue, Tokelau eta Wallis eta Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi eta Mata-Utu; Upolu, Savaiʻi, Tutuila eta Tongako uharteak."
+  },
+  "mariana-islands": {
+    "title": "Guam eta Iparraldeko Mariana uharteak",
+    "description": "Guam eta Iparraldeko Mariana uharteak — Hagåtña, Tamuning, Dededo, Saipan, Tinian eta Rota."
+  },
+  "greenland": {
+    "title": "Groenlandia",
+    "description": "Groenlandia — Nuuk, Sisimiut, Ilulissat, Qaqortoq eta Tasiilaq; izotz-geruza, Ilulissateko izotz-fiordoa eta hegoaldeko fiordoak."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s eta Royal Naval Dockyard, uhartearen parrokiak eta hondar arrosako hondartzak."
+  },
+  "belarus": {
+    "title": "Bielorrusia",
+    "description": "Bielorrusia — Minsk, Gomel, Mogilev, Vitebsk, Grodno eta Brest; Białowieżako basoa eta Polesiako zingirak."
+  },
+  "channel-islands": {
+    "title": "Mantxako uharteak",
+    "description": "Jersey, Guernsey, Alderney, Sark eta Herm — St Helier, St Peter Port eta Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faroe uharteak",
+    "description": "Faroe uharteak — Tórshavn, Klaksvík, Runavík eta hemezortzi uharteak, haien herrixkak, tunelak eta itsas labarrak."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard eta Jan Mayen — Longyearbyen, Barentsburg eta Ny-Ålesund; Spitsbergengo glaziarrak eta fiordoak."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo eta Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria eta Hiru Hiriak."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar eta Indiako Ozeanoko uharteak",
+    "description": "Madagaskar, Komoreak, Mayotte, Reunion, Maurizio eta Seychelleak — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis eta Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartum, Omdurman, Port Sudan, Kassala, El Obeid eta Nyala; Nilo Urdinaren eta Nilo Zuriaren elkargunea eta Meroeko piramideak."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria eta hamar uharteak, Santo Antãotik Bravaraino."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé eta Príncipe",
+    "description": "São Tomé eta Príncipe — São Tomé, Santo António eta bi uharteetako oihan tropikalak eta hondartzak."
+  },
+  "saint-helena": {
+    "title": "Santa Helena, Ascension eta Tristan da Cunha",
+    "description": "Santa Helena, Ascension uhartea eta Tristan da Cunha — Jamestown, Georgetown eta Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet eta Cox’s Bazar; Sundarbans eta Ganges–Brahmaputra delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka eta Maldivak",
+    "description": "Sri Lanka eta Maldivak — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura eta Malé; mendialdea, Sigiriya eta atoloiak."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh Hiria, Da Nang, Hai Phong, Hue, Hoi An eta Can Tho; Ha Long badia eta Mekong delta."
+  },
+  "philippines": {
+    "title": "Filipinak",
+    "description": "Filipinak — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio eta Zamboanga; Luzon, Bisayak, Mindanao eta Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia eta Ekialdeko Timor",
+    "description": "Indonesia eta Ekialdeko Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar eta Dili; Java, Sumatra, Bali, Borneo, Sulawesi eta Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapur eta Brunei",
+    "description": "Malaysia, Singapur eta Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malaka, Kota Kinabalu, Kuching eta Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine eta Inle aintzira; Irrawaddy ibaiaren harana eta Shan muinoak."
+  },
+  "cambodia-laos": {
+    "title": "Kanbodia eta Laos",
+    "description": "Kanbodia eta Laos — Phnom Penh, Siem Reap eta Angkor, Battambang, Vientiane, Luang Prabang eta Pakse; Mekong ibaia eta Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolonbia",
+    "description": "Kolonbia — Bogota, Medellín, Cali, Barranquilla, Cartagena eta Bucaramanga; Andeak, Karibeko kostaldea eta Amazonia."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valentzia, Barquisimeto, Mérida eta Ciudad Bolívar; Angel ur-jauzia, Orinoko ibaia eta Margarita uhartea."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos eta Puno; Machu Picchu, Titicaca aintzira eta Haran Sakratua."
+  },
+  "ecuador": {
+    "title": "Ekuador",
+    "description": "Ekuador — Quito, Guayaquil, Cuenca, Manta eta Baños; Sumendien Etorbidea, Amazonia eta Galapagoak."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre eta Potosí; Titicaca aintzira eta Uyuniko gatz-lautada."
+  },
+  "chile": {
+    "title": "Txile",
+    "description": "Txile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena eta Punta Arenas; Atacama, Aintziren Eskualdea, Patagonia eta Pazko uhartea."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguai eta Uruguai",
+    "description": "Paraguai eta Uruguai — Asuncion, Ciudad del Este, Encarnación, Montevideo, Punta del Este eta Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyanak",
+    "description": "Guyana, Surinam eta Guyana Frantsesa — Georgetown, Paramaribo, Cayenne eta Kourou; Kaieteur ur-jauzia eta Guyanako Ezkutuko oihana."
+  },
+  "falklands": {
+    "title": "Malvinak",
+    "description": "Malvinak — Stanley, Goose Green eta Ekialdeko eta Mendebaldeko Malvina uharteak."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaida, Hobart, Darwin eta Canberra; Koralezko Hesi Handia, Uluru eta Outback-a."
+  },
+  "new-zealand": {
+    "title": "Zeelanda Berria",
+    "description": "Zeelanda Berria — Auckland, Wellington, Christchurch, Hamilton, Dunedin eta Queenstown; Hegoaldeko Alpeak, Fiordland eta Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britainiar Kolonbia",
+    "description": "Britainiar Kolonbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George eta Whistler; Kostaldeko mendiak, Vancouver uhartea eta Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadako preriak",
+    "description": "Alberta, Saskatchewan eta Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina eta Banff; Mendi Harritsuak, preriak eta Churchill, Hudson badian."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston eta Thunder Bay; Niagara ur-jauziak, Laku Handiak eta Algonquin parkea."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montreal, Quebec hiria, Laval, Gatineau, Sherbrooke eta Saguenay; San Lorentzo ibaia, Laurentidak eta Gaspé penintsula."
+  },
+  "atlantic-canada": {
+    "title": "Kanada Atlantikoa",
+    "description": "Brunswick Berria, Eskozia Berria, Eduardo Printzearen uhartea eta Ternua eta Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton eta Charlottetown; Cabot Trail eta Fundy badia."
+  },
+  "northern-canada": {
+    "title": "Kanadako iparraldea",
+    "description": "Yukon, Ipar-mendebaldeko Lurraldeak eta Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City eta Inuvik; Artikoko artxipelagoa eta Mackenzie ibaia."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong eta Macau",
+    "description": "Hong Kong eta Macau — Hong Kong uhartea, Kowloon, Lurralde Berriak, Lantau eta Macauko penintsula, Taipa eta Coloane."
   }
 }

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "JAV pietų centrinė dalis",
     "description": "Teksasas, Oklahoma, Arkanzasas, Luiziana, Kentukis, Tenesis, Misisipė ir Alabama — Hjustonas, Dalasas, San Antonijas, Ostinas, Oklahoma Sitis, Tulsa, Litl Rokas, Naujasis Orleanas, Luisvilis, Nešvilis, Memfis, Džeksonas ir Birmingamas."
+  },
+  "west-polynesia": {
+    "title": "Samoa ir Tonga",
+    "description": "Samoa, Amerikos Samoa, Tonga, Niujė, Tokelau ir Volisas ir Futuna — Apija, Pago Pagas, Nukuʻalofa, Alofis ir Mata Utu; Upolu, Savaiʻi, Tutuila ir Tongos salos."
+  },
+  "mariana-islands": {
+    "title": "Guamas ir Marianos Šiaurinės Salos",
+    "description": "Guamas ir Marianos Šiaurinės Salos — Hagåtña, Tamuningas, Dededas, Saipanas, Tinianas ir Rota."
+  },
+  "greenland": {
+    "title": "Grenlandija",
+    "description": "Grenlandija — Nūkas, Sisimiutas, Ilulisatas, Kakortokas ir Tasilakas; ledynų skydas, Ilulisato ledo fjordas ir pietų fjordai."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamiltonas, St. George’s ir Karališkųjų karinių jūrų pajėgų dokas, salos parapijos ir jos rausvo smėlio paplūdimiai."
+  },
+  "belarus": {
+    "title": "Baltarusija",
+    "description": "Baltarusija — Minskas, Gomelis, Mogiliovas, Vitebskas, Gardinas ir Brestas; Belovežo giria ir Polesės pelkės."
+  },
+  "channel-islands": {
+    "title": "Normandijos salos",
+    "description": "Džersis, Gernsis, Oldernis, Sarkas ir Hermas — Sent Helijeris, Sent Piter Portas ir Gorėjus."
+  },
+  "faroe-islands": {
+    "title": "Farerų salos",
+    "description": "Farerų salos — Torshaunas, Klaksvikas, Runavikas ir aštuoniolika salų su jų kaimais, tuneliais ir jūros skardžiais."
+  },
+  "svalbard": {
+    "title": "Svalbardas",
+    "description": "Svalbardas ir Jan Majenas — Longjyrbyenas, Barencburgas ir Ni Olesunas; Špicbergeno ledynai ir fjordai."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozas ir Kominas — Valeta, Slima, Sent Džulianas, Mdina, Viktorija ir Trys miestai."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskaras ir Indijos vandenyno salos",
+    "description": "Madagaskaras, Komorai, Majotas, Reunjonas, Mauricijus ir Seišeliai — Antananaryvas, Tuamasina, Moronis, Mamudzu, Sen Deni, Port Luisas ir Viktorija."
+  },
+  "sudan": {
+    "title": "Sudanas",
+    "description": "Sudanas — Chartumas, Omdurmanas, Port Sudanas, Kasala, El Obeidas ir Njala; Mėlynojo ir Baltojo Nilo santaka ir Meroės piramidės."
+  },
+  "cabo-verde": {
+    "title": "Žaliasis Kyšulys",
+    "description": "Žaliasis Kyšulys — Praja, Mindelas, Santa Marija ir dešimt salų nuo Santo Antano iki Bravos."
+  },
+  "sao-tome-principe": {
+    "title": "San Tomė ir Prinsipė",
+    "description": "San Tomė ir Prinsipė — San Tomė, Santo Antonijus ir abiejų salų atogrąžų miškai bei paplūdimiai."
+  },
+  "saint-helena": {
+    "title": "Šv. Elenos, Dangun Žengimo ir Tristan da Kunjos salos",
+    "description": "Šv. Elenos sala, Dangun Žengimo sala ir Tristan da Kunja — Džeimstaunas, Džordžtaunas ir Edinburgas Septynių Jūrų."
+  },
+  "bangladesh": {
+    "title": "Bangladešas",
+    "description": "Bangladešas — Daka, Čitagongas, Khulna, Radžšahis, Silhetas ir Kokso Bazaras; Sundarbanai ir Gango–Brahmaputros delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Šri Lanka ir Maldyvai",
+    "description": "Šri Lanka ir Maldyvai — Kolombas, Kandis, Galė, Džafna, Trinkomalis, Anuradhapura ir Malė; kalnų kraštas, Sigirija ir atolai."
+  },
+  "vietnam": {
+    "title": "Vietnamas",
+    "description": "Vietnamas — Hanojus, Hošimino miestas, Danangas, Haifongas, Hue, Hojanas ir Kantas; Halongo įlanka ir Mekongo delta."
+  },
+  "philippines": {
+    "title": "Filipinai",
+    "description": "Filipinai — Manila, Kesonas, Sebu, Davao, Iloilas, Bagujas ir Zamboanga; Lusonas, Visajai, Mindanao ir Palavanas."
+  },
+  "indonesia": {
+    "title": "Indonezija ir Rytų Timoras",
+    "description": "Indonezija ir Rytų Timoras — Džakarta, Surabaja, Bandungas, Medanas, Džokjakarta, Denpasaras, Makasaras ir Dilis; Java, Sumatra, Balis, Borneo, Sulavesis ir Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaizija, Singapūras ir Brunėjus",
+    "description": "Malaizija, Singapūras ir Brunėjus — Kvala Lumpūras, Singapūras, Džordžtaunas, Džohor Baru, Malaka, Kota Kinabalu, Kučingas ir Bandar Seri Begavanas."
+  },
+  "myanmar": {
+    "title": "Mianmaras",
+    "description": "Mianmaras — Jangonas, Mandalajus, Neipjidas, Baganas, Molamjainas ir Inlės ežeras; Iravadžio slėnis ir Šanų kalnai."
+  },
+  "cambodia-laos": {
+    "title": "Kambodža ir Laosas",
+    "description": "Kambodža ir Laosas — Pnompenis, Siem Ripas ir Angkoras, Batambangas, Vientianas, Luang Prabangas ir Paksė; Mekongas ir Tonlesapas."
+  },
+  "colombia": {
+    "title": "Kolumbija",
+    "description": "Kolumbija — Bogota, Medeljinas, Kalis, Barankilja, Kartachena ir Bukaramanga; Andai, Karibų pakrantė ir Amazonija."
+  },
+  "venezuela": {
+    "title": "Venesuela",
+    "description": "Venesuela — Karakasas, Marakaibas, Valensija, Barkisimetas, Merida ir Siudad Bolivaras; Anchelio krioklys, Orinokas ir Margaritos sala."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arekipa, Kuskas, Truchiljas, Ikitosas ir Punas; Maču Pikču, Titikakos ežeras ir Šventasis slėnis."
+  },
+  "ecuador": {
+    "title": "Ekvadoras",
+    "description": "Ekvadoras — Kitas, Gvajakilis, Kuenka, Manta ir Banjosas; Ugnikalnių alėja, Amazonija ir Galapagų salos."
+  },
+  "bolivia": {
+    "title": "Bolivija",
+    "description": "Bolivija — La Pasas, El Altas, Santa Krusas, Kočabamba, Sukrė ir Potosis; Titikakos ežeras ir Ujunio druskožemis."
+  },
+  "chile": {
+    "title": "Čilė",
+    "description": "Čilė — Santjagas, Valparaisas, Konsepsjonas, Antofagasta, La Serena ir Punta Arenasas; Atakama, Ežerų kraštas, Patagonija ir Velykų sala."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragvajus ir Urugvajus",
+    "description": "Paragvajus ir Urugvajus — Asunsjonas, Siudad del Estė, Enkarnasjonas, Montevidėjas, Punta del Estė ir Kolonija del Sakramentas."
+  },
+  "guianas": {
+    "title": "Gvianos",
+    "description": "Gajana, Surinamas ir Prancūzijos Gviana — Džordžtaunas, Paramaribas, Kajenas ir Kuru; Kaieturo krioklys ir Gvianos skydo atogrąžų miškai."
+  },
+  "falklands": {
+    "title": "Folklando salos",
+    "description": "Folklando salos — Stenlis, Gus Grinas ir Rytų bei Vakarų Folklando salos."
+  },
+  "australia": {
+    "title": "Australija",
+    "description": "Australija — Sidnėjus, Melburnas, Brisbenas, Pertas, Adelaidė, Hobartas, Darvinas ir Kanbera; Didysis Barjerinis rifas, Uluru ir Autbekas."
+  },
+  "new-zealand": {
+    "title": "Naujoji Zelandija",
+    "description": "Naujoji Zelandija — Oklandas, Velingtonas, Kraistčerčas, Hamiltonas, Danidinas ir Kvinstaunas; Pietų Alpės, Fjordlandas ir Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britų Kolumbija",
+    "description": "Britų Kolumbija — Vankuveris, Viktorija, Kelouna, Kamlupsas, Prins Džordžas ir Visleris; Pakrantės kalnai, Vankuverio sala ir Okanaganas."
+  },
+  "canadian-prairies": {
+    "title": "Kanados prerijos",
+    "description": "Alberta, Saskačevanas ir Manitoba — Kalgaris, Edmontonas, Vinipegas, Saskatunas, Redžina ir Banfas; Uolinai kalnai, prerijos ir Čerčilis prie Hudsono įlankos."
+  },
+  "ontario": {
+    "title": "Ontarijas",
+    "description": "Ontarijas — Torontas, Otava, Misisoga, Hamiltonas, Londonas, Kingstonas ir Tander Bėjus; Niagaros krioklys, Didieji ežerai ir Algonkino parkas."
+  },
+  "quebec": {
+    "title": "Kvebekas",
+    "description": "Kvebekas — Monrealis, Kvebeko miestas, Lavalis, Gatino, Šerbrukas ir Saginė; Šv. Lauryno upė, Laurentidai ir Gaspė pusiasalis."
+  },
+  "atlantic-canada": {
+    "title": "Atlanto Kanada",
+    "description": "Naujasis Bransvikas, Naujoji Škotija, Princo Edvardo Sala ir Niufaundlandas ir Labradoras — Halifaksas, Sent Džonsas, Monktonas, Sent Džonas, Frederiktonas ir Šarlotaunas; Kaboto kelias ir Fandžio įlanka."
+  },
+  "northern-canada": {
+    "title": "Šiaurės Kanada",
+    "description": "Jukonas, Šiaurės Vakarų teritorijos ir Nunavutas — Vaithorsas, Jelounaifas, Ikaluitas, Dosonas ir Inuvikas; Kanados Arkties salynas ir Makenzio upė."
+  },
+  "hong-kong-macau": {
+    "title": "Honkongas ir Makao",
+    "description": "Honkongas ir Makao — Honkongo sala, Kaulunas, Naujosios teritorijos, Lantau ir Makao pusiasalis, Taipa bei Koloanė."
   }
 }

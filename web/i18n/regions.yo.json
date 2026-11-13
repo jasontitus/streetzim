@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Àárín-Gúúsù Orílẹ̀-èdè Amẹ́ríkà",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi àti Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson àti Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa àti Tonga",
+    "description": "Samoa, American Samoa, Tonga, Niue, Tokelau àti Wallis and Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi àti Mata-Utu; Upolu, Savaiʻi, Tutuila àti àwọn erékùṣù Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam àti Àwọn Erékùṣù Àríwá Mariana",
+    "description": "Guam àti Àwọn Erékùṣù Àríwá Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian àti Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq àti Tasiilaq; aṣọ yìnyín ńlá, Ilulissat Icefjord àti àwọn fjord ti gúúsù."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s àti Royal Naval Dockyard, àwọn parish erékùṣù náà àti àwọn etíkun iyanrìn pupa rẹ̀."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno àti Brest; igbó Belovezhskaya Pushcha àti àwọn ẹrẹ̀ Polesia."
+  },
+  "channel-islands": {
+    "title": "Àwọn Erékùṣù Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark àti Herm — St Helier, St Peter Port àti Gorey."
+  },
+  "faroe-islands": {
+    "title": "Àwọn Erékùṣù Faroe",
+    "description": "Àwọn Erékùṣù Faroe — Tórshavn, Klaksvík, Runavík àti erékùṣù méjìdínlógún, àwọn abúlé wọn, àwọn ọ̀nà abẹ́lẹ̀ àti àwọn àpáta etí òkun."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard àti Jan Mayen — Longyearbyen, Barentsburg àti Ny-Ålesund; àwọn glacier àti fjord ti Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo àti Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria àti Three Cities."
+  },
+  "madagascar-islands": {
+    "title": "Madagáskà àti Àwọn Erékùṣù Òkun India",
+    "description": "Madagáskà, Comoros, Mayotte, Réunion, Mauritius àti Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis àti Victoria."
+  },
+  "sudan": {
+    "title": "Sùdáànù",
+    "description": "Sùdáànù — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid àti Nyala; ibi tí Blue Nile àti White Nile ti pàdé, àti àwọn pyramid Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria àti erékùṣù mẹ́wàá, láti Santo Antão dé Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé àti Príncipe",
+    "description": "São Tomé àti Príncipe — São Tomé, Santo António àti àwọn igbó kìjikìji àti etíkun erékùṣù méjèèjì."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension àti Tristan da Cunha",
+    "description": "Saint Helena, Ascension Island àti Tristan da Cunha — Jamestown, Georgetown àti Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bàngládéṣì",
+    "description": "Bàngládéṣì — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet àti Cox’s Bazar; Sundarbans àti delta Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka àti Maldives",
+    "description": "Sri Lanka àti Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura àti Malé; ilẹ̀ olókè, Sigiriya àti àwọn atoll."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An àti Can Tho; Ha Long Bay àti Mekong Delta."
+  },
+  "philippines": {
+    "title": "Fílípínì",
+    "description": "Fílípínì — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio àti Zamboanga; Luzon, Visayas, Mindanao àti Palawan."
+  },
+  "indonesia": {
+    "title": "Indonéṣíà àti Timor-Leste",
+    "description": "Indonéṣíà àti Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar àti Dili; Java, Sumatra, Bali, Borneo, Sulawesi àti Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore àti Brunei",
+    "description": "Malaysia, Singapore àti Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching àti Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine àti Adágún Inle; àfonífojì Irrawaddy àti àwọn òkè Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia àti Laos",
+    "description": "Cambodia àti Laos — Phnom Penh, Siem Reap àti Angkor, Battambang, Vientiane, Luang Prabang àti Pakse; Mekong àti Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kòlóḿbíà",
+    "description": "Kòlóḿbíà — Bogotá, Medellín, Cali, Barranquilla, Cartagena àti Bucaramanga; àwọn òkè Andes, etíkun Caribbean àti Amazon."
+  },
+  "venezuela": {
+    "title": "Fẹnẹsuẹla",
+    "description": "Fẹnẹsuẹla — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida àti Ciudad Bolívar; Angel Falls, Orinoco àti Isla Margarita."
+  },
+  "peru": {
+    "title": "Pérù",
+    "description": "Pérù — Lima, Arequipa, Cusco, Trujillo, Iquitos àti Puno; Machu Picchu, Adágún Titicaca àti Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ẹ̀kùàdọ̀r",
+    "description": "Ẹ̀kùàdọ̀r — Quito, Guayaquil, Cuenca, Manta àti Baños; Avenue of the Volcanoes, Amazon àti Àwọn Erékùṣù Galápagos."
+  },
+  "bolivia": {
+    "title": "Bòlífíà",
+    "description": "Bòlífíà — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre àti Potosí; Adágún Titicaca àti Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Ṣílè",
+    "description": "Ṣílè — Santiago, Valparaíso, Concepción, Antofagasta, La Serena àti Punta Arenas; Atacama, Lake District, Patagonia àti Easter Island."
+  },
+  "paraguay-uruguay": {
+    "title": "Parágúáì àti Úrúgúáì",
+    "description": "Parágúáì àti Úrúgúáì — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este àti Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Àwọn Guiana",
+    "description": "Guyana, Suriname àti French Guiana — Georgetown, Paramaribo, Cayenne àti Kourou; Kaieteur Falls àti igbó kìjikìji Guiana Shield."
+  },
+  "falklands": {
+    "title": "Àwọn Erékùṣù Falkland",
+    "description": "Àwọn Erékùṣù Falkland — Stanley, Goose Green àti àwọn erékùṣù East Falkland àti West Falkland."
+  },
+  "australia": {
+    "title": "Ọstrélíà",
+    "description": "Ọstrélíà — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin àti Canberra; Great Barrier Reef, Uluru àti Outback."
+  },
+  "new-zealand": {
+    "title": "Ṣílándì Titun",
+    "description": "Ṣílándì Titun — Auckland, Wellington, Christchurch, Hamilton, Dunedin àti Queenstown; Southern Alps, Fiordland àti Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George àti Whistler; Coast Mountains, Vancouver Island àti Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Àwọn Pẹ̀tẹ́lẹ̀ Kánádà",
+    "description": "Alberta, Saskatchewan àti Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina àti Banff; Rockies, àwọn pẹ̀tẹ́lẹ̀ àti Churchill ní Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston àti Thunder Bay; Niagara Falls, Great Lakes àti Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke àti Saguenay; St. Lawrence, Laurentians àti Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Kánádà Atlantiki",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, àti Newfoundland and Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton àti Charlottetown; Cabot Trail àti Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Àríwá Kánádà",
+    "description": "Yukon, Northwest Territories àti Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City àti Inuvik; Arctic Archipelago àti Odò Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong àti Macau",
+    "description": "Hong Kong àti Macau — Hong Kong Island, Kowloon, New Territories, Lantau àti Macau Peninsula, Taipa àti Coloane."
   }
 }

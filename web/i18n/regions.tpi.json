@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Saut Namel bilong Amerika",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi na Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson na Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa na Tonga",
+    "description": "Samoa, Amerikan Samoa, Tonga, Niue, Tokelau, na Wallis na Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi na Mata-Utu; Upolu, Savaiʻi, Tutuila na ol ailan bilong Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam na Not Mariana Ailan",
+    "description": "Guam na Not Mariana Ailan — Hagåtña, Tamuning, Dededo, Saipan, Tinian na Rota."
+  },
+  "greenland": {
+    "title": "Grinlan",
+    "description": "Grinlan — Nuuk, Sisimiut, Ilulissat, Qaqortoq na Tasiilaq; bikpela ais, Ilulissat Icefjord na ol fjord bilong saut."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s na Royal Naval Dockyard, ol pais bilong ailan na ol nambis i gat pinkpela wesan."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno na Brest; bus Belovezhskaya Pushcha na ol wara graun bilong Polesia."
+  },
+  "channel-islands": {
+    "title": "Senel Ailan",
+    "description": "Jersey, Guernsey, Alderney, Sark na Herm — St Helier, St Peter Port na Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faro Ailan",
+    "description": "Faro Ailan — Tórshavn, Klaksvík, Runavík na ol 18 ailan, ol ples, ol hul rot na ol klif long nambis bilong ol."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard na Jan Mayen — Longyearbyen, Barentsburg na Ny-Ålesund; ol glasia na fjord bilong Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo na Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria na Tripela Taun."
+  },
+  "madagascar-islands": {
+    "title": "Madagaska na ol Ailan bilong Indian Osen",
+    "description": "Madagaska, Komoros, Mayotte, Réunion, Morisias na Seisel — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis na Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid na Nyala; ples we Blu Nail na Wait Nail i bung na ol piramid bilong Meroë."
+  },
+  "cabo-verde": {
+    "title": "Kabo Verde",
+    "description": "Kabo Verde — Praia, Mindelo, Santa Maria na ol 10 ailan, long Santo Antão i go long Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé na Príncipe",
+    "description": "São Tomé na Príncipe — São Tomé, Santo António na ol bus na nambis bilong tupela ailan."
+  },
+  "saint-helena": {
+    "title": "Sen Helena, Asensen na Tristan da Cunha",
+    "description": "Sen Helena, Asensen Ailan na Tristan da Cunha — Jamestown, Georgetown na Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Banglades",
+    "description": "Banglades — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet na Cox’s Bazar; Sundarbans na maus wara bilong Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka na Maldives",
+    "description": "Sri Lanka na Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura na Malé; ples maunten, Sigiriya na ol atol."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh Siti, Da Nang, Hai Phong, Hue, Hoi An na Can Tho; Ha Long Be na maus wara bilong Mekong."
+  },
+  "philippines": {
+    "title": "Filipins",
+    "description": "Filipins — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio na Zamboanga; Luzon, Visayas, Mindanao na Palawan."
+  },
+  "indonesia": {
+    "title": "Indonisia na Timor-Leste",
+    "description": "Indonisia na Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar na Dili; Java, Sumatra, Bali, Borneo, Sulawesi na Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malesia, Singapo na Brunei",
+    "description": "Malesia, Singapo na Brunei — Kuala Lumpur, Singapo, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching na Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine na Inle Lek; ples daun bilong Irrawaddy na ol maunten bilong Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodia na Laos",
+    "description": "Kambodia na Laos — Phnom Penh, Siem Reap na Angkor, Battambang, Vientiane, Luang Prabang na Pakse; wara Mekong na Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombia",
+    "description": "Kolombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena na Bucaramanga; ol maunten Andes, nambis bilong Karibian na Amason."
+  },
+  "venezuela": {
+    "title": "Venesuela",
+    "description": "Venesuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida na Ciudad Bolívar; Angel Wara Pundaun, wara Orinoco na Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos na Puno; Machu Picchu, Titicaca Lek na Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ekuador",
+    "description": "Ekuador — Quito, Guayaquil, Cuenca, Manta na Baños; Avenue of the Volcanoes, Amason na Galápagos Ailan."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre na Potosí; Titicaca Lek na Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Sile",
+    "description": "Sile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena na Punta Arenas; Atacama, ples bilong ol lek, Patagonia na Ista Ailan."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragwai na Urugwai",
+    "description": "Paragwai na Urugwai — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este na Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Ol Guiana",
+    "description": "Guyana, Suriname na Frens Guiana — Georgetown, Paramaribo, Cayenne na Kourou; Kaieteur Wara Pundaun na bus bilong Guiana Shield."
+  },
+  "falklands": {
+    "title": "Folklan Ailan",
+    "description": "Folklan Ailan — Stanley, Goose Green na ol ailan Is Folklan na Wes Folklan."
+  },
+  "australia": {
+    "title": "Ostrelia",
+    "description": "Ostrelia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin na Canberra; Great Barrier Reef, Uluru na Outback."
+  },
+  "new-zealand": {
+    "title": "Niu Silan",
+    "description": "Niu Silan — Auckland, Wellington, Christchurch, Hamilton, Dunedin na Queenstown; Southern Alps, Fiordland na Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George na Whistler; Coast Mountains, Vancouver Ailan na Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Ol Pleintok bilong Kanada",
+    "description": "Alberta, Saskatchewan na Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina na Banff; ol maunten Rockies, ol pleintok na Churchill long Hudson Be."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston na Thunder Bay; Niagara Wara Pundaun, ol Bikpela Lek na Algonquin Pak."
+  },
+  "quebec": {
+    "title": "Kwebek",
+    "description": "Kwebek — Montréal, Kwebek Siti, Laval, Gatineau, Sherbrooke na Saguenay; wara St. Lawrence, ol maunten Laurentians na Gaspé Penisula."
+  },
+  "atlantic-canada": {
+    "title": "Atlantik Kanada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, na Newfoundland na Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton na Charlottetown; Cabot Trail na Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Not Kanada",
+    "description": "Yukon, Northwest Territories na Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City na Inuvik; ol ailan bilong Arktik na wara Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong na Macau",
+    "description": "Hong Kong na Macau — Hong Kong Ailan, Kowloon, New Territories, Lantau na Macau Penisula, Taipa na Coloane."
   }
 }

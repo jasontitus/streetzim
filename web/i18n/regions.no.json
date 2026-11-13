@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Sør-sentrale USA",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi og Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson og Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa og Tonga",
+    "description": "Samoa, Amerikansk Samoa, Tonga, Niue, Tokelau og Wallis og Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi og Mata-Utu; Upolu, Savaiʻi, Tutuila og øyene i Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam og Nord-Marianene",
+    "description": "Guam og Nord-Marianene — Hagåtña, Tamuning, Dededo, Saipan, Tinian og Rota."
+  },
+  "greenland": {
+    "title": "Grønland",
+    "description": "Grønland — Nuuk, Sisimiut, Ilulissat, Qaqortoq og Tasiilaq; innlandsisen, Ilulissat-isfjorden og fjordene i sør."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s og Royal Naval Dockyard, øyas sogn og de rosa sandstrendene."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Homel, Mahiljoŭ, Vitsebsk, Hrodna og Brest; Białowieża-skogen og Polesje-myrene."
+  },
+  "channel-islands": {
+    "title": "Kanaløyene",
+    "description": "Jersey, Guernsey, Alderney, Sark og Herm — St Helier, St Peter Port og Gorey."
+  },
+  "faroe-islands": {
+    "title": "Færøyene",
+    "description": "Færøyene — Tórshavn, Klaksvík, Runavík og de atten øyene med bygder, tunneler og stup mot havet."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard og Jan Mayen — Longyearbyen, Barentsburg og Ny-Ålesund; isbreene og fjordene på Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo og Comino — Valletta, Sliema, St. Julian’s, Mdina, Victoria og De tre byene."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar og øyene i Indiahavet",
+    "description": "Madagaskar, Komorene, Mayotte, Réunion, Mauritius og Seychellene — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis og Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid og Nyala; der Den blå og Den hvite Nilen møtes, og pyramidene i Meroë."
+  },
+  "cabo-verde": {
+    "title": "Kapp Verde",
+    "description": "Kapp Verde — Praia, Mindelo, Santa Maria og de ti øyene, fra Santo Antão til Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé og Príncipe",
+    "description": "São Tomé og Príncipe — São Tomé, Santo António og de to øyenes regnskog og strender."
+  },
+  "saint-helena": {
+    "title": "St. Helena, Ascension og Tristan da Cunha",
+    "description": "St. Helena, Ascension og Tristan da Cunha — Jamestown, Georgetown og Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet og Cox’s Bazar; Sundarbans og Ganges–Brahmaputra-deltaet."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka og Maldivene",
+    "description": "Sri Lanka og Maldivene — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura og Malé; høylandet, Sigiriya og atollene."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh-byen, Da Nang, Hai Phong, Hue, Hoi An og Can Tho; Ha Long-bukta og Mekong-deltaet."
+  },
+  "philippines": {
+    "title": "Filippinene",
+    "description": "Filippinene — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio og Zamboanga; Luzon, Visayas, Mindanao og Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia og Øst-Timor",
+    "description": "Indonesia og Øst-Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar og Dili; Java, Sumatra, Bali, Borneo, Sulawesi og Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore og Brunei",
+    "description": "Malaysia, Singapore og Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching og Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine og Inle-sjøen; Irrawaddy-dalen og Shan-høylandet."
+  },
+  "cambodia-laos": {
+    "title": "Kambodsja og Laos",
+    "description": "Kambodsja og Laos — Phnom Penh, Siem Reap og Angkor, Battambang, Vientiane, Luang Prabang og Pakse; Mekong og Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena og Bucaramanga; Andesfjellene, den karibiske kysten og Amazonas."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida og Ciudad Bolívar; Angel Falls, Orinoco og Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos og Puno; Machu Picchu, Titicacasjøen og Den hellige dalen."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta og Baños; Vulkanenes allé, Amazonas og Galápagosøyene."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre og Potosí; Titicacasjøen og Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena og Punta Arenas; Atacama, innsjødistriktet, Patagonia og Påskeøya."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay og Uruguay",
+    "description": "Paraguay og Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este og Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyanaene",
+    "description": "Guyana, Surinam og Fransk Guyana — Georgetown, Paramaribo, Cayenne og Kourou; Kaieteur-fossen og regnskogen på Guyanaskjoldet."
+  },
+  "falklands": {
+    "title": "Falklandsøyene",
+    "description": "Falklandsøyene — Stanley, Goose Green og øyene Øst-Falkland og Vest-Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin og Canberra; Great Barrier Reef, Uluru og Outbacken."
+  },
+  "new-zealand": {
+    "title": "New Zealand",
+    "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin og Queenstown; De sørlige alper, Fiordland og Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George og Whistler; Coast Mountains, Vancouver Island og Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Den kanadiske prærien",
+    "description": "Alberta, Saskatchewan og Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina og Banff; Klippefjellene, prærien og Churchill ved Hudsonbukta."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston og Thunder Bay; Niagarafallene, De store sjøene og Algonquin-parken."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Québec by, Laval, Gatineau, Sherbrooke og Saguenay; Saint Lawrence-elva, Laurentidene og Gaspé-halvøya."
+  },
+  "atlantic-canada": {
+    "title": "Atlanterhavs-Canada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island og Newfoundland og Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton og Charlottetown; Cabot Trail og Fundybukta."
+  },
+  "northern-canada": {
+    "title": "Nord-Canada",
+    "description": "Yukon, Nordvestterritoriene og Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City og Inuvik; Den kanadiske arktiske øygruppen og Mackenzie-elva."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong og Macao",
+    "description": "Hongkong og Macao — Hongkong-øya, Kowloon, New Territories, Lantau og Macao-halvøya, Taipa og Coloane."
   }
 }

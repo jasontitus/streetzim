@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "INingizimu-Maphakathi yaseMelika",
     "description": "iTexas, i-Oklahoma, i-Arkansas, iLouisiana, iKentucky, iTennessee, iMississippi ne-Alabama — iHouston, iDallas, iSan Antonio, i-Austin, i-Oklahoma City, iTulsa, iLittle Rock, iNew Orleans, iLouisville, iNashville, iMemphis, iJackson neBirmingham."
+  },
+  "west-polynesia": {
+    "title": "ISamoa neTonga",
+    "description": "ISamoa, iSamoa yaseMelika, iTonga, iNiue, iTokelau, ne-Wallis neFutuna — i-Apia, iPago Pago, iNukuʻalofa, i-Alofi neMata-Utu; i-Upolu, iSavaiʻi, iTutuila neziqhingi zaseTonga."
+  },
+  "mariana-islands": {
+    "title": "IGuam neZiqhingi ZaseMariana ZaseNyakatho",
+    "description": "IGuam neZiqhingi ZaseMariana ZaseNyakatho — iHagåtña, iTamuning, iDededo, iSaipan, iTinian neRota."
+  },
+  "greenland": {
+    "title": "IGreenland",
+    "description": "IGreenland — iNuuk, iSisimiut, i-Ilulissat, iQaqortoq neTasiilaq; ungqimba lweqhwa, i-Ilulissat Icefjord namafjord aseningizimu."
+  },
+  "bermuda": {
+    "title": "IBermuda",
+    "description": "IBermuda — iHamilton, iSt. George’s ne-Royal Naval Dockyard, iziphanga zesiqhingi namabhishi aso anesihlabathi esibomvana."
+  },
+  "belarus": {
+    "title": "IBelarus",
+    "description": "IBelarus — iMinsk, iGomel, iMogilev, iVitebsk, iGrodno neBrest; ihlathi laseBelovezhskaya Pushcha namaxhaphozi asePolesia."
+  },
+  "channel-islands": {
+    "title": "IZiqhingi ZaseChannel",
+    "description": "IJersey, iGuernsey, i-Alderney, iSark neHerm — iSt Helier, iSt Peter Port neGorey."
+  },
+  "faroe-islands": {
+    "title": "IZiqhingi ZaseFaroe",
+    "description": "IZiqhingi ZaseFaroe — iTórshavn, iKlaksvík, iRunavík neziqhingi eziyishumi nesishiyagalombili, amadolobhana azo, imigudu engaphansi komhlaba namawa asolwandle."
+  },
+  "svalbard": {
+    "title": "ISvalbard",
+    "description": "ISvalbard neJan Mayen — iLongyearbyen, iBarentsburg neNy-Ålesund; izinguzunga zeqhwa namafjord aseSpitsbergen."
+  },
+  "malta": {
+    "title": "IMalta",
+    "description": "IMalta, iGozo neComino — iValletta, iSliema, iSt Julian’s, iMdina, iVictoria namaDolobha Amathathu."
+  },
+  "madagascar-islands": {
+    "title": "IMadagascar neZiqhingi ZoLwandlekazi LwaseNdiya",
+    "description": "IMadagascar, iComoros, iMayotte, iRéunion, iMauritius neSeychelles — i-Antananarivo, iToamasina, iMoroni, iMamoudzou, iSaint-Denis, iPort Louis neVictoria."
+  },
+  "sudan": {
+    "title": "ISudan",
+    "description": "ISudan — iKhartoum, i-Omdurman, iPort Sudan, iKassala, i-El Obeid neNyala; lapho kuhlangana khona iNayile Eluhlaza neNayile Emhlophe namaphiramidi aseMeroë."
+  },
+  "cabo-verde": {
+    "title": "ICabo Verde",
+    "description": "ICabo Verde — iPraia, iMindelo, iSanta Maria neziqhingi eziyishumi, kusuka eSanto Antão kuya eBrava."
+  },
+  "sao-tome-principe": {
+    "title": "ISão Tomé nePríncipe",
+    "description": "ISão Tomé nePríncipe — iSão Tomé, iSanto António namahlathi emvula namabhishi eziqhingi zombili."
+  },
+  "saint-helena": {
+    "title": "ISaint Helena, i-Ascension neTristan da Cunha",
+    "description": "ISaint Helena, iSiqhingi sase-Ascension neTristan da Cunha — iJamestown, iGeorgetown ne-Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "IBangladesh",
+    "description": "IBangladesh — iDhaka, iChittagong, iKhulna, iRajshahi, iSylhet neCox’s Bazar; iSundarbans nodelta lweGanges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "ISri Lanka neMaldives",
+    "description": "ISri Lanka neMaldives — iColombo, iKandy, iGalle, iJaffna, iTrincomalee, i-Anuradhapura neMalé; izwe lamagquma, iSigiriya nama-atoll."
+  },
+  "vietnam": {
+    "title": "IVietnam",
+    "description": "IVietnam — iHanoi, iHo Chi Minh City, iDa Nang, iHai Phong, iHue, iHoi An neCan Tho; iHa Long Bay nodelta loMekong."
+  },
+  "philippines": {
+    "title": "IPhilippines",
+    "description": "IPhilippines — iManila, iQuezon City, iCebu, iDavao, i-Iloilo, iBaguio neZamboanga; iLuzon, iVisayas, iMindanao nePalawan."
+  },
+  "indonesia": {
+    "title": "I-Indonesia neTimor-Leste",
+    "description": "I-Indonesia neTimor-Leste — iJakarta, iSurabaya, iBandung, iMedan, iYogyakarta, iDenpasar, iMakassar neDili; iJava, iSumatra, iBali, iBorneo, iSulawesi nePapua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "IMalaysia, iSingapore neBrunei",
+    "description": "IMalaysia, iSingapore neBrunei — iKuala Lumpur, iSingapore, iGeorge Town, iJohor Bahru, iMalacca, iKota Kinabalu, iKuching neBandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "IMyanmar",
+    "description": "IMyanmar — iYangon, iMandalay, iNaypyidaw, iBagan, iMawlamyine nechibi i-Inle; isigodi sase-Irrawaddy namagquma aseShan."
+  },
+  "cambodia-laos": {
+    "title": "ICambodia neLaos",
+    "description": "ICambodia neLaos — iPhnom Penh, iSiem Reap ne-Angkor, iBattambang, iVientiane, iLuang Prabang nePakse; iMekong neTonlé Sap."
+  },
+  "colombia": {
+    "title": "IColombia",
+    "description": "IColombia — iBogotá, iMedellín, iCali, iBarranquilla, iCartagena neBucaramanga; i-Andes, ugu lwaseCaribbean ne-Amazon."
+  },
+  "venezuela": {
+    "title": "IVenezuela",
+    "description": "IVenezuela — iCaracas, iMaracaibo, iValencia, iBarquisimeto, iMérida neCiudad Bolívar; impophoma i-Angel, i-Orinoco ne-Isla Margarita."
+  },
+  "peru": {
+    "title": "IPeru",
+    "description": "IPeru — iLima, i-Arequipa, iCusco, iTrujillo, i-Iquitos nePuno; iMachu Picchu, iChibi iTiticaca neSigodi Esingcwele."
+  },
+  "ecuador": {
+    "title": "I-Ecuador",
+    "description": "I-Ecuador — iQuito, iGuayaquil, iCuenca, iManta neBaños; i-Avenue of the Volcanoes, i-Amazon neZiqhingi ZaseGalápagos."
+  },
+  "bolivia": {
+    "title": "IBolivia",
+    "description": "IBolivia — iLa Paz, i-El Alto, iSanta Cruz, iCochabamba, iSucre nePotosí; iChibi iTiticaca neSalar de Uyuni."
+  },
+  "chile": {
+    "title": "IChile",
+    "description": "IChile — iSantiago, iValparaíso, iConcepción, i-Antofagasta, iLa Serena nePunta Arenas; i-Atacama, iSifunda Samachibi, iPatagonia neSiqhingi sase-Easter."
+  },
+  "paraguay-uruguay": {
+    "title": "IParaguay ne-Uruguay",
+    "description": "IParaguay ne-Uruguay — i-Asunción, iCiudad del Este, i-Encarnación, iMontevideo, iPunta del Este neColonia del Sacramento."
+  },
+  "guianas": {
+    "title": "IGuianas",
+    "description": "IGuyana, iSuriname neFrench Guiana — iGeorgetown, iParamaribo, iCayenne neKourou; impophoma iKaieteur nehlathi lemvula leGuiana Shield."
+  },
+  "falklands": {
+    "title": "IZiqhingi ZaseFalkland",
+    "description": "IZiqhingi ZaseFalkland — iStanley, iGoose Green neziqhingi i-East Falkland neWest Falkland."
+  },
+  "australia": {
+    "title": "I-Australia",
+    "description": "I-Australia — iSydney, iMelbourne, iBrisbane, iPerth, i-Adelaide, iHobart, iDarwin neCanberra; iGreat Barrier Reef, i-Uluru ne-Outback."
+  },
+  "new-zealand": {
+    "title": "INew Zealand",
+    "description": "INew Zealand — i-Auckland, iWellington, iChristchurch, iHamilton, iDunedin neQueenstown; iSouthern Alps, iFiordland neRotorua."
+  },
+  "british-columbia": {
+    "title": "IBritish Columbia",
+    "description": "IBritish Columbia — iVancouver, iVictoria, iKelowna, iKamloops, iPrince George neWhistler; iCoast Mountains, iSiqhingi saseVancouver ne-Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Amathafa aseCanada",
+    "description": "I-Alberta, iSaskatchewan neManitoba — iCalgary, i-Edmonton, iWinnipeg, iSaskatoon, iRegina neBanff; iRockies, amathafa neChurchill ngaseHudson Bay."
+  },
+  "ontario": {
+    "title": "I-Ontario",
+    "description": "I-Ontario — iToronto, i-Ottawa, iMississauga, iHamilton, iLondon, iKingston neThunder Bay; iNiagara Falls, amaChibi Amakhulu ne-Algonquin Park."
+  },
+  "quebec": {
+    "title": "IQuebec",
+    "description": "IQuebec — iMontréal, iQuebec City, iLaval, iGatineau, iSherbrooke neSaguenay; iSt. Lawrence, iLaurentians neNhlonhlo yaseGaspé."
+  },
+  "atlantic-canada": {
+    "title": "ICanada yase-Atlantic",
+    "description": "INew Brunswick, iNova Scotia, iPrince Edward Island, neNewfoundland neLabrador — iHalifax, iSt. John’s, iMoncton, iSaint John, iFredericton neCharlottetown; iCabot Trail neBay of Fundy."
+  },
+  "northern-canada": {
+    "title": "INyakatho yeCanada",
+    "description": "IYukon, iNorthwest Territories neNunavut — iWhitehorse, iYellowknife, i-Iqaluit, iDawson City ne-Inuvik; i-Arctic Archipelago nomfula iMackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "IHong Kong neMacau",
+    "description": "IHong Kong neMacau — iHong Kong Island, iKowloon, iNew Territories, iLantau neNhlonhlo yaseMacau, iTaipa neColoane."
   }
 }

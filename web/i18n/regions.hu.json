@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Az USA dél-középső része",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi és Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson és Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Szamoa és Tonga",
+    "description": "Szamoa, Amerikai Szamoa, Tonga, Niue, Tokelau, valamint Wallis és Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi és Mata-Utu; Upolu, Savaiʻi, Tutuila és Tonga szigetei."
+  },
+  "mariana-islands": {
+    "title": "Guam és az Északi-Mariana-szigetek",
+    "description": "Guam és az Északi-Mariana-szigetek — Hagåtña, Tamuning, Dededo, Saipan, Tinian és Rota."
+  },
+  "greenland": {
+    "title": "Grönland",
+    "description": "Grönland — Nuuk, Sisimiut, Ilulissat, Qaqortoq és Tasiilaq; a jégtakaró, az ilulissati jégfjord és a déli fjordok."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s és a Royal Naval Dockyard, a sziget egyházközségei és rózsaszín homokos strandjai."
+  },
+  "belarus": {
+    "title": "Fehéroroszország",
+    "description": "Fehéroroszország — Minszk, Homel, Mahiljov, Vicebszk, Hrodna és Breszt; a Białowieżai-őserdő és a Poleszjei-mocsarak."
+  },
+  "channel-islands": {
+    "title": "Csatorna-szigetek",
+    "description": "Jersey, Guernsey, Alderney, Sark és Herm — St Helier, St Peter Port és Gorey."
+  },
+  "faroe-islands": {
+    "title": "Feröer",
+    "description": "Feröer — Tórshavn, Klaksvík, Runavík és a tizennyolc sziget falvaival, alagútjaival és tengeri sziklafalaival."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard és Jan Mayen — Longyearbyen, Barentsburg és Ny-Ålesund; a Spitzbergák gleccserei és fjordjai."
+  },
+  "malta": {
+    "title": "Málta",
+    "description": "Málta, Gozo és Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria és a Három Város."
+  },
+  "madagascar-islands": {
+    "title": "Madagaszkár és az Indiai-óceán szigetei",
+    "description": "Madagaszkár, a Comore-szigetek, Mayotte, Réunion, Mauritius és a Seychelle-szigetek — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis és Victoria."
+  },
+  "sudan": {
+    "title": "Szudán",
+    "description": "Szudán — Kartúm, Omdurman, Port Sudan, Kasszala, El-Obeid és Nyala; a Kék- és a Fehér-Nílus találkozása és Meroé piramisai."
+  },
+  "cabo-verde": {
+    "title": "Zöld-foki Köztársaság",
+    "description": "Zöld-foki Köztársaság — Praia, Mindelo, Santa Maria és a tíz sziget, Santo Antãótól Braváig."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé és Príncipe",
+    "description": "São Tomé és Príncipe — São Tomé, Santo António és a két sziget esőerdői és strandjai."
+  },
+  "saint-helena": {
+    "title": "Szent Ilona, Ascension és Tristan da Cunha",
+    "description": "Szent Ilona, Ascension-sziget és Tristan da Cunha — Jamestown, Georgetown és Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Banglades",
+    "description": "Banglades — Dakka, Csittagong, Khulna, Rádzssáhi, Szilhet és Cox’s Bazar; a Szundarbans és a Gangesz–Brahmaputra-delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Srí Lanka és a Maldív-szigetek",
+    "description": "Srí Lanka és a Maldív-szigetek — Colombo, Kandy, Galle, Dzsaffna, Trincomalee, Anuradhapura és Malé; a hegyvidék, Szigirija és az atollok."
+  },
+  "vietnam": {
+    "title": "Vietnám",
+    "description": "Vietnám — Hanoi, Ho Si Minh-város, Đà Nẵng, Hải Phòng, Huế, Hội An és Cần Thơ; a Ha Long-öböl és a Mekong-delta."
+  },
+  "philippines": {
+    "title": "Fülöp-szigetek",
+    "description": "A Fülöp-szigetek — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio és Zamboanga; Luzon, a Visayas-szigetek, Mindanao és Palawan."
+  },
+  "indonesia": {
+    "title": "Indonézia és Kelet-Timor",
+    "description": "Indonézia és Kelet-Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar és Dili; Jáva, Szumátra, Bali, Borneó, Celebesz és Pápua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malajzia, Szingapúr és Brunei",
+    "description": "Malajzia, Szingapúr és Brunei — Kuala Lumpur, Szingapúr, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching és Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Mianmar",
+    "description": "Mianmar — Yangon, Mandalaj, Nepjida, Bagan, Mawlamyine és az Inle-tó; az Irrávádi völgye és a Shan-hegyvidék."
+  },
+  "cambodia-laos": {
+    "title": "Kambodzsa és Laosz",
+    "description": "Kambodzsa és Laosz — Phnom Penh, Siem Reap és Angkor, Battambang, Vientiane, Luang Prabang és Pakse; a Mekong és a Tonle Sap."
+  },
+  "colombia": {
+    "title": "Kolumbia",
+    "description": "Kolumbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena és Bucaramanga; az Andok, a karibi partvidék és az Amazonas-vidék."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida és Ciudad Bolívar; az Angel-vízesés, az Orinoco és Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos és Puno; Machu Picchu, a Titicaca-tó és a Szent-völgy."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta és Baños; a Vulkánok sugárútja, az Amazonas-vidék és a Galápagos-szigetek."
+  },
+  "bolivia": {
+    "title": "Bolívia",
+    "description": "Bolívia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre és Potosí; a Titicaca-tó és a Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena és Punta Arenas; az Atacama, a Tóvidék, Patagónia és a Húsvét-sziget."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay és Uruguay",
+    "description": "Paraguay és Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este és Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyanák",
+    "description": "Guyana, Suriname és Francia Guyana — Georgetown, Paramaribo, Cayenne és Kourou; a Kaieteur-vízesés és a Guyanai-pajzs esőerdeje."
+  },
+  "falklands": {
+    "title": "Falkland-szigetek",
+    "description": "A Falkland-szigetek — Stanley, Goose Green, valamint Kelet- és Nyugat-Falkland szigete."
+  },
+  "australia": {
+    "title": "Ausztrália",
+    "description": "Ausztrália — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin és Canberra; a Nagy-korallzátony, az Uluru és az Outback."
+  },
+  "new-zealand": {
+    "title": "Új-Zéland",
+    "description": "Új-Zéland — Auckland, Wellington, Christchurch, Hamilton, Dunedin és Queenstown; a Déli-Alpok, Fiordland és Rotorua."
+  },
+  "british-columbia": {
+    "title": "Brit Columbia",
+    "description": "Brit Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George és Whistler; a Parti-hegység, a Vancouver-sziget és az Okanagan-völgy."
+  },
+  "canadian-prairies": {
+    "title": "Kanadai prérik",
+    "description": "Alberta, Saskatchewan és Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina és Banff; a Sziklás-hegység, a préri és Churchill a Hudson-öbölnél."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston és Thunder Bay; a Niagara-vízesés, a Nagy-tavak és az Algonquin Park."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Québec város, Laval, Gatineau, Sherbrooke és Saguenay; a Szent Lőrinc-folyó, a Laurentidák és a Gaspé-félsziget."
+  },
+  "atlantic-canada": {
+    "title": "Atlanti-óceáni Kanada",
+    "description": "Új-Brunswick, Új-Skócia, Edward herceg-sziget, valamint Új-Fundland és Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton és Charlottetown; a Cabot Trail és a Fundy-öböl."
+  },
+  "northern-canada": {
+    "title": "Észak-Kanada",
+    "description": "Yukon, az Északnyugati területek és Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City és Inuvik; a Kanadai sarkvidéki szigetvilág és a Mackenzie folyó."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong és Makaó",
+    "description": "Hongkong és Makaó — Hongkong-sziget, Kowloon, az Új Területek, Lantau, valamint a Makaói-félsziget, Taipa és Coloane."
   }
 }

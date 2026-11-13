@@ -58,10 +58,16 @@ REGION_ISO639_3 = {
 UNLABELLED_REGION_LANGUAGES = {
     "africa": frozenset({"ha", "om", "yo", "ln", "ff", "ig", "zu", "mg", "so", "xh", "af", "sn", "ny", "bm", "rw", "st", "rn", "ti", "mos", "sg", "ss", "zdj", "crs"}),
     "africa-light": frozenset({"ha", "om", "yo", "ln", "ff", "ig", "zu", "mg", "so", "xh", "af", "sn", "ny", "bm", "rw", "st", "rn", "ti", "mos", "sg", "ss", "zdj", "crs"}),
+    "belarus": frozenset({"be"}),
+    "cabo-verde": frozenset({"kea"}),
+    "cambodia-laos": frozenset({"km", "lo"}),
     "caucasus": frozenset({"ka", "hy", "av", "dar", "kbd", "os", "kum", "lez", "inh", "krc"}),
     "central-africa": frozenset({"ln", "kg", "bem", "lua", "umb", "sg", "ff", "kmb", "ny"}),
     "central-asia": frozenset({"uz", "ps", "kk", "tg", "ky", "tk", "ka", "hy"}),
     "east-africa": frozenset({"om", "so", "rw", "rn", "lg", "ki", "ti", "suk", "luy", "kln", "luo", "kam", "sid", "din"}),
+    "faroe-islands": frozenset({"fo"}),
+    "greenland": frozenset({"kl"}),
+    "guianas": frozenset({"srn"}),
     "himalayas": frozenset({"ks", "mai", "bo", "phr", "doi", "bho", "dz"}),
     "horn-of-africa": frozenset({"om", "so", "ti", "sid", "din", "aa", "wal"}),
     "india-central": frozenset({"hne", "bhb"}),
@@ -77,10 +83,20 @@ UNLABELLED_REGION_LANGUAGES = {
     "india-west": frozenset({"gu", "bhb"}),
     "india-west-light": frozenset({"gu", "bhb"}),
     "indian-subcontinent": frozenset({"pa", "gu", "kn", "bho", "sd", "or", "ml", "mai", "ps", "skr", "as", "si", "dv", "dz"}),
+    "indonesia": frozenset({"jv", "su", "mad", "tet"}),
+    "madagascar-islands": frozenset({"mg"}),
+    "malta": frozenset({"mt"}),
+    "mariana-islands": frozenset({"ch"}),
+    "myanmar": frozenset({"my"}),
+    "new-zealand": frozenset({"mi"}),
+    "northern-canada": frozenset({"iu"}),
     "pacific-islands": frozenset({"tpi", "fj", "hif", "bi", "gil", "mh", "tvl", "na"}),
+    "philippines": frozenset({"ceb", "ilo", "hil"}),
     "southeast-asia": frozenset({"jv", "my", "su", "ceb", "km", "tts", "ilo", "hil", "mad", "lo", "tet"}),
     "southern-africa": frozenset({"zu", "xh", "af", "ny", "sn", "st", "nso", "tn", "vmw", "bem", "ts", "ss", "seh", "nd", "nr", "ve"}),
+    "sri-lanka-maldives": frozenset({"si", "dv"}),
     "west-africa": frozenset({"pcm", "ha", "yo", "ig", "ff", "ak", "bm", "wo", "dyu", "mos", "ee", "kr"}),
+    "west-polynesia": frozenset({"sm", "to"}),
 }
 
 # Language packs only (tools/langpack/, streetzim/wiki_pack.py): the other
@@ -99,6 +115,7 @@ PACK_ISO639_3 = {
     "sn": "sna", "so": "som", "ss": "ssw", "st": "sot", "su": "sun", "tg": "tgk", "ti": "tir",
     "tk": "tuk", "tn": "tsn", "ts": "tso", "uz": "uzb", "ve": "ven", "wo": "wol", "xh": "xho",
     "yo": "yor", "zu": "zul",
+    "be": "bel", "ch": "cha", "fo": "fao", "iu": "iku", "kl": "kal", "mi": "mri", "sm": "smo", "to": "ton",
 }
 
 # ISO 639-2/B (bibliographic) codes that are not also the language's ISO

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Canol De'r Unol Daleithiau",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ac Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa a Tonga",
+    "description": "Samoa, Samoa America, Tonga, Niue, Tokelau, a Wallis a Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi a Mata-Utu; Upolu, Savaiʻi, Tutuila ac ynysoedd Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam ac Ynysoedd Gogledd Mariana",
+    "description": "Guam ac Ynysoedd Gogledd Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian a Rota."
+  },
+  "greenland": {
+    "title": "Yr Ynys Las",
+    "description": "Yr Ynys Las — Nuuk, Sisimiut, Ilulissat, Qaqortoq a Tasiilaq; y llen iâ, Ffiord Iâ Ilulissat a ffiordau'r de."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s a'r Royal Naval Dockyard, plwyfi'r ynys a'i thraethau tywod pinc."
+  },
+  "belarus": {
+    "title": "Belarws",
+    "description": "Belarws — Minsk, Gomel, Mogilev, Vitebsk, Grodno a Brest; coedwig Belovezhskaya Pushcha a chorsydd Polesia."
+  },
+  "channel-islands": {
+    "title": "Ynysoedd y Sianel",
+    "description": "Jersey, Guernsey, Alderney, Sark a Herm — St Helier, St Peter Port a Gorey."
+  },
+  "faroe-islands": {
+    "title": "Ynysoedd Ffaro",
+    "description": "Ynysoedd Ffaro — Tórshavn, Klaksvík, Runavík a'r deunaw ynys, eu pentrefi, eu twneli a'u clogwyni môr."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard a Jan Mayen — Longyearbyen, Barentsburg a Ny-Ålesund; rhewlifoedd a ffiordau Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo a Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria a'r Tair Dinas."
+  },
+  "madagascar-islands": {
+    "title": "Madagasgar ac Ynysoedd Cefnfor India",
+    "description": "Madagasgar, Comoros, Mayotte, Réunion, Mauritius a Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis a Victoria."
+  },
+  "sudan": {
+    "title": "Swdan",
+    "description": "Swdan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid a Nyala; cymer y Nîl Las a'r Nîl Wen a phyramidiau Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria a'r deg ynys, o Santo Antão i Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé a Príncipe",
+    "description": "São Tomé a Príncipe — São Tomé, Santo António a fforestydd glaw a thraethau'r ddwy ynys."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension a Tristan da Cunha",
+    "description": "Saint Helena, Ynys Ascension a Tristan da Cunha — Jamestown, Georgetown ac Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet a Cox’s Bazar; y Sundarbans a delta Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka a'r Maldives",
+    "description": "Sri Lanka a'r Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura a Malé; y bryndir, Sigiriya a'r atolau."
+  },
+  "vietnam": {
+    "title": "Fietnam",
+    "description": "Fietnam — Hanoi, Dinas Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An a Can Tho; Bae Ha Long a delta'r Mekong."
+  },
+  "philippines": {
+    "title": "Y Philipinau",
+    "description": "Y Philipinau — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio a Zamboanga; Luzon, y Visayas, Mindanao a Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia a Dwyrain Timor",
+    "description": "Indonesia a Dwyrain Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar a Dili; Jawa, Sumatra, Bali, Borneo, Sulawesi a Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Maleisia, Singapôr a Brwnei",
+    "description": "Maleisia, Singapôr a Brwnei — Kuala Lumpur, Singapôr, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching a Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine a Llyn Inle; dyffryn yr Irrawaddy a bryniau Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia a Laos",
+    "description": "Cambodia a Laos — Phnom Penh, Siem Reap ac Angkor, Battambang, Vientiane, Luang Prabang a Pakse; y Mekong a'r Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena a Bucaramanga; yr Andes, arfordir y Caribî a'r Amazon."
+  },
+  "venezuela": {
+    "title": "Feneswela",
+    "description": "Feneswela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida a Ciudad Bolívar; Rhaeadr Angel, yr Orinoco ac Isla Margarita."
+  },
+  "peru": {
+    "title": "Periw",
+    "description": "Periw — Lima, Arequipa, Cusco, Trujillo, Iquitos a Puno; Machu Picchu, Llyn Titicaca a'r Dyffryn Sanctaidd."
+  },
+  "ecuador": {
+    "title": "Ecwador",
+    "description": "Ecwador — Quito, Guayaquil, Cuenca, Manta a Baños; Rhodfa'r Llosgfynyddoedd, yr Amazon ac Ynysoedd Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolifia",
+    "description": "Bolifia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre a Potosí; Llyn Titicaca a'r Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena a Punta Arenas; yr Atacama, Ardal y Llynnoedd, Patagonia ac Ynys y Pasg."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragwâi ac Wrwgwái",
+    "description": "Paragwâi ac Wrwgwái — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este a Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Y Guianas",
+    "description": "Guyana, Suriname a Guiana Ffrengig — Georgetown, Paramaribo, Cayenne a Kourou; Rhaeadr Kaieteur a fforest law Tarian Guiana."
+  },
+  "falklands": {
+    "title": "Ynysoedd Falklands",
+    "description": "Ynysoedd Falklands — Stanley, Goose Green ac ynysoedd Dwyrain a Gorllewin Falkland."
+  },
+  "australia": {
+    "title": "Awstralia",
+    "description": "Awstralia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin a Canberra; y Great Barrier Reef, Uluru a'r Outback."
+  },
+  "new-zealand": {
+    "title": "Seland Newydd",
+    "description": "Seland Newydd — Auckland, Wellington, Christchurch, Hamilton, Dunedin a Queenstown; Alpau'r De, Fiordland a Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George a Whistler; Mynyddoedd yr Arfordir, Ynys Vancouver a'r Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Paith Canada",
+    "description": "Alberta, Saskatchewan a Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina a Banff; y Rockies, y paith a Churchill ar Fae Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston a Thunder Bay; Rhaeadr Niagara, y Llynnoedd Mawr a Pharc Algonquin."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Dinas Québec, Laval, Gatineau, Sherbrooke a Saguenay; afon St. Lawrence, y Laurentides a Phenrhyn Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Canada'r Iwerydd",
+    "description": "New Brunswick, Nova Scotia, Ynys y Tywysog Edward, a Newfoundland a Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton a Charlottetown; y Cabot Trail a Bae Fundy."
+  },
+  "northern-canada": {
+    "title": "Gogledd Canada",
+    "description": "Yukon, Tiriogaethau'r Gogledd-orllewin a Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ac Inuvik; Ynysfor yr Arctig ac afon Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong a Macau",
+    "description": "Hong Kong a Macau — Ynys Hong Kong, Kowloon, y Tiriogaethau Newydd, Lantau a Phenrhyn Macau, Taipa a Coloane."
   }
 }

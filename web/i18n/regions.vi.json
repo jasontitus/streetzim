@@ -366,5 +366,165 @@
  "india-west-light": {
   "title": "Tây Ấn Độ (bản nhẹ)",
   "description": "Bản đồ Tây Ấn Độ không có ảnh vệ tinh, chỉ phóng to tới mức 13 — vẫn đủ các địa điểm nhưng dung lượng tải về nhỏ hơn, phù hợp với kết nối chậm và thiết bị có bộ nhớ hạn chế."
+ },
+ "west-polynesia": {
+  "title": "Samoa và Tonga",
+  "description": "Samoa, Samoa thuộc Mỹ, Tonga, Niue, Tokelau, và Wallis và Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi và Mata-Utu; Upolu, Savaiʻi, Tutuila và các đảo của Tonga."
+ },
+ "mariana-islands": {
+  "title": "Guam và Quần đảo Bắc Mariana",
+  "description": "Guam và Quần đảo Bắc Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian và Rota."
+ },
+ "greenland": {
+  "title": "Greenland",
+  "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq và Tasiilaq; dải băng lục địa, vịnh hẹp băng Ilulissat và các vịnh hẹp fjord ở phía nam."
+ },
+ "bermuda": {
+  "title": "Bermuda",
+  "description": "Bermuda — Hamilton, St. George’s và xưởng hải quân Royal Naval Dockyard, các giáo xứ của hòn đảo và những bãi biển cát hồng."
+ },
+ "belarus": {
+  "title": "Belarus",
+  "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno và Brest; rừng Belovezhskaya Pushcha và các đầm lầy Polesia."
+ },
+ "channel-islands": {
+  "title": "Quần đảo Eo Biển",
+  "description": "Jersey, Guernsey, Alderney, Sark và Herm — St Helier, St Peter Port và Gorey."
+ },
+ "faroe-islands": {
+  "title": "Quần đảo Faroe",
+  "description": "Quần đảo Faroe — Tórshavn, Klaksvík, Runavík và mười tám hòn đảo cùng những ngôi làng, đường hầm và vách đá ven biển."
+ },
+ "svalbard": {
+  "title": "Svalbard",
+  "description": "Svalbard và Jan Mayen — Longyearbyen, Barentsburg và Ny-Ålesund; các sông băng và vịnh hẹp fjord của Spitsbergen."
+ },
+ "malta": {
+  "title": "Malta",
+  "description": "Malta, Gozo và Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria và Ba Thành phố."
+ },
+ "madagascar-islands": {
+  "title": "Madagascar và các đảo Ấn Độ Dương",
+  "description": "Madagascar, Comoros, Mayotte, Réunion, Mauritius và Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis và Victoria."
+ },
+ "sudan": {
+  "title": "Sudan",
+  "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid và Nyala; nơi hợp lưu sông Nile Xanh và Nile Trắng cùng các kim tự tháp Meroë."
+ },
+ "cabo-verde": {
+  "title": "Cabo Verde",
+  "description": "Cabo Verde — Praia, Mindelo, Santa Maria và mười hòn đảo, từ Santo Antão đến Brava."
+ },
+ "sao-tome-principe": {
+  "title": "São Tomé và Príncipe",
+  "description": "São Tomé và Príncipe — São Tomé, Santo António cùng rừng mưa và bãi biển của hai hòn đảo."
+ },
+ "saint-helena": {
+  "title": "Saint Helena, Ascension và Tristan da Cunha",
+  "description": "Saint Helena, đảo Ascension và Tristan da Cunha — Jamestown, Georgetown và Edinburgh of the Seven Seas."
+ },
+ "bangladesh": {
+  "title": "Bangladesh",
+  "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet và Cox’s Bazar; rừng Sundarbans và châu thổ sông Hằng–Brahmaputra."
+ },
+ "sri-lanka-maldives": {
+  "title": "Sri Lanka và Maldives",
+  "description": "Sri Lanka và Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura và Malé; vùng đồi núi, Sigiriya và các đảo san hô vòng."
+ },
+ "vietnam": {
+  "title": "Việt Nam",
+  "description": "Việt Nam — Hà Nội, Thành phố Hồ Chí Minh, Đà Nẵng, Hải Phòng, Huế, Hội An và Cần Thơ; vịnh Hạ Long và Đồng bằng sông Cửu Long."
+ },
+ "philippines": {
+  "title": "Philippines",
+  "description": "Philippines — Manila, Thành phố Quezon, Cebu, Davao, Iloilo, Baguio và Zamboanga; Luzon, Visayas, Mindanao và Palawan."
+ },
+ "indonesia": {
+  "title": "Indonesia và Đông Timor",
+  "description": "Indonesia và Đông Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar và Dili; Java, Sumatra, Bali, Borneo, Sulawesi và Papua."
+ },
+ "malaysia-singapore-brunei": {
+  "title": "Malaysia, Singapore và Brunei",
+  "description": "Malaysia, Singapore và Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching và Bandar Seri Begawan."
+ },
+ "myanmar": {
+  "title": "Myanmar",
+  "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine và hồ Inle; thung lũng sông Irrawaddy và vùng đồi Shan."
+ },
+ "cambodia-laos": {
+  "title": "Campuchia và Lào",
+  "description": "Campuchia và Lào — Phnôm Pênh, Siem Reap và Angkor, Battambang, Viêng Chăn, Luang Prabang và Pakse; sông Mê Kông và Biển Hồ Tonlé Sap."
+ },
+ "colombia": {
+  "title": "Colombia",
+  "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena và Bucaramanga; dãy Andes, bờ biển Caribe và rừng Amazon."
+ },
+ "venezuela": {
+  "title": "Venezuela",
+  "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida và Ciudad Bolívar; thác Angel, sông Orinoco và đảo Margarita."
+ },
+ "peru": {
+  "title": "Peru",
+  "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos và Puno; Machu Picchu, hồ Titicaca và Thung lũng Thiêng."
+ },
+ "ecuador": {
+  "title": "Ecuador",
+  "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta và Baños; Đại lộ Núi lửa, rừng Amazon và quần đảo Galápagos."
+ },
+ "bolivia": {
+  "title": "Bolivia",
+  "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre và Potosí; hồ Titicaca và cánh đồng muối Salar de Uyuni."
+ },
+ "chile": {
+  "title": "Chile",
+  "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena và Punta Arenas; sa mạc Atacama, Vùng Hồ, Patagonia và đảo Phục Sinh."
+ },
+ "paraguay-uruguay": {
+  "title": "Paraguay và Uruguay",
+  "description": "Paraguay và Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este và Colonia del Sacramento."
+ },
+ "guianas": {
+  "title": "Vùng Guiana",
+  "description": "Guyana, Suriname và Guyane thuộc Pháp — Georgetown, Paramaribo, Cayenne và Kourou; thác Kaieteur và rừng mưa của Khiên Guiana."
+ },
+ "falklands": {
+  "title": "Quần đảo Falkland",
+  "description": "Quần đảo Falkland — Stanley, Goose Green và các đảo Đông Falkland và Tây Falkland."
+ },
+ "australia": {
+  "title": "Úc",
+  "description": "Úc — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin và Canberra; rạn san hô Great Barrier, Uluru và vùng hoang mạc Outback."
+ },
+ "new-zealand": {
+  "title": "New Zealand",
+  "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin và Queenstown; dãy Alps phía Nam, Fiordland và Rotorua."
+ },
+ "british-columbia": {
+  "title": "British Columbia",
+  "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George và Whistler; dãy núi Duyên hải, đảo Vancouver và thung lũng Okanagan."
+ },
+ "canadian-prairies": {
+  "title": "Thảo nguyên Canada",
+  "description": "Alberta, Saskatchewan và Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina và Banff; dãy Rocky, vùng thảo nguyên và Churchill bên vịnh Hudson."
+ },
+ "ontario": {
+  "title": "Ontario",
+  "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston và Thunder Bay; thác Niagara, Ngũ Đại Hồ và công viên Algonquin."
+ },
+ "quebec": {
+  "title": "Québec",
+  "description": "Québec — Montréal, thành phố Québec, Laval, Gatineau, Sherbrooke và Saguenay; sông Saint Lawrence, dãy Laurentides và bán đảo Gaspé."
+ },
+ "atlantic-canada": {
+  "title": "Canada vùng Đại Tây Dương",
+  "description": "New Brunswick, Nova Scotia, Đảo Hoàng tử Edward, và Newfoundland và Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton và Charlottetown; cung đường Cabot Trail và vịnh Fundy."
+ },
+ "northern-canada": {
+  "title": "Bắc Canada",
+  "description": "Yukon, Các Lãnh thổ Tây Bắc và Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City và Inuvik; Quần đảo Bắc Cực thuộc Canada và sông Mackenzie."
+ },
+ "hong-kong-macau": {
+  "title": "Hồng Kông và Ma Cao",
+  "description": "Hồng Kông và Ma Cao — đảo Hồng Kông, Cửu Long, Tân Giới, đảo Lantau cùng bán đảo Ma Cao, Taipa và Coloane."
  }
 }

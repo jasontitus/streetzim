@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Jugu Qendror i SHBA-së",
     "description": "Teksasi, Oklahoma, Arkansasi, Luiziana, Kentaki, Tenesi, Misisipi dhe Alabama — Hjustoni, Dallasi, San Antonio, Ostini, Oklahoma Siti, Tulsa, Litëll Roku, Nju Orleansi, Luisvili, Nashvili, Memfisi, Xheksoni dhe Birminghami."
+  },
+  "west-polynesia": {
+    "title": "Samoa dhe Tonga",
+    "description": "Samoa, Samoa Amerikane, Tonga, Niue, Tokelau dhe Uollis e Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi dhe Mata-Utu; Upolu, Savaiʻi, Tutuila dhe ishujt e Tongës."
+  },
+  "mariana-islands": {
+    "title": "Guami dhe Ishujt e Marianës Veriore",
+    "description": "Guami dhe Ishujt e Marianës Veriore — Hagåtña, Tamuning, Dededo, Saipan, Tinian dhe Rota."
+  },
+  "greenland": {
+    "title": "Grenlanda",
+    "description": "Grenlanda — Nuuku, Sisimiuti, Ilulissati, Qaqortoqu dhe Tasiilaqu; shtresa e akullit, fjordi i akullt i Ilulissatit dhe fjordet e jugut."
+  },
+  "bermuda": {
+    "title": "Bermudet",
+    "description": "Bermudet — Hamiltoni, St. George’s dhe Doku Detar Mbretëror, famullitë e ishullit dhe plazhet e tij me rërë rozë."
+  },
+  "belarus": {
+    "title": "Bjellorusia",
+    "description": "Bjellorusia — Minsku, Gomeli, Mogilevi, Vitebsku, Grodnoja dhe Bresti; pylli i Bjallovjezhës dhe kënetat e Polesisë."
+  },
+  "channel-islands": {
+    "title": "Ishujt e Kanalit",
+    "description": "Xhersi, Gernsi, Oldërni, Sarku dhe Hermi — St Helier, St Peter Port dhe Gorey."
+  },
+  "faroe-islands": {
+    "title": "Ishujt Faroe",
+    "description": "Ishujt Faroe — Tórshavni, Klaksvíku, Runavíku dhe tetëmbëdhjetë ishujt, me fshatrat, tunelet dhe shkëmbinjtë e tyre detarë."
+  },
+  "svalbard": {
+    "title": "Svalbardi",
+    "description": "Svalbardi dhe Jan Majeni — Longyearbyeni, Barentsburgu dhe Ny-Ålesundi; akullnajat dhe fjordet e Spitsbergenit."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo dhe Comino — Valeta, Sliema, St Julian’s, Mdina, Viktoria dhe Tre Qytetet."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskari dhe ishujt e Oqeanit Indian",
+    "description": "Madagaskari, Komoret, Majota, Reunioni, Mauritiusi dhe Sejshelet — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis dhe Viktoria."
+  },
+  "sudan": {
+    "title": "Sudani",
+    "description": "Sudani — Khartumi, Omdurmani, Port Sudani, Kasala, El Obeidi dhe Njala; bashkimi i Nilit të Kaltër me Nilin e Bardhë dhe piramidat e Meroes."
+  },
+  "cabo-verde": {
+    "title": "Kepi i Gjelbër",
+    "description": "Kepi i Gjelbër — Praia, Mindelo, Santa Maria dhe dhjetë ishujt, nga Santo Antão te Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé dhe Príncipe",
+    "description": "São Tomé dhe Príncipe — São Tomé, Santo António dhe pyjet tropikale e plazhet e dy ishujve."
+  },
+  "saint-helena": {
+    "title": "Shën Helena, Asensioni dhe Tristan da Kunja",
+    "description": "Shën Helena, ishulli Asension dhe Tristan da Kunja — Xhejmstauni, Xhorxhtauni dhe Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladeshi",
+    "description": "Bangladeshi — Daka, Çitagongu, Khulna, Rajshahi, Silheti dhe Cox’s Bazar; Sundarbanët dhe delta e Gangut dhe Brahmaputrës."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka dhe Maldivet",
+    "description": "Sri Lanka dhe Maldivet — Kolombo, Kandi, Gale, Xhafna, Trinkomali, Anuradhapura dhe Male; viset kodrinore, Sigiriya dhe atolet."
+  },
+  "vietnam": {
+    "title": "Vietnami",
+    "description": "Vietnami — Hanoi, Qyteti Ho Chi Minh, Da Nangu, Hai Fongu, Hue, Hoi Ani dhe Can Tho; gjiri Ha Long dhe delta e Mekongut."
+  },
+  "philippines": {
+    "title": "Filipinet",
+    "description": "Filipinet — Manila, Kezon Siti, Sebu, Davao, Iloilo, Baguio dhe Zamboanga; Luzoni, Visajat, Mindanao dhe Palavani."
+  },
+  "indonesia": {
+    "title": "Indonezia dhe Timori Lindor",
+    "description": "Indonezia dhe Timori Lindor — Xhakarta, Surabaja, Bandungu, Medani, Jogjakarta, Denpasari, Makasari dhe Dili; Java, Sumatra, Bali, Borneo, Sulavesi dhe Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malajzia, Singapori dhe Bruneji",
+    "description": "Malajzia, Singapori dhe Bruneji — Kuala Lumpuri, Singapori, Xhorxhtauni, Xhohor Baru, Malaka, Kota Kinabalu, Kuçingu dhe Bandar Seri Begavani."
+  },
+  "myanmar": {
+    "title": "Mianmari",
+    "description": "Mianmari — Jangoni, Mandalaji, Nejpjidoja, Bagani, Moulmeini dhe liqeni Inle; lugina e Iravadit dhe kodrat e Shanit."
+  },
+  "cambodia-laos": {
+    "title": "Kamboxhia dhe Laosi",
+    "description": "Kamboxhia dhe Laosi — Pnom Peni, Siem Reapi dhe Angkori, Batambangu, Vientiani, Luang Prabangu dhe Pakse; Mekongu dhe Tonle Sapi."
+  },
+  "colombia": {
+    "title": "Kolumbia",
+    "description": "Kolumbia — Bogota, Medelini, Kali, Barankilja, Kartagjena dhe Bukaramanga; Andet, bregdeti i Karaibeve dhe Amazona."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Karakasi, Marakaibo, Valensia, Barkisimeto, Merida dhe Siudad Bolivari; ujëvara Anhel, Orinoko dhe ishulli Margarita."
+  },
+  "peru": {
+    "title": "Peruja",
+    "description": "Peruja — Lima, Arekipa, Kusko, Truhijo, Ikitosi dhe Puno; Maçu Piçu, liqeni Titikaka dhe Lugina e Shenjtë."
+  },
+  "ecuador": {
+    "title": "Ekuadori",
+    "description": "Ekuadori — Kito, Guajakili, Kuenka, Manta dhe Banjosi; Rruga e Vullkaneve, Amazona dhe Ishujt Galapagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Pasi, El Alto, Santa Kruzi, Koçabamba, Sukre dhe Potosi; liqeni Titikaka dhe Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Kili",
+    "description": "Kili — Santiago, Valparaiso, Konsepsioni, Antofagasta, La Serena dhe Punta Arenasi; Atakama, Rajoni i Liqeneve, Patagonia dhe Ishulli i Pashkës."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguai dhe Uruguai",
+    "description": "Paraguai dhe Uruguai — Asunsioni, Siudad del Este, Enkarnasioni, Montevideo, Punta del Este dhe Kolonia del Sakramento."
+  },
+  "guianas": {
+    "title": "Guajanat",
+    "description": "Guajana, Surinami dhe Guajana Franceze — Xhorxhtauni, Paramaribo, Kajena dhe Kuru; ujëvara Kaieteur dhe pylli tropikal i Mburojës së Guajanës."
+  },
+  "falklands": {
+    "title": "Ishujt Falkland",
+    "description": "Ishujt Falkland — Stenli, Gus Grini dhe ishujt Falklandi Lindor e Falklandi Perëndimor."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sidnei, Melburni, Brisbani, Perthi, Adelaida, Hobarti, Darvini dhe Kanbera; Barriera e Madhe Koralore, Uluru dhe Autbeku."
+  },
+  "new-zealand": {
+    "title": "Zelanda e Re",
+    "description": "Zelanda e Re — Oklandi, Uelingtoni, Krajstçërçi, Hamiltoni, Danedini dhe Kuinstauni; Alpet Jugore, Fiordlandi dhe Rotorua."
+  },
+  "british-columbia": {
+    "title": "Kolumbia Britanike",
+    "description": "Kolumbia Britanike — Vankuveri, Viktoria, Kelouna, Kamlupsi, Prins Xhorxhi dhe Uisleri; Malet Bregdetare, ishulli Vankuver dhe Okanagani."
+  },
+  "canadian-prairies": {
+    "title": "Preritë kanadeze",
+    "description": "Alberta, Saskaçevani dhe Manitoba — Kalgari, Edmontoni, Uinipegu, Saskatuni, Rexhina dhe Banfi; Malet Shkëmbore, preritë dhe Çërçili në gjirin e Hudsonit."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Otava, Misisoga, Hamiltoni, Londoni, Kingstoni dhe Thander Bei; ujëvara e Niagarës, Liqenet e Mëdha dhe Parku Algonkin."
+  },
+  "quebec": {
+    "title": "Kebeku",
+    "description": "Kebeku — Montreali, Qyteti i Kebekut, Lavali, Gatino, Sherbruku dhe Sagne; lumi Shën Lorenc, malet Laurentide dhe gadishulli Gaspe."
+  },
+  "atlantic-canada": {
+    "title": "Kanadaja Atlantike",
+    "description": "Nju Brunsuiku, Nova Skotia, Ishulli i Princ Eduardit dhe Njufaundlendi e Labradori — Halifaksi, Sent Xhons, Monktoni, Sent Xhon, Frederiktoni dhe Sharllotauni; Rruga e Kabotit dhe gjiri i Fandit."
+  },
+  "northern-canada": {
+    "title": "Kanadaja Veriore",
+    "description": "Jukoni, Territoret Veriperëndimore dhe Nunavuti — Uajthorsi, Jellounajfi, Ikaluiti, Douson Siti dhe Inuviku; Arkipelagu Arktik dhe lumi Makenzi."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kongu dhe Makao",
+    "description": "Hong Kongu dhe Makao — ishulli i Hong Kongut, Kaulungu, Territoret e Reja, Lantau dhe gadishulli i Makaos, Taipa e Koloane."
   }
 }

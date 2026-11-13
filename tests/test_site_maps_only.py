@@ -73,7 +73,7 @@ def test_with_no_map_in_it_a_maps_only_language_has_no_pages(tmp_path, monkeypat
     site = _build(tmp_path, monkeypatch, versions_in_ml=False)
     assert _read(site, ML) is None
     assert f'hreflang="{ML}"' not in _read(site, "")
-    assert f"{ML}/" not in (site / "sitemap.xml").read_text(encoding="utf-8")
+    assert f"/{ML}/" not in (site / "sitemap.xml").read_text(encoding="utf-8")
     assert ML not in {c for c, _n, _s in gen.LANGUAGES}
     assert ML in {c for c, _n, _s in gen.ALL_LANGUAGES}
 
@@ -143,7 +143,7 @@ def test_an_outage_keeps_a_maps_only_languages_pages_but_unlinks_them(tmp_path, 
     gen.build_page()
     assert (site / ML / "index.html").exists() and (site / ML / "maps" / WITH / "index.html").exists()
     assert f'hreflang="{ML}"' not in _read(site, "")
-    assert f"{ML}/" not in (site / "sitemap.xml").read_text(encoding="utf-8")
+    assert f"/{ML}/" not in (site / "sitemap.xml").read_text(encoding="utf-8")
 
 
 def _entry(rid, live=True, language="en"):

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "America ke Dakkhin-Beech Rajya",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi aur Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson aur Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa aur Tonga",
+    "description": "Samoa, American Samoa, Tonga, Niue, Tokelau, aur Wallis and Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi aur Mata-Utu; Upolu, Savaiʻi, Tutuila aur Tonga ke tapu."
+  },
+  "mariana-islands": {
+    "title": "Guam aur Northern Mariana Islands",
+    "description": "Guam aur Northern Mariana Islands — Hagåtña, Tamuning, Dededo, Saipan, Tinian aur Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq aur Tasiilaq; barf ke chaadar, Ilulissat Icefjord aur dakkhin ke fjord."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s aur Royal Naval Dockyard, tapu ke parish aur uske gulaabi baalu waala beach."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno aur Brest; Belovezhskaya Pushcha ke jangal aur Polesia ke daldal."
+  },
+  "channel-islands": {
+    "title": "Channel Islands",
+    "description": "Jersey, Guernsey, Alderney, Sark aur Herm — St Helier, St Peter Port aur Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faroe Islands",
+    "description": "Faroe Islands — Tórshavn, Klaksvík, Runavík aur atharah tapu, uske gaon, surang aur samundar ke kinaare ke unche chattaan."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard aur Jan Mayen — Longyearbyen, Barentsburg aur Ny-Ålesund; Spitsbergen ke glacier aur fjord."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo aur Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria aur Three Cities."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar aur Hind Mahasagar ke Tapu",
+    "description": "Madagascar, Comoros, Mayotte, Réunion, Mauritius aur Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis aur Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid aur Nyala; jahaan Blue Nile aur White Nile mile hai, aur Meroë ke pyramid."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria aur das tapu, Santo Antão se Brava talak."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé aur Príncipe",
+    "description": "São Tomé aur Príncipe — São Tomé, Santo António aur dono tapu ke rainforest aur beach."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension aur Tristan da Cunha",
+    "description": "Saint Helena, Ascension Island aur Tristan da Cunha — Jamestown, Georgetown aur Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet aur Cox’s Bazar; Sundarbans aur Ganga–Brahmaputra delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka aur Maldives",
+    "description": "Sri Lanka aur Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura aur Malé; pahaari ilaaka, Sigiriya aur atoll."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An aur Can Tho; Ha Long Bay aur Mekong Delta."
+  },
+  "philippines": {
+    "title": "Philippines",
+    "description": "Philippines — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio aur Zamboanga; Luzon, Visayas, Mindanao aur Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia aur Timor-Leste",
+    "description": "Indonesia aur Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar aur Dili; Java, Sumatra, Bali, Borneo, Sulawesi aur Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore aur Brunei",
+    "description": "Malaysia, Singapore aur Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching aur Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine aur Inle Lake; Irrawaddy ke ghaati aur Shan ke pahaar."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia aur Laos",
+    "description": "Cambodia aur Laos — Phnom Penh, Siem Reap aur Angkor, Battambang, Vientiane, Luang Prabang aur Pakse; Mekong nadi aur Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena aur Bucaramanga; Andes, Caribbean ke kinaara aur Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida aur Ciudad Bolívar; Angel Falls, Orinoco nadi aur Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos aur Puno; Machu Picchu, Lake Titicaca aur Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta aur Baños; Avenue of the Volcanoes, Amazon aur Galápagos Islands."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre aur Potosí; Lake Titicaca aur Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena aur Punta Arenas; Atacama, Lake District, Patagonia aur Easter Island."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay aur Uruguay",
+    "description": "Paraguay aur Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este aur Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guiana ke Desh",
+    "description": "Guyana, Suriname aur French Guiana — Georgetown, Paramaribo, Cayenne aur Kourou; Kaieteur Falls aur Guiana Shield ke rainforest."
+  },
+  "falklands": {
+    "title": "Falkland Islands",
+    "description": "Falkland Islands — Stanley, Goose Green aur East Falkland aur West Falkland ke tapu."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin aur Canberra; Great Barrier Reef, Uluru aur Outback."
+  },
+  "new-zealand": {
+    "title": "New Zealand",
+    "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin aur Queenstown; Southern Alps, Fiordland aur Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George aur Whistler; Coast Mountains, Vancouver Island aur Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Canada ke Prairies",
+    "description": "Alberta, Saskatchewan aur Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina aur Banff; Rockies, prairies aur Hudson Bay pe Churchill."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston aur Thunder Bay; Niagara Falls, Great Lakes aur Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke aur Saguenay; St. Lawrence nadi, Laurentians aur Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Atlantic Canada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, aur Newfoundland and Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton aur Charlottetown; Cabot Trail aur Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Uttar Canada",
+    "description": "Yukon, Northwest Territories aur Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City aur Inuvik; Arctic Archipelago aur Mackenzie nadi."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong aur Macau",
+    "description": "Hong Kong aur Macau — Hong Kong Island, Kowloon, New Territories, Lantau aur Macau Peninsula, Taipa aur Coloane."
   }
 }

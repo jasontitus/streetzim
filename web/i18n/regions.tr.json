@@ -366,5 +366,165 @@
  "india-west-light": {
   "title": "Batı Hindistan (Hafif)",
   "description": "Uydu görüntüsü içermeyen ve 13. yakınlaştırma düzeyiyle sınırlı Batı Hindistan haritası — aynı yerler, daha küçük bir indirme boyutuyla; yavaş bağlantılar ve depolama alanı az olan cihazlar için."
+ },
+ "west-polynesia": {
+  "title": "Samoa ve Tonga",
+  "description": "Samoa, Amerikan Samoası, Tonga, Niue, Tokelau ile Wallis ve Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi ve Mata-Utu; Upolu, Savaiʻi, Tutuila ve Tonga adaları."
+ },
+ "mariana-islands": {
+  "title": "Guam ve Kuzey Mariana Adaları",
+  "description": "Guam ve Kuzey Mariana Adaları — Hagåtña, Tamuning, Dededo, Saipan, Tinian ve Rota."
+ },
+ "greenland": {
+  "title": "Grönland",
+  "description": "Grönland — Nuuk, Sisimiut, Ilulissat, Qaqortoq ve Tasiilaq; buz örtüsü, Ilulissat Buz Fiyordu ve güneyin fiyortları."
+ },
+ "bermuda": {
+  "title": "Bermuda",
+  "description": "Bermuda — Hamilton, St. George’s ve Kraliyet Donanması Tersanesi, adanın bölgeleri ve pembe kumlu plajları."
+ },
+ "belarus": {
+  "title": "Belarus",
+  "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno ve Brest; Belovejskaya Puşça ormanı ve Polesya bataklıkları."
+ },
+ "channel-islands": {
+  "title": "Manş Adaları",
+  "description": "Jersey, Guernsey, Alderney, Sark ve Herm — St Helier, St Peter Port ve Gorey."
+ },
+ "faroe-islands": {
+  "title": "Faroe Adaları",
+  "description": "Faroe Adaları — Tórshavn, Klaksvík, Runavík ve on sekiz ada; köyleri, tünelleri ve deniz uçurumları."
+ },
+ "svalbard": {
+  "title": "Svalbard",
+  "description": "Svalbard ve Jan Mayen — Longyearbyen, Barentsburg ve Ny-Ålesund; Spitsbergen’in buzulları ve fiyortları."
+ },
+ "malta": {
+  "title": "Malta",
+  "description": "Malta, Gozo ve Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria ve Üç Şehir."
+ },
+ "madagascar-islands": {
+  "title": "Madagaskar ve Hint Okyanusu Adaları",
+  "description": "Madagaskar, Komorlar, Mayotte, Réunion, Mauritius ve Seyşeller — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis ve Victoria."
+ },
+ "sudan": {
+  "title": "Sudan",
+  "description": "Sudan — Hartum, Omdurman, Port Sudan, Kassala, El Obeid ve Nyala; Mavi ve Beyaz Nil’in birleştiği yer ve Meroë piramitleri."
+ },
+ "cabo-verde": {
+  "title": "Yeşil Burun Adaları",
+  "description": "Yeşil Burun Adaları — Praia, Mindelo, Santa Maria ve Santo Antão’dan Brava’ya on ada."
+ },
+ "sao-tome-principe": {
+  "title": "São Tomé ve Príncipe",
+  "description": "São Tomé ve Príncipe — São Tomé, Santo António ve iki adanın yağmur ormanları ile plajları."
+ },
+ "saint-helena": {
+  "title": "Saint Helena, Ascension ve Tristan da Cunha",
+  "description": "Saint Helena, Ascension Adası ve Tristan da Cunha — Jamestown, Georgetown ve Edinburgh of the Seven Seas."
+ },
+ "bangladesh": {
+  "title": "Bangladeş",
+  "description": "Bangladeş — Dakka, Chittagong, Khulna, Rajshahi, Sylhet ve Cox’s Bazar; Sundarbans ve Ganj–Brahmaputra deltası."
+ },
+ "sri-lanka-maldives": {
+  "title": "Sri Lanka ve Maldivler",
+  "description": "Sri Lanka ve Maldivler — Kolombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura ve Male; dağlık bölge, Sigiriya ve atoller."
+ },
+ "vietnam": {
+  "title": "Vietnam",
+  "description": "Vietnam — Hanoi, Ho Chi Minh Kenti, Da Nang, Hai Phong, Hue, Hoi An ve Can Tho; Ha Long Körfezi ve Mekong Deltası."
+ },
+ "philippines": {
+  "title": "Filipinler",
+  "description": "Filipinler — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio ve Zamboanga; Luzon, Visayas, Mindanao ve Palawan."
+ },
+ "indonesia": {
+  "title": "Endonezya ve Doğu Timor",
+  "description": "Endonezya ve Doğu Timor — Cakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar ve Dili; Cava, Sumatra, Bali, Borneo, Sulawesi ve Papua."
+ },
+ "malaysia-singapore-brunei": {
+  "title": "Malezya, Singapur ve Brunei",
+  "description": "Malezya, Singapur ve Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching ve Bandar Seri Begawan."
+ },
+ "myanmar": {
+  "title": "Myanmar",
+  "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine ve İnle Gölü; İravadi vadisi ve Şan tepeleri."
+ },
+ "cambodia-laos": {
+  "title": "Kamboçya ve Laos",
+  "description": "Kamboçya ve Laos — Phnom Penh, Siem Reap ve Angkor, Battambang, Vientiane, Luang Prabang ve Pakse; Mekong ve Tonlé Sap."
+ },
+ "colombia": {
+  "title": "Kolombiya",
+  "description": "Kolombiya — Bogota, Medellín, Cali, Barranquilla, Cartagena ve Bucaramanga; And Dağları, Karayip kıyısı ve Amazon."
+ },
+ "venezuela": {
+  "title": "Venezuela",
+  "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida ve Ciudad Bolívar; Angel Şelalesi, Orinoco ve Margarita Adası."
+ },
+ "peru": {
+  "title": "Peru",
+  "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos ve Puno; Machu Picchu, Titicaca Gölü ve Kutsal Vadi."
+ },
+ "ecuador": {
+  "title": "Ekvador",
+  "description": "Ekvador — Quito, Guayaquil, Cuenca, Manta ve Baños; Volkanlar Caddesi, Amazon ve Galápagos Adaları."
+ },
+ "bolivia": {
+  "title": "Bolivya",
+  "description": "Bolivya — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre ve Potosí; Titicaca Gölü ve Salar de Uyuni."
+ },
+ "chile": {
+  "title": "Şili",
+  "description": "Şili — Santiago, Valparaíso, Concepción, Antofagasta, La Serena ve Punta Arenas; Atacama, Göller Bölgesi, Patagonya ve Paskalya Adası."
+ },
+ "paraguay-uruguay": {
+  "title": "Paraguay ve Uruguay",
+  "description": "Paraguay ve Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este ve Colonia del Sacramento."
+ },
+ "guianas": {
+  "title": "Guyanalar",
+  "description": "Guyana, Surinam ve Fransız Guyanası — Georgetown, Paramaribo, Cayenne ve Kourou; Kaieteur Şelalesi ve Guyana Kalkanı’nın yağmur ormanı."
+ },
+ "falklands": {
+  "title": "Falkland Adaları",
+  "description": "Falkland Adaları — Stanley, Goose Green ile Doğu ve Batı Falkland adaları."
+ },
+ "australia": {
+  "title": "Avustralya",
+  "description": "Avustralya — Sidney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin ve Canberra; Büyük Set Resifi, Uluru ve Outback."
+ },
+ "new-zealand": {
+  "title": "Yeni Zelanda",
+  "description": "Yeni Zelanda — Auckland, Wellington, Christchurch, Hamilton, Dunedin ve Queenstown; Güney Alpleri, Fiordland ve Rotorua."
+ },
+ "british-columbia": {
+  "title": "Britanya Kolumbiyası",
+  "description": "Britanya Kolumbiyası — Vancouver, Victoria, Kelowna, Kamloops, Prince George ve Whistler; Kıyı Dağları, Vancouver Adası ve Okanagan."
+ },
+ "canadian-prairies": {
+  "title": "Kanada Preryaları",
+  "description": "Alberta, Saskatchewan ve Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina ve Banff; Rocky Dağları, preriler ve Hudson Körfezi kıyısındaki Churchill."
+ },
+ "ontario": {
+  "title": "Ontario",
+  "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston ve Thunder Bay; Niagara Şelalesi, Büyük Göller ve Algonquin Parkı."
+ },
+ "quebec": {
+  "title": "Québec",
+  "description": "Québec — Montréal, Québec şehri, Laval, Gatineau, Sherbrooke ve Saguenay; Saint Lawrence, Laurentides ve Gaspé Yarımadası."
+ },
+ "atlantic-canada": {
+  "title": "Atlantik Kanada",
+  "description": "New Brunswick, Nova Scotia, Prens Edward Adası ile Newfoundland ve Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton ve Charlottetown; Cabot Trail ve Fundy Körfezi."
+ },
+ "northern-canada": {
+  "title": "Kuzey Kanada",
+  "description": "Yukon, Kuzeybatı Toprakları ve Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ve Inuvik; Kanada Arktik Takımadaları ve Mackenzie Nehri."
+ },
+ "hong-kong-macau": {
+  "title": "Hong Kong ve Makao",
+  "description": "Hong Kong ve Makao — Hong Kong Adası, Kowloon, Yeni Topraklar, Lantau ile Makao Yarımadası, Taipa ve Coloane."
  }
 }

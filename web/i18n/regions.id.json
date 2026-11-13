@@ -366,5 +366,165 @@
  "india-west-light": {
   "title": "India Barat (Ringan)",
   "description": "Peta India Barat tanpa citra satelit dan dengan zoom maksimum 13 — tempat-tempat yang sama dengan ukuran unduhan lebih kecil, cocok untuk koneksi lambat dan perangkat berkapasitas kecil."
+ },
+ "west-polynesia": {
+  "title": "Samoa dan Tonga",
+  "description": "Samoa, Samoa Amerika, Tonga, Niue, Tokelau, serta Wallis dan Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi, dan Mata-Utu; Upolu, Savaiʻi, Tutuila, dan pulau-pulau Tonga."
+ },
+ "mariana-islands": {
+  "title": "Guam dan Kepulauan Mariana Utara",
+  "description": "Guam dan Kepulauan Mariana Utara — Hagåtña, Tamuning, Dededo, Saipan, Tinian, dan Rota."
+ },
+ "greenland": {
+  "title": "Greenland",
+  "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq, dan Tasiilaq; lapisan es, Fjord Es Ilulissat, dan fjord-fjord di selatan."
+ },
+ "bermuda": {
+  "title": "Bermuda",
+  "description": "Bermuda — Hamilton, St. George’s, dan Royal Naval Dockyard, paroki-paroki pulau ini, serta pantai-pantai berpasir merah mudanya."
+ },
+ "belarus": {
+  "title": "Belarus",
+  "description": "Belarus — Minsk, Homel, Mogilev, Vitebsk, Grodno, dan Brest; hutan Białowieża (Belovezhskaya Pushcha) dan rawa-rawa Polesia."
+ },
+ "channel-islands": {
+  "title": "Kepulauan Channel",
+  "description": "Jersey, Guernsey, Alderney, Sark, dan Herm — St Helier, St Peter Port, dan Gorey."
+ },
+ "faroe-islands": {
+  "title": "Kepulauan Faroe",
+  "description": "Kepulauan Faroe — Tórshavn, Klaksvík, Runavík, dan kedelapan belas pulaunya, beserta desa, terowongan, dan tebing lautnya."
+ },
+ "svalbard": {
+  "title": "Svalbard",
+  "description": "Svalbard dan Jan Mayen — Longyearbyen, Barentsburg, dan Ny-Ålesund; gletser dan fjord Spitsbergen."
+ },
+ "malta": {
+  "title": "Malta",
+  "description": "Malta, Gozo, dan Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria, dan Tiga Kota."
+ },
+ "madagascar-islands": {
+  "title": "Madagaskar dan Kepulauan Samudra Hindia",
+  "description": "Madagaskar, Komoro, Mayotte, Réunion, Mauritius, dan Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis, dan Victoria."
+ },
+ "sudan": {
+  "title": "Sudan",
+  "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid, dan Nyala; pertemuan Sungai Nil Biru dan Nil Putih serta piramida Meroë."
+ },
+ "cabo-verde": {
+  "title": "Tanjung Verde",
+  "description": "Tanjung Verde — Praia, Mindelo, Santa Maria, dan kesepuluh pulaunya, dari Santo Antão hingga Brava."
+ },
+ "sao-tome-principe": {
+  "title": "São Tomé dan Príncipe",
+  "description": "São Tomé dan Príncipe — São Tomé, Santo António, serta hutan hujan dan pantai di kedua pulaunya."
+ },
+ "saint-helena": {
+  "title": "Saint Helena, Ascension, dan Tristan da Cunha",
+  "description": "Saint Helena, Pulau Ascension, dan Tristan da Cunha — Jamestown, Georgetown, dan Edinburgh of the Seven Seas."
+ },
+ "bangladesh": {
+  "title": "Bangladesh",
+  "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet, dan Cox’s Bazar; Sundarbans dan delta Gangga–Brahmaputra."
+ },
+ "sri-lanka-maldives": {
+  "title": "Sri Lanka dan Maladewa",
+  "description": "Sri Lanka dan Maladewa — Kolombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura, dan Malé; dataran tinggi, Sigiriya, dan atol-atolnya."
+ },
+ "vietnam": {
+  "title": "Vietnam",
+  "description": "Vietnam — Hanoi, Kota Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An, dan Can Tho; Teluk Ha Long dan Delta Mekong."
+ },
+ "philippines": {
+  "title": "Filipina",
+  "description": "Filipina — Manila, Kota Quezon, Cebu, Davao, Iloilo, Baguio, dan Zamboanga; Luzon, Visayas, Mindanao, dan Palawan."
+ },
+ "indonesia": {
+  "title": "Indonesia dan Timor Leste",
+  "description": "Indonesia dan Timor Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar, dan Dili; Jawa, Sumatra, Bali, Kalimantan, Sulawesi, dan Papua."
+ },
+ "malaysia-singapore-brunei": {
+  "title": "Malaysia, Singapura, dan Brunei",
+  "description": "Malaysia, Singapura, dan Brunei — Kuala Lumpur, Singapura, George Town, Johor Bahru, Melaka, Kota Kinabalu, Kuching, dan Bandar Seri Begawan."
+ },
+ "myanmar": {
+  "title": "Myanmar",
+  "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine, dan Danau Inle; lembah Sungai Irrawaddy dan perbukitan Shan."
+ },
+ "cambodia-laos": {
+  "title": "Kamboja dan Laos",
+  "description": "Kamboja dan Laos — Phnom Penh, Siem Reap dan Angkor, Battambang, Vientiane, Luang Prabang, dan Pakse; Sungai Mekong dan Tonlé Sap."
+ },
+ "colombia": {
+  "title": "Kolombia",
+  "description": "Kolombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena, dan Bucaramanga; Andes, pesisir Karibia, dan Amazon."
+ },
+ "venezuela": {
+  "title": "Venezuela",
+  "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida, dan Ciudad Bolívar; Air Terjun Angel, Sungai Orinoco, dan Pulau Margarita."
+ },
+ "peru": {
+  "title": "Peru",
+  "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos, dan Puno; Machu Picchu, Danau Titicaca, dan Lembah Suci."
+ },
+ "ecuador": {
+  "title": "Ekuador",
+  "description": "Ekuador — Quito, Guayaquil, Cuenca, Manta, dan Baños; Jalan Raya Gunung Api, Amazon, dan Kepulauan Galápagos."
+ },
+ "bolivia": {
+  "title": "Bolivia",
+  "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre, dan Potosí; Danau Titicaca dan Salar de Uyuni."
+ },
+ "chile": {
+  "title": "Chili",
+  "description": "Chili — Santiago, Valparaíso, Concepción, Antofagasta, La Serena, dan Punta Arenas; Atacama, Kawasan Danau, Patagonia, dan Pulau Paskah."
+ },
+ "paraguay-uruguay": {
+  "title": "Paraguay dan Uruguay",
+  "description": "Paraguay dan Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este, dan Colonia del Sacramento."
+ },
+ "guianas": {
+  "title": "Guyana Raya",
+  "description": "Guyana, Suriname, dan Guyana Prancis — Georgetown, Paramaribo, Cayenne, dan Kourou; Air Terjun Kaieteur dan hutan hujan Perisai Guyana."
+ },
+ "falklands": {
+  "title": "Kepulauan Falkland",
+  "description": "Kepulauan Falkland — Stanley, Goose Green, dan pulau-pulau Falkland Timur dan Falkland Barat."
+ },
+ "australia": {
+  "title": "Australia",
+  "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin, dan Canberra; Great Barrier Reef, Uluru, dan Outback."
+ },
+ "new-zealand": {
+  "title": "Selandia Baru",
+  "description": "Selandia Baru — Auckland, Wellington, Christchurch, Hamilton, Dunedin, dan Queenstown; Pegunungan Alpen Selatan, Fiordland, dan Rotorua."
+ },
+ "british-columbia": {
+  "title": "British Columbia",
+  "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George, dan Whistler; Pegunungan Pesisir, Pulau Vancouver, dan Okanagan."
+ },
+ "canadian-prairies": {
+  "title": "Prairie Kanada",
+  "description": "Alberta, Saskatchewan, dan Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina, dan Banff; Pegunungan Rocky, padang prairie, dan Churchill di Teluk Hudson."
+ },
+ "ontario": {
+  "title": "Ontario",
+  "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston, dan Thunder Bay; Air Terjun Niagara, Danau-Danau Besar, dan Taman Algonquin."
+ },
+ "quebec": {
+  "title": "Quebec",
+  "description": "Quebec — Montréal, Kota Quebec, Laval, Gatineau, Sherbrooke, dan Saguenay; Sungai Saint Lawrence, Pegunungan Laurentian, dan Semenanjung Gaspé."
+ },
+ "atlantic-canada": {
+  "title": "Kanada Atlantik",
+  "description": "New Brunswick, Nova Scotia, Pulau Prince Edward, serta Newfoundland dan Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton, dan Charlottetown; Cabot Trail dan Teluk Fundy."
+ },
+ "northern-canada": {
+  "title": "Kanada Utara",
+  "description": "Yukon, Wilayah Barat Laut, dan Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City, dan Inuvik; Kepulauan Arktik dan Sungai Mackenzie."
+ },
+ "hong-kong-macau": {
+  "title": "Hong Kong dan Makau",
+  "description": "Hong Kong dan Makau — Pulau Hong Kong, Kowloon, Wilayah Baru, Lantau, serta Semenanjung Makau, Taipa, dan Coloane."
  }
 }

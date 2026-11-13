@@ -85,7 +85,7 @@ def test_an_area_shows_only_the_maps_that_hold_it(shown):
 
 
 def test_search_finds_countries_in_continent_maps_and_ranks_titles_first(shown):
-    assert set(shown["madagascar"]["titles"]) == {"Africa", "Africa (Light)"}, shown["madagascar"]["titles"]
+    assert set(shown["madagascar"]["titles"]) == {"Madagascar & the Indian Ocean Islands", "Africa", "Africa (Light)"}, shown["madagascar"]["titles"]
     titles = shown["rank"]["titles"]
     assert titles and "Switzerland" in titles[0], titles
     assert titles.index("Europe") > max(i for i, t in enumerate(titles) if "Switzerland" in t), titles

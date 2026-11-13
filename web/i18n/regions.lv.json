@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "ASV dienvidu centrālā daļa",
     "description": "Teksasa, Oklahoma, Arkanzasa, Luiziāna, Kentuki, Tenesī, Misisipi un Alabama — Hjūstona, Dalasa, Sanantonio, Ostina, Oklahomasitija, Talsa, Litlroka, Ņūorleāna, Lūivila, Nešvila, Memfisa, Džeksona un Birmingema."
+  },
+  "west-polynesia": {
+    "title": "Samoa un Tonga",
+    "description": "Samoa, Amerikāņu Samoa, Tonga, Niue, Tokelau un Volisa un Futuna — Apija, Pagopago, Nukualofa, Alofi un Matautu; Upolu, Savaii, Tutuila un Tongas salas."
+  },
+  "mariana-islands": {
+    "title": "Guama un Ziemeļu Marianas",
+    "description": "Guama un Ziemeļu Marianas salas — Hagatņa, Tamuninga, Dededo, Saipana, Tiniana un Rota."
+  },
+  "greenland": {
+    "title": "Grenlande",
+    "description": "Grenlande — Nūka, Sisimiuta, Ilulisata, Kakortoka un Tasilaka; ledus vairogs, Ilulisatas ledus fjords un dienvidu fjordi."
+  },
+  "bermuda": {
+    "title": "Bermudu salas",
+    "description": "Bermudu salas — Hamiltona, Sentdžordžesa un Karaliskās flotes doks, salas draudzes un rozā smilšu pludmales."
+  },
+  "belarus": {
+    "title": "Baltkrievija",
+    "description": "Baltkrievija — Minska, Homeļa, Mahiļova, Vitebska, Grodņa un Bresta; Belovežas gārša un Polesjes purvi."
+  },
+  "channel-islands": {
+    "title": "Normandijas salas",
+    "description": "Džērsija, Gērnsija, Oldernija, Sarka un Herma — Sentheljēra, Sentpīterporta un Gorija."
+  },
+  "faroe-islands": {
+    "title": "Fēru salas",
+    "description": "Fēru salas — Tórshavna, Klaksvīka, Runavīka un astoņpadsmit salas ar to ciemiem, tuneļiem un jūras klintīm."
+  },
+  "svalbard": {
+    "title": "Svalbāra",
+    "description": "Svalbāra un Jana Majena sala — Longjērbīene, Barencburga un Nīolesunna; Špicbergenas šļūdoņi un fjordi."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo un Komino — Valleta, Slīma, Sentdžuliansa, Mdīna, Viktorija un Trīs pilsētas."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskara un Indijas okeāna salas",
+    "description": "Madagaskara, Komoru salas, Majota, Reinjona, Maurīcija un Seišelu salas — Antananarivu, Tuamasina, Moroni, Mamudzu, Sendenī, Portluisa un Viktorija."
+  },
+  "sudan": {
+    "title": "Sudāna",
+    "description": "Sudāna — Hartūma, Omdurmana, Portsudāna, Kasala, Elobeida un Njala; Zilās un Baltās Nīlas sateka un Meroes piramīdas."
+  },
+  "cabo-verde": {
+    "title": "Kaboverde",
+    "description": "Kaboverde — Praja, Mindelu, Santamarija un desmit salas no Santuantanas līdz Bravai."
+  },
+  "sao-tome-principe": {
+    "title": "Santome un Prinsipi",
+    "description": "Santome un Prinsipi — Santome, Santuantoniu un abu salu lietusmeži un pludmales."
+  },
+  "saint-helena": {
+    "title": "Sv. Helēnas, Debesbraukšanas un Tristana da Kuņas salas",
+    "description": "Sv. Helēnas sala, Debesbraukšanas sala un Tristana da Kuņas salas — Džeimstauna, Džordžtauna un Edinburga-pie-Septiņām-Jūrām."
+  },
+  "bangladesh": {
+    "title": "Bangladeša",
+    "description": "Bangladeša — Daka, Čitagonga, Khulna, Radžšahi, Silheta un Koksbazāra; Sundarbani un Gangas–Brahmaputras delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Šrilanka un Maldīvija",
+    "description": "Šrilanka un Maldīvija — Kolombo, Kandi, Galle, Džafna, Trinkomali, Anuradhapura un Male; kalnu apvidus, Sigirija un atoli."
+  },
+  "vietnam": {
+    "title": "Vjetnama",
+    "description": "Vjetnama — Hanoja, Hošimina, Danang, Haifona, Hue, Hojana un Kantho; Halonga līcis un Mekongas delta."
+  },
+  "philippines": {
+    "title": "Filipīnas",
+    "description": "Filipīnas — Manila, Kesonsitija, Sebu, Davao, Iloilo, Bagio un Zamboanga; Lusona, Visajas salas, Mindanao un Palavana."
+  },
+  "indonesia": {
+    "title": "Indonēzija un Austrumtimora",
+    "description": "Indonēzija un Austrumtimora — Džakarta, Surabaja, Bandunga, Medana, Džokjakarta, Denpasara, Makasara un Dili; Java, Sumatra, Bali, Borneo, Sulavesi un Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaizija, Singapūra un Bruneja",
+    "description": "Malaizija, Singapūra un Bruneja — Kualalumpura, Singapūra, Džordžtauna, Džohorbaru, Malaka, Kotakinabalu, Kučinga un Bandarseribegavana."
+  },
+  "myanmar": {
+    "title": "Mjanma",
+    "description": "Mjanma — Jangona, Mandalaja, Neipjido, Pagana, Moulmeina un Inles ezers; Iravadi ieleja un Šanu kalni."
+  },
+  "cambodia-laos": {
+    "title": "Kambodža un Laosa",
+    "description": "Kambodža un Laosa — Pnompeņa, Siemreapa un Angkora, Batambanga, Vjenčana, Luanprabanga un Pakse; Mekonga un Tonlesaps."
+  },
+  "colombia": {
+    "title": "Kolumbija",
+    "description": "Kolumbija — Bogota, Medeljina, Kali, Barankilja, Kartahena un Bukaramanga; Andi, Karību jūras piekraste un Amazone."
+  },
+  "venezuela": {
+    "title": "Venecuēla",
+    "description": "Venecuēla — Karakasa, Marakaibo, Valensija, Barkisimeto, Merida un Sjudadbolivara; Andela ūdenskritums, Orinoko un Margaritas sala."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arekipa, Kusko, Truhiljo, Ikitosa un Puno; Maču Pikču, Titikakas ezers un Svētā ieleja."
+  },
+  "ecuador": {
+    "title": "Ekvadora",
+    "description": "Ekvadora — Kito, Gvajakila, Kuenka, Manta un Banjosa; Vulkānu aleja, Amazone un Galapagu salas."
+  },
+  "bolivia": {
+    "title": "Bolīvija",
+    "description": "Bolīvija — Lapasa, Elalto, Santakrusa, Kočabamba, Sukre un Potosi; Titikakas ezers un Ujuni sālsezers."
+  },
+  "chile": {
+    "title": "Čīle",
+    "description": "Čīle — Santjago, Valparaiso, Konsepsjona, Antofagasta, Laserena un Puntaarenasa; Atakama, Ezeru apgabals, Patagonija un Lieldienu sala."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragvaja un Urugvaja",
+    "description": "Paragvaja un Urugvaja — Asunsjona, Sjudaddeleste, Enkarnasjona, Montevideo, Puntadeleste un Kolonija del Sakramento."
+  },
+  "guianas": {
+    "title": "Gviānas",
+    "description": "Gajāna, Surinama un Francijas Gviāna — Džordžtauna, Paramaribo, Kajenna un Kuru; Kaietūras ūdenskritums un Gviānas vairoga lietusmežs."
+  },
+  "falklands": {
+    "title": "Folklenda salas",
+    "description": "Folklenda salas — Stenli, Gūsgrīna un Austrumfolklenda un Rietumfolklenda."
+  },
+  "australia": {
+    "title": "Austrālija",
+    "description": "Austrālija — Sidneja, Melburna, Brisbena, Pērta, Adelaida, Hobārta, Dārvina un Kanbera; Lielais Barjerrifs, Uluru un Austrālijas iekšzeme."
+  },
+  "new-zealand": {
+    "title": "Jaunzēlande",
+    "description": "Jaunzēlande — Oklenda, Velingtona, Kraistčērča, Hamiltona, Danidina un Kvīnstauna; Dienvidu Alpi, Fjordlenda un Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britu Kolumbija",
+    "description": "Britu Kolumbija — Vankūvera, Viktorija, Kelouna, Kamlupsa, Prinsdžordža un Vislera; Piekrastes kalni, Vankūveras sala un Okanagana."
+  },
+  "canadian-prairies": {
+    "title": "Kanādas prērijas",
+    "description": "Alberta, Saskačevana un Manitoba — Kalgari, Edmontona, Vinipega, Saskatūna, Ridžaina un Banfa; Klinšu kalni, prērijas un Čērčila pie Hudzona līča."
+  },
+  "ontario": {
+    "title": "Ontārio",
+    "description": "Ontārio — Toronto, Otava, Misisoga, Hamiltona, Londona, Kingstona un Tanderbeja; Niagāras ūdenskritums, Lielie ezeri un Algonkinas parks."
+  },
+  "quebec": {
+    "title": "Kvebeka",
+    "description": "Kvebeka — Monreāla, Kvebekas pilsēta, Lavala, Gatino, Šerbruka un Saginē; Sentlorensa upe, Laurentīdi un Gaspē pussala."
+  },
+  "atlantic-canada": {
+    "title": "Atlantijas Kanāda",
+    "description": "Ņūbransvika, Jaunskotija, Prinča Edvarda sala un Ņūfaundlenda un Labradora — Halifaksa, Sentdžonsa, Monktona, Sentdžona, Frederiktona un Šārlotauna; Kabota taka un Fandija līcis."
+  },
+  "northern-canada": {
+    "title": "Ziemeļkanāda",
+    "description": "Jukona, Ziemeļrietumu teritorijas un Nunavuta — Vaithorsa, Jelounaifa, Ikaluita, Dousonsitija un Inuvika; Kanādas Arktiskais arhipelāgs un Makenzi upe."
+  },
+  "hong-kong-macau": {
+    "title": "Honkonga un Makao",
+    "description": "Honkonga un Makao — Honkongas sala, Kaulūna, Jaunās teritorijas, Lantau un Makao pussala, Taipa un Koloane."
   }
 }

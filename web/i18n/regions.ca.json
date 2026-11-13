@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Centre-sud dels Estats Units",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississipí i Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, Nova Orleans, Louisville, Nashville, Memphis, Jackson i Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa i Tonga",
+    "description": "Samoa, Samoa Nord-americana, Tonga, Niue, Tokelau i Wallis i Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi i Mata-Utu; Upolu, Savaiʻi, Tutuila i les illes de Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam i les Illes Mariannes Septentrionals",
+    "description": "Guam i les Illes Mariannes Septentrionals — Hagåtña, Tamuning, Dededo, Saipan, Tinian i Rota."
+  },
+  "greenland": {
+    "title": "Groenlàndia",
+    "description": "Groenlàndia — Nuuk, Sisimiut, Ilulissat, Qaqortoq i Tasiilaq; l’inlandsis, el fiord gelat d’Ilulissat i els fiords del sud."
+  },
+  "bermuda": {
+    "title": "Bermudes",
+    "description": "Bermudes — Hamilton, St. George’s i la drassana de la Royal Navy, les parròquies de l’illa i les seves platges de sorra rosa."
+  },
+  "belarus": {
+    "title": "Bielorússia",
+    "description": "Bielorússia — Minsk, Hòmiel, Mahiliou, Vítsiebsk, Hrodna i Brest; el bosc de Białowieża i els aiguamolls de Polèsia."
+  },
+  "channel-islands": {
+    "title": "Illes del Canal",
+    "description": "Jersey, Guernsey, Alderney, Sark i Herm — St Helier, St Peter Port i Gorey."
+  },
+  "faroe-islands": {
+    "title": "Illes Fèroe",
+    "description": "Les Illes Fèroe — Tórshavn, Klaksvík, Runavík i les divuit illes, amb els seus pobles, túnels i penya-segats."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard i Jan Mayen — Longyearbyen, Barentsburg i Ny-Ålesund; les glaceres i els fiords de Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo i Comino — la Valletta, Sliema, St Julian’s, Mdina, Victoria i les Tres Ciutats."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar i les illes de l’oceà Índic",
+    "description": "Madagascar, les Comores, Mayotte, la Reunió, Maurici i les Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis i Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartum, Omdurman, Port Sudan, Kassala, El Obeid i Nyala; la confluència del Nil Blau i el Nil Blanc i les piràmides de Mèroe."
+  },
+  "cabo-verde": {
+    "title": "Cap Verd",
+    "description": "Cap Verd — Praia, Mindelo, Santa Maria i les deu illes, de Santo Antão a Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé i Príncipe",
+    "description": "São Tomé i Príncipe — São Tomé, Santo António i les selves i platges de les dues illes."
+  },
+  "saint-helena": {
+    "title": "Santa Helena, Ascensió i Tristan da Cunha",
+    "description": "Santa Helena, l’illa de l’Ascensió i Tristan da Cunha — Jamestown, Georgetown i Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet i Cox’s Bazar; els Sundarbans i el delta del Ganges i el Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka i les Maldives",
+    "description": "Sri Lanka i les Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura i Malé; la regió muntanyosa, Sigiriya i els atols."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ciutat Ho Chi Minh, Da Nang, Haiphong, Hue, Hoi An i Can Tho; la badia de Ha Long i el delta del Mekong."
+  },
+  "philippines": {
+    "title": "Filipines",
+    "description": "Les Filipines — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio i Zamboanga; Luzon, les Visayas, Mindanao i Palawan."
+  },
+  "indonesia": {
+    "title": "Indonèsia i Timor Oriental",
+    "description": "Indonèsia i Timor Oriental — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar i Dili; Java, Sumatra, Bali, Borneo, Sulawesi i Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malàisia, Singapur i Brunei",
+    "description": "Malàisia, Singapur i Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching i Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine i el llac Inle; la vall de l’Irauadi i els turons Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodja i Laos",
+    "description": "Cambodja i Laos — Phnom Penh, Siem Reap i Angkor, Battambang, Vientiane, Luang Prabang i Pakse; el Mekong i el Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colòmbia",
+    "description": "Colòmbia — Bogotà, Medellín, Cali, Barranquilla, Cartagena i Bucaramanga; els Andes, la costa del Carib i l’Amazònia."
+  },
+  "venezuela": {
+    "title": "Veneçuela",
+    "description": "Veneçuela — Caracas, Maracaibo, València, Barquisimeto, Mérida i Ciudad Bolívar; el salt Ángel, l’Orinoco i l’illa Margarita."
+  },
+  "peru": {
+    "title": "Perú",
+    "description": "Perú — Lima, Arequipa, Cusco, Trujillo, Iquitos i Puno; Machu Picchu, el llac Titicaca i la Vall Sagrada."
+  },
+  "ecuador": {
+    "title": "Equador",
+    "description": "Equador — Quito, Guayaquil, Cuenca, Manta i Baños; l’Avinguda dels Volcans, l’Amazònia i les illes Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolívia",
+    "description": "Bolívia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre i Potosí; el llac Titicaca i el Salar d’Uyuni."
+  },
+  "chile": {
+    "title": "Xile",
+    "description": "Xile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena i Punta Arenas; l’Atacama, la Regió dels Llacs, la Patagònia i l’illa de Pasqua."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguai i Uruguai",
+    "description": "Paraguai i Uruguai — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este i Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Les Guaianes",
+    "description": "Guyana, Surinam i la Guaiana Francesa — Georgetown, Paramaribo, Caiena i Kourou; el salt Kaieteur i la selva de l’escut de les Guaianes."
+  },
+  "falklands": {
+    "title": "Illes Malvines",
+    "description": "Les Illes Malvines (Falkland) — Stanley, Goose Green i les illes de Malvina Oriental i Malvina Occidental."
+  },
+  "australia": {
+    "title": "Austràlia",
+    "description": "Austràlia — Sydney, Melbourne, Brisbane, Perth, Adelaida, Hobart, Darwin i Canberra; la Gran Barrera de Corall, Uluru i l’Outback."
+  },
+  "new-zealand": {
+    "title": "Nova Zelanda",
+    "description": "Nova Zelanda — Auckland, Wellington, Christchurch, Hamilton, Dunedin i Queenstown; els Alps del Sud, Fiordland i Rotorua."
+  },
+  "british-columbia": {
+    "title": "Colúmbia Britànica",
+    "description": "Colúmbia Britànica — Vancouver, Victoria, Kelowna, Kamloops, Prince George i Whistler; la Serralada Costanera, l’illa de Vancouver i l’Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Praderies canadenques",
+    "description": "Alberta, Saskatchewan i Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina i Banff; les Rocoses, les praderies i Churchill, a la badia de Hudson."
+  },
+  "ontario": {
+    "title": "Ontàrio",
+    "description": "Ontàrio — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston i Thunder Bay; les cascades del Niàgara, els Grans Llacs i el parc Algonquin."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Mont-real, la ciutat de Quebec, Laval, Gatineau, Sherbrooke i Saguenay; el Sant Llorenç, els Laurentides i la península de Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Canadà atlàntic",
+    "description": "Nou Brunswick, Nova Escòcia, l’Illa del Príncep Eduard i Terranova i Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton i Charlottetown; el Cabot Trail i la badia de Fundy."
+  },
+  "northern-canada": {
+    "title": "Nord del Canadà",
+    "description": "Yukon, els Territoris del Nord-oest i Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City i Inuvik; l’arxipèlag Àrtic i el riu Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong i Macau",
+    "description": "Hong Kong i Macau — l’illa de Hong Kong, Kowloon, els Nous Territoris, Lantau i la península de Macau, Taipa i Coloane."
   }
 }

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Sidi ya katikati ya Ameriki",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi mpe Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson mpe Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa mpe Tonga",
+    "description": "Samoa, Samoa ya Ameriki, Tonga, Niue, Tokelau, mpe Wallis-ná-Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi mpe Mata-Utu; Upolu, Savaiʻi, Tutuila mpe bisanga ya Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam mpe Bisanga Mariana ya Nɔ́rdi",
+    "description": "Guam mpe Bisanga Mariana ya Nɔ́rdi — Hagåtña, Tamuning, Dededo, Saipan, Tinian mpe Rota."
+  },
+  "greenland": {
+    "title": "Groenland",
+    "description": "Groenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq mpe Tasiilaq; etando ya glasi, fjord ya glasi ya Ilulissat mpe ba-fjord ya sudi."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s mpe Royal Naval Dockyard, ba-paroisse ya esanga mpe mabeke na yango ya zelo ya langi ya rose."
+  },
+  "belarus": {
+    "title": "Bielorisi",
+    "description": "Bielorisi — Minsk, Gomel, Mogilev, Vitebsk, Grodno mpe Brest; zamba ya Belovezhskaya Pushcha mpe bitima ya Polesia."
+  },
+  "channel-islands": {
+    "title": "Bisanga Anglo-Normandes",
+    "description": "Jersey, Guernsey, Alderney, Sark mpe Herm — St Helier, St Peter Port mpe Gorey."
+  },
+  "faroe-islands": {
+    "title": "Bisanga Féroé",
+    "description": "Bisanga Féroé — Tórshavn, Klaksvík, Runavík mpe bisanga zómi na mwambe, mboka na yango, ba-tinele mpe mabanga milai ya libongo."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard mpe Jan Mayen — Longyearbyen, Barentsburg mpe Ny-Ålesund; ba-glasye mpe ba-fjord ya Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo mpe Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria mpe Bingumba Misáto."
+  },
+  "madagascar-islands": {
+    "title": "Madagasikari mpe Bisanga ya Mbú ya Indien",
+    "description": "Madagasikari, Komori, Mayotte, Réunion, Morisi mpe Seyshele — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis mpe Victoria."
+  },
+  "sudan": {
+    "title": "Sudani",
+    "description": "Sudani — Khartoum, Omdurman, Port-Soudan, Kassala, El Obeid mpe Nyala; esika Nil ya Bule mpe Nil ya Pɛmbɛ ekutanaka mpe ba-piramidi ya Meroë."
+  },
+  "cabo-verde": {
+    "title": "Kapo Vɛrdɛ",
+    "description": "Kapo Vɛrdɛ — Praia, Mindelo, Santa Maria mpe bisanga zómi, banda Santo Antão kino Brava."
+  },
+  "sao-tome-principe": {
+    "title": "Sao Tomé mpe Prínsipe",
+    "description": "Sao Tomé mpe Prínsipe — São Tomé, Santo António mpe zamba ya mbula mpe mabeke ya bisanga mibale."
+  },
+  "saint-helena": {
+    "title": "Sainte-Hélène, Ascension mpe Tristan da Cunha",
+    "description": "Sainte-Hélène, Esanga Ascension mpe Tristan da Cunha — Jamestown, Georgetown mpe Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladɛsi",
+    "description": "Bangladɛsi — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet mpe Cox’s Bazar; Sundarbans mpe delta ya Gange–Brahmapoutre."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka mpe Maldives",
+    "description": "Sri Lanka mpe Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura mpe Malé; etúká ya bangomba, Sigiriya mpe ba-atolle."
+  },
+  "vietnam": {
+    "title": "Vietnami",
+    "description": "Vietnami — Hanoi, Engumba Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An mpe Can Tho; Libéu ya Ha Long mpe delta ya Mekong."
+  },
+  "philippines": {
+    "title": "Filipine",
+    "description": "Filipine — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio mpe Zamboanga; Luzon, Visayas, Mindanao mpe Palawan."
+  },
+  "indonesia": {
+    "title": "Indonezi mpe Timor-Leste",
+    "description": "Indonezi mpe Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar mpe Dili; Java, Sumatra, Bali, Borneo, Sulawesi mpe Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malɛzi, Singapur mpe Brunei",
+    "description": "Malɛzi, Singapur mpe Brunei — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching mpe Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine mpe Laki Inle; lobwaku ya Irrawaddy mpe bangomba ya Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodja mpe Laos",
+    "description": "Kambodja mpe Laos — Phnom Penh, Siem Reap mpe Angkor, Battambang, Vientiane, Luang Prabang mpe Pakse; ebale Mekong mpe Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombi",
+    "description": "Kolombi — Bogotá, Medellín, Cali, Barranquilla, Cartagena mpe Bucaramanga; Andes, libongo ya Karaibe mpe Amazone."
+  },
+  "venezuela": {
+    "title": "Venezwela",
+    "description": "Venezwela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida mpe Ciudad Bolívar; Salto Ángel, ebale Orinoco mpe Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos mpe Puno; Machu Picchu, Laki Titicaca mpe Lobwaku Mosantu."
+  },
+  "ecuador": {
+    "title": "Ekwatɛ́lɛ",
+    "description": "Ekwatɛ́lɛ — Quito, Guayaquil, Cuenca, Manta mpe Baños; Nzela ya Bangomba ya Mɔ́tɔ, Amazone mpe Bisanga Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivi",
+    "description": "Bolivi — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre mpe Potosí; Laki Titicaca mpe Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Shili",
+    "description": "Shili — Santiago, Valparaíso, Concepción, Antofagasta, La Serena mpe Punta Arenas; Atacama, etúká ya ba-laki, Patagonia mpe Esanga ya Pâques."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay mpe Uruguay",
+    "description": "Paraguay mpe Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este mpe Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Ba-Guyane",
+    "description": "Guyana, Suriname mpe Guyane ya Falansé — Georgetown, Paramaribo, Cayenne mpe Kourou; Mai-ma-kokita ya Kaieteur mpe zamba ya mbula ya Guiana Shield."
+  },
+  "falklands": {
+    "title": "Bisanga Malouines",
+    "description": "Bisanga Malouines (Falkland) — Stanley, Goose Green mpe bisanga ya East Falkland mpe West Falkland."
+  },
+  "australia": {
+    "title": "Ositrali",
+    "description": "Ositrali — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin mpe Canberra; Grande Barrière de corail, Uluru mpe Outback."
+  },
+  "new-zealand": {
+    "title": "Zelandi ya Sika",
+    "description": "Zelandi ya Sika — Auckland, Wellington, Christchurch, Hamilton, Dunedin mpe Queenstown; Alpes ya Sudi, Fiordland mpe Rotorua."
+  },
+  "british-columbia": {
+    "title": "Kolombi-Britanike",
+    "description": "Kolombi-Britanike — Vancouver, Victoria, Kelowna, Kamloops, Prince George mpe Whistler; Bangomba ya Libongo, Esanga Vancouver mpe Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Ba-Prairie ya Kanada",
+    "description": "Alberta, Saskatchewan mpe Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina mpe Banff; Rocheuses, ba-prairie mpe Churchill na libongo ya Baie d’Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston mpe Thunder Bay; Mai-ma-kokita ya Niagara, Ba-Laki Minene mpe Parc Algonquin."
+  },
+  "quebec": {
+    "title": "Kebeki",
+    "description": "Kebeki — Montréal, Engumba Kebeki, Laval, Gatineau, Sherbrooke mpe Saguenay; ebale Saint-Laurent, Laurentides mpe péninsule ya Gaspésie."
+  },
+  "atlantic-canada": {
+    "title": "Kanada ya Atlantiki",
+    "description": "Nouveau-Brunswick, Nouvelle-Écosse, Île-du-Prince-Édouard, mpe Terre-Neuve-et-Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton mpe Charlottetown; Cabot Trail mpe Baie de Fundy."
+  },
+  "northern-canada": {
+    "title": "Nɔ́rdi ya Kanada",
+    "description": "Yukon, Territoires du Nord-Ouest mpe Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City mpe Inuvik; bisanga ya Arktiki mpe ebale Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong mpe Macao",
+    "description": "Hong Kong mpe Macao — Esanga Hong Kong, Kowloon, Nouveaux Territoires, Lantau mpe péninsule ya Macao, Taipa mpe Coloane."
   }
 }

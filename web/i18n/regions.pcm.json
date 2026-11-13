@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Saut Sẹntral US",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi an Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson an Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa an Tonga",
+    "description": "Samoa, American Samoa, Tonga, Niue, Tokelau an Wallis an Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi an Mata-Utu; Upolu, Savaiʻi, Tutuila an di aylands for Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam an di Nọt Mariana Aylands",
+    "description": "Guam an di Nọt Mariana Aylands — Hagåtña, Tamuning, Dededo, Saipan, Tinian an Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq an Tasiilaq; di big ays wey kova di land, di Ilulissat Icefjord an di fjords for saut."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s an di Royal Naval Dockyard, di ayland parishes an im pink-sand bich dem."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno an Brest; di Belovezhskaya Pushcha fọrest an di Polesia swamp dem."
+  },
+  "channel-islands": {
+    "title": "Channel Aylands",
+    "description": "Jersey, Guernsey, Alderney, Sark an Herm — St Helier, St Peter Port an Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faroe Aylands",
+    "description": "Di Faroe Aylands — Tórshavn, Klaksvík, Runavík an di eitin aylands, wit dia vilej, tọnel an sii klif dem."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard an Jan Mayen — Longyearbyen, Barentsburg an Ny-Ålesund; di glaciers an fjords for Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo an Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria an di Three Cities."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar an di Indian Ocean Aylands",
+    "description": "Madagascar, di Comoros, Mayotte, Réunion, Mauritius an di Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis an Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid an Nyala; wia di Blue Nile an White Nile mit, an di pyramids for Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria an di ten aylands, from Santo Antão rich Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé an Príncipe",
+    "description": "São Tomé an Príncipe — São Tomé, Santo António an di rainfọrest an bich for di tu aylands."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension an Tristan da Cunha",
+    "description": "Saint Helena, Ascension Ayland an Tristan da Cunha — Jamestown, Georgetown an Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet an Cox’s Bazar; di Sundarbans an di Ganges–Brahmaputra delta."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka an di Maldives",
+    "description": "Sri Lanka an di Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura an Malé; di hil kọntri, Sigiriya an di atolls."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An an Can Tho; Ha Long Bay an di Mekong Delta."
+  },
+  "philippines": {
+    "title": "Philippines",
+    "description": "Di Philippines — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio an Zamboanga; Luzon, di Visayas, Mindanao an Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia an Timor-Leste",
+    "description": "Indonesia an Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar an Dili; Java, Sumatra, Bali, Borneo, Sulawesi an Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore an Brunei",
+    "description": "Malaysia, Singapore an Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching an Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine an Inle Lake; di Irrawaddy vali an di Shan hils."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia an Laos",
+    "description": "Cambodia an Laos — Phnom Penh, Siem Reap an Angkor, Battambang, Vientiane, Luang Prabang an Pakse; di Mekong an di Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena an Bucaramanga; di Andes, di Caribbean kost an di Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida an Ciudad Bolívar; Angel Falls, di Orinoco an Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos an Puno; Machu Picchu, Lake Titicaca an di Sacred Valley."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta an Baños; di Avenue of the Volcanoes, di Amazon an di Galápagos Aylands."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre an Potosí; Lake Titicaca an di Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena an Punta Arenas; di Atacama, di Lake District, Patagonia an Easter Ayland."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay an Uruguay",
+    "description": "Paraguay an Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este an Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Di Guianas",
+    "description": "Guyana, Suriname an French Guiana — Georgetown, Paramaribo, Cayenne an Kourou; Kaieteur Falls an di rainfọrest for di Guiana Shield."
+  },
+  "falklands": {
+    "title": "Falkland Aylands",
+    "description": "Di Falkland Aylands — Stanley, Goose Green an di aylands for East an West Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin an Canberra; di Great Barrier Reef, Uluru an di Outback."
+  },
+  "new-zealand": {
+    "title": "New Zealand",
+    "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin an Queenstown; di Southern Alps, Fiordland an Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George an Whistler; di Coast Mountains, Vancouver Ayland an di Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Canadian Prairies",
+    "description": "Alberta, Saskatchewan an Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina an Banff; di Rockies, di prairies an Churchill for Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston an Thunder Bay; Niagara Falls, di Great Lakes an Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke an Saguenay; di St. Lawrence, di Laurentians an di Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Atlantic Canada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, an Newfoundland an Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton an Charlottetown; di Cabot Trail an di Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Nọtan Canada",
+    "description": "Yukon, di Northwest Territories an Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City an Inuvik; di Arctic Archipelago an di Mackenzie River."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong an Macau",
+    "description": "Hong Kong an Macau — Hong Kong Ayland, Kowloon, di New Territories, Lantau an di Macau Peninsula, Taipa an Coloane."
   }
 }

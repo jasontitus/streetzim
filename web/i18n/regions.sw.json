@@ -14,5 +14,165 @@
   "south-central-us": {
     "title": "Kusini-Kati mwa Marekani",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi na Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson na Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa na Tonga",
+    "description": "Samoa, Samoa ya Marekani, Tonga, Niue, Tokelau, na Wallis na Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi na Mata-Utu; Upolu, Savaiʻi, Tutuila na visiwa vya Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam na Visiwa vya Mariana ya Kaskazini",
+    "description": "Guam na Visiwa vya Mariana ya Kaskazini — Hagåtña, Tamuning, Dededo, Saipan, Tinian na Rota."
+  },
+  "greenland": {
+    "title": "Grinlandi",
+    "description": "Grinlandi — Nuuk, Sisimiut, Ilulissat, Qaqortoq na Tasiilaq; tabaka la barafu, Fyord ya Barafu ya Ilulissat na fyord za kusini."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s na Royal Naval Dockyard, parokia za kisiwa na fukwe zake za mchanga wa waridi."
+  },
+  "belarus": {
+    "title": "Belarusi",
+    "description": "Belarusi — Minsk, Gomel, Mogilev, Vitebsk, Grodno na Brest; msitu wa Belovezhskaya Pushcha na mabwawa ya Polesia."
+  },
+  "channel-islands": {
+    "title": "Visiwa vya Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark na Herm — St Helier, St Peter Port na Gorey."
+  },
+  "faroe-islands": {
+    "title": "Visiwa vya Faroe",
+    "description": "Visiwa vya Faroe — Tórshavn, Klaksvík, Runavík na visiwa kumi na nane, vijiji vyake, mahandaki na majabali ya pwani."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard na Jan Mayen — Longyearbyen, Barentsburg na Ny-Ålesund; barafuto na fyord za Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo na Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria na Miji Mitatu."
+  },
+  "madagascar-islands": {
+    "title": "Madagaska na Visiwa vya Bahari ya Hindi",
+    "description": "Madagaska, Komoro, Mayotte, Réunion, Morisi na Shelisheli — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis na Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid na Nyala; makutano ya Naili ya Buluu na Naili Nyeupe na piramidi za Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria na visiwa kumi, kuanzia Santo Antão hadi Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé na Príncipe",
+    "description": "São Tomé na Príncipe — São Tomé, Santo António na misitu ya mvua na fukwe za visiwa hivyo viwili."
+  },
+  "saint-helena": {
+    "title": "Santa Helena, Ascension na Tristan da Cunha",
+    "description": "Santa Helena, Kisiwa cha Ascension na Tristan da Cunha — Jamestown, Georgetown na Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladeshi",
+    "description": "Bangladeshi — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet na Cox’s Bazar; Sundarbans na delta ya Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka na Maldivi",
+    "description": "Sri Lanka na Maldivi — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura na Malé; nyanda za juu, Sigiriya na visiwa vya tumbawe."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Jiji la Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An na Can Tho; Ghuba ya Ha Long na Delta ya Mekong."
+  },
+  "philippines": {
+    "title": "Ufilipino",
+    "description": "Ufilipino — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio na Zamboanga; Luzon, Visayas, Mindanao na Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia na Timor-Leste",
+    "description": "Indonesia na Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar na Dili; Java, Sumatra, Bali, Borneo, Sulawesi na Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapuri na Brunei",
+    "description": "Malaysia, Singapuri na Brunei — Kuala Lumpur, Singapuri, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching na Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine na Ziwa Inle; bonde la Irrawaddy na vilima vya Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kambodia na Laos",
+    "description": "Kambodia na Laos — Phnom Penh, Siem Reap na Angkor, Battambang, Vientiane, Luang Prabang na Pakse; mto Mekong na Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombia",
+    "description": "Kolombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena na Bucaramanga; milima ya Andes, pwani ya Karibi na Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida na Ciudad Bolívar; Maporomoko ya Angel, mto Orinoco na Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos na Puno; Machu Picchu, Ziwa Titicaca na Bonde Takatifu."
+  },
+  "ecuador": {
+    "title": "Ekwado",
+    "description": "Ekwado — Quito, Guayaquil, Cuenca, Manta na Baños; Njia ya Volkano, Amazon na Visiwa vya Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre na Potosí; Ziwa Titicaca na Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena na Punta Arenas; jangwa la Atacama, Eneo la Maziwa, Patagonia na Kisiwa cha Pasaka."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragwai na Urugwai",
+    "description": "Paragwai na Urugwai — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este na Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guiana",
+    "description": "Guyana, Surinamu na Guiana ya Kifaransa — Georgetown, Paramaribo, Cayenne na Kourou; Maporomoko ya Kaieteur na msitu wa mvua wa Ngao ya Guiana."
+  },
+  "falklands": {
+    "title": "Visiwa vya Falkland",
+    "description": "Visiwa vya Falkland — Stanley, Goose Green na visiwa vya Falkland Mashariki na Falkland Magharibi."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin na Canberra; Mwamba Mkuu wa Tumbawe, Uluru na Outback."
+  },
+  "new-zealand": {
+    "title": "Nyuzilandi",
+    "description": "Nyuzilandi — Auckland, Wellington, Christchurch, Hamilton, Dunedin na Queenstown; Milima ya Alpi ya Kusini, Fiordland na Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George na Whistler; Milima ya Pwani, Kisiwa cha Vancouver na Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Nyanda za Kanada",
+    "description": "Alberta, Saskatchewan na Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina na Banff; Milima ya Rocky, nyanda na Churchill kwenye Ghuba ya Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston na Thunder Bay; Maporomoko ya Niagara, Maziwa Makuu na Hifadhi ya Algonquin."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Jiji la Quebec, Laval, Gatineau, Sherbrooke na Saguenay; mto St. Lawrence, milima ya Laurentian na Rasi ya Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Kanada ya Atlantiki",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, na Newfoundland na Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton na Charlottetown; Cabot Trail na Ghuba ya Fundy."
+  },
+  "northern-canada": {
+    "title": "Kaskazini mwa Kanada",
+    "description": "Yukon, Maeneo ya Kaskazini-Magharibi na Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City na Inuvik; Funguvisiwa la Aktiki na mto Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong na Makau",
+    "description": "Hong Kong na Makau — Kisiwa cha Hong Kong, Kowloon, New Territories, Lantau na Rasi ya Makau, Taipa na Coloane."
   }
 }

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Ka Hema Waena o ʻAmelika Hui Pū ʻIa",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi a me Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a me Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Kāmoa a me Tonga",
+    "description": "Kāmoa, Kāmoa ʻAmelika, Tonga, Niue, Tokelau, a me Wallis a me Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi a me Mata-Utu; Upolu, Savaiʻi, Tutuila a me nā mokupuni o Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam a me Nā Mokupuni ʻĀkau o Mariana",
+    "description": "Guam a me Nā Mokupuni ʻĀkau o Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian a me Rota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq a me Tasiilaq; ka papa hau nui, ke kaikuono hau o Ilulissat a me nā fjord o ka hema."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s a me ka Royal Naval Dockyard, nā ʻāpana o ka mokupuni a me kona mau kahakai one ʻākala."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno a me Brest; ka nahele ʻo Belovezhskaya Pushcha a me nā ʻāina kele o Polesia."
+  },
+  "channel-islands": {
+    "title": "Nā Mokupuni Channel",
+    "description": "Jersey, Guernsey, Alderney, Sark a me Herm — St Helier, St Peter Port a me Gorey."
+  },
+  "faroe-islands": {
+    "title": "Nā Mokupuni Faroe",
+    "description": "Nā Mokupuni Faroe — Tórshavn, Klaksvík, Runavík a me nā mokupuni he ʻumikūmāwalu, ko lākou mau kauhale, nā ana alanui a me nā pali kahakai."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard a me Jan Mayen — Longyearbyen, Barentsburg a me Ny-Ålesund; nā muliwai hau a me nā fjord o Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo a me Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria a me nā Kūlanakauhale ʻEkolu."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar a me Nā Mokupuni o ka Moana ʻInikia",
+    "description": "Madagascar, Comoros, Mayotte, Réunion, Mauritius a me Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis a me Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid a me Nyala; ka hui ʻana o ka Nile Uliuli a me ka Nile Keʻokeʻo a me nā pelamika o Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria a me nā mokupuni he ʻumi, mai Santo Antão a hiki i Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé a me Príncipe",
+    "description": "São Tomé a me Príncipe — São Tomé, Santo António a me nā nahele ua a me nā kahakai o nā mokupuni ʻelua."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension a me Tristan da Cunha",
+    "description": "Saint Helena, ka Mokupuni ʻo Ascension a me Tristan da Cunha — Jamestown, Georgetown a me Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet a me Cox’s Bazar; ka Sundarbans a me ka delta o Ganges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka a me Maldives",
+    "description": "Sri Lanka a me Maldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura a me Malé; ka ʻāina puʻu, Sigiriya a me nā ʻākoʻakoʻa."
+  },
+  "vietnam": {
+    "title": "Wiekanama",
+    "description": "Wiekanama — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An a me Can Tho; ke kai kūono ʻo Ha Long a me ka delta o Mekong."
+  },
+  "philippines": {
+    "title": "ʻĀina Pilipino",
+    "description": "ʻĀina Pilipino — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio a me Zamboanga; Luzon, nā Visayas, Mindanao a me Palawan."
+  },
+  "indonesia": {
+    "title": "ʻInikonekia a me Timor-Leste",
+    "description": "ʻInikonekia a me Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar a me Dili; Java, Sumatra, Bali, Borneo, Sulawesi a me Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore a me Brunei",
+    "description": "Malaysia, Singapore a me Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching a me Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine a me ka loko ʻo Inle; ke awāwa o Irrawaddy a me nā puʻu o Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia a me Laos",
+    "description": "Cambodia a me Laos — Phnom Penh, Siem Reap a me Angkor, Battambang, Vientiane, Luang Prabang a me Pakse; ka muliwai ʻo Mekong a me ka Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolomepia",
+    "description": "Kolomepia — Bogotá, Medellín, Cali, Barranquilla, Cartagena a me Bucaramanga; nā Andes, ke kahakai Karipiano a me ka Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida a me Ciudad Bolívar; ka wailele ʻo Angel, ka Orinoco a me Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos a me Puno; Machu Picchu, ka loko ʻo Titicaca a me ke Awāwa Laʻa."
+  },
+  "ecuador": {
+    "title": "ʻEkuakoa",
+    "description": "ʻEkuakoa — Quito, Guayaquil, Cuenca, Manta a me Baños; ke Alanui o nā Lua Pele, ka Amazon a me nā Mokupuni Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre a me Potosí; ka loko ʻo Titicaca a me ka Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Kile",
+    "description": "Kile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena a me Punta Arenas; ka Atacama, ka ʻāina loko, Patagonia a me Rapa Nui."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay a me Uruguay",
+    "description": "Paraguay a me Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este a me Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Nā Guiana",
+    "description": "Guyana, Suriname a me Guiana Palani — Georgetown, Paramaribo, Cayenne a me Kourou; ka wailele ʻo Kaieteur a me ka nahele ua o ka Guiana Shield."
+  },
+  "falklands": {
+    "title": "Nā Mokupuni Falkland",
+    "description": "Nā Mokupuni Falkland — Stanley, Goose Green a me nā mokupuni ʻo East Falkland a me West Falkland."
+  },
+  "australia": {
+    "title": "Nūhōlani",
+    "description": "Nūhōlani — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin a me Canberra; ka Great Barrier Reef, Uluru a me ka Outback."
+  },
+  "new-zealand": {
+    "title": "Aotearoa",
+    "description": "Aotearoa — Auckland, Wellington, Christchurch, Hamilton, Dunedin a me Queenstown; nā Southern Alps, Fiordland a me Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George a me Whistler; nā Coast Mountains, ka Mokupuni ʻo Vancouver a me ka Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Nā Kula Pāpū o Kanakā",
+    "description": "Alberta, Saskatchewan a me Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina a me Banff; nā Rockies, nā kula pāpū a me Churchill ma Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston a me Thunder Bay; ka wailele ʻo Niagara, nā Loko Nui a me Algonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke a me Saguenay; ka muliwai ʻo St. Lawrence, nā Laurentians a me ka Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Kanakā ʻAkelanika",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, a me Newfoundland a me Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton a me Charlottetown; ka Cabot Trail a me ke kai kūono ʻo Fundy."
+  },
+  "northern-canada": {
+    "title": "Kanakā ʻĀkau",
+    "description": "Yukon, Northwest Territories a me Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City a me Inuvik; ka pae mokupuni ʻAkika a me ka muliwai ʻo Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong a me Macau",
+    "description": "Hong Kong a me Macau — ka Mokupuni ʻo Hong Kong, Kowloon, nā New Territories, Lantau a me ka Macau Peninsula, Taipa a me Coloane."
   }
 }

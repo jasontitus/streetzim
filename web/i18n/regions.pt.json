@@ -366,5 +366,165 @@
  "india-west-light": {
   "title": "Oeste da Índia (versão leve)",
   "description": "O mapa do Oeste da Índia sem imagens de satélite e com zoom limitado ao nível 13 — os mesmos lugares em um download menor, para conexões mais lentas e aparelhos menores."
+ },
+ "west-polynesia": {
+  "title": "Samoa e Tonga",
+  "description": "Samoa, Samoa Americana, Tonga, Niue, Tokelau e Wallis e Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi e Mata-Utu; Upolu, Savaiʻi, Tutuila e as ilhas de Tonga."
+ },
+ "mariana-islands": {
+  "title": "Guam e Ilhas Marianas do Norte",
+  "description": "Guam e as Ilhas Marianas do Norte — Hagåtña, Tamuning, Dededo, Saipan, Tinian e Rota."
+ },
+ "greenland": {
+  "title": "Groenlândia",
+  "description": "Groenlândia — Nuuk, Sisimiut, Ilulissat, Qaqortoq e Tasiilaq; o manto de gelo, o fiorde gelado de Ilulissat e os fiordes do sul."
+ },
+ "bermuda": {
+  "title": "Bermudas",
+  "description": "Bermudas — Hamilton, St. George’s e o Royal Naval Dockyard, as paróquias da ilha e suas praias de areia rosa."
+ },
+ "belarus": {
+  "title": "Bielorrússia",
+  "description": "Bielorrússia — Minsk, Gomel, Mogilev, Vitebsk, Grodno e Brest; a floresta de Białowieża e os pântanos da Polésia."
+ },
+ "channel-islands": {
+  "title": "Ilhas do Canal",
+  "description": "Jersey, Guernsey, Alderney, Sark e Herm — St Helier, St Peter Port e Gorey."
+ },
+ "faroe-islands": {
+  "title": "Ilhas Faroé",
+  "description": "As Ilhas Faroé — Tórshavn, Klaksvík, Runavík e as dezoito ilhas, com suas aldeias, túneis e falésias à beira-mar."
+ },
+ "svalbard": {
+  "title": "Svalbard",
+  "description": "Svalbard e Jan Mayen — Longyearbyen, Barentsburg e Ny-Ålesund; as geleiras e os fiordes de Spitsbergen."
+ },
+ "malta": {
+  "title": "Malta",
+  "description": "Malta, Gozo e Comino — Valeta, Sliema, St. Julian’s, Mdina, Victoria e as Três Cidades."
+ },
+ "madagascar-islands": {
+  "title": "Madagascar e ilhas do Oceano Índico",
+  "description": "Madagascar, Comores, Mayotte, Reunião, Maurício e Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis e Victoria."
+ },
+ "sudan": {
+  "title": "Sudão",
+  "description": "Sudão — Cartum, Omdurman, Porto Sudão, Kassala, El Obeid e Nyala; a confluência do Nilo Azul com o Nilo Branco e as pirâmides de Meroé."
+ },
+ "cabo-verde": {
+  "title": "Cabo Verde",
+  "description": "Cabo Verde — Praia, Mindelo, Santa Maria e as dez ilhas, de Santo Antão à Brava."
+ },
+ "sao-tome-principe": {
+  "title": "São Tomé e Príncipe",
+  "description": "São Tomé e Príncipe — São Tomé, Santo António e as florestas tropicais e praias das duas ilhas."
+ },
+ "saint-helena": {
+  "title": "Santa Helena, Ascensão e Tristão da Cunha",
+  "description": "Santa Helena, ilha de Ascensão e Tristão da Cunha — Jamestown, Georgetown e Edinburgh of the Seven Seas."
+ },
+ "bangladesh": {
+  "title": "Bangladesh",
+  "description": "Bangladesh — Daca, Chittagong, Khulna, Rajshahi, Sylhet e Cox’s Bazar; os Sundarbans e o delta do Ganges e do Brahmaputra."
+ },
+ "sri-lanka-maldives": {
+  "title": "Sri Lanka e Maldivas",
+  "description": "Sri Lanka e Maldivas — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura e Malé; as terras altas, Sigiriya e os atóis."
+ },
+ "vietnam": {
+  "title": "Vietnã",
+  "description": "Vietnã — Hanói, Cidade de Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An e Can Tho; a baía de Ha Long e o delta do Mekong."
+ },
+ "philippines": {
+  "title": "Filipinas",
+  "description": "Filipinas — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio e Zamboanga; Luzon, as Visayas, Mindanao e Palawan."
+ },
+ "indonesia": {
+  "title": "Indonésia e Timor-Leste",
+  "description": "Indonésia e Timor-Leste — Jacarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar e Díli; Java, Sumatra, Bali, Bornéu, Celebes e Papua."
+ },
+ "malaysia-singapore-brunei": {
+  "title": "Malásia, Singapura e Brunei",
+  "description": "Malásia, Singapura e Brunei — Kuala Lumpur, Singapura, George Town, Johor Bahru, Malaca, Kota Kinabalu, Kuching e Bandar Seri Begawan."
+ },
+ "myanmar": {
+  "title": "Mianmar",
+  "description": "Mianmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine e o lago Inle; o vale do Irrawaddy e as colinas Shan."
+ },
+ "cambodia-laos": {
+  "title": "Camboja e Laos",
+  "description": "Camboja e Laos — Phnom Penh, Siem Reap e Angkor, Battambang, Vientiane, Luang Prabang e Pakse; o Mekong e o Tonlé Sap."
+ },
+ "colombia": {
+  "title": "Colômbia",
+  "description": "Colômbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena e Bucaramanga; os Andes, o litoral caribenho e a Amazônia."
+ },
+ "venezuela": {
+  "title": "Venezuela",
+  "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida e Ciudad Bolívar; o Salto Ángel, o Orinoco e a ilha Margarita."
+ },
+ "peru": {
+  "title": "Peru",
+  "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos e Puno; Machu Picchu, o lago Titicaca e o Vale Sagrado."
+ },
+ "ecuador": {
+  "title": "Equador",
+  "description": "Equador — Quito, Guayaquil, Cuenca, Manta e Baños; a Avenida dos Vulcões, a Amazônia e as ilhas Galápagos."
+ },
+ "bolivia": {
+  "title": "Bolívia",
+  "description": "Bolívia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre e Potosí; o lago Titicaca e o Salar de Uyuni."
+ },
+ "chile": {
+  "title": "Chile",
+  "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena e Punta Arenas; o Atacama, a Região dos Lagos, a Patagônia e a Ilha de Páscoa."
+ },
+ "paraguay-uruguay": {
+  "title": "Paraguai e Uruguai",
+  "description": "Paraguai e Uruguai — Assunção, Ciudad del Este, Encarnación, Montevidéu, Punta del Este e Colonia del Sacramento."
+ },
+ "guianas": {
+  "title": "As Guianas",
+  "description": "Guiana, Suriname e Guiana Francesa — Georgetown, Paramaribo, Caiena e Kourou; as cataratas Kaieteur e a floresta tropical do Escudo das Guianas."
+ },
+ "falklands": {
+  "title": "Ilhas Malvinas (Falkland)",
+  "description": "As Ilhas Malvinas (Falkland) — Stanley, Goose Green e as ilhas Malvina Oriental e Malvina Ocidental."
+ },
+ "australia": {
+  "title": "Austrália",
+  "description": "Austrália — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin e Camberra; a Grande Barreira de Coral, Uluru e o Outback."
+ },
+ "new-zealand": {
+  "title": "Nova Zelândia",
+  "description": "Nova Zelândia — Auckland, Wellington, Christchurch, Hamilton, Dunedin e Queenstown; os Alpes do Sul, Fiordland e Rotorua."
+ },
+ "british-columbia": {
+  "title": "Colúmbia Britânica",
+  "description": "Colúmbia Britânica — Vancouver, Victoria, Kelowna, Kamloops, Prince George e Whistler; as Montanhas Costeiras, a ilha de Vancouver e o vale do Okanagan."
+ },
+ "canadian-prairies": {
+  "title": "Pradarias canadenses",
+  "description": "Alberta, Saskatchewan e Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina e Banff; as Montanhas Rochosas, as pradarias e Churchill, na baía de Hudson."
+ },
+ "ontario": {
+  "title": "Ontário",
+  "description": "Ontário — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston e Thunder Bay; as Cataratas do Niágara, os Grandes Lagos e o Parque Algonquin."
+ },
+ "quebec": {
+  "title": "Quebec",
+  "description": "Quebec — Montreal, Cidade de Quebec, Laval, Gatineau, Sherbrooke e Saguenay; o rio São Lourenço, os Laurentides e a península de Gaspé."
+ },
+ "atlantic-canada": {
+  "title": "Canadá Atlântico",
+  "description": "Nova Brunswick, Nova Escócia, Ilha do Príncipe Eduardo e Terra Nova e Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton e Charlottetown; a Cabot Trail e a baía de Fundy."
+ },
+ "northern-canada": {
+  "title": "Norte do Canadá",
+  "description": "Yukon, Territórios do Noroeste e Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City e Inuvik; o Arquipélago Ártico e o rio Mackenzie."
+ },
+ "hong-kong-macau": {
+  "title": "Hong Kong e Macau",
+  "description": "Hong Kong e Macau — a ilha de Hong Kong, Kowloon, os Novos Territórios, Lantau e a península de Macau, Taipa e Coloane."
  }
 }

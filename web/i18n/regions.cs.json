@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Střední jih USA",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi a Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa a Tonga",
+    "description": "Samoa, Americká Samoa, Tonga, Niue, Tokelau a Wallis a Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi a Mata-Utu; Upolu, Savaiʻi, Tutuila a ostrovy Tongy."
+  },
+  "mariana-islands": {
+    "title": "Guam a Severní Mariany",
+    "description": "Guam a Severní Mariany — Hagåtña, Tamuning, Dededo, Saipan, Tinian a Rota."
+  },
+  "greenland": {
+    "title": "Grónsko",
+    "description": "Grónsko — Nuuk, Sisimiut, Ilulissat, Qaqortoq a Tasiilaq; pevninský ledovec, ledovcový fjord Ilulissat a fjordy na jihu."
+  },
+  "bermuda": {
+    "title": "Bermudy",
+    "description": "Bermudy — Hamilton, St. George’s a Royal Naval Dockyard, farnosti ostrova a pláže s růžovým pískem."
+  },
+  "belarus": {
+    "title": "Bělorusko",
+    "description": "Bělorusko — Minsk, Homel, Mohylev, Vitebsk, Hrodna a Brest; Bělověžský prales a polesské bažiny."
+  },
+  "channel-islands": {
+    "title": "Normanské ostrovy",
+    "description": "Jersey, Guernsey, Alderney, Sark a Herm — St Helier, St Peter Port a Gorey."
+  },
+  "faroe-islands": {
+    "title": "Faerské ostrovy",
+    "description": "Faerské ostrovy — Tórshavn, Klaksvík, Runavík a osmnáct ostrovů s vesnicemi, tunely a mořskými útesy."
+  },
+  "svalbard": {
+    "title": "Špicberky",
+    "description": "Špicberky a Jan Mayen — Longyearbyen, Barentsburg a Ny-Ålesund; ledovce a fjordy ostrova Špicberk."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo a Comino — Valletta, Sliema, St. Julian’s, Mdina, Victoria a Tři města."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar a ostrovy Indického oceánu",
+    "description": "Madagaskar, Komory, Mayotte, Réunion, Mauricius a Seychely — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis a Victoria."
+  },
+  "sudan": {
+    "title": "Súdán",
+    "description": "Súdán — Chartúm, Omdurmán, Port Sudan, Kassala, El Obeid a Nyala; soutok Modrého a Bílého Nilu a pyramidy v Meroe."
+  },
+  "cabo-verde": {
+    "title": "Kapverdy",
+    "description": "Kapverdy — Praia, Mindelo, Santa Maria a deset ostrovů od Santo Antão po Bravu."
+  },
+  "sao-tome-principe": {
+    "title": "Svatý Tomáš a Princův ostrov",
+    "description": "Svatý Tomáš a Princův ostrov — São Tomé, Santo António a deštné pralesy a pláže obou ostrovů."
+  },
+  "saint-helena": {
+    "title": "Svatá Helena, Ascension a Tristan da Cunha",
+    "description": "Svatá Helena, ostrov Ascension a Tristan da Cunha — Jamestown, Georgetown a Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladéš",
+    "description": "Bangladéš — Dháka, Čittagong, Khulna, Rádžšáhí, Silhet a Cox’s Bazar; Sundarbany a delta Gangy a Brahmaputry."
+  },
+  "sri-lanka-maldives": {
+    "title": "Srí Lanka a Maledivy",
+    "description": "Srí Lanka a Maledivy — Kolombo, Kandy, Galle, Džaffna, Trincomalee, Anurádhapura a Male; centrální vysočina, Sígirija a atoly."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoj, Ho Či Minovo Město, Da Nang, Haiphong, Hue, Hoi An a Can Tho; zátoka Ha Long a delta Mekongu."
+  },
+  "philippines": {
+    "title": "Filipíny",
+    "description": "Filipíny — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio a Zamboanga; Luzon, Visayas, Mindanao a Palawan."
+  },
+  "indonesia": {
+    "title": "Indonésie a Východní Timor",
+    "description": "Indonésie a Východní Timor — Jakarta, Surabaja, Bandung, Medan, Yogyakarta, Denpasar, Makassar a Dili; Jáva, Sumatra, Bali, Borneo, Sulawesi a Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malajsie, Singapur a Brunej",
+    "description": "Malajsie, Singapur a Brunej — Kuala Lumpur, Singapur, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching a Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Rangún, Mandalaj, Neipyijto, Bagan, Mawlamyine a jezero Inle; údolí Iravadi a Šanská vysočina."
+  },
+  "cambodia-laos": {
+    "title": "Kambodža a Laos",
+    "description": "Kambodža a Laos — Phnompenh, Siem Reap a Angkor, Battambang, Vientiane, Luang Prabang a Pakse; Mekong a jezero Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolumbie",
+    "description": "Kolumbie — Bogotá, Medellín, Cali, Barranquilla, Cartagena a Bucaramanga; Andy, karibské pobřeží a Amazonie."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida a Ciudad Bolívar; Andělův vodopád, Orinoko a ostrov Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos a Puno; Machu Picchu, jezero Titicaca a Posvátné údolí."
+  },
+  "ecuador": {
+    "title": "Ekvádor",
+    "description": "Ekvádor — Quito, Guayaquil, Cuenca, Manta a Baños; Alej sopek, Amazonie a Galapágy."
+  },
+  "bolivia": {
+    "title": "Bolívie",
+    "description": "Bolívie — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre a Potosí; jezero Titicaca a Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena a Punta Arenas; Atacama, Jezerní oblast, Patagonie a Velikonoční ostrov."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay a Uruguay",
+    "description": "Paraguay a Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este a Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyany",
+    "description": "Guyana, Surinam a Francouzská Guyana — Georgetown, Paramaribo, Cayenne a Kourou; vodopád Kaieteur a deštný prales Guyanského štítu."
+  },
+  "falklands": {
+    "title": "Falklandy",
+    "description": "Falklandské ostrovy — Stanley, Goose Green a ostrovy Východní a Západní Falkland."
+  },
+  "australia": {
+    "title": "Austrálie",
+    "description": "Austrálie — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin a Canberra; Velký bariérový útes, Uluru a vnitrozemí Outback."
+  },
+  "new-zealand": {
+    "title": "Nový Zéland",
+    "description": "Nový Zéland — Auckland, Wellington, Christchurch, Hamilton, Dunedin a Queenstown; Jižní Alpy, Fiordland a Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britská Kolumbie",
+    "description": "Britská Kolumbie — Vancouver, Victoria, Kelowna, Kamloops, Prince George a Whistler; Pobřežní hory, Vancouverův ostrov a údolí Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadské prérie",
+    "description": "Alberta, Saskatchewan a Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina a Banff; Skalisté hory, prérie a Churchill u Hudsonova zálivu."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston a Thunder Bay; Niagarské vodopády, Velká jezera a Algonquinský park."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, město Québec, Laval, Gatineau, Sherbrooke a Saguenay; řeka Svatého Vavřince, Laurentidy a poloostrov Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Atlantská Kanada",
+    "description": "Nový Brunšvik, Nové Skotsko, Ostrov prince Edwarda a Newfoundland a Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton a Charlottetown; Cabot Trail a zátoka Fundy."
+  },
+  "northern-canada": {
+    "title": "Severní Kanada",
+    "description": "Yukon, Severozápadní teritoria a Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City a Inuvik; Kanadské arktické souostroví a řeka Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong a Macao",
+    "description": "Hongkong a Macao — ostrov Hongkong, Kowloon, Nová teritoria, Lantau a poloostrov Macao, Taipa a Coloane."
   }
 }

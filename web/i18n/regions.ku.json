@@ -14,5 +14,165 @@
   "south-central-us": {
     "title": "Başûr-Navenda Dewletên Yekbûyî",
     "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi û Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson û Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa û Tonga",
+    "description": "Samoa, Samoaya Amerîkî, Tonga, Niue, Tokelau û Wallis û Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi û Mata-Utu; Upolu, Savaiʻi, Tutuila û giravên Tongayê."
+  },
+  "mariana-islands": {
+    "title": "Guam û Giravên Marianayê yên Bakur",
+    "description": "Guam û Giravên Marianayê yên Bakur — Hagåtña, Tamuning, Dededo, Saipan, Tinian û Rota."
+  },
+  "greenland": {
+    "title": "Grînlenda",
+    "description": "Grînlenda — Nuuk, Sisimiut, Ilulissat, Qaqortoq û Tasiilaq; qalikê qeşayê, Fiyorda Qeşayê ya Ilulissatê û fiyordên başûr."
+  },
+  "bermuda": {
+    "title": "Bermûda",
+    "description": "Bermûda — Hamilton, St. George’s û Tersaneya Deryayî ya Qraliyetê, herêmên giravê û peravên wê yên bi qûma pembe."
+  },
+  "belarus": {
+    "title": "Belarûs",
+    "description": "Belarûs — Mînsk, Gomel, Mogilev, Vîtebsk, Grodno û Brest; daristana Belovejskaya Puşça û zozanên Polesyayê."
+  },
+  "channel-islands": {
+    "title": "Giravên Kanalê",
+    "description": "Jersey, Guernsey, Alderney, Sark û Herm — St Helier, St Peter Port û Gorey."
+  },
+  "faroe-islands": {
+    "title": "Giravên Faroeyê",
+    "description": "Giravên Faroeyê — Tórshavn, Klaksvík, Runavík û hejdeh girav, bi gund, tunêl û zinarên xwe yên li ber deryayê."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard û Jan Mayen — Longyearbyen, Barentsburg û Ny-Ålesund; cemed û fiyordên Spîtsbergenê."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo û Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria û Sê Bajar."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar û Giravên Okyanûsa Hindî",
+    "description": "Madagaskar, Komor, Mayotte, Réunion, Mauritius û Seyşel — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis û Victoria."
+  },
+  "sudan": {
+    "title": "Sûdan",
+    "description": "Sûdan — Xartûm, Omdurman, Port Sudan, Kassala, El Obeid û Nyala; cihê gihîştina Nîla Şîn û Nîla Spî û pîramîdên Meroeyê."
+  },
+  "cabo-verde": {
+    "title": "Kap Verde",
+    "description": "Kap Verde — Praia, Mindelo, Santa Maria û deh girav, ji Santo Antão heta Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé û Príncipe",
+    "description": "São Tomé û Príncipe — São Tomé, Santo António û daristanên baranê û peravên her du giravan."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension û Tristan da Cunha",
+    "description": "Saint Helena, Girava Ascensionê û Tristan da Cunha — Jamestown, Georgetown û Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladeş",
+    "description": "Bangladeş — Dakka, Chittagong, Khulna, Rajshahi, Sylhet û Cox’s Bazar; Sundarbans û deltaya Ganj–Brahmaputrayê."
+  },
+  "sri-lanka-maldives": {
+    "title": "Srî Lanka û Maldîv",
+    "description": "Srî Lanka û Maldîv — Kolombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura û Malé; herêma çiyayî, Sigiriya û atol."
+  },
+  "vietnam": {
+    "title": "Viyetnam",
+    "description": "Viyetnam — Hanoi, Bajarê Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An û Can Tho; Kendava Ha Longê û deltaya Mekongê."
+  },
+  "philippines": {
+    "title": "Fîlîpîn",
+    "description": "Fîlîpîn — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio û Zamboanga; Luzon, Visayas, Mindanao û Palawan."
+  },
+  "indonesia": {
+    "title": "Endonezya û Tîmora Rojhilat",
+    "description": "Endonezya û Tîmora Rojhilat — Cakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar û Dili; Java, Sumatra, Bali, Borneo, Sulawesi û Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malezya, Sîngapûr û Brûney",
+    "description": "Malezya, Sîngapûr û Brûney — Kuala Lumpur, Sîngapûr, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching û Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine û Gola Inle; geliyê Irrawaddy û girên Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kamboçya û Laos",
+    "description": "Kamboçya û Laos — Phnom Penh, Siem Reap û Angkor, Battambang, Vientiane, Luang Prabang û Pakse; Mekong û Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombiya",
+    "description": "Kolombiya — Bogotá, Medellín, Cali, Barranquilla, Cartagena û Bucaramanga; Andes, perava Karayîbê û Amazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida û Ciudad Bolívar; Şelala Angel, Orinoco û Girava Margarita."
+  },
+  "peru": {
+    "title": "Perû",
+    "description": "Perû — Lima, Arequipa, Cusco, Trujillo, Iquitos û Puno; Machu Picchu, Gola Titicacayê û Geliyê Pîroz."
+  },
+  "ecuador": {
+    "title": "Ekwador",
+    "description": "Ekwador — Quito, Guayaquil, Cuenca, Manta û Baños; Rêya Volkanan, Amazon û Giravên Galápagosê."
+  },
+  "bolivia": {
+    "title": "Bolîvya",
+    "description": "Bolîvya — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre û Potosí; Gola Titicacayê û Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Şîlî",
+    "description": "Şîlî — Santiago, Valparaíso, Concepción, Antofagasta, La Serena û Punta Arenas; Atacama, Herêma Golan, Patagonya û Girava Paskalyayê."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay û Ûrûguay",
+    "description": "Paraguay û Ûrûguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este û Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guyana",
+    "description": "Guyana, Sûrînam û Guyanaya Fransî — Georgetown, Paramaribo, Cayenne û Kourou; Şelala Kaieteur û daristana baranê ya Mertala Guyanayê."
+  },
+  "falklands": {
+    "title": "Giravên Falklandê",
+    "description": "Giravên Falklandê — Stanley, Goose Green û giravên Falklanda Rojhilat û Falklanda Rojava."
+  },
+  "australia": {
+    "title": "Awistralya",
+    "description": "Awistralya — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin û Canberra; Refa Mezin a Bendê, Uluru û Outback."
+  },
+  "new-zealand": {
+    "title": "Zelandaya Nû",
+    "description": "Zelandaya Nû — Auckland, Wellington, Christchurch, Hamilton, Dunedin û Queenstown; Alpên Başûr, Fiordland û Rotorua."
+  },
+  "british-columbia": {
+    "title": "Kolombiyaya Brîtanî",
+    "description": "Kolombiyaya Brîtanî — Vancouver, Victoria, Kelowna, Kamloops, Prince George û Whistler; Çiyayên Peravê, Girava Vancouverê û Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Deştên Kanadayê",
+    "description": "Alberta, Saskatchewan û Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina û Banff; Çiyayên Rocky, deşt û Churchill li ser Kendava Hudsonê."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston û Thunder Bay; Şelala Niagarayê, Golên Mezin û Parka Algonquin."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Bajarê Quebecê, Laval, Gatineau, Sherbrooke û Saguenay; Çemê St. Lawrence, Laurentides û Nîvgirava Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Kanadaya Atlantîk",
+    "description": "New Brunswick, Nova Scotia, Girava Prince Edward û Newfoundland û Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton û Charlottetown; Cabot Trail û Kendava Fundyê."
+  },
+  "northern-canada": {
+    "title": "Bakurê Kanadayê",
+    "description": "Yukon, Herêmên Bakur-Rojava û Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City û Inuvik; Arşîpela Arktîkê û Çemê Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong û Makao",
+    "description": "Hong Kong û Makao — Girava Hong Kongê, Kowloon, Herêmên Nû, Lantau û Nîvgirava Makaoyê, Taipa û Coloane."
   }
 }

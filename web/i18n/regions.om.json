@@ -10,5 +10,165 @@
   "south-central-us": {
     "title": "Giddugala Kibbaa Ameerikaa",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi fi Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson fi Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Saamowaa fi Tongaa",
+    "description": "Saamowaa, Saamowaa Ameerikaa, Tongaa, Niuwee, Tokelaawu fi Waalis fi Futuunaa — Apia, Pago Pago, Nukuʻalofa, Alofi fi Mata-Utu; Upolu, Savaiʻi, Tutuila fi odoloota Tongaa."
+  },
+  "mariana-islands": {
+    "title": "Guwaam fi Odoloota Maariyaanaa Kaabaa",
+    "description": "Guwaam fi Odoloota Maariyaanaa Kaabaa — Hagåtña, Tamuning, Dededo, Saipan, Tinian fi Rota."
+  },
+  "greenland": {
+    "title": "Giriinlaand",
+    "description": "Giriinlaand — Nuuk, Sisimiut, Ilulissat, Qaqortoq fi Tasiilaq; uwwisa cabbii, Ilulissat Icefjord fi fiyoordota kibbaa."
+  },
+  "bermuda": {
+    "title": "Bermuudaa",
+    "description": "Bermuudaa — Hamilton, St. George’s fi Royal Naval Dockyard, aanaalee odolaa fi qarqara galaanaa cirracha diimaa-adiitiin."
+  },
+  "belarus": {
+    "title": "Belaruus",
+    "description": "Belaruus — Minsk, Gomel, Mogilev, Vitebsk, Grodno fi Brest; bosona Belovezhskaya Pushcha fi lafa jajjaboo Polesia."
+  },
+  "channel-islands": {
+    "title": "Odoloota Chaanalii",
+    "description": "Jersey, Guernsey, Alderney, Sark fi Herm — St Helier, St Peter Port fi Gorey."
+  },
+  "faroe-islands": {
+    "title": "Odoloota Faroo",
+    "description": "Odoloota Faroo — Tórshavn, Klaksvík, Runavík fi odoloota kudha saddeet, gandoota isaanii, boolla karaa fi qarqara kattaa galaanaa."
+  },
+  "svalbard": {
+    "title": "Svaalbaard",
+    "description": "Svaalbaard fi Jan Mayen — Longyearbyen, Barentsburg fi Ny-Ålesund; cabbii fi fiyoordota Spitsbergen."
+  },
+  "malta": {
+    "title": "Maaltaa",
+    "description": "Maaltaa, Gozo fi Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria fi Magaalota Sadan."
+  },
+  "madagascar-islands": {
+    "title": "Madagaaskaar fi Odoloota Galaana Hindii",
+    "description": "Madagaaskaar, Komoroos, Mayotte, Réunion, Moorishiyes fi Seeshels — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis fi Victoria."
+  },
+  "sudan": {
+    "title": "Sudaan",
+    "description": "Sudaan — Kaartuum, Omdurmaan, Port Sudan, Kassala, El Obeid fi Nyala; bakka Abbayyaa Cuquliisaa fi Abbayyaa Adiin walitti makaman fi piraamidoota Meroë."
+  },
+  "cabo-verde": {
+    "title": "Keep Verdee",
+    "description": "Keep Verdee — Praia, Mindelo, Santa Maria fi odoloota kudhan, Santo Antão irraa hanga Brava."
+  },
+  "sao-tome-principe": {
+    "title": "Saawo Toomee fi Prinsiip",
+    "description": "Saawo Toomee fi Prinsiip — São Tomé, Santo António fi bosona roobaa fi qarqara galaanaa odoloota lamaanii."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension fi Tristan da Cunha",
+    "description": "Saint Helena, Odola Ascension fi Tristan da Cunha — Jamestown, Georgetown fi Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Baangilaadesh",
+    "description": "Baangilaadesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet fi Cox’s Bazar; Sundarbans fi deeltaa Gaanjis–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sirii Laankaa fi Maaldiivs",
+    "description": "Sirii Laankaa fi Maaldiivs — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura fi Malé; lafa gaaraa, Sigiriya fi atoloota."
+  },
+  "vietnam": {
+    "title": "Veetinaam",
+    "description": "Veetinaam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An fi Can Tho; Ha Long Bay fi deeltaa Mekong."
+  },
+  "philippines": {
+    "title": "Filippiins",
+    "description": "Filippiins — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio fi Zamboanga; Luzon, Visayas, Mindanao fi Palawan."
+  },
+  "indonesia": {
+    "title": "Indooneeshiyaa fi Tiimor-Lestee",
+    "description": "Indooneeshiyaa fi Tiimor-Lestee — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar fi Dili; Java, Sumatra, Bali, Borneo, Sulawesi fi Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Maleeshiyaa, Singaappoor fi Bruunee",
+    "description": "Maleeshiyaa, Singaappoor fi Bruunee — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching fi Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Miyaanmaar",
+    "description": "Miyaanmaar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine fi Haroo Inle; sulula Irrawaddy fi tulluuwwan Shan."
+  },
+  "cambodia-laos": {
+    "title": "Kamboodiyaa fi Laa’os",
+    "description": "Kamboodiyaa fi Laa’os — Phnom Penh, Siem Reap fi Angkor, Battambang, Vientiane, Luang Prabang fi Pakse; Mekong fi Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolombiyaa",
+    "description": "Kolombiyaa — Bogotá, Medellín, Cali, Barranquilla, Cartagena fi Bucaramanga; Andes, qarqara Kariibiyaanii fi Amazon."
+  },
+  "venezuela": {
+    "title": "Veenzuweelaa",
+    "description": "Veenzuweelaa — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida fi Ciudad Bolívar; Angel Falls, Orinoco fi Isla Margarita."
+  },
+  "peru": {
+    "title": "Peeruu",
+    "description": "Peeruu — Lima, Arequipa, Cusco, Trujillo, Iquitos fi Puno; Machu Picchu, Haroo Titicaca fi Sulula Qulqulluu."
+  },
+  "ecuador": {
+    "title": "Ikuwaadoor",
+    "description": "Ikuwaadoor — Quito, Guayaquil, Cuenca, Manta fi Baños; Avenue of the Volcanoes, Amazon fi Odoloota Galápagos."
+  },
+  "bolivia": {
+    "title": "Booliiviyaa",
+    "description": "Booliiviyaa — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre fi Potosí; Haroo Titicaca fi Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chiilee",
+    "description": "Chiilee — Santiago, Valparaíso, Concepción, Antofagasta, La Serena fi Punta Arenas; Atacama, Naannoo Harootaa, Patagonia fi Odola Easter."
+  },
+  "paraguay-uruguay": {
+    "title": "Paaraaguwaay fi Uruguwaay",
+    "description": "Paaraaguwaay fi Uruguwaay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este fi Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Giyaanota",
+    "description": "Guyaanaa, Surinaam fi Giyaanaa Faransaa — Georgetown, Paramaribo, Cayenne fi Kourou; Kaieteur Falls fi bosona roobaa Guiana Shield."
+  },
+  "falklands": {
+    "title": "Odoloota Fooklaand",
+    "description": "Odoloota Fooklaand — Stanley, Goose Green fi odoloota East Falkland fi West Falkland."
+  },
+  "australia": {
+    "title": "Awustiraaliyaa",
+    "description": "Awustiraaliyaa — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin fi Canberra; Great Barrier Reef, Uluru fi Outback."
+  },
+  "new-zealand": {
+    "title": "Niw Zilaand",
+    "description": "Niw Zilaand — Auckland, Wellington, Christchurch, Hamilton, Dunedin fi Queenstown; Southern Alps, Fiordland fi Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George fi Whistler; Coast Mountains, Odola Vancouver fi Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Dirree Kanaadaa",
+    "description": "Alberta, Saskatchewan fi Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina fi Banff; Rockies, dirree fi Churchill qarqara Hudson Bay."
+  },
+  "ontario": {
+    "title": "Ontaariyoo",
+    "description": "Ontaariyoo — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston fi Thunder Bay; Niagara Falls, Haroowwan Gurguddoo fi Algonquin Park."
+  },
+  "quebec": {
+    "title": "Kuwebek",
+    "description": "Kuwebek — Montréal, Quebec City, Laval, Gatineau, Sherbrooke fi Saguenay; St. Lawrence, Laurentians fi Gaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Kanaadaa Atlaantikii",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, fi Newfoundland fi Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton fi Charlottetown; Cabot Trail fi Bay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Kaaba Kanaadaa",
+    "description": "Yukon, Northwest Territories fi Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City fi Inuvik; Arctic Archipelago fi Laga Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Koong fi Makaawoo",
+    "description": "Hong Koong fi Makaawoo — Odola Hong Kong, Kowloon, New Territories, Lantau fi Macau Peninsula, Taipa fi Coloane."
   }
 }

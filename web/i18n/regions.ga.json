@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Lár-Dheisceart na Stát Aontaithe",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi agus Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson agus Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samó agus Tonga",
+    "description": "Samó, Samó Mheiriceá, Tonga, Niue, Tócalá, agus Vailís agus Futúna — Apia, Pago Pago, Nukuʻalofa, Alofi agus Mata-Utu; Upolu, Savaiʻi, Tutuila agus oileáin Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam agus na hOileáin Mháirianacha Thuaidh",
+    "description": "Guam agus na hOileáin Mháirianacha Thuaidh — Hagåtña, Tamuning, Dededo, Saipan, Tinian agus Rota."
+  },
+  "greenland": {
+    "title": "An Ghraonlainn",
+    "description": "An Ghraonlainn — Nuuk, Sisimiut, Ilulissat, Qaqortoq agus Tasiilaq; an leac oighir, Fiord Oighir Ilulissat agus fiordanna an deiscirt."
+  },
+  "bermuda": {
+    "title": "Beirmiúda",
+    "description": "Beirmiúda — Hamilton, St. George’s agus an Royal Naval Dockyard, paróistí an oileáin agus a thránna gainimh bhándearga."
+  },
+  "belarus": {
+    "title": "An Bhealarúis",
+    "description": "An Bhealarúis — Minsc, Gomel, Mogilev, Vitebsk, Grodno agus Brest; foraois Belovezhskaya Pushcha agus riasca Polesia."
+  },
+  "channel-islands": {
+    "title": "Oileáin Mhuir nIocht",
+    "description": "Geirsí, Geansaí, Alderney, Sark agus Herm — St Helier, St Peter Port agus Gorey."
+  },
+  "faroe-islands": {
+    "title": "Oileáin Fharó",
+    "description": "Oileáin Fharó — Tórshavn, Klaksvík, Runavík agus an t-ocht n-oileán déag, a mbailte beaga, a dtolláin agus a n-aillte mara."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard agus Jan Mayen — Longyearbyen, Barentsburg agus Ny-Ålesund; oighearshruthanna agus fiordanna Spitsbergen."
+  },
+  "malta": {
+    "title": "Málta",
+    "description": "Málta, Gozo agus Comino — Vaileite, Sliema, St Julian’s, Mdina, Victoria agus na Trí Chathair."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar agus Oileáin an Aigéin Indiaigh",
+    "description": "Madagascar, Oileáin Chomóra, Mayotte, Réunion, Oileán Mhuirís agus na Séiséil — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis agus Victoria."
+  },
+  "sudan": {
+    "title": "An tSúdáin",
+    "description": "An tSúdáin — Cartúm, Omdurman, Port Sudan, Kassala, El Obeid agus Nyala; cumar na Níle Gorma agus na Níle Báine agus pirimidí Meroë."
+  },
+  "cabo-verde": {
+    "title": "Rinn Verde",
+    "description": "Rinn Verde — Praia, Mindelo, Santa Maria agus na deich n-oileán, ó Santo Antão go Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé agus Príncipe",
+    "description": "São Tomé agus Príncipe — São Tomé, Santo António agus foraoisí báistí agus tránna an dá oileán."
+  },
+  "saint-helena": {
+    "title": "San Héilin, Ascension agus Tristan da Cunha",
+    "description": "San Héilin, Oileán Ascension agus Tristan da Cunha — Jamestown, Georgetown agus Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "An Bhanglaidéis",
+    "description": "An Bhanglaidéis — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet agus Cox’s Bazar; na Sundarbans agus deilt na Gainséise agus an Bhrahmapútra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Srí Lanca agus Oileáin Mhaildíve",
+    "description": "Srí Lanca agus Oileáin Mhaildíve — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura agus Malé; an tír chnocach, Sigiriya agus na hatolláin."
+  },
+  "vietnam": {
+    "title": "Vítneam",
+    "description": "Vítneam — Hanoi, Cathair Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An agus Can Tho; Cuan Ha Long agus deilt an Mhekong."
+  },
+  "philippines": {
+    "title": "Na hOileáin Fhilipíneacha",
+    "description": "Na hOileáin Fhilipíneacha — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio agus Zamboanga; Luzon, na Visayas, Mindanao agus Palawan."
+  },
+  "indonesia": {
+    "title": "An Indinéis agus Tíomór Thoir",
+    "description": "An Indinéis agus Tíomór Thoir — Iacárta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar agus Dili; Iáva, Sumatra, Bali, Borneo, Sulawesi agus Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "An Mhalaeisia, Singeapór agus Brúiné",
+    "description": "An Mhalaeisia, Singeapór agus Brúiné — Kuala Lumpur, Singeapór, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching agus Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Maenmar",
+    "description": "Maenmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine agus Loch Inle; gleann an Irrawaddy agus cnoic Shan."
+  },
+  "cambodia-laos": {
+    "title": "An Chambóid agus Laos",
+    "description": "An Chambóid agus Laos — Phnom Penh, Siem Reap agus Angkor, Battambang, Vientiane, Luang Prabang agus Pakse; an Mekong agus an Tonlé Sap."
+  },
+  "colombia": {
+    "title": "An Cholóim",
+    "description": "An Cholóim — Bogotá, Medellín, Cali, Barranquilla, Cartagena agus Bucaramanga; na hAindéis, cósta na Cairibe agus an Amasóin."
+  },
+  "venezuela": {
+    "title": "Veiniséala",
+    "description": "Veiniséala — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida agus Ciudad Bolívar; Eas Angel, an Oranócó agus Isla Margarita."
+  },
+  "peru": {
+    "title": "Peiriú",
+    "description": "Peiriú — Lima, Arequipa, Cusco, Trujillo, Iquitos agus Puno; Machu Picchu, Loch Titicaca agus an Gleann Naofa."
+  },
+  "ecuador": {
+    "title": "Eacuadór",
+    "description": "Eacuadór — Quito, Guayaquil, Cuenca, Manta agus Baños; Ascaill na mBolcán, an Amasóin agus Oileáin Galápagos."
+  },
+  "bolivia": {
+    "title": "An Bholaiv",
+    "description": "An Bholaiv — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre agus Potosí; Loch Titicaca agus an Salar de Uyuni."
+  },
+  "chile": {
+    "title": "An tSile",
+    "description": "An tSile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena agus Punta Arenas; an Atacama, Ceantar na Lochanna, an Phatagóin agus Oileán na Cásca."
+  },
+  "paraguay-uruguay": {
+    "title": "Paragua agus Uragua",
+    "description": "Paragua agus Uragua — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este agus Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Na Guáinithe",
+    "description": "An Ghuáin, Suranam agus Guáin na Fraince — Georgetown, Paramaribo, Cayenne agus Kourou; Eas Kaieteur agus foraois bháistí Sciath na Guáine."
+  },
+  "falklands": {
+    "title": "Oileáin Fháclainne",
+    "description": "Oileáin Fháclainne — Stanley, Goose Green agus oileáin Fháclainn Thoir agus Fháclainn Thiar."
+  },
+  "australia": {
+    "title": "An Astráil",
+    "description": "An Astráil — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin agus Canberra; an Mhórsceir Bhacainn, Uluru agus an Outback."
+  },
+  "new-zealand": {
+    "title": "An Nua-Shéalainn",
+    "description": "An Nua-Shéalainn — Auckland, Wellington, Christchurch, Hamilton, Dunedin agus Queenstown; Alpa an Deiscirt, Fiordland agus Rotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George agus Whistler; Sléibhte an Chósta, Oileán Vancouver agus an Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Féarthailte Cheanada",
+    "description": "Alberta, Saskatchewan agus Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina agus Banff; na Sléibhte Creagacha, na féarthailte agus Churchill ar Bhá Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston agus Thunder Bay; Easanna Niagara, na Lochanna Móra agus Páirc Algonquin."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Cathair Québec, Laval, Gatineau, Sherbrooke agus Saguenay; an St. Lawrence, na Laurentides agus Leithinis Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Ceanada an Atlantaigh",
+    "description": "New Brunswick, Albain Nua, Oileán an Phrionsa Éadbhard, agus Talamh an Éisc agus Labradór — Halifax, St. John’s, Moncton, Saint John, Fredericton agus Charlottetown; an Cabot Trail agus Bá Fundy."
+  },
+  "northern-canada": {
+    "title": "Tuaisceart Cheanada",
+    "description": "Yukon, Críocha an Iarthuaiscirt agus Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City agus Inuvik; Oileánra an Artaigh agus abhainn Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Cong agus Macao",
+    "description": "Hong Cong agus Macao — Oileán Hong Cong, Kowloon, na Críocha Nua, Lantau agus Leithinis Mhacao, Taipa agus Coloane."
   }
 }

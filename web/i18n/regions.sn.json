@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Maodzanyemba ePakati peAmerica",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi neAlabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson neBirmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa neTonga",
+    "description": "Samoa, American Samoa, Tonga, Niue, Tokelau neWallis neFutuna — Apia, Pago Pago, Nukuʻalofa, Alofi neMata-Utu; Upolu, Savaiʻi, Tutuila nezvitsuwa zveTonga."
+  },
+  "mariana-islands": {
+    "title": "Guam neZvitsuwa zveNorthern Mariana",
+    "description": "Guam neZvitsuwa zveNorthern Mariana — Hagåtña, Tamuning, Dededo, Saipan, Tinian neRota."
+  },
+  "greenland": {
+    "title": "Greenland",
+    "description": "Greenland — Nuuk, Sisimiut, Ilulissat, Qaqortoq neTasiilaq; chando chakafukidza nyika, Ilulissat Icefjord nemafjord ekumaodzanyemba."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s neRoyal Naval Dockyard, maparishi echitsuwa nemahombekombe acho ejecha repinki."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Gomel, Mogilev, Vitebsk, Grodno neBrest; sango reBelovezhskaya Pushcha nemapani ePolesia."
+  },
+  "channel-islands": {
+    "title": "Zvitsuwa zveChannel",
+    "description": "Jersey, Guernsey, Alderney, Sark neHerm — St Helier, St Peter Port neGorey."
+  },
+  "faroe-islands": {
+    "title": "Zvitsuwa zveFaroe",
+    "description": "Zvitsuwa zveFaroe — Tórshavn, Klaksvík, Runavík nezvitsuwa gumi nezvisere, misha yazvo, matanera nemawere egungwa."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard neJan Mayen — Longyearbyen, Barentsburg neNy-Ålesund; maglacier nemafjord eSpitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo neComino — Valletta, Sliema, St Julian’s, Mdina, Victoria neThree Cities."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar neZvitsuwa zveIndian Ocean",
+    "description": "Madagascar, Comoros, Mayotte, Réunion, Mauritius neSeychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis neVictoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid neNyala; panosangana Blue Nile neWhite Nile, nemapiramidhi eMeroë."
+  },
+  "cabo-verde": {
+    "title": "Cabo Verde",
+    "description": "Cabo Verde — Praia, Mindelo, Santa Maria nezvitsuwa gumi, kubva kuSanto Antão kusvika kuBrava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé nePríncipe",
+    "description": "São Tomé nePríncipe — São Tomé, Santo António nemasango anonaya nemahombekombe ezvitsuwa zviviri."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension neTristan da Cunha",
+    "description": "Saint Helena, Ascension Island neTristan da Cunha — Jamestown, Georgetown neEdinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet neCox’s Bazar; Sundarbans nedelta yeGanges–Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka neMaldives",
+    "description": "Sri Lanka neMaldives — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura neMalé; nyika yezvikomo, Sigiriya nemaatoll."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minh City, Da Nang, Hai Phong, Hue, Hoi An neCan Tho; Ha Long Bay neMekong Delta."
+  },
+  "philippines": {
+    "title": "Philippines",
+    "description": "Philippines — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio neZamboanga; Luzon, Visayas, Mindanao nePalawan."
+  },
+  "indonesia": {
+    "title": "Indonesia neTimor-Leste",
+    "description": "Indonesia neTimor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar neDili; Java, Sumatra, Bali, Borneo, Sulawesi nePapua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malaysia, Singapore neBrunei",
+    "description": "Malaysia, Singapore neBrunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching neBandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine neInle Lake; mupata weIrrawaddy nezvikomo zveShan."
+  },
+  "cambodia-laos": {
+    "title": "Cambodia neLaos",
+    "description": "Cambodia neLaos — Phnom Penh, Siem Reap neAngkor, Battambang, Vientiane, Luang Prabang nePakse; Mekong neTonlé Sap."
+  },
+  "colombia": {
+    "title": "Colombia",
+    "description": "Colombia — Bogotá, Medellín, Cali, Barranquilla, Cartagena neBucaramanga; Andes, mahombekombe eCaribbean neAmazon."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida neCiudad Bolívar; Angel Falls, Orinoco neIsla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos nePuno; Machu Picchu, Lake Titicaca neSacred Valley."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta neBaños; Avenue of the Volcanoes, Amazon neZvitsuwa zveGalápagos."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre nePotosí; Lake Titicaca neSalar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena nePunta Arenas; Atacama, Lake District, Patagonia neEaster Island."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay neUruguay",
+    "description": "Paraguay neUruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este neColonia del Sacramento."
+  },
+  "guianas": {
+    "title": "MaGuiana",
+    "description": "Guyana, Suriname neFrench Guiana — Georgetown, Paramaribo, Cayenne neKourou; Kaieteur Falls nesango rinonaya reGuiana Shield."
+  },
+  "falklands": {
+    "title": "Zvitsuwa zveFalkland",
+    "description": "Zvitsuwa zveFalkland — Stanley, Goose Green nezvitsuwa zveEast Falkland neWest Falkland."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin neCanberra; Great Barrier Reef, Uluru neOutback."
+  },
+  "new-zealand": {
+    "title": "New Zealand",
+    "description": "New Zealand — Auckland, Wellington, Christchurch, Hamilton, Dunedin neQueenstown; Southern Alps, Fiordland neRotorua."
+  },
+  "british-columbia": {
+    "title": "British Columbia",
+    "description": "British Columbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George neWhistler; Coast Mountains, Vancouver Island neOkanagan."
+  },
+  "canadian-prairies": {
+    "title": "Mapurazi eCanada",
+    "description": "Alberta, Saskatchewan neManitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina neBanff; Rockies, mapurazi neChurchill paHudson Bay."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston neThunder Bay; Niagara Falls, Great Lakes neAlgonquin Park."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, Quebec City, Laval, Gatineau, Sherbrooke neSaguenay; St. Lawrence, Laurentians neGaspé Peninsula."
+  },
+  "atlantic-canada": {
+    "title": "Atlantic Canada",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island neNewfoundland neLabrador — Halifax, St. John’s, Moncton, Saint John, Fredericton neCharlottetown; Cabot Trail neBay of Fundy."
+  },
+  "northern-canada": {
+    "title": "Kuchamhembe kweCanada",
+    "description": "Yukon, Northwest Territories neNunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City neInuvik; Arctic Archipelago neRwizi rweMackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong neMacau",
+    "description": "Hong Kong neMacau — Hong Kong Island, Kowloon, New Territories, Lantau neMacau Peninsula, Taipa neColoane."
   }
 }

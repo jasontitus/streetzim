@@ -14,5 +14,165 @@
   "south-central-us": {
     "title": "ABŞ-ın Cənub-Mərkəzi hissəsi",
     "description": "Texas, Oklahoma, Arkanzas, Luiziana, Kentukki, Tennessi, Missisipi və Alabama — Hyuston, Dallas, San-Antonio, Ostin, Oklahoma-Siti, Talsa, Litl-Rok, Yeni Orlean, Luisvill, Neşvill, Memfis, Cekson və Birminhem."
+  },
+  "west-polynesia": {
+    "title": "Samoa və Tonqa",
+    "description": "Samoa, Amerika Samoası, Tonqa, Niue, Tokelau, Uollis və Futuna — Apia, Paqo-Paqo, Nukualofa, Alofi və Mata-Utu; Upolu, Savai, Tutuila və Tonqa adaları."
+  },
+  "mariana-islands": {
+    "title": "Quam və Şimali Marian adaları",
+    "description": "Quam və Şimali Marian adaları — Haqatna, Tamuninq, Dededo, Saypan, Tinian və Rota."
+  },
+  "greenland": {
+    "title": "Qrenlandiya",
+    "description": "Qrenlandiya — Nuuk, Sisimiut, İlulissat, Qaqortoq və Tasiilaq; buz örtüyü, İlulissat buz fyordu və cənubun fyordları."
+  },
+  "bermuda": {
+    "title": "Bermud adaları",
+    "description": "Bermud adaları — Hamilton, Sent-Corc və Kral Hərbi Dəniz Dokyardı, adanın kilsə dairələri və çəhrayı qumlu çimərlikləri."
+  },
+  "belarus": {
+    "title": "Belarus",
+    "description": "Belarus — Minsk, Homel, Mogilyov, Vitebsk, Qrodno və Brest; Belovej meşəsi və Polesye bataqlıqları."
+  },
+  "channel-islands": {
+    "title": "Normand adaları",
+    "description": "Cersi, Gernsi, Olderni, Sark və Herm — Sent-Helier, Sent-Piter-Port və Qori."
+  },
+  "faroe-islands": {
+    "title": "Farer adaları",
+    "description": "Farer adaları — Torshavn, Klaksvik, Runavik və on səkkiz ada, onların kəndləri, tunelləri və dəniz qayaları."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard və Yan-Mayen — Lonqyirbyen, Barentsburq və Ny-Olesund; Şpitsbergenin buzlaqları və fyordları."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Qozo və Komino — Valletta, Sliema, Sent-Culians, Mdina, Viktoriya və Üç Şəhər."
+  },
+  "madagascar-islands": {
+    "title": "Madaqaskar və Hind okeanı adaları",
+    "description": "Madaqaskar, Komor adaları, Mayotta, Reunyon, Mavriki və Seyşel adaları — Antananarivu, Tuamasina, Moroni, Mamudzu, Sen-Deni, Port-Lui və Viktoriya."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Xartum, Ümdürman, Port-Sudan, Kassala, Əl-Übeyd və Nyala; Mavi və Ağ Nilin qovuşduğu yer və Meroe ehramları."
+  },
+  "cabo-verde": {
+    "title": "Kabo-Verde",
+    "description": "Kabo-Verde — Praya, Mindelu, Santa-Mariya və Santu-Antandan Bravaya qədər on ada."
+  },
+  "sao-tome-principe": {
+    "title": "San-Tome və Prinsipi",
+    "description": "San-Tome və Prinsipi — San-Tome, Santu-Antoniu və iki adanın tropik meşələri və çimərlikləri."
+  },
+  "saint-helena": {
+    "title": "Müqəddəs Yelena, Askenson və Tristan-da-Kunya",
+    "description": "Müqəddəs Yelena, Askenson adası və Tristan-da-Kunya — Ceymstaun, Corctaun və Yeddi Dənizin Edinburqu."
+  },
+  "bangladesh": {
+    "title": "Banqladeş",
+    "description": "Banqladeş — Dəkkə, Çittaqonq, Xulna, Racşahi, Silhet və Koks-Bazar; Sundarbans və Qanq–Brahmaputra deltası."
+  },
+  "sri-lanka-maldives": {
+    "title": "Şri-Lanka və Maldiv adaları",
+    "description": "Şri-Lanka və Maldiv adaları — Kolombo, Kandi, Qalle, Cafna, Trinkomali, Anuradhapura və Male; dağlıq ərazi, Siqiriya və atollar."
+  },
+  "vietnam": {
+    "title": "Vyetnam",
+    "description": "Vyetnam — Hanoy, Hoşimin, Danang, Hayfon, Hue, Hoyan və Kantho; Halonq körfəzi və Mekonq deltası."
+  },
+  "philippines": {
+    "title": "Filippin",
+    "description": "Filippin — Manila, Kezon-Siti, Sebu, Davao, İloilo, Bagio və Zamboanqa; Luson, Visayas adaları, Mindanao və Palavan."
+  },
+  "indonesia": {
+    "title": "İndoneziya və Şərqi Timor",
+    "description": "İndoneziya və Şərqi Timor — Cakarta, Surabaya, Bandunq, Medan, Yoqyakarta, Denpasar, Makassar və Dili; Yava, Sumatra, Bali, Borneo, Sulavesi və Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malayziya, Sinqapur və Bruney",
+    "description": "Malayziya, Sinqapur və Bruney — Kuala-Lumpur, Sinqapur, Corc-Taun, Cohor-Baru, Malakka, Kota-Kinabalu, Kuçinq və Bandar-Seri-Beqavan."
+  },
+  "myanmar": {
+    "title": "Myanma",
+    "description": "Myanma — Yanqon, Mandalay, Neypyido, Baqan, Molamyayn və İnle gölü; İravadi vadisi və Şan dağları."
+  },
+  "cambodia-laos": {
+    "title": "Kamboca və Laos",
+    "description": "Kamboca və Laos — Pnompen, Siem-Reap və Ankor, Battambanq, Vyentyan, Luanqprabanq və Pakse; Mekonq və Tonlesap."
+  },
+  "colombia": {
+    "title": "Kolumbiya",
+    "description": "Kolumbiya — Boqota, Medelyin, Kali, Barrankilya, Kartaxena və Bukaramanqa; And dağları, Karib sahili və Amazoniya."
+  },
+  "venezuela": {
+    "title": "Venesuela",
+    "description": "Venesuela — Karakas, Marakaybo, Valensiya, Barkisimeto, Merida və Syudad-Bolivar; Anxel şəlaləsi, Orinoko və Marqarita adası."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arekipa, Kusko, Truxilyo, İkitos və Puno; Maçu-Pikçu, Titikaka gölü və Müqəddəs Vadi."
+  },
+  "ecuador": {
+    "title": "Ekvador",
+    "description": "Ekvador — Kito, Quayakil, Kuenka, Manta və Banyos; Vulkanlar xiyabanı, Amazoniya və Qalapaqos adaları."
+  },
+  "bolivia": {
+    "title": "Boliviya",
+    "description": "Boliviya — La-Pas, El-Alto, Santa-Krus, Koçabamba, Sukre və Potosi; Titikaka gölü və Uyuni duz düzənliyi."
+  },
+  "chile": {
+    "title": "Çili",
+    "description": "Çili — Santyaqo, Valparaiso, Konsepsyon, Antofaqasta, La-Serena və Punta-Arenas; Atakama, Göllər bölgəsi, Pataqoniya və Pasxa adası."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraqvay və Uruqvay",
+    "description": "Paraqvay və Uruqvay — Asunsyon, Syudad-del-Este, Enkarnasyon, Montevideo, Punta-del-Este və Kolonya-del-Sakramento."
+  },
+  "guianas": {
+    "title": "Qvianalar",
+    "description": "Qayana, Surinam və Fransa Qvianası — Corctaun, Paramaribo, Kayenna və Kuru; Kayetur şəlaləsi və Qviana yaylasının tropik meşələri."
+  },
+  "falklands": {
+    "title": "Folklend adaları",
+    "description": "Folklend adaları — Stenli, Qus-Qrin, Şərqi və Qərbi Folklend adaları."
+  },
+  "australia": {
+    "title": "Avstraliya",
+    "description": "Avstraliya — Sidney, Melburn, Brisben, Pert, Adelaida, Hobart, Darvin və Kanberra; Böyük Sədd rifi, Uluru və Autbek."
+  },
+  "new-zealand": {
+    "title": "Yeni Zelandiya",
+    "description": "Yeni Zelandiya — Oklend, Vellinqton, Kraystçerç, Hamilton, Danidin və Kuinstaun; Cənubi Alp dağları, Fyordlend və Rotorua."
+  },
+  "british-columbia": {
+    "title": "Britaniya Kolumbiyası",
+    "description": "Britaniya Kolumbiyası — Vankuver, Viktoriya, Kelouna, Kamlups, Prins-Corc və Uisler; Sahil dağları, Vankuver adası və Okanaqan."
+  },
+  "canadian-prairies": {
+    "title": "Kanada preriləri",
+    "description": "Alberta, Saskaçevan və Manitoba — Kalqari, Edmonton, Vinnipeq, Saskatun, Recayna və Banf; Qayalı dağlar, prerilər və Hudson körfəzi sahilində Çerçill."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottava, Missisoqa, Hamilton, London, Kinqston və Tander-Bey; Niaqara şəlaləsi, Böyük göllər və Alqonkin parkı."
+  },
+  "quebec": {
+    "title": "Kvebek",
+    "description": "Kvebek — Monreal, Kvebek şəhəri, Laval, Qatino, Şerbruk və Saqney; Müqəddəs Lavrenti çayı, Lorensiya dağları və Qaspe yarımadası."
+  },
+  "atlantic-canada": {
+    "title": "Atlantik Kanada",
+    "description": "Nyu-Brunsvik, Yeni Şotlandiya, Şahzadə Eduard adası, Nyufaundlend və Labrador — Halifaks, Sent-Cons, Monkton, Sent-Con, Frederikton və Şarlottaun; Kabot yolu və Fandi körfəzi."
+  },
+  "northern-canada": {
+    "title": "Şimali Kanada",
+    "description": "Yukon, Şimal-Qərb əraziləri və Nunavut — Uaythors, Yellounayf, İkaluit, Douson-Siti və İnuvik; Kanada Arktik arxipelaqı və Makkenzi çayı."
+  },
+  "hong-kong-macau": {
+    "title": "Honkonq və Makao",
+    "description": "Honkonq və Makao — Honkonq adası, Kaulun, Yeni Ərazilər, Lantau və Makao yarımadası, Taypa və Koloane."
   }
 }

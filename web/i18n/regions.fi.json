@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Yhdysvaltain eteläinen keskiosa",
     "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ja Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ja Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa ja Tonga",
+    "description": "Samoa, Amerikan Samoa, Tonga, Niue, Tokelau sekä Wallis ja Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi ja Mata-Utu; Upolu, Savaiʻi, Tutuila ja Tongan saaret."
+  },
+  "mariana-islands": {
+    "title": "Guam ja Pohjois-Mariaanit",
+    "description": "Guam ja Pohjois-Mariaanit — Hagåtña, Tamuning, Dededo, Saipan, Tinian ja Rota."
+  },
+  "greenland": {
+    "title": "Grönlanti",
+    "description": "Grönlanti — Nuuk, Sisimiut, Ilulissat, Qaqortoq ja Tasiilaq; mannerjäätikkö, Ilulissatin jäävuono ja etelän vuonot."
+  },
+  "bermuda": {
+    "title": "Bermuda",
+    "description": "Bermuda — Hamilton, St. George’s ja Royal Naval Dockyard, saaren seurakunnat ja sen vaaleanpunaiset hiekkarannat."
+  },
+  "belarus": {
+    "title": "Valko-Venäjä",
+    "description": "Valko-Venäjä — Minsk, Gomel, Mogiljov, Vitebsk, Grodno ja Brest; Białowieżan aarniometsä ja Polesian suot."
+  },
+  "channel-islands": {
+    "title": "Kanaalisaaret",
+    "description": "Jersey, Guernsey, Alderney, Sark ja Herm — St Helier, St Peter Port ja Gorey."
+  },
+  "faroe-islands": {
+    "title": "Färsaaret",
+    "description": "Färsaaret — Tórshavn, Klaksvík, Runavík ja kahdeksantoista saarta kylineen, tunneleineen ja merijyrkänteineen."
+  },
+  "svalbard": {
+    "title": "Huippuvuoret",
+    "description": "Huippuvuoret ja Jan Mayen — Longyearbyen, Barentsburg ja Ny-Ålesund; Huippuvuorten pääsaaren jäätiköt ja vuonot."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo ja Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria ja Kolme kaupunkia."
+  },
+  "madagascar-islands": {
+    "title": "Madagaskar ja Intian valtameren saaret",
+    "description": "Madagaskar, Komorit, Mayotte, Réunion, Mauritius ja Seychellit — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis ja Victoria."
+  },
+  "sudan": {
+    "title": "Sudan",
+    "description": "Sudan — Khartum, Omdurman, Port Sudan, Kassala, El Obeid ja Nyala; Sinisen ja Valkoisen Niilin yhtymäkohta ja Meroën pyramidit."
+  },
+  "cabo-verde": {
+    "title": "Kap Verde",
+    "description": "Kap Verde — Praia, Mindelo, Santa Maria ja kymmenen saarta Santo Antãosta Bravaan."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé ja Príncipe",
+    "description": "São Tomé ja Príncipe — São Tomé, Santo António sekä kahden saaren sademetsät ja rannat."
+  },
+  "saint-helena": {
+    "title": "Saint Helena, Ascension ja Tristan da Cunha",
+    "description": "Saint Helena, Ascensionsaari ja Tristan da Cunha — Jamestown, Georgetown ja Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet ja Cox’s Bazar; Sundarbans ja Gangesin–Brahmaputran suisto."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka ja Malediivit",
+    "description": "Sri Lanka ja Malediivit — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura ja Malé; ylängöt, Sigiriya ja atollit."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Ho Chi Minhin kaupunki, Da Nang, Hai Phong, Hue, Hoi An ja Can Tho; Ha Longin lahti ja Mekongin suisto."
+  },
+  "philippines": {
+    "title": "Filippiinit",
+    "description": "Filippiinit — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio ja Zamboanga; Luzon, Visayat, Mindanao ja Palawan."
+  },
+  "indonesia": {
+    "title": "Indonesia ja Itä-Timor",
+    "description": "Indonesia ja Itä-Timor — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar ja Dili; Jaava, Sumatra, Bali, Borneo, Sulawesi ja Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malesia, Singapore ja Brunei",
+    "description": "Malesia, Singapore ja Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malakka, Kota Kinabalu, Kuching ja Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine ja Inlejärvi; Irrawaddyn laakso ja Shanin vuoristo."
+  },
+  "cambodia-laos": {
+    "title": "Kambodža ja Laos",
+    "description": "Kambodža ja Laos — Phnom Penh, Siem Reap ja Angkor, Battambang, Vientiane, Luang Prabang ja Pakse; Mekong ja Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Kolumbia",
+    "description": "Kolumbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena ja Bucaramanga; Andit, Karibian rannikko ja Amazonia."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida ja Ciudad Bolívar; Angelin putoukset, Orinoco ja Isla Margarita."
+  },
+  "peru": {
+    "title": "Peru",
+    "description": "Peru — Lima, Arequipa, Cusco, Trujillo, Iquitos ja Puno; Machu Picchu, Titicacajärvi ja Pyhä laakso."
+  },
+  "ecuador": {
+    "title": "Ecuador",
+    "description": "Ecuador — Quito, Guayaquil, Cuenca, Manta ja Baños; tulivuorten kuja, Amazonia ja Galápagossaaret."
+  },
+  "bolivia": {
+    "title": "Bolivia",
+    "description": "Bolivia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre ja Potosí; Titicacajärvi ja Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Chile",
+    "description": "Chile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena ja Punta Arenas; Atacama, järviseutu, Patagonia ja Pääsiäissaari."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay ja Uruguay",
+    "description": "Paraguay ja Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este ja Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Guayanat",
+    "description": "Guyana, Suriname ja Ranskan Guayana — Georgetown, Paramaribo, Cayenne ja Kourou; Kaieteurin putoukset ja Guayanan kilven sademetsä."
+  },
+  "falklands": {
+    "title": "Falklandinsaaret",
+    "description": "Falklandinsaaret — Stanley, Goose Green sekä Itä- ja Länsi-Falklandin saaret."
+  },
+  "australia": {
+    "title": "Australia",
+    "description": "Australia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin ja Canberra; Iso valliriutta, Uluru ja Outback."
+  },
+  "new-zealand": {
+    "title": "Uusi-Seelanti",
+    "description": "Uusi-Seelanti — Auckland, Wellington, Christchurch, Hamilton, Dunedin ja Queenstown; Eteläiset Alpit, Fiordland ja Rotorua."
+  },
+  "british-columbia": {
+    "title": "Brittiläinen Kolumbia",
+    "description": "Brittiläinen Kolumbia — Vancouver, Victoria, Kelowna, Kamloops, Prince George ja Whistler; Coast Mountains, Vancouverinsaari ja Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Kanadan preeriat",
+    "description": "Alberta, Saskatchewan ja Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina ja Banff; Kalliovuoret, preeriat ja Churchill Hudsoninlahden rannalla."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston ja Thunder Bay; Niagaran putoukset, Suuret järvet ja Algonquinin puisto."
+  },
+  "quebec": {
+    "title": "Québec",
+    "description": "Québec — Montréal, Québecin kaupunki, Laval, Gatineau, Sherbrooke ja Saguenay; Saint Lawrence -joki, Laurentidit ja Gaspén niemimaa."
+  },
+  "atlantic-canada": {
+    "title": "Atlantin Kanada",
+    "description": "New Brunswick, Nova Scotia, Prinssi Edwardin saari sekä Newfoundland ja Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton ja Charlottetown; Cabot Trail ja Fundynlahti."
+  },
+  "northern-canada": {
+    "title": "Pohjois-Kanada",
+    "description": "Yukon, Luoteisterritoriot ja Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City ja Inuvik; Kanadan arktinen saaristo ja Mackenziejoki."
+  },
+  "hong-kong-macau": {
+    "title": "Hongkong ja Macao",
+    "description": "Hongkong ja Macao — Hongkongin saari, Kowloon, New Territories, Lantau sekä Macaon niemimaa, Taipa ja Coloane."
   }
 }

@@ -6,5 +6,165 @@
   "south-central-us": {
     "title": "Istados Unidos tzentru-meridionales",
     "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi e Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson e Birmingham."
+  },
+  "west-polynesia": {
+    "title": "Samoa e Tonga",
+    "description": "Samoa, Samoa Americanas, Tonga, Niue, Tokelau, e Wallis e Futuna — Apia, Pago Pago, Nukuʻalofa, Alofi e Mata-Utu; Upolu, Savaiʻi, Tutuila e sas ìsulas de Tonga."
+  },
+  "mariana-islands": {
+    "title": "Guam e Ìsulas Marianas Setentrionales",
+    "description": "Guam e sas Ìsulas Marianas Setentrionales — Hagåtña, Tamuning, Dededo, Saipan, Tinian e Rota."
+  },
+  "greenland": {
+    "title": "Groenlàndia",
+    "description": "Groenlàndia — Nuuk, Sisimiut, Ilulissat, Qaqortoq e Tasiilaq; sa calotta de astra, su fiordu de astra de Ilulissat e sos fiordos de su sud."
+  },
+  "bermuda": {
+    "title": "Bermudas",
+    "description": "Bermudas — Hamilton, St. George’s e su Royal Naval Dockyard, sas parròchias de s’ìsula e sas pràias suas de arena ruja."
+  },
+  "belarus": {
+    "title": "Bielorùssia",
+    "description": "Bielorùssia — Minsk, Gomel, Mogilev, Vitebsk, Grodno e Brest; sa foresta de Belovezhskaya Pushcha e sas paludes de Polesia."
+  },
+  "channel-islands": {
+    "title": "Ìsulas de su Canale",
+    "description": "Jersey, Guernsey, Alderney, Sark e Herm — St Helier, St Peter Port e Gorey."
+  },
+  "faroe-islands": {
+    "title": "Ìsulas Faroe",
+    "description": "Sas Ìsulas Faroe — Tórshavn, Klaksvík, Runavík e sas degheoto ìsulas, sas biddas, sas gallerias e sas iscogleras issoro."
+  },
+  "svalbard": {
+    "title": "Svalbard",
+    "description": "Svalbard e Jan Mayen — Longyearbyen, Barentsburg e Ny-Ålesund; sos ghiatzos e sos fiordos de Spitsbergen."
+  },
+  "malta": {
+    "title": "Malta",
+    "description": "Malta, Gozo e Comino — Valletta, Sliema, St Julian’s, Mdina, Victoria e sas Tres Tzitades."
+  },
+  "madagascar-islands": {
+    "title": "Madagascar e ìsulas de s’Otzèanu Indianu",
+    "description": "Madagascar, sas Comoras, Mayotte, Réunion, Maurìtzius e sas Seychelles — Antananarivo, Toamasina, Moroni, Mamoudzou, Saint-Denis, Port Louis e Victoria."
+  },
+  "sudan": {
+    "title": "Sudàn",
+    "description": "Sudàn — Khartoum, Omdurman, Port Sudan, Kassala, El Obeid e Nyala; s’addòbiu de su Nilu Biaitu e de su Nilu Biancu e sas piràmides de Meroë."
+  },
+  "cabo-verde": {
+    "title": "Cabu Birde",
+    "description": "Cabu Birde — Praia, Mindelo, Santa Maria e sas deghe ìsulas, dae Santo Antão a Brava."
+  },
+  "sao-tome-principe": {
+    "title": "São Tomé e Príncipe",
+    "description": "São Tomé e Príncipe — São Tomé, Santo António e sas forestas pluviales e sas pràias de sas duas ìsulas."
+  },
+  "saint-helena": {
+    "title": "Sant’Elena, Ascensione e Tristan da Cunha",
+    "description": "Sant’Elena, s’Ìsula de s’Ascensione e Tristan da Cunha — Jamestown, Georgetown e Edinburgh of the Seven Seas."
+  },
+  "bangladesh": {
+    "title": "Bangladesh",
+    "description": "Bangladesh — Dhaka, Chittagong, Khulna, Rajshahi, Sylhet e Cox’s Bazar; sas Sundarbans e su delta de su Gange e de su Brahmaputra."
+  },
+  "sri-lanka-maldives": {
+    "title": "Sri Lanka e Maldivas",
+    "description": "Sri Lanka e sas Maldivas — Colombo, Kandy, Galle, Jaffna, Trincomalee, Anuradhapura e Malé; sas collinas, Sigiriya e sos atollos."
+  },
+  "vietnam": {
+    "title": "Vietnam",
+    "description": "Vietnam — Hanoi, Tzitade de Ho Chi Minh, Da Nang, Hai Phong, Hue, Hoi An e Can Tho; sa baia de Ha Long e su delta de su Mekong."
+  },
+  "philippines": {
+    "title": "Filipinas",
+    "description": "Sas Filipinas — Manila, Quezon City, Cebu, Davao, Iloilo, Baguio e Zamboanga; Luzon, sas Visayas, Mindanao e Palawan."
+  },
+  "indonesia": {
+    "title": "Indonèsia e Timor-Leste",
+    "description": "Indonèsia e Timor-Leste — Jakarta, Surabaya, Bandung, Medan, Yogyakarta, Denpasar, Makassar e Dili; Giava, Sumatra, Bali, Bòrneu, Sulawesi e Papua."
+  },
+  "malaysia-singapore-brunei": {
+    "title": "Malèsia, Singapore e Brunei",
+    "description": "Malèsia, Singapore e Brunei — Kuala Lumpur, Singapore, George Town, Johor Bahru, Malacca, Kota Kinabalu, Kuching e Bandar Seri Begawan."
+  },
+  "myanmar": {
+    "title": "Myanmar",
+    "description": "Myanmar — Yangon, Mandalay, Naypyidaw, Bagan, Mawlamyine e su lagu Inle; sa badde de s’Irrawaddy e sas collinas de sos Shan."
+  },
+  "cambodia-laos": {
+    "title": "Cambòdia e Laos",
+    "description": "Cambòdia e Laos — Phnom Penh, Siem Reap e Angkor, Battambang, Vientiane, Luang Prabang e Pakse; su Mekong e su Tonlé Sap."
+  },
+  "colombia": {
+    "title": "Colòmbia",
+    "description": "Colòmbia — Bogotá, Medellín, Cali, Barranquilla, Cartagena e Bucaramanga; sas Andes, sa costa caràibica e s’Amatzònia."
+  },
+  "venezuela": {
+    "title": "Venezuela",
+    "description": "Venezuela — Caracas, Maracaibo, Valencia, Barquisimeto, Mérida e Ciudad Bolívar; su Saltu de s’Àngelu, s’Orinoco e Isla Margarita."
+  },
+  "peru": {
+    "title": "Perù",
+    "description": "Perù — Lima, Arequipa, Cusco, Trujillo, Iquitos e Puno; Machu Picchu, su lagu Titicaca e sa Badde Sagrada."
+  },
+  "ecuador": {
+    "title": "Ècuador",
+    "description": "Ècuador — Quito, Guayaquil, Cuenca, Manta e Baños; s’Avenida de sos Vulcanos, s’Amatzònia e sas Ìsulas Galápagos."
+  },
+  "bolivia": {
+    "title": "Bolìvia",
+    "description": "Bolìvia — La Paz, El Alto, Santa Cruz, Cochabamba, Sucre e Potosí; su lagu Titicaca e su Salar de Uyuni."
+  },
+  "chile": {
+    "title": "Tzile",
+    "description": "Tzile — Santiago, Valparaíso, Concepción, Antofagasta, La Serena e Punta Arenas; s’Atacama, sa Regione de sos Lagos, sa Patagònia e s’Ìsula de Pasca."
+  },
+  "paraguay-uruguay": {
+    "title": "Paraguay e Uruguay",
+    "description": "Paraguay e Uruguay — Asunción, Ciudad del Este, Encarnación, Montevideo, Punta del Este e Colonia del Sacramento."
+  },
+  "guianas": {
+    "title": "Sas Guyanas",
+    "description": "Guyana, Suriname e Guyana Frantzesa — Georgetown, Paramaribo, Cayenne e Kourou; sas cascadas de Kaieteur e sa foresta pluviale de s’Iscudu de sa Guyana."
+  },
+  "falklands": {
+    "title": "Ìsulas Falkland",
+    "description": "Sas Ìsulas Falkland — Stanley, Goose Green e sas ìsulas de East Falkland e West Falkland."
+  },
+  "australia": {
+    "title": "Austràlia",
+    "description": "Austràlia — Sydney, Melbourne, Brisbane, Perth, Adelaide, Hobart, Darwin e Canberra; sa Grande Barriera Coralina, Uluru e s’Outback."
+  },
+  "new-zealand": {
+    "title": "Zelanda Noa",
+    "description": "Zelanda Noa — Auckland, Wellington, Christchurch, Hamilton, Dunedin e Queenstown; sas Alpes Meridionales, su Fiordland e Rotorua."
+  },
+  "british-columbia": {
+    "title": "Colùmbia Britànnica",
+    "description": "Colùmbia Britànnica — Vancouver, Victoria, Kelowna, Kamloops, Prince George e Whistler; sos Montes Costeros, s’Ìsula de Vancouver e s’Okanagan."
+  },
+  "canadian-prairies": {
+    "title": "Pradarias canadesas",
+    "description": "Alberta, Saskatchewan e Manitoba — Calgary, Edmonton, Winnipeg, Saskatoon, Regina e Banff; sas Montagnas Rocciosas, sas pradarias e Churchill in sa Baia de Hudson."
+  },
+  "ontario": {
+    "title": "Ontario",
+    "description": "Ontario — Toronto, Ottawa, Mississauga, Hamilton, London, Kingston e Thunder Bay; sas cascadas de su Niagara, sos Grandes Lagos e su Parcu Algonquin."
+  },
+  "quebec": {
+    "title": "Quebec",
+    "description": "Quebec — Montréal, sa tzitade de Quebec, Laval, Gatineau, Sherbrooke e Saguenay; su Santu Laurentu, sos Laurentides e sa penìsula de Gaspé."
+  },
+  "atlantic-canada": {
+    "title": "Cànada atlànticu",
+    "description": "New Brunswick, Nova Scotia, Prince Edward Island, e Newfoundland e Labrador — Halifax, St. John’s, Moncton, Saint John, Fredericton e Charlottetown; su Cabot Trail e sa Baia de Fundy."
+  },
+  "northern-canada": {
+    "title": "Cànada setentrionale",
+    "description": "Yukon, sos Territòrios de su Nord-Ovest e Nunavut — Whitehorse, Yellowknife, Iqaluit, Dawson City e Inuvik; s’Artzipèlagu Àrticu e su riu Mackenzie."
+  },
+  "hong-kong-macau": {
+    "title": "Hong Kong e Macau",
+    "description": "Hong Kong e Macau — s’Ìsula de Hong Kong, Kowloon, sos New Territories, Lantau e sa penìsula de Macau, Taipa e Coloane."
   }
 }
