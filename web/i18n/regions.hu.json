@@ -6,5 +6,9 @@
   "carpathians": {
     "title": "Románia, Magyarország és Bulgária",
     "description": "Románia, Magyarország és Bulgária — Bukarest, Budapest, Szófia, Kolozsvár, Plovdiv, Temesvár; a Kárpátok, a Duna-delta és a Fekete-tenger partja."
+  },
+  "south-central-us": {
+    "title": "Az USA dél-középső része",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi és Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson és Birmingham."
   }
 }

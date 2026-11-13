@@ -154,6 +154,10 @@
   "title": "Midwest United States",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas."
  },
+ "south-central-us": {
+  "title": "South Central US",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi and Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson and Birmingham."
+ },
  "west-coast-us": {
   "title": "West Coast US",
   "description": "U.S. West Coast: Washington, Oregon, and California — Seattle, Portland, San Francisco, Los Angeles, San Diego, and everything in between."

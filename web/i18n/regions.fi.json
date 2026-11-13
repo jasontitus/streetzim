@@ -2,5 +2,9 @@
   "nordics": {
     "title": "Pohjoismaat",
     "description": "Norja, Ruotsi, Suomi ja Tanska — Oslo, Tukholma, Helsinki, Kööpenhamina, Bergen, Göteborg; vuonot, Lappi ja Itämeren saaristot."
+  },
+  "south-central-us": {
+    "title": "Yhdysvaltain eteläinen keskiosa",
+    "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ja Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ja Birmingham."
   }
 }

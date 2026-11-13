@@ -2,5 +2,9 @@
   "southern-africa": {
     "title": "Suider-Afrika",
     "description": "Suid-Afrika, Namibië, Botswana, Zimbabwe, Mosambiek, Zambië, Malawi, Lesotho en Eswatini — Johannesburg, Kaapstad, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, die Kalahari, die Krugerwildtuin en die Kaap."
+  },
+  "south-central-us": {
+    "title": "Suid-Sentrale Verenigde State",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi en Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson en Birmingham."
   }
 }

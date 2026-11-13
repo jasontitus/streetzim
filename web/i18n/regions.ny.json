@@ -6,5 +6,9 @@
   "southern-africa": {
     "title": "Kumwera kwa Africa",
     "description": "South Africa, Namibia, Botswana, Zimbabwe, Mozambique, Zambia, Malawi, Lesotho ndi Eswatini — Johannesburg, Cape Town, Durban, Pretoria, Windhoek, Gaborone, Harare, Maputo, Lusaka, Kalahari, Kruger ndi dera la Cape."
+  },
+  "south-central-us": {
+    "title": "Pakati-Kumwera kwa United States",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ndi Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ndi Birmingham."
   }
 }

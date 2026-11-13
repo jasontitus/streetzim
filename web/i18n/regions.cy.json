@@ -2,5 +2,9 @@
   "britain-ireland": {
     "title": "Prydain ac Iwerddon",
     "description": "Prydain ac Iwerddon — Llundain, Manceinion, Birmingham, Glasgow, Caeredin, Dulyn, Caerdydd, Belfast; Ucheldiroedd yr Alban, Eryri, Ardal y Llynnoedd, Ffordd Wyllt yr Iwerydd."
+  },
+  "south-central-us": {
+    "title": "Canol De'r Unol Daleithiau",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ac Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a Birmingham."
   }
 }

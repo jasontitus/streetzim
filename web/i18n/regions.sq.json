@@ -2,5 +2,9 @@
   "balkans": {
     "title": "Ballkani",
     "description": "Sllovenia, Kroacia, Bosnja dhe Hercegovina, Serbia, Mali i Zi, Shqipëria, Maqedonia e Veriut dhe Kosova — Beogradi, Zagrebi, Sarajeva, Lubjana, Spliti, Tirana; bregdeti i Dalmacisë, Alpet Dinarike."
+  },
+  "south-central-us": {
+    "title": "Jugu Qendror i SHBA-së",
+    "description": "Teksasi, Oklahoma, Arkansasi, Luiziana, Kentaki, Tenesi, Misisipi dhe Alabama — Hjustoni, Dallasi, San Antonio, Ostini, Oklahoma Siti, Tulsa, Litëll Roku, Nju Orleansi, Luisvili, Nashvili, Memfisi, Xheksoni dhe Birminghami."
   }
 }

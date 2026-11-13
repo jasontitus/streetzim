@@ -2,5 +2,9 @@
   "hawaii": {
     "title": "Hawaiʻi",
     "description": "Ka Pae ʻĀina ʻo Hawaiʻi — Honolulu, Hilo, Kahului; Oʻahu, Maui, Hawaiʻi (ka Mokupuni Nui), Kauaʻi, Molokaʻi a me Lānaʻi; Mauna Kea, Mauna Loa, Haleakalā, Puʻuloa (Pearl Harbor) a me ke kahakai ʻo Nā Pali."
+  },
+  "south-central-us": {
+    "title": "Ka Hema Waena o ʻAmelika Hui Pū ʻIa",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi a me Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a me Birmingham."
   }
 }

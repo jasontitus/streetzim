@@ -6,5 +6,9 @@
   "ukraine": {
     "title": "Ucraina, Moldova și vestul Rusiei",
     "description": "Ucraina și Republica Moldova în întregime (inclusiv Crimeea), plus fâșia de frontieră din vestul Rusiei — Volgograd, Rostov, Soci, Krasnodar, litoralul Mării Negre și poalele Caucazului."
+  },
+  "south-central-us": {
+    "title": "Sudul central al SUA",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi și Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson și Birmingham."
   }
 }

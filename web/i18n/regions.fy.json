@@ -2,5 +2,9 @@
   "benelux": {
     "title": "Benelux",
     "description": "Nederlân, Belgje en Lúksemboarch — Amsterdam, Rotterdam, De Haach, Brussel, Antwerpen, Gint, Lúksemboarch-stêd; de Rânestêd, de Ardinnen, de Noardseekust."
+  },
+  "south-central-us": {
+    "title": "Súd-Sintraal Feriene Steaten",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi en Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson en Birmingham."
   }
 }

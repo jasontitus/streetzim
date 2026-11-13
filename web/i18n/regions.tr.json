@@ -151,6 +151,10 @@
   "title": "ABD Orta Batı",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Kuzey Dakota, Güney Dakota, Nebraska ve Kansas."
  },
+ "south-central-us": {
+  "title": "Güney Orta ABD",
+  "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ve Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ve Birmingham."
+ },
  "west-coast-us": {
   "title": "ABD Batı Kıyısı",
   "description": "ABD Batı Kıyısı: Washington, Oregon ve Kaliforniya — Seattle, Portland, San Francisco, Los Angeles, San Diego ve aradaki her yer."

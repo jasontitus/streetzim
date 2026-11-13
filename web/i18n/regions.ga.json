@@ -2,5 +2,9 @@
   "britain-ireland": {
     "title": "An Bhreatain agus Éire",
     "description": "Éire agus an Bhreatain Mhór — Londain, Manchain, Birmingham, Glaschú, Dún Éideann, Baile Átha Cliath, Caerdydd, Béal Feirste; Garbhchríocha na hAlban, Eryri, Ceantar na Lochanna, Slí an Atlantaigh Fhiáin."
+  },
+  "south-central-us": {
+    "title": "Lár-Dheisceart na Stát Aontaithe",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi agus Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson agus Birmingham."
   }
 }

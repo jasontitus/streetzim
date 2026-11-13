@@ -2,5 +2,9 @@
   "southern-africa": {
     "title": "UMzantsi we-Afrika",
     "description": "UMzantsi Afrika, iNamibia, iBotswana, iZimbabwe, iMozambique, iZambia, iMalawi, iLesotho ne-Eswatini — iRhawuti, iKapa, iThekwini, iPitoli, iWindhoek, iGaborone, iHarare, iMaputo, iLusaka, iKalahari, iKruger nommandla waseKapa."
+  },
+  "south-central-us": {
+    "title": "UMzantsi-Mbindi waseMelika",
+    "description": "iTexas, i-Oklahoma, i-Arkansas, iLouisiana, iKentucky, iTennessee, iMississippi ne-Alabama — iHouston, iDallas, iSan Antonio, i-Austin, i-Oklahoma City, iTulsa, iLittle Rock, iNew Orleans, iLouisville, iNashville, iMemphis, iJackson neBirmingham."
   }
 }

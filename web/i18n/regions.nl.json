@@ -151,6 +151,10 @@
   "title": "Midwesten van de VS",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska en Kansas."
  },
+ "south-central-us": {
+  "title": "Zuid-centrale VS",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi en Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson en Birmingham."
+ },
  "west-coast-us": {
   "title": "Westkust van de VS",
   "description": "De Amerikaanse westkust: Washington, Oregon en Californië — Seattle, Portland, San Francisco, Los Angeles, San Diego en alles daartussen."

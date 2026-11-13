@@ -2,5 +2,9 @@
   "austria-czech": {
     "title": "Rakúsko, Česko a Slovensko",
     "description": "Rakúsko, Česko a Slovensko — Viedeň, Praha, Bratislava, Brno, Salzburg, Graz, Innsbruck; Východné Alpy, Čechy, Tatry."
+  },
+  "south-central-us": {
+    "title": "Stredný juh USA",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi a Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a Birmingham."
   }
 }

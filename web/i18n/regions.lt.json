@@ -2,5 +2,9 @@
   "baltics": {
     "title": "Baltijos šalys",
     "description": "Estija, Latvija ir Lietuva — Talinas, Ryga, Vilnius ir Baltijos jūros pakrantė."
+  },
+  "south-central-us": {
+    "title": "JAV pietų centrinė dalis",
+    "description": "Teksasas, Oklahoma, Arkanzasas, Luiziana, Kentukis, Tenesis, Misisipė ir Alabama — Hjustonas, Dalasas, San Antonijas, Ostinas, Oklahoma Sitis, Tulsa, Litl Rokas, Naujasis Orleanas, Luisvilis, Nešvilis, Memfis, Džeksonas ir Birmingamas."
   }
 }

@@ -10,5 +10,9 @@
   "iran": {
     "title": "İran",
     "description": "İran — Xəzər dənizindən Fars körfəzinədək; Tehran, İsfahan, Şiraz və Məşhəd daxil olmaqla."
+  },
+  "south-central-us": {
+    "title": "ABŞ-ın Cənub-Mərkəzi hissəsi",
+    "description": "Texas, Oklahoma, Arkanzas, Luiziana, Kentukki, Tennessi, Missisipi və Alabama — Hyuston, Dallas, San-Antonio, Ostin, Oklahoma-Siti, Talsa, Litl-Rok, Yeni Orlean, Luisvill, Neşvill, Memfis, Cekson və Birminhem."
   }
 }

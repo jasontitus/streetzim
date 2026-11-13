@@ -151,6 +151,10 @@
   "title": "Midwest degli Stati Uniti",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Dakota del Nord, Dakota del Sud, Nebraska e Kansas."
  },
+ "south-central-us": {
+  "title": "Stati Uniti centro-meridionali",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi e Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson e Birmingham."
+ },
  "west-coast-us": {
   "title": "Costa Ovest degli Stati Uniti",
   "description": "La costa occidentale degli Stati Uniti: Washington, Oregon e California — Seattle, Portland, San Francisco, Los Angeles, San Diego e tutto ciò che c’è in mezzo."

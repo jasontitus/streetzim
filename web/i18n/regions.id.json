@@ -151,6 +151,10 @@
   "title": "Amerika Serikat Bagian Barat Tengah",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Dakota Utara, Dakota Selatan, Nebraska, dan Kansas."
  },
+ "south-central-us": {
+  "title": "Amerika Serikat Bagian Selatan Tengah",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi, dan Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson, dan Birmingham."
+ },
  "west-coast-us": {
   "title": "Pantai Barat Amerika Serikat",
   "description": "Pantai Barat Amerika Serikat: Washington, Oregon, dan California — Seattle, Portland, San Francisco, Los Angeles, San Diego, dan semua tempat di antaranya."

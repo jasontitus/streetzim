@@ -2,5 +2,9 @@
   "balkans": {
     "title": "Balkan",
     "description": "Slovenija, Hrvaška, Bosna in Hercegovina, Srbija, Črna gora, Albanija, Severna Makedonija in Kosovo — Beograd, Zagreb, Sarajevo, Ljubljana, Split, Tirana; dalmatinska obala, Dinarsko gorstvo."
+  },
+  "south-central-us": {
+    "title": "Južni osrednji del ZDA",
+    "description": "Teksas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Misisipi in Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson in Birmingham."
   }
 }

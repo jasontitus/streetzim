@@ -2,5 +2,9 @@
   "pacific-islands": {
     "title": "Pacific ke Tapu",
     "description": "Papua New Guinea, Fiji, Solomon Islands, Vanuatu, New Caledonia, Palau, Micronesia, Marshall Islands, Nauru, Tuvalu aur Kiribati ke Gilbert Islands — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa aur Majuro."
+  },
+  "south-central-us": {
+    "title": "America ke Dakkhin-Beech Rajya",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi aur Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson aur Birmingham."
   }
 }

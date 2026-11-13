@@ -2,5 +2,9 @@
   "pacific-islands": {
     "title": "Veiyanuyanu ena Pasivika",
     "description": "Papua Niukini, Viti, Yatu Solomoni, Vanuatu, Niu Kaletonia, Palau, Maikaronisia, Yatu Marisali, Nauru, Tuvalu kei na Yatu Gilbert e Kiribati — Port Moresby, Suva, Nadi, Honiara, Port Vila, Nouméa kei Majuro."
+  },
+  "south-central-us": {
+    "title": "Na Ceva e Loma ni Amerika",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi kei Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson kei Birmingham."
   }
 }

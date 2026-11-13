@@ -2,5 +2,9 @@
   "baltics": {
     "title": "Baltija",
     "description": "Igaunija, Latvija un Lietuva — Tallina, Rīga, Viļņa un Baltijas jūras piekraste."
+  },
+  "south-central-us": {
+    "title": "ASV dienvidu centrālā daļa",
+    "description": "Teksasa, Oklahoma, Arkanzasa, Luiziāna, Kentuki, Tenesī, Misisipi un Alabama — Hjūstona, Dalasa, Sanantonio, Ostina, Oklahomasitija, Talsa, Litlroka, Ņūorleāna, Lūivila, Nešvila, Memfisa, Džeksona un Birmingema."
   }
 }

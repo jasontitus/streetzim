@@ -151,6 +151,10 @@
   "title": "Meio-Oeste dos EUA",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Dakota do Norte, Dakota do Sul, Nebraska e Kansas."
  },
+ "south-central-us": {
+  "title": "Centro-Sul dos EUA",
+  "description": "Texas, Oklahoma, Arkansas, Luisiana, Kentucky, Tennessee, Mississippi e Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, Nova Orleans, Louisville, Nashville, Memphis, Jackson e Birmingham."
+ },
  "west-coast-us": {
   "title": "Costa Oeste dos EUA",
   "description": "A Costa Oeste dos EUA: Washington, Oregon e Califórnia — Seattle, Portland, São Francisco, Los Angeles, San Diego e tudo o que há entre elas."

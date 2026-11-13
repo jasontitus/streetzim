@@ -6,5 +6,9 @@
   "switzerland-light": {
     "title": "Svizra ed Alps (Light)",
     "description": "Ina Svizra pli pitschna per apparats cun pauca plazza e colliaziuns plaunas — la medema regiun e la medema tschertga sco la versiun cumpletta, ma senza maletgs da satellit e cun in nivel da zoom damain en ils detagls da la charta vectoriala (z13 empè da z14). 1.4 GB empè da 2.1 GB. Vias, lieus, adressas, rutas, terren e Wikipedia restan tuttina; la charta na daventa simplamain betg pli precisa a partir da la scala dals singuls edifizis."
+  },
+  "south-central-us": {
+    "title": "Il sid central dals Stadis Unids",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ed Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson e Birmingham."
   }
 }

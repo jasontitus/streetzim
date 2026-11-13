@@ -2,5 +2,9 @@
   "central-africa": {
     "title": "Afríka ya Katikati",
     "description": "Kongó-Kinshasa, Kamerun, Tshad, Repibiki ya Afríka ya Káti, Gabɔ́, Kongó-Brazzaville, Ginɛ́-Ekwatorial, Angola mpe Zambia — Kinshasa, Luanda, Douala, Yaoundé, N'Djamena, Lusaka; etando ya ebale Kongó mpe Rift Albertin."
+  },
+  "south-central-us": {
+    "title": "Sidi ya katikati ya Ameriki",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi mpe Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson mpe Birmingham."
   }
 }

@@ -499,6 +499,13 @@ REGIONS = [
         "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska, and Kansas.",
     },
     {
+        "id": "south-central-us",
+        "tier": "us-region",
+        "title": "South Central US",
+        "zim_file": "osm-south-central-us.zim",
+        "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi and Alabama &mdash; Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson and Birmingham.",
+    },
+    {
         "id": "west-coast-us",
         "tier": "us-region",
         "title": "West Coast US",

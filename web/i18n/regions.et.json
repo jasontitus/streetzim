@@ -2,5 +2,9 @@
   "baltics": {
     "title": "Baltimaad",
     "description": "Eesti, Läti ja Leedu — Tallinn, Riia, Vilnius ja Läänemere rannik."
+  },
+  "south-central-us": {
+    "title": "USA lõuna-keskosa",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi ja Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson ja Birmingham."
   }
 }

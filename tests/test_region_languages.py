@@ -54,7 +54,7 @@ def test_known_regions(rid, first):
 # Spanish at home: two million and 1% of the region's people, or a tenth.
 SPANISH = ["united-states", "california", "texas", "florida", "new-york-state", "nyc-metro",
            "greater-la", "chicago-metro", "colorado", "washington-dc", "silicon-valley",
-           "west-coast-us", "east-coast-us", "midwest-us", "central-us"]
+           "west-coast-us", "east-coast-us", "midwest-us", "central-us", "south-central-us"]
 
 
 @pytest.mark.parametrize("rid", SPANISH)

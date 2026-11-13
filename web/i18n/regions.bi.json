@@ -2,5 +2,9 @@
   "pacific-islands": {
     "title": "Ol Aelan blong Pasifik",
     "description": "Papua Niugini, Fiji, Solomon Aelan, Vanuatu, Niu Kaledonia, Palau, Maekronesia, Masol Aelan, Nauru, Tuvalu mo Gilbet Aelan blong Kiribati — Pot Mosbi, Suva, Nadi, Honiara, Pot Vila, Numea mo Majuro."
+  },
+  "south-central-us": {
+    "title": "Saot Senta blong Yunaeted Stet",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi mo Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson mo Birmingham."
   }
 }

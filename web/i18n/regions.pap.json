@@ -2,5 +2,9 @@
   "central-america-caribbean": {
     "title": "Amérika Sentral i Karibe",
     "description": "Amérika Sentral i Karibe — Yucatán, Belize, Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica, Panama, Cuba, Jamaica, Hispaniola, Islanan Cayman, Puerto Rico, Antia Menor i e parti zùit di Bahamas."
+  },
+  "south-central-us": {
+    "title": "Sentro-zùit di Estadonan Uni",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi i Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson i Birmingham."
   }
 }

@@ -151,6 +151,10 @@
   "title": "Środkowy Zachód USA",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Dakota Północna, Dakota Południowa, Nebraska i Kansas."
  },
+ "south-central-us": {
+  "title": "Południowo-środkowe USA",
+  "description": "Teksas, Oklahoma, Arkansas, Luizjana, Kentucky, Tennessee, Missisipi i Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, Nowy Orlean, Louisville, Nashville, Memphis, Jackson i Birmingham."
+ },
  "west-coast-us": {
   "title": "Zachodnie wybrzeże USA",
   "description": "Zachodnie wybrzeże USA: stan Waszyngton, Oregon i Kalifornia — Seattle, Portland, San Francisco, Los Angeles, San Diego i wszystko pomiędzy."

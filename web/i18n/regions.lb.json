@@ -2,5 +2,9 @@
   "benelux": {
     "title": "Benelux",
     "description": "Holland, d’Belsch a Lëtzebuerg — Amsterdam, Rotterdam, Den Haag, Bréissel, Antwerpen, Gent, d’Stad Lëtzebuerg; d’Randstad, d’Ardennen, d’Nordséiküst."
+  },
+  "south-central-us": {
+    "title": "Südlech Mëtt vun den USA",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi a Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson a Birmingham."
   }
 }

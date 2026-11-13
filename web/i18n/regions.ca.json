@@ -2,5 +2,9 @@
   "iberia": {
     "title": "Península Ibèrica",
     "description": "Espanya, Portugal i Andorra — Madrid, Barcelona, València, Sevilla, Lisboa, Porto; els Pirineus, la Meseta, l’Algarve i les Balears."
+  },
+  "south-central-us": {
+    "title": "Centre-sud dels Estats Units",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississipí i Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, Nova Orleans, Louisville, Nashville, Memphis, Jackson i Birmingham."
   }
 }

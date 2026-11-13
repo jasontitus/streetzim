@@ -151,6 +151,10 @@
   "title": "Mittlerer Westen der USA",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, North Dakota, South Dakota, Nebraska und Kansas."
  },
+ "south-central-us": {
+  "title": "Südliche Mitte der USA",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi und Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson und Birmingham."
+ },
  "west-coast-us": {
   "title": "US-Westküste",
   "description": "Die Westküste der USA: Washington, Oregon und Kalifornien — Seattle, Portland, San Francisco, Los Angeles, San Diego und alles dazwischen."

@@ -2,5 +2,9 @@
   "iberia": {
     "title": "Iberiar penintsula",
     "description": "Espainia, Portugal eta Andorra — Madril, Bartzelona, Valentzia, Sevilla, Lisboa, Porto; Pirinioak, Meseta, Algarve eta Balearrak."
+  },
+  "south-central-us": {
+    "title": "Estatu Batuetako hego-erdialdea",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi eta Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson eta Birmingham."
   }
 }

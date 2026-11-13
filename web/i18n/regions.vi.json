@@ -151,6 +151,10 @@
   "title": "Miền Trung Tây nước Mỹ",
   "description": "Ohio, Indiana, Illinois, Michigan, Wisconsin, Minnesota, Iowa, Missouri, Bắc Dakota, Nam Dakota, Nebraska và Kansas."
  },
+ "south-central-us": {
+  "title": "Miền Trung Nam nước Mỹ",
+  "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi và Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson và Birmingham."
+ },
  "west-coast-us": {
   "title": "Bờ Tây nước Mỹ",
   "description": "Bờ Tây nước Mỹ: Washington, Oregon và California — Seattle, Portland, San Francisco, Los Angeles, San Diego và mọi nơi ở giữa."

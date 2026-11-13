@@ -2,5 +2,9 @@
   "nordics": {
     "title": "Norden",
     "description": "Norge, Sverige, Finland och Danmark — Oslo, Stockholm, Helsingfors, Köpenhamn, Bergen, Göteborg; fjordarna, Lappland och Östersjöns skärgårdar."
+  },
+  "south-central-us": {
+    "title": "Södra centrala USA",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi och Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson och Birmingham."
   }
 }

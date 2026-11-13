@@ -2,5 +2,9 @@
   "iceland": {
     "title": "Ísland",
     "description": "Ísland — Reykjavík, Akureyri, hringvegurinn, Þingvellir, Geysir, Gullfoss, Vík, Jökulsárlón, Snæfellsnes, Vestfirðir og Vatnajökull."
+  },
+  "south-central-us": {
+    "title": "Suður-miðríki Bandaríkjanna",
+    "description": "Texas, Oklahoma, Arkansas, Louisiana, Kentucky, Tennessee, Mississippi og Alabama — Houston, Dallas, San Antonio, Austin, Oklahoma City, Tulsa, Little Rock, New Orleans, Louisville, Nashville, Memphis, Jackson og Birmingham."
   }
 }
