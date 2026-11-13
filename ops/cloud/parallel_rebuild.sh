@@ -146,6 +146,13 @@ WIKI_SRC=${PAR_WIKI_SRC:-$ROOT/wiki-src/wikipedia_en_all_maxi_2026-02.zim}
 WIKI_DIR=${PAR_WIKI_DIR:-/mnt/data/tilemaker/streetzim-wiki}
 PRECUT=${PAR_PRECUT:-1}
 PRECUT_CMD=${PAR_PRECUT_CMD:-}
+# Before the tiles: the queue's extracts and search files, one pass over the
+# planet per few regions and one over the world search file for all of them
+# (ops/batch_extracts.py), instead of a pass per build; regions over
+# PREFETCH_MAX_AREA square degrees are left to their builds.
+PREFETCH=${PAR_PREFETCH:-1}
+PREFETCH_CMD=${PAR_PREFETCH_CMD:-}
+PREFETCH_MAX_AREA=${PAR_PREFETCH_MAX_AREA:-2500}
 PY=${PAR_PY:-$ROOT/venv-linux/bin/python3}
 IA=${PAR_IA:-$ROOT/venv-linux/bin/ia}
 PENDING_EVERY=${PAR_PENDING_EVERY:-600}
@@ -725,6 +732,32 @@ precut() {
   done
 }
 
+prefetch() {
+  local id src bbox ids="" rc
+  for id in $(awk '/^[[:space:]]*(#|$)/ {next} {print $1}' "$QUEUE"); do
+    eligible "$id" || continue
+    src=$(src_of "$id")
+    bbox=$(awk -F'\t' -v id="$src" '$1 == id {print $3; exit}' "$REGISTRY" 2>/dev/null)
+    [ -n "$bbox" ] || continue
+    echo "$bbox" | awk -F, -v max="$PREFETCH_MAX_AREA" '{exit !($1 < $3 && ($3 - $1) * ($4 - $2) <= max)}' || continue
+    case " $ids " in *" $src "*) ;; *) ids="$ids $src" ;; esac
+  done
+  [ -n "$ids" ] || return 0
+  say "prefetch: extracts and search files for$ids"
+  local -a scrub=()
+  mapfile -t scrub < <(scrub_args)
+  if [ -n "$PREFETCH_CMD" ]; then
+    env PREFETCH_IDS="${ids# }" bash -c "$PREFETCH_CMD" >> "$STATE/logs/prefetch.log" 2>&1
+  else
+    # shellcheck disable=SC2086  # one argument per region
+    (cd "$ROOT" && env "${scrub[@]}" PATH="$DRIVER_PATH" "$PY" ops/batch_extracts.py --root "$ROOT" -- $ids) \
+      >> "$STATE/logs/prefetch.log" 2>&1
+  fi
+  rc=$?
+  say "prefetch: rc=$rc ($(tail -1 "$STATE/logs/prefetch.log" 2>/dev/null | cut -c1-120))"
+}
+prepare() { [ "$PREFETCH" != 1 ] || prefetch; [ "$PRECUT" != 1 ] || precut; }
+
 # ---- finishing upload-pending regions --------------------------------------
 pending_loop() {  # runs in the background until the runner exits
   local parent=$1 f id zim md5 rc tries
@@ -788,8 +821,8 @@ if [ "$PRECUT" = 1 ]; then
   PRECUT_GROUP=$(precut_order | tr '\n' ' ')
   rm -rf "$STATE/tiles"; mkdir -p "$STATE/tiles"
   say "tiles: cutting in this order: $PRECUT_GROUP"
-  bg_start precut
 fi
+[ "$PREFETCH" != 1 ] && [ "$PRECUT" != 1 ] || bg_start prepare
 last_start=0
 blocked=""
 FAILED=""

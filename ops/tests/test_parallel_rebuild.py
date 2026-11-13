@@ -59,7 +59,7 @@ def _env(tmp: Path, **kw: str) -> dict[str, str]:
         "PAR_FREE_GB_CMD": f"cat {tmp}/free", "PAR_MEM_GB_CMD": f"cat {tmp}/mem",
         "PAR_POLL": "0.2", "PAR_STAGGER": "0", "PAR_MEMWATCH_OFF": "1",
         "PAR_WORKERS": "2", "PAR_PORT_BASE": "19811", "PAR_CPUS_PER_WORKER": "2",
-        "PAR_WIKI_NVME": "0", "PAR_PRECUT": "0", "PAR_PENDING_EVERY": "1",
+        "PAR_WIKI_NVME": "0", "PAR_PRECUT": "0", "PAR_PREFETCH": "0", "PAR_PENDING_EVERY": "1",
         "FAKE_LOG": str(tmp / "fake.log"), "FAKE_DIR": str(tmp / "fake"),
         "FAKE_TSV": str(tmp / "rebuild-old.tsv"),
         # must not reach the driver
@@ -591,6 +591,41 @@ def test_precut_first_group_in_pick_order_and_gates_each_build(tmp_path):
     # the small region first, then the large one worker 0 takes
     assert "tiles nopbf: extract missing" in out and "tiles: cutting in this order: a nopbf v" in out
     assert "cut x" not in (tmp_path / "fake.log").read_text()      # only the first group
+
+
+def test_prefetch_runs_before_the_tiles_for_the_small_eligible_regions(tmp_path):
+    """The queue's extracts and search files are cut in one batch
+    (ops/batch_extracts.py) before the tiles: each data region once (a
+    variant's parent), not one already done, not one over PREFETCH_MAX_AREA
+    and not one across the antimeridian (the driver cuts those itself)."""
+    _setup(tmp_path, "## g\na\nv\nbig\nwrap\ndone\n## later\nb\n", variants="v\ta\tno\t13\n")
+    (tmp_path / "regions.tsv").write_text(
+        "# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\nv\tV\t1,2,3,4\tcountry\n"
+        "big\tBig\t0,0,60,50\tcontinent\nwrap\tW\t179,-20,-179,-18\tcountry\n"
+        "done\tD\t1,2,3,4\tcountry\nb\tB\t5,5,6,6\tcountry\n")
+    (tmp_path / "state" / "status").mkdir()
+    (tmp_path / "state" / "status" / "done").write_text("uploaded - - - 1 2 osm-done-2026-01-01.zim\n")
+    regions = tmp_path / "root" / "world-data" / "regions"
+    regions.mkdir(parents=True)
+    (regions / "a.osm.pbf").write_text("pbf")   # so the tiles of a are cut, after the batch
+    env = _env(tmp_path, PAR_PRECUT="1", PAR_PREFETCH="1",
+               PAR_PREFETCH_CMD=f'sleep 1; echo "prefetch $PREFETCH_IDS" >> {tmp_path}/fake.log',
+               PAR_PRECUT_CMD=f'echo "cut $PRECUT_ID" >> {tmp_path}/fake.log')
+    r = _run(tmp_path, env)
+    assert r.returncode == 0
+    lines = (tmp_path / "fake.log").read_text().splitlines()
+    pre = [ln for ln in lines if ln.startswith("prefetch")]
+    assert pre == ["prefetch a b"], pre
+    cuts = [i for i, ln in enumerate(lines) if ln.startswith("cut ")]
+    assert cuts and lines.index(pre[0]) < cuts[0], lines
+
+
+def test_prefetch_off_runs_no_batch(tmp_path):
+    _setup(tmp_path, "## g\na\n")
+    (tmp_path / "regions.tsv").write_text("# id\tname\tbbox\na\tA\t1,2,3,4\tcountry\n")
+    env = _env(tmp_path, PAR_PREFETCH="0", PAR_PREFETCH_CMD=f'echo "prefetch $PREFETCH_IDS" >> {tmp_path}/fake.log')
+    assert _run(tmp_path, env).returncode == 0
+    assert not [ln for ln in (tmp_path / "fake.log").read_text().splitlines() if ln.startswith("prefetch")]
 
 
 def test_precut_leaves_an_extract_without_complete_multipolygons_to_its_build(tmp_path):
