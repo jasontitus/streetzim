@@ -278,7 +278,7 @@ def test_an_empty_find_list_says_so_instead_of_counting_zero() -> None:
     # an edited coordinate label is searched without its bidi isolates
     ("550-routing-pickers.js", "return inputEl.value.replace(/[\\u200e\\u200f\\u2066-\\u2069]/g, '').trim();"),
     # a picked point's coordinates keep their order
-    ("540-routing-worker-bridge.js", "return szLtr(lat.toFixed(4) + ', ' + lon.toFixed(4));"),
+    ("540-routing-worker-bridge.js", "return szLtr(szCoordText(lat, lon, 4));"),
     # the place sheet's button icon sits before the label on either side
     ("210-place-detail-sheet.js", "leadIcon.style.cssText = SZ_UI_RTL ? 'margin-left:6px;' : 'margin-right:6px;';"),
     # nearby rows align with the text

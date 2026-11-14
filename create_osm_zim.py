@@ -103,6 +103,7 @@ from streetzim.common import (  # noqa: F401
 )
 from streetzim import area as _area
 from streetzim import clip as _clip
+from streetzim import polar as _polar
 from streetzim.routing.build import (  # noqa: F401
     extract_routing_graph,
     chunk_graph_file,
@@ -444,6 +445,12 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
     parser.add_argument("--clip-min-zoom", type=int, default=10, metavar="Z",
                         help="Keep every tile up to this zoom over the whole box, "
                              "as context (default 10)")
+    parser.add_argument("--projection", choices=[_polar.NAME], default=None,
+                        help="The data is not in real longitude and latitude but "
+                             "moved for a polar map (streetzim/polar.py); --bbox "
+                             "and every input are in map positions. Recorded in "
+                             "map-config.json so the viewer converts what it "
+                             "shows of the real world")
     parser.add_argument("--map-center", metavar="LON,LAT",
                         help="Override initial map center. Default = bbox "
                              "centroid, which lands in empty water for "
@@ -1805,6 +1812,8 @@ def _build_map_config(
     else:
         center = [0, 0]
         zoom = 2
+    if getattr(args, "projection", None):
+        center = [0, 0]                # the pole
     if args.map_center:
         try:
             lon, lat = (float(x) for x in args.map_center.split(","))
@@ -1847,6 +1856,12 @@ def _build_map_config(
             map_config["clipArea"] = active_clip.area_geojson()
             map_config["clipMinZoom"] = active_clip.min_zoom
             map_config["clipContext"] = "ctx"      # ctx/z/x/y redirects (zim_writer)
+    if getattr(args, "projection", None):
+        map_config["projection"] = args.projection
+        if bbox and "clipMask" not in map_config:
+            # Past 60 S there is no map: greyed, like the outside of a cut.
+            map_config["clipMask"] = _polar.edge_mask(bbox)
+            map_config["clipMinZoom"] = 0
     if satellite_dir and os.path.isdir(str(satellite_dir)):
         map_config["hasSatellite"] = True
         map_config["satelliteMaxZoom"] = satellite_max_zoom

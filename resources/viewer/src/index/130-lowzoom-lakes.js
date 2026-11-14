@@ -261,7 +261,8 @@ function makeStyle(config) {
       "openmaptiles": sourceConfig,
       "lowzoom-lakes": {
         "type": "geojson",
-        "data": _szLowzoomLakes(),
+        // Real-world lakes: not for a map whose positions are not real (122).
+        "data": _szPolar ? { type: 'FeatureCollection', features: [] } : _szLowzoomLakes(),
         // No "attribution" here on purpose. MapLibre appends an active
         // source's attribution to the on-map bar, and at a 320px viewport the
         // extra "Natural Earth" wraps it to two lines, which then overlaps
@@ -834,6 +835,7 @@ function makeStyle(config) {
       }
     ]
   };
+  _szAddGraticule(style);
   _szAddClipMask(style, config);
   var faces = _szFontFaces(window.maplibregl);
   if (faces) style["font-faces"] = faces;

@@ -884,7 +884,8 @@ function sheetFor(config, idx, record) {
   document.body = body;
   const fn = new Function('window', 'document', 'history', 'location', 'baseUrl', '_findResultsState',
     '_populateNearby', 'requestAnimationFrame', 'setTimeout', '_szRecentAdd', '_szStorage', '_szRecentStoreKey',
-    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC + SHEET_SRC +
+    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' +
+    slice('// BEGIN polar', '// END polar') + WIKI_SRC + SHEET_SRC +
     '\nreturn { show: _showPlaceDetail, set: function(i) { WIKI_GEO_INDEX = i; WIKI_GEO_QID = {};' +
     ' for (var t in i) { var q = i[t] && i[t][3]; if (q) WIKI_GEO_QID[q] = t; } },' +
     ' packs: function() { return WIKI_PACKS; }, wikiPacksInit: wikiPacksInit, wikiPackSetIndex: wikiPackSetIndex };');
@@ -1269,7 +1270,7 @@ await ok('popup and list names: "local · visitor\'s" on a merged map, else the 
 });
 
 // The whole style, through makeStyle (130-137), as viewer_style_js does.
-const STYLE_SRC = HTML.slice(HTML.indexOf('var _SZ_LAKES'), HTML.indexOf('// END rtl-text'));
+const STYLE_SRC = HTML.slice(HTML.indexOf('// BEGIN polar'), HTML.indexOf('// END rtl-text'));
 function makeStyleFn() {
   const window = { matchMedia: () => ({ matches: false, addEventListener() {} }), devicePixelRatio: 1,
                    addEventListener() {} };

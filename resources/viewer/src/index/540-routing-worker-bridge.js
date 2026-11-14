@@ -614,7 +614,7 @@
   }
 
   function coordLabel(lat, lon) {
-    return szLtr(lat.toFixed(4) + ', ' + lon.toFixed(4));
+    return szLtr(szCoordText(lat, lon, 4));
   }
 
   function makeMarkerEl(cls) {

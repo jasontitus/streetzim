@@ -1137,6 +1137,170 @@ await ok('search results: the subline is printed as written ("1 mi", not "1 Mi")
   assert.match(HTML, /proximityLabel = _szProximityLabel\(dist \* 69, map\._streetzimUnit\);/);
 });
 
+// ---- Polar maps (122-polar.js) ------------------------------------------
+const POLAR_SRC = slice('// BEGIN polar', '// END polar');
+function loadPolar() {
+  return new Function('document', POLAR_SRC + `
+    return { szUsePolar, szToMap, szToTrue, szMapScale, szCoordText, _szPolarFix, _szPolarGraticule,
+             _szAddGraticule, SzPolarScale, _SZ_POLAR, on: () => _szPolar };`)({
+    createElement: () => ({ style: {}, className: '', textContent: '' }),
+  });
+}
+// (lon, lat) -> map position, from streetzim/polar.py (itself held to PROJ).
+const POLAR_PTS = [
+  [[166.6687, -77.8484], [2.744684984, -11.504475533]],
+  [[0, -60], [0, 28.665451514]],
+  [[90, -71], [18.709752387, 0]],
+  [[-63.5, -64.8], [-22.359530827, 11.078369656]],
+  [[-120, -85.5], [-3.805622713, -2.196638979]],
+];
+function fakeGeo(fix) {
+  return {
+    getCurrentPosition(ok) { ok(fix); },
+    watchPosition(ok) { ok(fix); return 7; },
+  };
+}
+
+await ok('polar: the same positions as the build, there and back', () => {
+  const P = loadPolar();
+  P.szUsePolar({ projection: 'antarctic-polar' }, null);
+  for (const [real, map] of POLAR_PTS) {
+    const m = P.szToMap(real[0], real[1]);
+    assert.ok(Math.abs(m[0] - map[0]) < 1e-8 && Math.abs(m[1] - map[1]) < 1e-8, JSON.stringify([real, m]));
+    const t = P.szToTrue(map[0], map[1]);
+    assert.ok(Math.abs(t[0] - real[0]) < 1e-6 && Math.abs(t[1] - real[1]) < 1e-7, JSON.stringify([map, t]));
+  }
+  assert.deepStrictEqual(P.szToTrue(0, 0), [0, -90]);
+  assert.strictEqual(P.szCoordText(-11.504475533, 2.744684984, 4), '-77.8484, 166.6687');
+});
+
+await ok('polar: every other map is left alone', () => {
+  const P = loadPolar();
+  const geo = fakeGeo({ coords: { latitude: 50.45, longitude: 30.52 }, timestamp: 1 });
+  const get = geo.getCurrentPosition;
+  for (const config of [null, {}, { projection: 'mercator' }]) {
+    P.szUsePolar(config, geo);
+    assert.strictEqual(P.on(), false);
+    assert.deepStrictEqual(P.szToMap(30.52, 50.45), [30.52, 50.45]);
+    assert.deepStrictEqual(P.szToTrue(30.52, 50.45), [30.52, 50.45]);
+    assert.strictEqual(P.szMapScale(50, 30, 51, 31), 1);
+    assert.strictEqual(P.szCoordText(50.45, 30.52, 2), '50.45, 30.52');
+    assert.strictEqual(geo.getCurrentPosition, get);
+    const style = { sources: {}, layers: [] };
+    P._szAddGraticule(style);
+    assert.deepStrictEqual(style, { sources: {}, layers: [] });
+  }
+});
+
+await ok('polar: a GPS fix becomes a map position, its heading turned with it', () => {
+  const P = loadPolar();
+  const real = { coords: { latitude: -77.8484, longitude: 166.6687, accuracy: 20, heading: 10, speed: 3,
+                           altitude: 30, altitudeAccuracy: 5 }, timestamp: 42 };
+  const geo = fakeGeo(real);
+  P.szUsePolar({ projection: 'antarctic-polar' }, geo);
+  const seen = [];
+  geo.getCurrentPosition((p) => seen.push(p), () => seen.push('err'));
+  assert.strictEqual(geo.watchPosition((p) => seen.push(p), () => seen.push('err')), 7);
+  assert.strictEqual(seen.length, 2);
+  for (const p of seen) {
+    assert.ok(Math.abs(p.coords.longitude - 2.744684984) < 1e-8);
+    assert.ok(Math.abs(p.coords.latitude - -11.504475533) < 1e-8);
+    assert.ok(Math.abs(p.coords.heading - 176.6687) < 1e-9);     // 10 + the longitude
+    assert.strictEqual(p.coords.speed, 3);
+    assert.strictEqual(p.timestamp, 42);
+    // 20 real metres, in the map's metres there
+    assert.ok(Math.abs(p.coords.accuracy * P.szMapScale(-11.5045, 2.7447, -11.5045, 2.7447) - 20) < 1e-3);
+  }
+  // wrapped once, however often the config is applied
+  const wrapped = geo.getCurrentPosition;
+  P.szUsePolar({ projection: 'antarctic-polar' }, geo);
+  assert.strictEqual(geo.getCurrentPosition, wrapped);
+  // a heading the device does not have stays that way
+  assert.strictEqual(P._szPolarFix({ coords: { latitude: -80, longitude: -100, heading: null } }).coords.heading, null);
+  assert.ok(Math.abs(P._szPolarFix({ coords: { latitude: -80, longitude: -100, heading: 30 } }).coords.heading - 290) < 1e-9);
+});
+
+await ok('polar: a position that is not on the map is an error, not a wrong place', () => {
+  const P = loadPolar();
+  for (const fix of [{ coords: { latitude: 50.45, longitude: 30.52 } }, { coords: { latitude: NaN, longitude: 0 } }, {}]) {
+    const geo = fakeGeo(fix);
+    P.szUsePolar({ projection: 'antarctic-polar' }, geo);
+    const seen = [];
+    geo.getCurrentPosition((p) => seen.push(p), (e) => seen.push(e.code));
+    geo.watchPosition((p) => seen.push(p), (e) => seen.push(e.code));
+    assert.deepStrictEqual(seen, [2, 2]);
+    geo.getCurrentPosition((p) => seen.push(p));       // no error callback: nothing, and no throw
+    assert.deepStrictEqual(seen, [2, 2]);
+  }
+});
+
+await ok('polar: distances measured on the map become real ones', () => {
+  const P = loadPolar();
+  P.szUsePolar({ projection: 'antarctic-polar' }, null);
+  // true to scale at 71 S; map distances are too long nearer the pole and
+  // along the 0 E axis at the edge, too short along the 90 E axis there.
+  const at = (lon, lat) => { const m = P.szToMap(lon, lat); return P.szMapScale(m[1], m[0], m[1], m[0]); };
+  assert.ok(Math.abs(at(90, -71) - 1) < 1e-9);
+  assert.ok(Math.abs(at(0, -90) - 1.02799) < 1e-4);
+  assert.ok(Math.abs(at(90, -60) - 0.95919) < 1e-4);
+  assert.ok(Math.abs(at(0, -60) - 1.09317) < 1e-4);
+  // against the real thing: one degree of latitude near McMurdo is 111.6 km
+  const a = P.szToMap(166.6687, -77.5), b = P.szToMap(166.6687, -78.5), R = 6371000, rad = Math.PI / 180;
+  const h = Math.sin((b[1] - a[1]) * rad / 2) ** 2
+    + Math.cos(a[1] * rad) * Math.cos(b[1] * rad) * Math.sin((b[0] - a[0]) * rad / 2) ** 2;
+  const metres = 2 * R * Math.asin(Math.sqrt(h)) * P.szMapScale(a[1], a[0], b[1], b[0]);
+  assert.ok(Math.abs(metres - 111620) < 400, String(metres));
+});
+
+await ok('polar: meridians and parallels, named, and a scale bar in real units', () => {
+  const P = loadPolar();
+  P.szUsePolar({ projection: 'antarctic-polar' }, null);
+  const g = P._szPolarGraticule();
+  const lines = g.features.filter((f) => f.geometry.type === 'LineString');
+  const labels = g.features.filter((f) => f.geometry.type === 'Point').map((f) => f.properties.label);
+  assert.strictEqual(lines.length, 24 + 6);
+  for (const want of ['0°', '180°', '90°E', '90°W', '30°E', '150°W', '85°S', '65°S']) assert.ok(labels.includes(want), want);
+  assert.ok(!labels.includes('60°S') && !labels.includes('180°W') && !labels.includes('180°E'));
+  // the four quarter meridians meet at the pole
+  assert.strictEqual(lines.filter((f) => f.geometry.coordinates[0][0] === 0 && f.geometry.coordinates[0][1] === 0).length, 4);
+  for (const f of g.features) {
+    for (const c of f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.coordinates) {
+      assert.ok(Math.abs(c[0]) < 31 && Math.abs(c[1]) < 31);
+    }
+  }
+  const style = { sources: {}, layers: [] };
+  P._szAddGraticule(style);
+  assert.deepStrictEqual(style.layers.map((l) => l.id), ['polar-graticule', 'polar-graticule-label']);
+
+  // 100 px across the pole at a zoom where they are 1000 map metres
+  const handlers = {};
+  const ll = (lng) => ({ lng, lat: 0, distanceTo: (o) => Math.abs(o.lng - lng) * 111194.9266 });
+  let across = 1000;
+  const map = { on: (e, f) => { handlers[e] = f; }, off() {}, getContainer: () => ({ clientHeight: 600 }),
+                unproject: ([x]) => ll((x - 50) * across / 100 / 111194.9266) };
+  const bar = new P.SzPolarScale('metric');
+  const el = bar.onAdd(map);
+  assert.strictEqual(el.textContent, '1 km');           // 1028 real metres across: a 1 km bar
+  assert.ok(Math.abs(parseFloat(el.style.width) - 100 / 1.02799) < 0.05, el.style.width);
+  bar.setUnit('imperial');
+  assert.strictEqual(el.textContent, '2000 ft');
+  bar.setUnit('metric');
+  across = 250;                                              // zoomed in: 257 real metres across
+  handlers.move();
+  assert.strictEqual(el.textContent, '200\u00a0m');
+  assert.ok(Math.abs(parseFloat(el.style.width) - 100 * 200 / 256.9975) < 0.05, el.style.width);
+});
+
+await ok('polar: the viewer asks the polar part wherever the real world shows', () => {
+  assert.match(HTML, /szUsePolar\(config, navigator\.geolocation\)/);
+  assert.match(HTML, /_szPolar \? new SzPolarScale\(scaleUnit\)/);
+  assert.match(HTML, /"data": _szPolar \? \{ type: 'FeatureCollection', features: \[\] \} : _szLowzoomLakes\(\)/);
+  assert.match(HTML, /_szAddGraticule\(style\);\s*_szAddClipMask\(style, config\);/);
+  assert.match(HTML, /szLtr\(szCoordText\(r\.a, r\.o, 5\)\)/);
+  assert.match(HTML, /return szLtr\(szCoordText\(lat, lon, 4\)\);/);
+  assert.match(HTML, /Math\.sqrt\(a\)\)\) \* szMapScale\(lat1, lon1, lat2, lon2\);/);
+});
+
 // ---- Recent places (300-search.js) ---------------------------------------
 const RECENT_SRC = slice('// BEGIN recent-places', '// END recent-places');
 const recent = new Function('_szViewKey', 'SZ_VIEW_PREFIX',

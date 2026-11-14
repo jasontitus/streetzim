@@ -1080,7 +1080,7 @@ function _haversineMetersStrip(lat1, lon1, lat2, lon2) {
   var a = Math.sin(dLat/2) * Math.sin(dLat/2)
         + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad)
         * Math.sin(dLon/2) * Math.sin(dLon/2);
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a))) * szMapScale(lat1, lon1, lat2, lon2);
 }
 
 function _formatDistanceStrip(m) {

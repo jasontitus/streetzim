@@ -141,7 +141,7 @@ function _showPlaceDetail(map, r, idx) {
   if (typeof r.a === 'number' && typeof r.o === 'number') {
     var coordRow = _detailFactRow(
       szT('place.coords', 'Coords'),
-      szLtr(r.a.toFixed(5) + ', ' + r.o.toFixed(5)),
+      szLtr(szCoordText(r.a, r.o, 5)),
       null);
     info.appendChild(coordRow);
   }

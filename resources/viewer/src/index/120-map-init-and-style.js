@@ -63,6 +63,7 @@ if (!window.__szUnsupported) fetchConfig(1)
     // markup now; everything rendered from here on asks szT (docs/i18n.md).
     szUseLanguage(config && config.language, location.search);
     _szRecentStoreKey = _szRecentKey(config);   // the recent places are this map's
+    szUsePolar(config, navigator.geolocation);  // a polar map's positions (122)
     // Check WebGL support before initializing MapLibre (6 draws with WebGL2
     // only; the loader in part 000 gives an engine without it MapLibre 5).
     try {
@@ -192,7 +193,8 @@ if (!window.__szUnsupported) fetchConfig(1)
     // kept (szReadUnit/szWriteUnit, 140) and every distance follows it.
     var scaleUnit = szReadUnit(_szStorage());
     map._streetzimUnit = scaleUnit;  // shared with driving-mode HUD
-    var scaleControl = new maplibregl.ScaleControl({ unit: scaleUnit });
+    var scaleControl = _szPolar ? new SzPolarScale(scaleUnit)
+      : new maplibregl.ScaleControl({ unit: scaleUnit });
     map.addControl(scaleControl, 'bottom-left');
     document.addEventListener('click', function(e) {
       if (e.target.closest('.maplibregl-ctrl-scale')) {

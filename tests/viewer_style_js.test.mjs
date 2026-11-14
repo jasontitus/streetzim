@@ -25,8 +25,9 @@ async function ok(name, fn) {
   catch (e) { console.error('FAIL ', name, '\n      ', e.stack || e.message); process.exitCode = 1; }
 }
 
-// makeStyle (130) through the RTL block (137) are contiguous in index.html.
-const a = HTML.indexOf('var _SZ_LAKES');
+// The polar part (122) and makeStyle (130) through the RTL block (137) are
+// contiguous in index.html.
+const a = HTML.indexOf('// BEGIN polar');
 const b = HTML.indexOf('// END rtl-text');
 assert.ok(a >= 0 && b > a, 'style/theme/icon/rtl blocks not found in index.html');
 const SRC = HTML.slice(a, b);
