@@ -12,6 +12,7 @@
 //   szToMap(lon, lat)   real -> map, [lon, lat]
 //   szToTrue(lon, lat)  map -> real, [lon, lat]
 // On every other map both return their input.
+// BEGIN shared-polar  (the same block is in places.html; tests/viewer_ui_js.test.mjs)
 var _szPolar = false;
 var _SZ_POLAR = (function () {
   var A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F), E = Math.sqrt(E2);
@@ -64,6 +65,7 @@ function szCoordText(lat, lon, digits) {
   var t = szToTrue(lon, lat);
   return t[1].toFixed(digits) + ', ' + t[0].toFixed(digits);
 }
+// END shared-polar
 // A GPS fix as a map position, or null for one that is not on the map. The
 // heading turns with it: real north points away from the pole, which on the
 // map is the direction of the fix's own longitude.

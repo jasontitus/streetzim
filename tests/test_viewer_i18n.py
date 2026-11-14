@@ -254,7 +254,7 @@ def test_numbers_reach_a_sentence_as_one_isolated_value() -> None:
     fmt = drive.split("function formatDistanceLocalized(", 1)[1].split("\n  }", 1)[0]
     assert fmt.count("return szLtr(") == 6, fmt
     plc = build_i18n._strip_generated(PLACES.read_text(encoding="utf-8"))
-    assert "{ coords: szLtr(lat.toFixed(3) + ', ' + lon.toFixed(3)) }" in plc
+    assert "{ coords: szLtr(szCoordText(lat, lon, 3)) }" in plc
     banner = (PARTS / "020-body-markup.html").read_text(encoding="utf-8")
     assert "szLtr(szFixed(mb / 1024, 1) + ' GB')" in banner and "szLtr(Math.round(mb) + ' MB')" in banner
     for lang, table in lang_tables().items():

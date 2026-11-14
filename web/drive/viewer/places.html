@@ -1299,6 +1299,62 @@ function applyUrlParamsOnce() {
   }
 }
 
+// A polar map's positions (index.html's 122-polar.js has the account).
+// BEGIN shared-polar  (the same block is in places.html; tests/viewer_ui_js.test.mjs)
+var _szPolar = false;
+var _SZ_POLAR = (function () {
+  var A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F), E = Math.sqrt(E2);
+  var RAD = Math.PI / 180;
+  function t(phi) {   // phi: latitude counted towards the pole, radians
+    var s = Math.sin(phi);
+    return Math.tan(Math.PI / 4 - phi / 2) / Math.pow((1 - E * s) / (1 + E * s), E / 2);
+  }
+  var PHI_C = 71 * RAD;
+  var K = A * Math.cos(PHI_C) / Math.sqrt(1 - E2 * Math.sin(PHI_C) * Math.sin(PHI_C)) / t(PHI_C);
+  return {
+    // Real places north of this have no position on the map.
+    NORTH_LIMIT: -45,
+    toMap: function (lon, lat) {
+      var rho = K * t(-lat * RAD), lam = lon * RAD;
+      var x = rho * Math.sin(lam), y = rho * Math.cos(lam);
+      var sh = Math.sinh(y / A);
+      return [x / A / RAD, Math.atan(sh) / RAD];
+    },
+    toTrue: function (mlon, mlat) {
+      var x = A * mlon * RAD, y = A * Math.asinh(Math.tan(mlat * RAD));
+      var rho = Math.sqrt(x * x + y * y);
+      if (rho === 0) return [0, -90];
+      var tt = rho / K, phi = Math.PI / 2 - 2 * Math.atan(tt);
+      for (var i = 0; i < 8; i++) {
+        var s = Math.sin(phi);
+        phi = Math.PI / 2 - 2 * Math.atan(tt * Math.pow((1 - E * s) / (1 + E * s), E / 2));
+      }
+      return [Math.atan2(x, y) / RAD, -phi / RAD];
+    },
+    // Real metres per map (Web Mercator, at this map latitude) metre: what a
+    // distance measured on the map as if it were real is to be multiplied by.
+    scaleAt: function (mlon, mlat) {
+      var phi = Math.min(-this.toTrue(mlon, mlat)[1] * RAD, Math.PI / 2 - 1e-7);
+      var m = Math.cos(phi) / Math.sqrt(1 - E2 * Math.sin(phi) * Math.sin(phi));
+      var k = K * t(phi) / (A * m);       // the projection's scale there
+      return 1 / (k * Math.cos(mlat * RAD));
+    }
+  };
+})();
+function szToMap(lon, lat) { return _szPolar ? _SZ_POLAR.toMap(lon, lat) : [lon, lat]; }
+function szToTrue(lon, lat) { return _szPolar ? _SZ_POLAR.toTrue(lon, lat) : [lon, lat]; }
+// What a distance measured between two map positions as if they were real
+// has to be multiplied by, to be the real distance.
+function szMapScale(lat1, lon1, lat2, lon2) {
+  return _szPolar ? _SZ_POLAR.scaleAt((lon1 + lon2) / 2, (lat1 + lat2) / 2) : 1;
+}
+// "lat, lon" of a map position as the reader knows coordinates: real ones.
+function szCoordText(lat, lon, digits) {
+  var t = szToTrue(lon, lat);
+  return t[1].toFixed(digits) + ', ' + t[0].toFixed(digits);
+}
+// END shared-polar
+
 // ---------- bootstrapping ----------
 
 // map-config.json: its `language` picks the UI language (docs/i18n.md),
@@ -1310,6 +1366,7 @@ const _mapConfigP = fetchJSON(HERE + 'map-config.json').catch(() => null);
   // changes. A missing map-config.json (very old ZIM) means English.
   const cfg = await _mapConfigP;
   szUseLanguage(cfg && cfg.language, location.search);
+  _szPolar = !!cfg && cfg.projection === 'antarctic-polar';
   if (state.originMode === 'gps') {
     state.originLabel = myLocationLabel();
     if (els.near.hasAttribute('data-sz-here')) showNearHere();
@@ -1392,7 +1449,7 @@ const _mapConfigP = fetchJSON(HERE + 'map-config.json').catch(() => null);
       // One value, so a right-to-left table cannot swap latitude and
       // longitude (szLtr keeps "37.975, 23.735" in order).
       state.originLabel = szT('places.near_coords', 'Near ({coords})',
-                              { coords: szLtr(lat.toFixed(3) + ', ' + lon.toFixed(3)) });
+                              { coords: szLtr(szCoordText(lat, lon, 3)) });
       showNearPlace(state.originLabel);
       reverseGeocodeFromViewport(lat, lon).then(name => {
         if (name && state.originMode === 'viewport') {
@@ -2745,31 +2802,36 @@ function requestGPS() {
     state.originNote = szT('places.location_not_yet', 'Location not available yet — sorted by name.');
     rerunQuery();
   }, 12000);
+  const failed = err => {
+    clearTimeout(giveUp);
+    if (!gpsStillWanted() || state.origin) return;
+    state.originMode = 'none';
+    // Kept in state and appended to the result count line by
+    // _sortAndShow, because a plain setStatus here was overwritten
+    // a moment later by the query's own status text.
+    state.originNote = szT('places.location_unavailable', 'Location unavailable ({error}) — sorted by name. Pick a place under "Search near" to sort by distance.',
+                           { error: err.message });
+    if (!gaveUp) rerunQuery();  // the give-up timer already re-ran it
+    else applyStatusNote();
+  };
   navigator.geolocation.getCurrentPosition(
     pos => {
+      // A polar map's places are at map positions; so must the origin be.
+      let at = [pos.coords.longitude, pos.coords.latitude];
+      if (_szPolar) at = at[1] <= _SZ_POLAR.NORTH_LIMIT ? szToMap(at[0], at[1]) : null;
+      if (!at) { failed({ message: 'not on this map' }); return; }
       clearTimeout(giveUp);
       // A late grant (after the 12 s give-up) is still welcome as long
       // as nobody picked another origin in the meantime.
       if (!gpsStillWanted()) return;
-      state.origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      state.origin = { lat: at[1], lon: at[0] };
       state.originMode = 'gps';
       state.originLabel = myLocationLabel();
       state.originNote = '';
       showNearHere();
       rerunQuery();
     },
-    err => {
-      clearTimeout(giveUp);
-      if (!gpsStillWanted() || state.origin) return;
-      state.originMode = 'none';
-      // Kept in state and appended to the result count line by
-      // _sortAndShow, because a plain setStatus here was overwritten
-      // a moment later by the query's own status text.
-      state.originNote = szT('places.location_unavailable', 'Location unavailable ({error}) — sorted by name. Pick a place under "Search near" to sort by distance.',
-                             { error: err.message });
-      if (!gaveUp) rerunQuery();  // the give-up timer already re-ran it
-      else applyStatusNote();
-    },
+    failed,
     { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
   );
 }
@@ -3175,7 +3237,8 @@ function haversine(lat1, lon1, lat2, lon2) {
   const dLon = (lon2 - lon1) * r;
   const a = Math.sin(dLat / 2) ** 2
           + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  // szMapScale: 1, but for a polar map, where positions are not real ones.
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a))) * szMapScale(lat1, lon1, lat2, lon2);
 }
 
 // Longitude-inside-bounds with antimeridian wraparound. MapLibre's

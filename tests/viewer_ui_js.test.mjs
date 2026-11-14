@@ -1291,6 +1291,27 @@ await ok('polar: meridians and parallels, named, and a scale bar in real units',
   assert.ok(Math.abs(parseFloat(el.style.width) - 100 * 200 / 256.9975) < 0.05, el.style.width);
 });
 
+await ok('polar: the Find page has the same core, and its GPS origin and distances go through it', () => {
+  const PLACES = fs.readFileSync(`${REPO}/resources/viewer/places.html`, 'utf8');
+  const core = (src) => {
+    const a = src.indexOf('// BEGIN shared-polar'), b = src.indexOf('// END shared-polar', a);
+    assert.ok(a >= 0 && b > a);
+    return src.slice(a, b);
+  };
+  assert.strictEqual(core(PLACES), core(HTML));
+  const hav = PLACES.slice(PLACES.indexOf('function haversine('), PLACES.indexOf('\n}\n', PLACES.indexOf('function haversine(')) + 3);
+  const F = new Function(core(PLACES) + hav + `
+    return { haversine, text: szCoordText, polar(on) { _szPolar = on; } };`)();
+  const flat = F.haversine(-11.6, 2.7, -11.4, 2.7);
+  F.polar(true);
+  assert.ok(Math.abs(F.haversine(-11.6, 2.7, -11.4, 2.7) / flat - 1.03732) < 1e-3);
+  assert.strictEqual(F.text(-11.504475533, 2.744684984, 3), '-77.848, 166.669');
+  assert.match(PLACES, /_szPolar = !!cfg && cfg\.projection === 'antarctic-polar';/);
+  assert.match(PLACES, /if \(_szPolar\) at = at\[1\] <= _SZ_POLAR\.NORTH_LIMIT \? szToMap\(at\[0\], at\[1\]\) : null;\s*if \(!at\) \{ failed\(/);
+  assert.match(PLACES, /state\.origin = \{ lat: at\[1\], lon: at\[0\] \};/);
+  assert.match(PLACES, /coords: szLtr\(szCoordText\(lat, lon, 3\)\)/);
+});
+
 await ok('polar: the viewer asks the polar part wherever the real world shows', () => {
   assert.match(HTML, /szUsePolar\(config, navigator\.geolocation\)/);
   assert.match(HTML, /_szPolar \? new SzPolarScale\(scaleUnit\)/);

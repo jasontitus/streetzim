@@ -3325,52 +3325,60 @@ return;
 showFatalError(szT('fatal.error_loading', 'Error loading map'), err, err && err._url);
 });
 // BEGIN polar
+// BEGIN shared-polar  (the same block is in places.html; tests/viewer_ui_js.test.mjs)
 var _szPolar = false;
 var _SZ_POLAR = (function () {
-var A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F), E = Math.sqrt(E2);
-var RAD = Math.PI / 180;
-function t(phi) {
-var s = Math.sin(phi);
-return Math.tan(Math.PI / 4 - phi / 2) / Math.pow((1 - E * s) / (1 + E * s), E / 2);
-}
-var PHI_C = 71 * RAD;
-var K = A * Math.cos(PHI_C) / Math.sqrt(1 - E2 * Math.sin(PHI_C) * Math.sin(PHI_C)) / t(PHI_C);
-return {
-NORTH_LIMIT: -45,
-toMap: function (lon, lat) {
-var rho = K * t(-lat * RAD), lam = lon * RAD;
-var x = rho * Math.sin(lam), y = rho * Math.cos(lam);
-var sh = Math.sinh(y / A);
-return [x / A / RAD, Math.atan(sh) / RAD];
-},
-toTrue: function (mlon, mlat) {
-var x = A * mlon * RAD, y = A * Math.asinh(Math.tan(mlat * RAD));
-var rho = Math.sqrt(x * x + y * y);
-if (rho === 0) return [0, -90];
-var tt = rho / K, phi = Math.PI / 2 - 2 * Math.atan(tt);
-for (var i = 0; i < 8; i++) {
-var s = Math.sin(phi);
-phi = Math.PI / 2 - 2 * Math.atan(tt * Math.pow((1 - E * s) / (1 + E * s), E / 2));
-}
-return [Math.atan2(x, y) / RAD, -phi / RAD];
-},
-scaleAt: function (mlon, mlat) {
-var phi = Math.min(-this.toTrue(mlon, mlat)[1] * RAD, Math.PI / 2 - 1e-7);
-var m = Math.cos(phi) / Math.sqrt(1 - E2 * Math.sin(phi) * Math.sin(phi));
-var k = K * t(phi) / (A * m);
-return 1 / (k * Math.cos(mlat * RAD));
-}
-};
+  var A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F), E = Math.sqrt(E2);
+  var RAD = Math.PI / 180;
+  function t(phi) {   // phi: latitude counted towards the pole, radians
+    var s = Math.sin(phi);
+    return Math.tan(Math.PI / 4 - phi / 2) / Math.pow((1 - E * s) / (1 + E * s), E / 2);
+  }
+  var PHI_C = 71 * RAD;
+  var K = A * Math.cos(PHI_C) / Math.sqrt(1 - E2 * Math.sin(PHI_C) * Math.sin(PHI_C)) / t(PHI_C);
+  return {
+    // Real places north of this have no position on the map.
+    NORTH_LIMIT: -45,
+    toMap: function (lon, lat) {
+      var rho = K * t(-lat * RAD), lam = lon * RAD;
+      var x = rho * Math.sin(lam), y = rho * Math.cos(lam);
+      var sh = Math.sinh(y / A);
+      return [x / A / RAD, Math.atan(sh) / RAD];
+    },
+    toTrue: function (mlon, mlat) {
+      var x = A * mlon * RAD, y = A * Math.asinh(Math.tan(mlat * RAD));
+      var rho = Math.sqrt(x * x + y * y);
+      if (rho === 0) return [0, -90];
+      var tt = rho / K, phi = Math.PI / 2 - 2 * Math.atan(tt);
+      for (var i = 0; i < 8; i++) {
+        var s = Math.sin(phi);
+        phi = Math.PI / 2 - 2 * Math.atan(tt * Math.pow((1 - E * s) / (1 + E * s), E / 2));
+      }
+      return [Math.atan2(x, y) / RAD, -phi / RAD];
+    },
+    // Real metres per map (Web Mercator, at this map latitude) metre: what a
+    // distance measured on the map as if it were real is to be multiplied by.
+    scaleAt: function (mlon, mlat) {
+      var phi = Math.min(-this.toTrue(mlon, mlat)[1] * RAD, Math.PI / 2 - 1e-7);
+      var m = Math.cos(phi) / Math.sqrt(1 - E2 * Math.sin(phi) * Math.sin(phi));
+      var k = K * t(phi) / (A * m);       // the projection's scale there
+      return 1 / (k * Math.cos(mlat * RAD));
+    }
+  };
 })();
 function szToMap(lon, lat) { return _szPolar ? _SZ_POLAR.toMap(lon, lat) : [lon, lat]; }
 function szToTrue(lon, lat) { return _szPolar ? _SZ_POLAR.toTrue(lon, lat) : [lon, lat]; }
+// What a distance measured between two map positions as if they were real
+// has to be multiplied by, to be the real distance.
 function szMapScale(lat1, lon1, lat2, lon2) {
-return _szPolar ? _SZ_POLAR.scaleAt((lon1 + lon2) / 2, (lat1 + lat2) / 2) : 1;
+  return _szPolar ? _SZ_POLAR.scaleAt((lon1 + lon2) / 2, (lat1 + lat2) / 2) : 1;
 }
+// "lat, lon" of a map position as the reader knows coordinates: real ones.
 function szCoordText(lat, lon, digits) {
-var t = szToTrue(lon, lat);
-return t[1].toFixed(digits) + ', ' + t[0].toFixed(digits);
+  var t = szToTrue(lon, lat);
+  return t[1].toFixed(digits) + ', ' + t[0].toFixed(digits);
 }
+// END shared-polar
 function _szPolarFix(pos) {
 var c = pos && pos.coords;
 if (!c || !(c.latitude <= _SZ_POLAR.NORTH_LIMIT)) return null;
@@ -4674,7 +4682,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '274410e6';
+var SZ_VIEWER_BUILD = '8bc4dbff';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
