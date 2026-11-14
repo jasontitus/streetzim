@@ -41,3 +41,15 @@ def test_the_built_viewer_names_itself():
     assert h.hexdigest()[:8] == m[0].decode()
     about = (ROOT / "resources" / "viewer" / "src" / "index" / "140-view-home-about.js").read_text(encoding="utf-8")
     assert about.count("var SZ_VIEWER_BUILD = '';") == 1
+
+
+def test_a_fresh_viewer_does_not_read_as_stale(capsys):
+    """Every build prints the viewer's fingerprint and warns when a string
+    it expects is gone; the strings must be ones today's viewer has, or
+    the warning is on every build and means nothing."""
+    sys.path.insert(0, str(ROOT))
+    from streetzim import common
+    common.log_viewer_freshness()
+    out = capsys.readouterr().out
+    assert "viewer HTML fingerprint" in out
+    assert "MISSING" not in out, out

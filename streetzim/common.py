@@ -265,7 +265,7 @@ def log_viewer_freshness():
     import datetime as _dt
     print("  --- viewer HTML fingerprint ---")
     expected_markers = {
-        "index.html": ["enrich.ws", "item.ws", "places-link"],
+        "index.html": ["enrich.ws", "item.ws", "streetzim.recent."],
         "places.html": ["Search near", "near-input"],
     }
     warned = False
