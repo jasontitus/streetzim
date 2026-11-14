@@ -883,13 +883,13 @@ function sheetFor(config, idx, record) {
   const body = document.createElement('body');
   document.body = body;
   const fn = new Function('window', 'document', 'history', 'location', 'baseUrl', '_findResultsState',
-    '_populateNearby', 'requestAnimationFrame', 'setTimeout',
+    '_populateNearby', 'requestAnimationFrame', 'setTimeout', '_szRecentAdd', '_szStorage', '_szRecentStoreKey',
     'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC + SHEET_SRC +
     '\nreturn { show: _showPlaceDetail, set: function(i) { WIKI_GEO_INDEX = i; WIKI_GEO_QID = {};' +
     ' for (var t in i) { var q = i[t] && i[t][3]; if (q) WIKI_GEO_QID[q] = t; } },' +
     ' packs: function() { return WIKI_PACKS; }, wikiPacksInit: wikiPacksInit, wikiPackSetIndex: wikiPackSetIndex };');
   const api = fn({}, document, {}, { pathname: '/', search: '' }, 'http://kiwix/c/', { origin: null },
-    () => {}, () => {}, () => 0);
+    () => {}, () => {}, () => 0, () => {}, () => null, '');
   api.set(BASE);
   api.wikiPacksInit(config);
   for (const pk of api.packs()) if (idx[pk.lang]) api.wikiPackSetIndex(pk, idx[pk.lang]);
@@ -980,7 +980,7 @@ await ok('names with several values: a search row shows the first; data-name and
   // The shown names come from _szShownNames (admin-search block), in the
   // map's second language SZ_LANG2 (none here).
   const R = new Function('szPlaceType', 'szT',
-    'var activeIdx = -1, lastSearchMatches = [], resultsEl = { style: {}, innerHTML: "" }, SZ_LANG2 = "";\n' +
+    'var activeIdx = -1, lastSearchMatches = [], resultsEl = { style: {}, innerHTML: "", removeAttribute: function() {} }, SZ_LANG2 = "";\n' +
     src('function _szShownNames(rec, lang) {', '\n// The normalized texts') +
     src('  function renderResults(matches) {', '\n  function doSearch(') +
     src('  function escapeHtml(s) {', '\n  function selectResult(') +
@@ -1008,7 +1008,7 @@ await ok('names with several values: the Find page\'s #dest=…&label= hand-off 
                                                            setOrigin: (...x) => calls.push(['origin', ...x]) } };
     const pins = [];
     new Function('window', 'map', 'placeSearchPin', 'SZ_HERE', 'renderFindResultsFromStash',
-      HTML.slice(a, b) + '\napplyHash();')(win, { flyTo() {}, fitBounds() {} }, (m, la, lo, name) => pins.push(name),
+      'function _szRecentAdd() {} function _szStorage() { return null; } var _szRecentStoreKey = "";\n' + HTML.slice(a, b) + '\napplyHash();')(win, { flyTo() {}, fitBounds() {} }, (m, la, lo, name) => pins.push(name),
       'HERE', () => {});
     return { calls, pins };
   };
@@ -1043,7 +1043,7 @@ await ok('applyHash on load reads the URL the page opened with and flies to no m
     const win = { location: { hash }, streetzimRouting: { open() {}, setDest: (...x) => calls.push(['dest', ...x]) } };
     const map = { flyTo: (o) => flown.push([o.center, o.zoom]), fitBounds() {} };
     new Function('window', 'map', 'placeSearchPin', 'SZ_HERE', 'renderFindResultsFromStash', 'openHash', 'config',
-      viewHelpers() + HTML.slice(a, b) + `\napplyHash(${first});`)(win, map, (m, la, lo, name) => pins.push(name),
+      'function _szRecentAdd() {} function _szStorage() { return null; } var _szRecentStoreKey = "";\n' + viewHelpers() + HTML.slice(a, b) + `\napplyHash(${first});`)(win, map, (m, la, lo, name) => pins.push(name),
       'HERE', () => {}, openHash, config);
     return { flown, pins, calls };
   };

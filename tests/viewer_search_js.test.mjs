@@ -209,14 +209,16 @@ ok('selectResult measures the chrome with the results list closed, and the camer
   const map = fakeMap(390, 430);
   const fitCalls = [];
   const pinned = [];
+  const kept = [];
   const selectResult = new Function('lastSearchMatches', 'resultsEl', 'input', 'map', 'document',
     '_szAdminCamera', 'SZ_ADMIN_ZOOM', '_szFitAdminBox', '_szFlyToClear', 'placeSearchPin',
-    '_szShownNames', 'SZ_LANG2',
+    '_szShownNames', 'SZ_LANG2', '_szRecentAdd', '_szStorage', '_szRecentStoreKey',
     body + '\nreturn selectResult;')(
     [{ item: ATLANTA }], resultsEl, input, map, doc, V._szAdminCamera, V.SZ_ADMIN_ZOOM,
     (m, b, top, z) => { fitCalls.push(top); V._szFitAdminBox(m, b, top, z); },
     () => { throw new Error('an area must not take the point path'); },
-    (m, lat, lon, name) => pinned.push(name), V._szShownNames, '');
+    (m, lat, lon, name) => pinned.push(name), V._szShownNames, '',
+    (store, key, item) => kept.push([store, key, item]), () => 'the store', 'the key');
   const attrs = { 'data-idx': '0', 'data-lat': String(ATLANTA.a), 'data-lon': String(ATLANTA.o),
                   'data-type': 'admin', 'data-name': 'Atlanta' };
   selectResult({ getAttribute: (k) => attrs[k] });
@@ -225,6 +227,8 @@ ok('selectResult measures the chrome with the results list closed, and the camer
   assert.ok(input.blurred);
   // The pin's popup and its Directions label take the name the row showed.
   assert.deepStrictEqual(pinned, ['Atlanta']);
+  // ... and the place is kept, to find again under the empty box.
+  assert.deepStrictEqual(kept, [['the store', 'the key', ATLANTA]]);
   assert.strictEqual(map.moved && map.moved.kind, 'fit');
   assert.strictEqual(map.moved.opts.padding.top, 130);
 });
@@ -472,9 +476,11 @@ ok('a pick on a merged map pins the name the row showed', () => {
   const doc = { getElementById: () => ({ getBoundingClientRect: () => ({ bottom: 110 }) }) };
   const sel = (lang) => new Function('lastSearchMatches', 'resultsEl', 'input', 'map', 'document',
     '_szAdminCamera', 'SZ_ADMIN_ZOOM', '_szFitAdminBox', '_szFlyToClear', 'placeSearchPin',
-    '_szShownNames', 'SZ_LANG2', body + '\nreturn selectResult;')(
+    '_szShownNames', 'SZ_LANG2', '_szRecentAdd', '_szStorage', '_szRecentStoreKey',
+    body + '\nreturn selectResult;')(
     [{ item: rec }], { style: {} }, { blur() {} }, fakeMap(390, 844), doc, V._szAdminCamera,
-    V.SZ_ADMIN_ZOOM, () => {}, () => {}, (m, lat, lon, name) => pinned.push(name), V._szShownNames, lang);
+    V.SZ_ADMIN_ZOOM, () => {}, () => {}, (m, lat, lon, name) => pinned.push(name), V._szShownNames, lang,
+    () => {}, () => null, '');
   const attrs = { 'data-idx': '0', 'data-lat': '46.2', 'data-lon': '6.15', 'data-type': 'place',
                   'data-name': 'Geneva' };
   sel('de')({ getAttribute: (k) => attrs[k] });

@@ -20,6 +20,8 @@ function element() {
     addEventListener(type, fn) { this.listeners[type] = fn; },
     blur() { this.listeners.blur?.(); },
     setAttribute() {},
+    hasAttribute() { return false; },
+    removeAttribute() {},
     appendChild() {},
     querySelectorAll() { return []; },
   };
