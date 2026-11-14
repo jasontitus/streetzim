@@ -5,6 +5,7 @@
 // existing _fetchWdChunk hook when the place has a Wikidata Q-ID.
 function _showPlaceDetail(map, r, idx) {
   if (_findResultsState.detailPanel) _hidePlaceDetail();
+  _szRecentAdd(_szStorage(), _szRecentStoreKey, r);   // one to find again (300-search.js)
   var backdrop = document.createElement('div');
   backdrop.style.cssText = (
     'position:fixed; left:0; right:0; top:0; bottom:0; z-index:1700;'

@@ -1137,6 +1137,98 @@ await ok('search results: the subline is printed as written ("1 mi", not "1 Mi")
   assert.match(HTML, /proximityLabel = _szProximityLabel\(dist \* 69, map\._streetzimUnit\);/);
 });
 
+// ---- Recent places (300-search.js) ---------------------------------------
+const RECENT_SRC = slice('// BEGIN recent-places', '// END recent-places');
+const recent = new Function('_szViewKey', 'SZ_VIEW_PREFIX',
+  RECENT_SRC + '\nreturn { _szRecentKey, _szRecentRead, _szRecentAdd, _szRecentClear, _szRecentSlim, SZ_RECENT_MAX };')(
+  v0._szViewKey, 'streetzim.view.');
+const HOTEL = { n: 'Hôtel de Paris', nn: 'Hôtel de Paris', t: 'poi', s: 'hotel', cat: 'hotel', l: 'Monaco',
+  a: 43.7392, o: 7.4272, ws: 'https://example.org', p: '+377 00 00 00', ln: { de: 'Hotel de Paris' } };
+
+await ok('recent places: kept per map, beside its saved view', () => {
+  const k = recent._szRecentKey(CONFIG);
+  assert.strictEqual(k, 'streetzim.recent.' + v0._szViewKey(CONFIG).slice('streetzim.view.'.length));
+  assert.notStrictEqual(k, recent._szRecentKey({ ...CONFIG, name: 'Nice' }));
+  assert.notStrictEqual(k, v0._szViewKey(CONFIG));
+});
+
+await ok('recent places: newest first, a place once, at most SZ_RECENT_MAX', () => {
+  const st = memStorage(), k = recent._szRecentKey(CONFIG);
+  assert.deepStrictEqual(recent._szRecentRead(st, k), []);
+  assert.strictEqual(recent._szRecentAdd(st, k, HOTEL), true);
+  assert.strictEqual(recent._szRecentAdd(st, k, { n: 'Café A', t: 'poi', a: 43.74, o: 7.42 }), true);
+  assert.deepStrictEqual(recent._szRecentRead(st, k).map((r) => r.n), ['Café A', 'Hôtel de Paris']);
+  // picked again: moved to the top, not listed twice, and with every field
+  recent._szRecentAdd(st, k, { ...HOTEL });
+  const got = recent._szRecentRead(st, k);
+  assert.deepStrictEqual(got.map((r) => r.n), ['Hôtel de Paris', 'Café A']);
+  assert.deepStrictEqual(got[0], HOTEL);
+  // the same name somewhere else is another place
+  recent._szRecentAdd(st, k, { ...HOTEL, a: 43.8 });
+  assert.strictEqual(recent._szRecentRead(st, k).length, 3);
+  for (let i = 0; i < 30; i++) recent._szRecentAdd(st, k, { n: 'P' + i, t: 'poi', a: 43.7, o: 7.4 + i / 1000 });
+  const all = recent._szRecentRead(st, k);
+  assert.strictEqual(all.length, recent.SZ_RECENT_MAX);
+  assert.strictEqual(all[0].n, 'P29');
+  assert.strictEqual(JSON.parse(st.m.get(k)).length, recent.SZ_RECENT_MAX);
+  // another map's list is its own
+  assert.deepStrictEqual(recent._szRecentRead(st, recent._szRecentKey({ ...CONFIG, name: 'Nice' })), []);
+  recent._szRecentClear(st, k);
+  assert.deepStrictEqual(recent._szRecentRead(st, k), []);
+});
+
+await ok('recent places: only a named point is kept, and a large record is cut down', () => {
+  const st = memStorage(), k = recent._szRecentKey(CONFIG);
+  for (const bad of [null, 'x', {}, { n: 'x' }, { n: '', a: 1, o: 1 }, { n: 'x', a: 91, o: 1 },
+    { n: 'x', a: 1, o: 181 }, { n: 'x', a: NaN, o: 1 }, { n: 'x'.repeat(301), a: 1, o: 1 }]) {
+    assert.strictEqual(recent._szRecentAdd(st, k, bad), false, JSON.stringify(bad));
+  }
+  assert.strictEqual(st.m.size, 0);
+  // coordinates written as text are read as numbers
+  assert.deepStrictEqual(recent._szRecentSlim({ n: 'x', a: '43.5', o: '7.5' }), { n: 'x', a: 43.5, o: 7.5 });
+  // a corner keeps its two streets; a function or a huge field is dropped
+  const corner = { n: 'A & B', t: 'street', a: 43.7, o: 7.4, corner: [{ n: 'A', a: 43.7, o: 7.4 }, { n: 'B', a: 43.7, o: 7.4 }] };
+  assert.deepStrictEqual(recent._szRecentSlim(corner), corner);
+  const fat = recent._szRecentSlim({ ...HOTEL, big: 'y'.repeat(5000), geom: new Array(2000).fill(1), f() {} });
+  assert.deepStrictEqual(fat, HOTEL);
+  const many = { ...HOTEL };
+  for (let i = 0; i < 20; i++) many['x' + i] = 'z'.repeat(290);
+  assert.deepStrictEqual(recent._szRecentSlim(many),
+    { n: HOTEL.n, t: 'poi', a: HOTEL.a, o: HOTEL.o, nn: HOTEL.nn, s: 'hotel', cat: 'hotel', l: 'Monaco' });
+});
+
+await ok('recent places: no storage, a full one or garbage in it is no list, not an error', () => {
+  const k = recent._szRecentKey(CONFIG);
+  assert.strictEqual(recent._szRecentAdd(null, k, HOTEL), false);
+  assert.deepStrictEqual(recent._szRecentRead(null, k), []);
+  recent._szRecentClear(null, k);
+  assert.strictEqual(recent._szRecentAdd(memStorage(), null, HOTEL), false);
+  assert.strictEqual(recent._szRecentAdd(memStorage({ throwOnSet: true }), k, HOTEL), false);
+  for (const junk of ['{', '"x"', '{"a":1}', '[1,null,"x",{"n":"x"}]']) {
+    const st = memStorage();
+    st.m.set(k, junk);
+    assert.deepStrictEqual(recent._szRecentRead(st, k), [], junk);
+  }
+  const st = memStorage();
+  st.m.set(k, JSON.stringify([{ n: 'ok', a: 1, o: 2 }, { n: 'bad', a: 'x', o: 2 }]));
+  assert.deepStrictEqual(recent._szRecentRead(st, k).map((r) => r.n), ['ok']);
+});
+
+await ok('recent places: recorded where a place is picked, listed under the empty box', () => {
+  // a search result, a Find result's sheet, the Find page's "Map"
+  assert.match(HTML, /if \(item\) _szRecentAdd\(_szStorage\(\), _szRecentStoreKey, item\);\n    if \(item && item\.corner\)/);
+  assert.match(HTML, /function _showPlaceDetail\(map, r, idx\) \{\n[^\n]*\n  _szRecentAdd\(_szStorage\(\), _szRecentStoreKey, r\);/);
+  assert.match(HTML, /if \(label\) _szRecentAdd\(_szStorage\(\), _szRecentStoreKey, \{ n: label, t: 'poi', a: pinLat, o: pinLon \}\);/);
+  assert.match(HTML, /_szRecentStoreKey = _szRecentKey\(config\);/);
+  // shown for an empty box only, and never over an open list
+  const show = slice('  function showRecents() {', '  function dropRecents() {');
+  assert.match(show, /if \(input\.value\.trim\(\)\) return;/);
+  assert.match(show, /if \(resultsEl\.style\.display === 'block'\) return;/);
+  assert.match(show, /resultsEl\.setAttribute\('data-sz-recent', '1'\);/);
+  // a search's results are not marked as the recent list
+  assert.match(slice('  function renderResults(matches) {', '  var searchSeq = 0;'), /resultsEl\.removeAttribute\('data-sz-recent'\);/);
+});
+
 // ---- the in-ZIM Wikipedia button (100-wiki-bridge-and-viewport.js) ----
 // A record's `w` gets a button only when its article was bundled, which
 // wiki-geo-index.json lists; before, any `w` did, and most opened a

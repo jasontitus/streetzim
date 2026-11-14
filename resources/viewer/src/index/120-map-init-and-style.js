@@ -62,6 +62,7 @@ if (!window.__szUnsupported) fetchConfig(1)
     // URL asks for another (?uilang=de, ?uilang=qps). Translates the static
     // markup now; everything rendered from here on asks szT (docs/i18n.md).
     szUseLanguage(config && config.language, location.search);
+    _szRecentStoreKey = _szRecentKey(config);   // the recent places are this map's
     // Check WebGL support before initializing MapLibre (6 draws with WebGL2
     // only; the loader in part 000 gives an engine without it MapLibre 5).
     try {
@@ -605,7 +606,11 @@ if (!window.__szUnsupported) fetchConfig(1)
       // unannotated camera move.
       if (pinMatch) {
         var pinLat = parseFloat(pinMatch[1]), pinLon = parseFloat(pinMatch[2]);
-        if (validLatLon(pinLat, pinLon)) placeSearchPin(map, pinLat, pinLon, label || '');
+        if (validLatLon(pinLat, pinLon)) {
+          placeSearchPin(map, pinLat, pinLon, label || '');
+          // a place picked on the Find page is one to find again
+          if (label) _szRecentAdd(_szStorage(), _szRecentStoreKey, { n: label, t: 'poi', a: pinLat, o: pinLon });
+        }
         // Shown once: the URL drops it (the view writer keeps the rest of
         // the fragment), so a reload or a later Back does not bring an old
         // pin back over what the reader has done since.

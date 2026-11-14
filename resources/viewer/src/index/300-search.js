@@ -719,6 +719,80 @@ function _szFitAdminBox(map, bounds, topChrome, zoom) {
 }
 // END admin-search
 
+// BEGIN recent-places
+// The places a reader picked (a search result, a Find result's sheet, the
+// Find page's "Map"), newest first: the list under the empty search box.
+// Kept on the device, per map (the name and box _szViewKey goes by: /drive/
+// serves every map at one path, and a Kiwix book's path changes with each
+// release). Where the reader has no storage (Kiwix on iOS) nothing is kept
+// and no list shows.
+var SZ_RECENT_PREFIX = 'streetzim.recent.';
+var SZ_RECENT_MAX = 12;
+var _szRecentStoreKey = null;   // set once map-config.json has loaded
+
+function _szRecentKey(config) {
+  return SZ_RECENT_PREFIX + _szViewKey(config).slice(SZ_VIEW_PREFIX.length);
+}
+
+// A stored place is a search record: a name and a point at least.
+function _szRecentValid(r) {
+  return !!r && typeof r === 'object' && typeof r.n === 'string' && !!r.n && r.n.length <= 300
+    && typeof r.a === 'number' && isFinite(r.a) && r.a >= -90 && r.a <= 90
+    && typeof r.o === 'number' && isFinite(r.o) && r.o >= -180 && r.o <= 180;
+}
+
+// The record as stored: its plain fields and its small nested ones (the
+// names in other languages, an area's box, a corner's two streets). A
+// record that is still large keeps what a result row and its pin need.
+function _szRecentSlim(item) {
+  if (!item || typeof item !== 'object') return null;
+  var out = {}, k, v;
+  for (k in item) {
+    if (!Object.prototype.hasOwnProperty.call(item, k)) continue;
+    v = item[k];
+    if (typeof v === 'string' ? v.length <= 300 : (typeof v === 'number' || typeof v === 'boolean')) out[k] = v;
+    else if (v && typeof v === 'object') {
+      try { if (JSON.stringify(v).length <= 1200) out[k] = v; } catch (e) {}
+    }
+  }
+  out.a = +out.a; out.o = +out.o;
+  if (!_szRecentValid(out)) return null;
+  if (JSON.stringify(out).length > 3000) {
+    out = { n: out.n, t: item.t, a: out.a, o: out.o };
+    ['nn', 's', 'cat', 'l'].forEach(function(f) { if (typeof item[f] === 'string' && item[f].length <= 300) out[f] = item[f]; });
+  }
+  return out;
+}
+
+function _szRecentSame(x, y) {
+  return x.n === y.n && Math.abs(x.a - y.a) < 1e-5 && Math.abs(x.o - y.o) < 1e-5;
+}
+
+// Garbage, an old format or a stray entry is skipped, not shown.
+function _szRecentRead(storage, key) {
+  if (!storage || !key) return [];
+  var arr = null;
+  try { arr = JSON.parse(storage.getItem(key) || 'null'); } catch (e) { return []; }
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(_szRecentValid).slice(0, SZ_RECENT_MAX);
+}
+
+function _szRecentAdd(storage, key, item) {
+  if (!storage || !key) return false;
+  var rec = _szRecentSlim(item);
+  if (!rec) return false;
+  var arr = _szRecentRead(storage, key).filter(function(r) { return !_szRecentSame(r, rec); });
+  arr.unshift(rec);
+  try { storage.setItem(key, JSON.stringify(arr.slice(0, SZ_RECENT_MAX))); return true; }
+  catch (e) { return false; }
+}
+
+function _szRecentClear(storage, key) {
+  if (!storage || !key) return;
+  try { storage.removeItem(key); } catch (e) {}
+}
+// END recent-places
+
 // Drop a red marker at (lat, lon) with a "Directions to here" popup.
 // Shared by the search-result picker and the #pin= deep-link path
 // (Find-page "Map" button). Replaces any existing search marker.
@@ -905,7 +979,7 @@ function initSearch(map) {
   // of it on a 568x320 landscape phone, a strip of it in portrait, and the
   // results are what the reader taps then (#25). Watched rather than set
   // where the dropdown opens: several places open it (typing, the sign
-  // reader, history), and routing hides the whole search box with the
+  // reader, the recent places), and routing hides the whole search box with the
   // dropdown still open in it. While the dropdown is open the body carries
   // .sz-search-open, which hides the "Search this area" pill (it would sit
   // on the results); when it closes the pill is placed again
@@ -1568,6 +1642,7 @@ var SEARCH_SHARDS = (function () {
   function renderResults(matches) {
     activeIdx = -1;
     lastSearchMatches = matches;
+    resultsEl.removeAttribute('data-sz-recent');
     if (matches.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results"></div>';
       resultsEl.firstChild.textContent = szT('search.no_results', 'No results found');
@@ -1610,6 +1685,38 @@ var SEARCH_SHARDS = (function () {
     searchSeq++;
     activeIdx = -1;
     resultsEl.style.display = 'none';
+  }
+
+  // The recent places, under the box while it is empty: the rows are
+  // result rows (a tap is selectResult's, which also moves the place back
+  // to the top), under a heading with "Clear". Marked data-sz-recent: they
+  // are not the results of a search.
+  function showRecents() {
+    if (input.value.trim()) return;
+    // not over a list that is open: a photo's results show with the box empty
+    if (resultsEl.style.display === 'block') return;
+    var recs = _szRecentRead(_szStorage(), _szRecentStoreKey);
+    if (!recs.length) return;
+    searchSeq++;
+    renderResults(recs.map(function(r) { return { item: r, score: 0 }; }));
+    var head = document.createElement('div');
+    head.className = 'search-recent-head';
+    var label = document.createElement('span');
+    label.textContent = szT('places.recent_searches', 'Recent searches');
+    var clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'search-recent-clear';
+    clear.textContent = szT('common.clear', 'Clear');
+    head.appendChild(label);
+    head.appendChild(clear);
+    resultsEl.insertBefore(head, resultsEl.firstChild);
+    resultsEl.setAttribute('data-sz-recent', '1');
+  }
+  function dropRecents() {
+    if (!resultsEl.hasAttribute('data-sz-recent')) return;
+    resultsEl.removeAttribute('data-sz-recent');
+    lastSearchMatches = [];
+    while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
   }
 
   function doSearch(query) {
@@ -1726,6 +1833,7 @@ var SEARCH_SHARDS = (function () {
     var idx = parseInt(el.getAttribute('data-idx'), 10);
     var match = (isFinite(idx) && lastSearchMatches[idx]) || null;
     var item = match && match.item ? match.item : null;
+    if (item) _szRecentAdd(_szStorage(), _szRecentStoreKey, item);
     if (item && item.corner) { map._szGoCorner(item.corner[0], item.corner[1]); return; }
     var lat = parseFloat(el.getAttribute('data-lat'));
     var lon = parseFloat(el.getAttribute('data-lon'));
@@ -1791,10 +1899,16 @@ var SEARCH_SHARDS = (function () {
   // Input handler with debounce
   input.addEventListener('input', function() {
     dismissSearchResults();
+    dropRecents();
     var v = input.value.trim();
     clearBtn.style.display = v ? 'block' : 'none';
+    if (!v) { showRecents(); return; }
     debounceTimer = setTimeout(function() { doSearch(v); }, 200);
   });
+  // An empty box in use shows the recent places (a tap as well as focus:
+  // the box keeps focus after the list is put away).
+  input.addEventListener('focus', showRecents);
+  input.addEventListener('click', showRecents);
 
   // Keyboard navigation
   input.addEventListener('keydown', function(e) {
@@ -1855,6 +1969,12 @@ var SEARCH_SHARDS = (function () {
     // clicked by the page (the photo's answer, a Map marker) is meant
     if (__touchScrolled && e.isTrusted) {
       __touchScrolled = false;
+      return;
+    }
+    if (e.target.closest('.search-recent-clear')) {
+      _szRecentClear(_szStorage(), _szRecentStoreKey);
+      dismissSearchResults();
+      dropRecents();
       return;
     }
     var el = e.target.closest('.search-result');
