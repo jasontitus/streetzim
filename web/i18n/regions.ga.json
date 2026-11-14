@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Cong agus Macao",
     "description": "Hong Cong agus Macao — Oileán Hong Cong, Kowloon, na Críocha Nua, Lantau agus Leithinis Mhacao, Taipa agus Coloane."
+  },
+  "antarctica": {
+    "title": "An Antartaice",
+    "description": "An Antartaice — Stáisiún McMurdo, Bunáit Scott agus Villa Las Estrellas; Leithinis an Antartaigh, Oileáin Shealtainn Theas, Seilf Oighir Ross agus Sliabh Erebus. Críochnaíonn an léarscáil ag 85° ó dheas agus ní shroicheann sí an Mol Theas."
   }
 }

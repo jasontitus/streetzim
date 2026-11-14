@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong mpe Macao",
     "description": "Hong Kong mpe Macao — Esanga Hong Kong, Kowloon, Nouveaux Territoires, Lantau mpe péninsule ya Macao, Taipa mpe Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctique",
+    "description": "Antarctique — Station McMurdo, Base Scott mpe Villa Las Estrellas; Péninsule Antarctique, bisanga South Shetland, Ross Ice Shelf mpe ngomba Erebus. Karte esuki na 85° ya sudi mpe ekomi te na Pôle Sud."
   }
 }

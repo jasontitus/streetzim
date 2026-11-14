@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong i Macau",
     "description": "Hong Kong i Macau — l’illa de Hong Kong, Kowloon, els Nous Territoris, Lantau i la península de Macau, Taipa i Coloane."
+  },
+  "antarctica": {
+    "title": "Antàrtida",
+    "description": "Antàrtida — l’estació McMurdo, la base Scott i Villa Las Estrellas; la península Antàrtica, les illes Shetland del Sud, la barrera de gel de Ross i el mont Erebus. El mapa acaba als 85° sud i no arriba al pol Sud."
   }
 }

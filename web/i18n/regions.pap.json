@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong i Macau",
     "description": "Hong Kong i Macau — Isla di Hong Kong, Kowloon, New Territories, Lantau i e Peninsula di Macau, Taipa i Coloane."
+  },
+  "antarctica": {
+    "title": "Antártika",
+    "description": "Antártika — Estashon McMurdo, Base Scott i Villa Las Estrellas; e Península Antártiko, e Islanan Shetland di Zùit, e plataforma di glas di Ross i Seru Erebus. E mapa ta kaba na 85° zùit i no ta yega Polo Zùit."
   }
 }

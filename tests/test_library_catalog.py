@@ -12,13 +12,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-CONTINENTS = {"Africa", "Asia", "Europe", "North America", "Oceania", "South America"}
+CONTINENTS = {"Africa", "Antarctica", "Asia", "Europe", "North America", "Oceania", "South America"}
 REGIONS_M49 = {
     "Northern Africa", "Western Africa", "Middle Africa", "Eastern Africa", "Southern Africa",
     "Central Asia", "Eastern Asia", "South-eastern Asia", "Southern Asia", "Western Asia",
     "Northern Europe", "Western Europe", "Southern Europe", "Eastern Europe",
     "Northern America", "Central America", "Caribbean", "South America",
     "Australia and New Zealand", "Melanesia", "Micronesia", "Polynesia",
+    "Antarctica",
 }
 
 
@@ -59,7 +60,8 @@ def test_countries_sit_in_their_un_m49_regions(gen):
                             ("Sudan", "Northern Africa"), ("Cuba", "Caribbean"), ("Mexico", "Central America"),
                             ("Czechia", "Eastern Europe"), ("Cyprus", "Western Asia"), ("Georgia", "Western Asia"),
                             ("Tuvalu", "Polynesia"), ("Kiribati", "Micronesia"), ("Palau", "Micronesia"),
-                            ("Taiwan", "Eastern Asia"), ("Kosovo", "Southern Europe"), ("Greenland", "Northern America")]:
+                            ("Taiwan", "Eastern Asia"), ("Kosovo", "Southern Europe"), ("Greenland", "Northern America"),
+                            ("Antarctica", "Antarctica")]:
         assert m49[country][0] == region, country
     places = gen.load_places()
     assert "Eastern Africa" in places["southern-africa"]["regions"]

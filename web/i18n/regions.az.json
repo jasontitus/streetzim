@@ -174,5 +174,9 @@
   "hong-kong-macau": {
     "title": "Honkonq və Makao",
     "description": "Honkonq və Makao — Honkonq adası, Kaulun, Yeni Ərazilər, Lantau və Makao yarımadası, Taypa və Koloane."
+  },
+  "antarctica": {
+    "title": "Antarktida",
+    "description": "Antarktida — Mak-Merdo stansiyası, Skott bazası və Villa Las Estrellas; Antarktika yarımadası, Cənubi Şetland adaları, Ross şelf buzlağı və Erebus dağı. Xəritə 85° cənub enliyində bitir və Cənub qütbünə çatmır."
   }
 }

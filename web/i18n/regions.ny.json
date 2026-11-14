@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong ndi Macau",
     "description": "Hong Kong ndi Macau — Hong Kong Island, Kowloon, New Territories, Lantau ndi Macau Peninsula, Taipa ndi Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base ndi Villa Las Estrellas; Antarctic Peninsula, zilumba za South Shetland, Ross Ice Shelf ndi phiri la Erebus. Mapu amathera pa 85° kumwera ndipo safika ku South Pole."
   }
 }

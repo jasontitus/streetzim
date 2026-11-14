@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Honkonga un Makao",
     "description": "Honkonga un Makao — Honkongas sala, Kaulūna, Jaunās teritorijas, Lantau un Makao pussala, Taipa un Koloane."
+  },
+  "antarctica": {
+    "title": "Antarktīda",
+    "description": "Antarktīda — Makmērdo stacija, Skota bāze un Villa Las Estrellas; Antarktikas pussala, Dienvidšetlendas salas, Rosa šelfa ledājs un Erebusa kalns. Karte beidzas pie 85° dienvidu platuma un nesniedzas līdz Dienvidpolam."
   }
 }

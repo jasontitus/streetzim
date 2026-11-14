@@ -2,3 +2,6 @@
 # (a data file: a flag reaches one region without editing the build script).
 # Columns (tab-separated): id, then the flags (space-separated).
 # (Every region is built with --ocr since 2026-10-28; Bahrain tested it first.)
+# Antarctica: imagery and terrain to zoom 11. The box is 360 degrees wide (zoom 12 would be
+# 4.9 million tiles of each), and inland the imagery is one flat white.
+antarctica	--satellite-zoom 11 --satellite-download-zoom 11 --terrain-zoom 11

@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong och Macao",
     "description": "Hongkong och Macao — Hongkongön, Kowloon, New Territories, Lantau samt Macaohalvön, Taipa och Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktis",
+    "description": "Antarktis — McMurdo-stationen, Scott Base och Villa Las Estrellas; Antarktiska halvön, Sydshetlandsöarna, Ross shelfis och Mount Erebus. Kartan slutar vid 85° syd och når inte Sydpolen."
   }
 }

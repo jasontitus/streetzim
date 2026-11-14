@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong și Macao",
     "description": "Hong Kong și Macao — Insula Hong Kong, Kowloon, Noile Teritorii, Lantau și Peninsula Macao, Taipa și Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — stația McMurdo, baza Scott și Villa Las Estrellas; Peninsula Antarctică, Insulele Shetland de Sud, Bariera de gheață Ross și Muntele Erebus. Harta se termină la 85° sud și nu ajunge la Polul Sud."
   }
 }

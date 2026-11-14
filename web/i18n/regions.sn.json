@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong neMacau",
     "description": "Hong Kong neMacau — Hong Kong Island, Kowloon, New Territories, Lantau neMacau Peninsula, Taipa neColoane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base neVilla Las Estrellas; Antarctic Peninsula, zvitsuwa zveSouth Shetland, Ross Ice Shelf neGomo reErebus. Mepu inogumira pa85° kumaodzanyemba uye haisviki kuSouth Pole."
   }
 }

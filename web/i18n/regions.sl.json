@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong in Macao",
     "description": "Hongkong in Macao — otok Hongkong, Kowloon, Nova ozemlja, Lantau ter polotok Macao, Taipa in Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktika",
+    "description": "Antarktika — postaja McMurdo, baza Scott in Villa Las Estrellas; Antarktični polotok, Južni Shetlandski otoki, Rossova ledena polica in gora Erebus. Zemljevid se konča pri 85° južne širine in ne seže do južnega tečaja."
   }
 }

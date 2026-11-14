@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong ja Macau",
     "description": "Hongkong ja Macau — Hongkongi saar, Kowloon, Uued alad, Lantau ning Macau poolsaar, Taipa ja Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktis",
+    "description": "Antarktis — McMurdo jaam, Scotti baas ja Villa Las Estrellas; Antarktika poolsaar, Lõuna-Shetlandi saared, Rossi šelfiliustik ja Erebuse mägi. Kaart lõpeb 85° lõunalaiusel ega ulatu lõunapooluseni."
   }
 }

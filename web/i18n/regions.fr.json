@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hong Kong et Macao",
   "description": "Hong Kong et Macao — l’île de Hong Kong, Kowloon, les Nouveaux Territoires, Lantau, la péninsule de Macao, Taipa et Coloane."
+ },
+ "antarctica": {
+  "title": "Antarctique",
+  "description": "Antarctique — la base McMurdo, la base Scott et Villa Las Estrellas ; la péninsule Antarctique, les îles Shetland du Sud, la barrière de Ross et le mont Erebus. La carte s’arrête à 85° sud et n’atteint pas le pôle Sud."
  }
 }

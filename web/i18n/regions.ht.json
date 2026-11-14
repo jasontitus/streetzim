@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong ak Makao",
     "description": "Hong Kong ak Makao — Zile Hong Kong, Kowloon, Nouvo Teritwa yo, Lantau ak Penensil Makao, Taipa ak Coloane."
+  },
+  "antarctica": {
+    "title": "Antatik",
+    "description": "Antatik — Estasyon McMurdo, Baz Scott ak Villa Las Estrellas; Penensil Antatik la, zile Shetland disid yo, platfòm glas Ross la ak mòn Erebus. Kat la fini nan 85° sid epi li pa rive nan Pòl Sid la."
   }
 }

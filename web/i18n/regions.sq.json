@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kongu dhe Makao",
     "description": "Hong Kongu dhe Makao — ishulli i Hong Kongut, Kaulungu, Territoret e Reja, Lantau dhe gadishulli i Makaos, Taipa e Koloane."
+  },
+  "antarctica": {
+    "title": "Antarktida",
+    "description": "Antarktida — Stacioni McMurdo, Baza Scott dhe Villa Las Estrellas; Gadishulli Antarktik, Ishujt Shetland të Jugut, Shelfi i Akullit Ross dhe mali Erebus. Harta mbaron në 85° jug dhe nuk arrin në Polin e Jugut."
   }
 }

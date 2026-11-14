@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong a Macao",
     "description": "Hongkong a Macao — ostrov Hongkong, Kowloon, Nové teritóriá, Lantau a polostrov Macao, Taipa a Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktída",
+    "description": "Antarktída — stanica McMurdo, Scottova základňa a Villa Las Estrellas; Antarktický polostrov, Južné Shetlandy, Rossov šelfový ľadovec a Mount Erebus. Mapa sa končí na 85° južnej šírky a nesiaha po južný pól."
   }
 }

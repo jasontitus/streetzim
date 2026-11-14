@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong a me Macau",
     "description": "Hong Kong a me Macau — ka Mokupuni ʻo Hong Kong, Kowloon, nā New Territories, Lantau a me ka Macau Peninsula, Taipa a me Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base a me Villa Las Estrellas; ka Antarctic Peninsula, nā mokupuni ʻo South Shetland, ka Ross Ice Shelf a me ka mauna ʻo Erebus. Pau ka palapala ʻāina ma 85° hema, ʻaʻole ia e hiki i ka Wēlau Hema."
   }
 }

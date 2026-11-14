@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong kei Macau",
     "description": "Hong Kong kei Macau — Hong Kong Island, Kowloon, New Territories, Lantau kei na Macau Peninsula, Taipa kei Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base kei Villa Las Estrellas; na Antarctic Peninsula, na yatu South Shetland, na Ross Ice Shelf kei na ulunivanua o Erebus. E tini na mape ena 85° ki na ceva ka sega ni yacova na South Pole."
   }
 }

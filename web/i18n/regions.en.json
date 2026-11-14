@@ -529,5 +529,9 @@
  "hong-kong-macau": {
   "title": "Hong Kong & Macau",
   "description": "Hong Kong and Macau — Hong Kong Island, Kowloon, the New Territories, Lantau and the Macau Peninsula, Taipa and Coloane."
+ },
+ "antarctica": {
+  "title": "Antarctica",
+  "description": "Antarctica — McMurdo Station, Scott Base and Villa Las Estrellas; the Antarctic Peninsula, the South Shetland Islands, the Ross Ice Shelf and Mount Erebus. The map ends at 85° south and does not reach the South Pole."
  }
 }

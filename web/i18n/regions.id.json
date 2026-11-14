@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hong Kong dan Makau",
   "description": "Hong Kong dan Makau — Pulau Hong Kong, Kowloon, Wilayah Baru, Lantau, serta Semenanjung Makau, Taipa, dan Coloane."
+ },
+ "antarctica": {
+  "title": "Antarktika",
+  "description": "Antarktika — Stasiun McMurdo, Pangkalan Scott, dan Villa Las Estrellas; Semenanjung Antarktika, Kepulauan Shetland Selatan, Paparan Es Ross, dan Gunung Erebus. Peta berakhir di 85° lintang selatan dan tidak mencapai Kutub Selatan."
  }
 }

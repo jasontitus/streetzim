@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong e Macau",
     "description": "Hong Kong e Macau — a illa de Hong Kong, Kowloon, os Novos Territorios, Lantau e a península de Macau, Taipa e Coloane."
+  },
+  "antarctica": {
+    "title": "Antártida",
+    "description": "Antártida — a base McMurdo, a base Scott e Villa Las Estrellas; a península Antártica, as illas Shetland do Sur, a barreira de xeo de Ross e o monte Erebus. O mapa remata nos 85° sur e non chega ao Polo Sur."
   }
 }

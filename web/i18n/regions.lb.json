@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong a Macau",
     "description": "Hong Kong a Macau — Hong Kong Island, Kowloon, d’New Territories, Lantau an d’Hallefinsel Macau, Taipa a Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktis",
+    "description": "Antarktis — McMurdo-Statioun, Scott Base a Villa Las Estrellas; d’Antarktesch Hallefinsel, d’Südlech Shetlandinselen, d’Ross-Schelfäis an de Mount Erebus. D’Kaart hält bei 85° Süd op a geet net bis bei de Südpol."
   }
 }

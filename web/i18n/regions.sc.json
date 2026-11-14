@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong e Macau",
     "description": "Hong Kong e Macau — s’Ìsula de Hong Kong, Kowloon, sos New Territories, Lantau e sa penìsula de Macau, Taipa e Coloane."
+  },
+  "antarctica": {
+    "title": "Antàrtide",
+    "description": "Antàrtide — s’istatzione McMurdo, sa base Scott e Villa Las Estrellas; sa Penìsula Antàrtica, sas ìsulas Shetland de su Sud, sa barriera de astra de Ross e su monte Erebus. Sa mapa agabbat a 85° sud e non lompet a su Polu Sud."
   }
 }

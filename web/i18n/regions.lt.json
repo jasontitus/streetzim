@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Honkongas ir Makao",
     "description": "Honkongas ir Makao — Honkongo sala, Kaulunas, Naujosios teritorijos, Lantau ir Makao pusiasalis, Taipa bei Koloanė."
+  },
+  "antarctica": {
+    "title": "Antarktida",
+    "description": "Antarktida — Makmerdo stotis, Skoto bazė ir Villa Las Estrellas; Antarkties pusiasalis, Pietų Šetlando salos, Roso šelfinis ledynas ir Erebuso kalnas. Žemėlapis baigiasi ties 85° pietų platumos ir Pietų ašigalio nesiekia."
   }
 }

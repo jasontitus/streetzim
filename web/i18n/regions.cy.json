@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong a Macau",
     "description": "Hong Kong a Macau — Ynys Hong Kong, Kowloon, y Tiriogaethau Newydd, Lantau a Phenrhyn Macau, Taipa a Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — Gorsaf McMurdo, Canolfan Scott a Villa Las Estrellas; Penrhyn Antarctica, Ynysoedd De Shetland, Sgafell Iâ Ross a Mynydd Erebus. Mae'r map yn gorffen ar 85° i'r de ac nid yw'n cyrraedd Pegwn y De."
   }
 }

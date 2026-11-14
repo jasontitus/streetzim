@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hong Kong ve Makao",
   "description": "Hong Kong ve Makao — Hong Kong Adası, Kowloon, Yeni Topraklar, Lantau ile Makao Yarımadası, Taipa ve Coloane."
+ },
+ "antarctica": {
+  "title": "Antarktika",
+  "description": "Antarktika — McMurdo İstasyonu, Scott Üssü ve Villa Las Estrellas; Antarktika Yarımadası, Güney Shetland Adaları, Ross Buz Sahanlığı ve Erebus Dağı. Harita 85° güney enleminde biter ve Güney Kutbu'na ulaşmaz."
  }
 }

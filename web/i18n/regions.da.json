@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong og Macao",
     "description": "Hongkong og Macao — Hong Kong Island, Kowloon, New Territories, Lantau og Macao-halvøen, Taipa og Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktis",
+    "description": "Antarktis — McMurdo-stationen, Scott Base og Villa Las Estrellas; Den Antarktiske Halvø, Sydshetlandsøerne, Ross-isshelfen og Mount Erebus. Kortet slutter ved 85° syd og når ikke Sydpolen."
   }
 }

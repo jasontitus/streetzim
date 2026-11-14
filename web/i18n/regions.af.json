@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong en Macau",
     "description": "Hongkong en Macau — Hongkong-eiland, Kowloon, die Nuwe Gebiede, Lantau en die Macau-skiereiland, Taipa en Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktika",
+    "description": "Antarktika — McMurdo-stasie, Scott-basis en Villa Las Estrellas; die Antarktiese Skiereiland, die Suid-Shetland-eilande, die Ross-ysbank en berg Erebus. Die kaart eindig by 85° suid en strek nie tot by die Suidpool nie."
   }
 }

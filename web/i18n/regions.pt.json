@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hong Kong e Macau",
   "description": "Hong Kong e Macau — a ilha de Hong Kong, Kowloon, os Novos Territórios, Lantau e a península de Macau, Taipa e Coloane."
+ },
+ "antarctica": {
+  "title": "Antártida",
+  "description": "Antártida — a Estação McMurdo, a Base Scott e Villa Las Estrellas; a Península Antártica, as Ilhas Shetland do Sul, a Plataforma de Gelo Ross e o monte Erebus. O mapa termina a 85° sul e não chega ao Polo Sul."
  }
 }

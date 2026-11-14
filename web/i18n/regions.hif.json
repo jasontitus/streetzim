@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong aur Macau",
     "description": "Hong Kong aur Macau — Hong Kong Island, Kowloon, New Territories, Lantau aur Macau Peninsula, Taipa aur Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base aur Villa Las Estrellas; Antarctic Peninsula, South Shetland ke taapu, Ross Ice Shelf aur Mount Erebus. Naksa 85° dakkhin pe khatam hoe hae aur South Pole tak nai pahunche hae."
   }
 }

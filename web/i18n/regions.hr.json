@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong i Makao",
     "description": "Hong Kong i Makao — otok Hong Kong, Kowloon, Novi teritoriji, Lantau te poluotok Makao, Taipa i Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktika",
+    "description": "Antarktika — postaja McMurdo, baza Scott i Villa Las Estrellas; Antarktički poluotok, Južni Shetlandski otoci, Rossova ledena ploča i planina Erebus. Karta završava na 85° južne širine i ne doseže Južni pol."
   }
 }

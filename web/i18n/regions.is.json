@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong og Makaó",
     "description": "Hong Kong og Makaó — Hong Kong-eyja, Kowloon, Nýju landsvæðin, Lantau og Makaóskagi, Taipa og Coloane."
+  },
+  "antarctica": {
+    "title": "Suðurskautslandið",
+    "description": "Suðurskautslandið — McMurdo-stöðin, Scott-stöðin og Villa Las Estrellas; Suðurskautsskaginn, Suður-Hjaltlandseyjar, Ross-íshellan og Erebusfjall. Kortið endar við 85° suðlægrar breiddar og nær ekki til suðurpólsins."
   }
 }

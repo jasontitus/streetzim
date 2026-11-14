@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong mo Macau",
     "description": "Hong Kong mo Macau — Hong Kong Aelan, Kowloon, New Territories, Lantau mo Macau Peninsula, Taipa mo Coloane."
+  },
+  "antarctica": {
+    "title": "Antaktika",
+    "description": "Antaktika — McMurdo Station, Scott Base mo Villa Las Estrellas; Antarctic Peninsula, ol aelan blong South Shetland, Ross Ice Shelf mo Mount Erebus. Map i finis long 85° saot mo i no kasem South Pole."
   }
 }

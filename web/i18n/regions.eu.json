@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong eta Macau",
     "description": "Hong Kong eta Macau — Hong Kong uhartea, Kowloon, Lurralde Berriak, Lantau eta Macauko penintsula, Taipa eta Coloane."
+  },
+  "antarctica": {
+    "title": "Antartika",
+    "description": "Antartika — McMurdo estazioa, Scott basea eta Villa Las Estrellas; Antartikako penintsula, Hegoaldeko Shetland uharteak, Rossen izotz-plataforma eta Erebus mendia. Mapa 85° hegoaldean amaitzen da eta ez da Hego Polora iristen."
   }
 }

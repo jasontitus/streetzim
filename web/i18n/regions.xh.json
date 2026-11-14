@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "IHong Kong neMacau",
     "description": "IHong Kong neMacau — iSiqithi saseHong Kong, iKowloon, iNew Territories, iLantau, iMacau Peninsula, iTaipa neColoane."
+  },
+  "antarctica": {
+    "title": "I-Antarctica",
+    "description": "I-Antarctica — iMcMurdo Station, iScott Base neVilla Las Estrellas; i-Antarctic Peninsula, iziqithi zaseSouth Shetland, iRoss Ice Shelf neNtaba i-Erebus. Imephu iphela kwi-85° emazantsi kwaye ayifiki kwiSouth Pole."
   }
 }

@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hồng Kông và Ma Cao",
   "description": "Hồng Kông và Ma Cao — đảo Hồng Kông, Cửu Long, Tân Giới, đảo Lantau cùng bán đảo Ma Cao, Taipa và Coloane."
+ },
+ "antarctica": {
+  "title": "Châu Nam Cực",
+  "description": "Châu Nam Cực — Trạm McMurdo, Căn cứ Scott và Villa Las Estrellas; bán đảo Nam Cực, quần đảo Nam Shetland, thềm băng Ross và núi Erebus. Bản đồ kết thúc ở vĩ tuyến 85° nam và không tới Nam Cực điểm."
  }
 }

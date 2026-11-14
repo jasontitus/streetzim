@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hongkong en Macau",
   "description": "Hongkong en Macau — Hongkong-eiland, Kowloon, de New Territories, Lantau en het schiereiland Macau, Taipa en Coloane."
+ },
+ "antarctica": {
+  "title": "Antarctica",
+  "description": "Antarctica — McMurdo Station, Scott Base en Villa Las Estrellas; het Antarctisch Schiereiland, de Zuidelijke Shetlandeilanden, het Ross-ijsplateau en Mount Erebus. De kaart eindigt op 85° zuiderbreedte en reikt niet tot de Zuidpool."
  }
 }

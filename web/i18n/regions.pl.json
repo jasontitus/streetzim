@@ -526,5 +526,9 @@
  "hong-kong-macau": {
   "title": "Hongkong i Makau",
   "description": "Hongkong i Makau — wyspa Hongkong, Koulun, Nowe Terytoria, Lantau oraz Półwysep Makau, Taipa i Coloane."
+ },
+ "antarctica": {
+  "title": "Antarktyda",
+  "description": "Antarktyda — stacja McMurdo, baza Scotta i Villa Las Estrellas; Półwysep Antarktyczny, Szetlandy Południowe, Lodowiec Szelfowy Rossa i Mount Erebus. Mapa kończy się na 85° szerokości południowej i nie sięga bieguna południowego."
  }
 }

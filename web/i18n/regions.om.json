@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hong Koong fi Makaawoo",
     "description": "Hong Koong fi Makaawoo — Odola Hong Kong, Kowloon, New Territories, Lantau fi Macau Peninsula, Taipa fi Coloane."
+  },
+  "antarctica": {
+    "title": "Antaarktikaa",
+    "description": "Antaarktikaa — McMurdo Station, Scott Base fi Villa Las Estrellas; Antarctic Peninsula, odoloota South Shetland, Ross Ice Shelf fi Gaara Erebus. Kaartaan kun 85° kibbaatti dhuma, South Pole hin ga'u."
   }
 }

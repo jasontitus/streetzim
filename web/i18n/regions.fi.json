@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hongkong ja Macao",
     "description": "Hongkong ja Macao — Hongkongin saari, Kowloon, New Territories, Lantau sekä Macaon niemimaa, Taipa ja Coloane."
+  },
+  "antarctica": {
+    "title": "Etelämanner",
+    "description": "Etelämanner — McMurdon asema, Scottin asema ja Villa Las Estrellas; Antarktiksen niemimaa, Etelä-Shetlandinsaaret, Rossin jäähylly ja Mount Erebus. Kartta päättyy 85. eteläiselle leveysasteelle eikä ulotu etelänavalle."
   }
 }

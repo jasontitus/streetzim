@@ -166,5 +166,9 @@
   "hong-kong-macau": {
     "title": "Hong Kong àti Macau",
     "description": "Hong Kong àti Macau — Hong Kong Island, Kowloon, New Territories, Lantau àti Macau Peninsula, Taipa àti Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "Antarctica — McMurdo Station, Scott Base àti Villa Las Estrellas; Antarctic Peninsula, àwọn erékùṣù South Shetland, Ross Ice Shelf àti Òkè Erebus. Àwòrán ilẹ̀ náà parí ní 85° gúúsù, kò sì dé South Pole."
   }
 }

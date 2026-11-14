@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hongkong e Macao",
     "description": "Hongkong e Macao — l’insla da Hongkong, Kowloon, ils New Territories, Lantau e la peninsla da Macao, Taipa e Coloane."
+  },
+  "antarctica": {
+    "title": "Antarctica",
+    "description": "L’Antarctica — la staziun McMurdo, la basa Scott e Villa Las Estrellas; la Peninsla Antarctica, las Inslas Shetland dal Sid, la platta da glatsch da Ross ed il Mount Erebus. La charta finescha tar 85° sid e na tanscha betg fin al Pol dal Sid."
   }
 }

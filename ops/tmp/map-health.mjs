@@ -31,6 +31,15 @@ const origin=process.env.ZIM_ORIGIN, tag=process.env.TAG||'x';
 // place a user actually opens. Probe there instead. The threshold is
 // unchanged: a genuinely blank map still renders nothing at its own city.
 const ANCHOR_ZOOM = 11;
+// A settlement near a pole is a few streets in an empty country, and a view
+// at zoom 11 there is a fifth as wide on the ground as at the equator:
+// Longyearbyen draws 52 features, under the 100 the gates ask for, on a map
+// with nothing wrong. When the anchor shows fewer than ENOUGH the count is
+// taken again closer in, where buildings are drawn. A blank map is as blank
+// there. The first count stays in the output (firstProbe), and probeActual
+// names the zoom the reported count came from.
+const CLOSE_ZOOM = 14;
+const ENOUGH = 100;   // the gates' own threshold (renderedFeatures >= 100)
 let anchorWhy = 'default view';
 function anchorFor(tagName) {
   // tag is the zim basename, e.g. osm-hawaii-2026-09-20 (a trailing build
@@ -122,24 +131,28 @@ if (anchor) {
     } catch (e) { return null; }
   }).catch(() => null);
 
-  const ok = await p.evaluate(([lat, lon, z]) => {
+  const ok = await jumpTo(ANCHOR_ZOOM);
+  if (!ok) anchorWhy = 'default view (map never constructed, so no jump)';
+  if (ok) movedTo = anchor;
+}
+// Move to the anchor at zoom z and let its tiles settle.
+async function jumpTo(z) {
+  const ok = await p.evaluate(([lat, lon, zoom]) => {
     const m = window.__sz && window.__sz.map;
     if (!m) return false;
-    m.jumpTo({ center: [lon, lat], zoom: z });
+    m.jumpTo({ center: [lon, lat], zoom });
     return true;
-  }, [anchor.lat, anchor.lon, ANCHOR_ZOOM]).catch(() => false);
-  if (!ok) anchorWhy = 'default view (map never constructed, so no jump)';
+  }, [anchor.lat, anchor.lon, z]).catch(() => false);
   if (ok) {
-    movedTo = anchor;
-
     await p.waitForFunction(
       () => { const m = window.__sz && window.__sz.map;
               return m && m.areTilesLoaded() && !m.isMoving(); },
       { timeout: 60000 }).catch(() => {});
     await new Promise(r => setTimeout(r, 4000));
   }
+  return ok;
 }
-const out = await p.evaluate(() => {
+const measure = () => p.evaluate(() => {
   const s = window.__sz || {};
   const m = s.map;
   const r = { sawCtor: !!s.ctorArgs, errors: (s.errors||[]).slice(0,5) };
@@ -171,6 +184,16 @@ const out = await p.evaluate(() => {
   } catch (e) { r.probeError = String(e).slice(0,200); }
   return r;
 });
+let out = await measure();
+let firstProbe = null, probeZoom = ANCHOR_ZOOM;
+if (movedTo && out && typeof out.renderedFeatures === 'number' && out.renderedFeatures < ENOUGH) {
+  const first = { zoom: out.zoom, features: out.renderedFeatures };
+  if (await jumpTo(CLOSE_ZOOM)) {
+    firstProbe = first;
+    probeZoom = CLOSE_ZOOM;
+    out = await measure();
+  }
+}
 // Name the discriminator beside the numbers: a PASS/FAIL whose probe point is
 // invisible is how a wrong gate goes unnoticed for three regions.
 // Report the point the count came from, and how far it is from the point we
@@ -182,8 +205,9 @@ if (movedTo && out && out.center) {
   driftKm = +Math.sqrt(dLat * dLat + dLon * dLon).toFixed(1);
 }
 console.log(JSON.stringify({ tag,
-  probeRequested: movedTo ? `${movedTo.label || movedTo.id} ${movedTo.lat},${movedTo.lon} z${ANCHOR_ZOOM}`
+  probeRequested: movedTo ? `${movedTo.label || movedTo.id} ${movedTo.lat},${movedTo.lon} z${probeZoom}`
                           : anchorWhy,
+  firstProbe,
   probeActual: out && out.center ? `${out.center[1]},${out.center[0]} z${out.zoom}` : null,
   probeDriftKm: driftKm,
   openingView,

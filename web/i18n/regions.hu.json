@@ -170,5 +170,9 @@
   "hong-kong-macau": {
     "title": "Hongkong és Makaó",
     "description": "Hongkong és Makaó — Hongkong-sziget, Kowloon, az Új Területek, Lantau, valamint a Makaói-félsziget, Taipa és Coloane."
+  },
+  "antarctica": {
+    "title": "Antarktisz",
+    "description": "Antarktisz — McMurdo állomás, Scott-bázis és Villa Las Estrellas; az Antarktiszi-félsziget, a Déli-Shetland-szigetek, a Ross-selfjég és a Mount Erebus. A térkép a déli szélesség 85. fokánál ér véget, a Déli-sarkig nem ér el."
   }
 }

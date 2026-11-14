@@ -282,6 +282,13 @@ REGIONS = [
         "zim_file": "osm-canada.zim",
         "description": "All of Canada &mdash; Toronto, Montreal, Vancouver, Calgary, Ottawa, Quebec City, Edmonton, Halifax, the Rockies, Banff, the Great Lakes, the Maritimes, and the Yukon and Northwest Territories.",
     },
+    {
+        "id": "antarctica",
+        "tier": "continent",
+        "title": "Antarctica",
+        "zim_file": "osm-antarctica.zim",
+        "description": "Antarctica &mdash; McMurdo Station, Scott Base and Villa Las Estrellas; the Antarctic Peninsula, the South Shetland Islands, the Ross Ice Shelf and Mount Erebus. The map ends at 85&deg; south and does not reach the South Pole.",
+    },
     # ── Multi-country regions ────────────────────────────────────────
     {
         "id": "west-asia",

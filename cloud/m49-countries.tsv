@@ -4,6 +4,7 @@
 # Short English names. Not in M49 on their own, placed by geography: Kosovo
 # (Southern Europe), Taiwan (Eastern Asia). The Americas are split into North
 # America (Northern America, Central America, the Caribbean) and South America.
+# Antarctica, which M49 lists under no region, is its own region and continent.
 # Columns (tab-separated): country	region	continent
 Algeria	Northern Africa	Africa
 Egypt	Northern Africa	Africa
@@ -246,3 +247,4 @@ Tokelau	Polynesia	Oceania
 Tonga	Polynesia	Oceania
 Tuvalu	Polynesia	Oceania
 Wallis and Futuna	Polynesia	Oceania
+Antarctica	Antarctica	Antarctica
