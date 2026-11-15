@@ -131,18 +131,26 @@ def main():
                 pkeys[d.key] = k
     gen_new = {(M, b"Flavour"), (M, b"Name"), (M, b"Title"), (M, b"Language")} - bkeys
     expected = bkeys | set(pkeys) | gen_new | ({(X, b"fulltext/xapian"), (X, b"title/xapian")} if ix else set())
-    check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)", set(mkeys) == expected,
-          f"missing={len(expected - set(mkeys))} extra={sorted(set(mkeys) - expected)[:3]}")
+    mset = set(mkeys)
+    check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)", mset == expected,
+          f"missing={len(expected - mset)} extra={sorted(mset - expected)[:3]}")
     check("no pack M/X/W entry leaked", not any(k in pkeys for k in mkeys if k[0] != C))
+    # A map of a wide, empty land has millions of entries (Greenland: 13.7
+    # million): the key sets go before the next list comes, and that list
+    # holds each entry's place and path, not the entry.
+    del mkeys, bkeys, expected, mset
 
     # base C entries
     bad = []
     n = 0
-    for d in sorted((d for d in zb.iter_dirents() if d.ns == C and d.path != b"map-config.json"), key=cluster_order):
+    order = sorted((*cluster_order(d), d.path) for d in zb.iter_dirents()
+                   if d.ns == C and d.path != b"map-config.json")
+    for *_, raw in order:
         n += 1
-        p = d.path.decode()
+        p = raw.decode()
         if sig(am, p) != sig(ab, p):
             bad.append(p)
+    del order
     check("base C entries identical (title, mime, content, redirect target)", not bad, f"checked={n} bad={sorted(bad)[:3]}")
 
     # map-config.json

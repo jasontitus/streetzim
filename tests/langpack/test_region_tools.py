@@ -86,6 +86,47 @@ def test_region_json_stays_inside_the_outline(tmp_path: Path) -> None:
     assert _rj(b2)["generated"]["city"] == "Edirne"              # no outline: anywhere
 
 
+# A small region cut to its outline: the 10 km inside the outline's edge are
+# the margin around the region, where the neighbour's roads are closed to cars.
+SMALL = {"type": "Polygon", "coordinates": [[[23.5, 37.8], [24.0, 37.8], [24.0, 38.2], [23.5, 38.2], [23.5, 37.8]]]}
+ACROSS = {"n": "Across", "s": "city", "a": 38.17, "o": 23.75, "q": "Q43387"}      # 3 km inside the edge
+GEO_SMALL = {"Across": [38.17, 23.75, "place", "Q43387", ""], "Marousi": [38.05, 23.8, "place", "Q852385", ""]}
+
+
+def test_region_json_routes_inside_the_region_when_the_city_is_in_the_margin(tmp_path: Path) -> None:
+    places = [PLACES[0], ACROSS,
+              {"n": "Overthere", "s": "suburb", "a": 38.15, "o": 23.75},    # 2 km from Across, in the margin too
+              {"n": "Zografou", "s": "suburb", "a": 37.9770, "o": 23.7700},  # 3 km from Athens
+              {"n": "Plaka", "s": "quarter", "a": 37.9730, "o": 23.7300}]    # 0.5 km: too near
+    r = _rj(_base(tmp_path / "b.zim", places, GEO_SMALL, {"name": "Testland", "center": CENTER, "clipArea": SMALL}))
+    # the only city with an article is past the border: its label and article are
+    # the gates' still, the route is between places of the region
+    assert r["generated"]["city"] == "Across" and r["generated"]["route_from"] == "Athens"
+    assert r["route"] == {"src": "37.97560,23.73480", "dst": "37.97700,23.77000"}
+    # no outline: nothing is a margin
+    r2 = _rj(_base(tmp_path / "b2.zim", places, GEO_SMALL, {"name": "Testland", "center": CENTER}))
+    assert r2["route"] == {"src": "38.17000,23.75000", "dst": "38.15000,23.75000"}
+    assert "route_from" not in r2["generated"]
+
+
+def test_region_json_a_town_of_the_region_beats_a_city_in_the_margin(tmp_path: Path) -> None:
+    places = [ACROSS, PLACES[2]]
+    b = _base(tmp_path / "b.zim", places, GEO_SMALL, {"name": "Testland", "center": CENTER, "clipArea": SMALL})
+    assert _rj(b)["generated"]["city"] == "Marousi"
+    b2 = _base(tmp_path / "b2.zim", places, GEO_SMALL, {"name": "Testland", "center": CENTER})
+    assert _rj(b2)["generated"]["city"] == "Across"              # no outline: the city
+
+
+def test_region_json_the_route_does_not_end_in_the_margin(tmp_path: Path) -> None:
+    places = [{"n": "Kifisia", "s": "town", "a": 38.10, "o": 23.75, "q": "Q852385"},   # 11 km inside the edge
+              {"n": "Edgeham", "s": "hamlet", "a": 38.125, "o": 23.75},                 # 2.8 km north: in the margin
+              {"n": "Inville", "s": "village", "a": 38.06, "o": 23.75}]                 # 4.4 km south
+    geo = {"Kifisia": [38.10, 23.75, "place", "Q852385", ""]}
+    r = _rj(_base(tmp_path / "b.zim", places, geo, {"name": "Testland", "center": CENTER, "clipArea": SMALL}))
+    assert r["route"] == {"src": "38.10000,23.75000", "dst": "38.06000,23.75000"}
+    assert "route_from" not in r["generated"]
+
+
 def test_region_json_falls_back_to_the_geo_index_and_fails_without_one(tmp_path: Path) -> None:
     b = _base(tmp_path / "b.zim", [], {"Alpha_Town": [10.0, 20.0, "place", "Q1", ""]}, {"name": "T", "center": [20, 10]})
     r = _rj(b)

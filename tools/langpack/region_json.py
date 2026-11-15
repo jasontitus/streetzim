@@ -17,7 +17,9 @@ writes one for any other base, from the base alone:
   city or town within 100 km of map-config's center (the registry's main
   city), then any city or town, then any place; a city before a town, then
   the nearest to the center. zoom 7; the UI gate
-  tries other zooms when the label is hidden there.
+  tries other zooms when the label is hidden there. A base cut to an outline
+  holds a margin around the region (MARGIN_KM) for context: a place in it
+  comes after one of the same tier outside it.
 - search.native: the city's native-script name ("nn") when the record has
   one, else its name; search.english: its name. Both expect the name the
   result list shows (the record's "n"), which the UI gate also finds in a
@@ -25,6 +27,10 @@ writes one for any other base, from the base alone:
   language's name: Warschau).
 - route: from the city to the nearest other place record 1.5-8 km away
   (a suburb or village: on the road graph), else to a point 2 km north.
+  Neither end in the outline's margin, where the roads the region's own
+  cannot reach are closed to cars (streetzim/routing/margin.py): a city
+  there (Hong Kong's map has no other with an article: Futian, in
+  Shenzhen) leaves the start to the place record nearest the center.
 - named_qids: the city and the next such place.
 - base_lang: map-config "language", else en.
 
@@ -50,6 +56,7 @@ CLASS_RANK = {"city": 0, "town": 1}
 SEARCH_CLASSES = ("city", "town", "village")
 PLACE_RECORD = re.compile(rb'"t":\s*"place",\s*"s":\s*"(?:city|town|village)"')
 NEAR_KM = 100.0          # the main city's surroundings come first
+MARGIN_KM = 10.0         # create_osm_zim.py --clip-buffer-km: the outline is the border widened by this
 
 
 def km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -71,6 +78,26 @@ def inside(geom: object, lat: float, lon: float) -> bool:
                 if (y1 > lat) != (y2 > lat) and lon < x1 + (lat - y1) * (x2 - x1) / (y2 - y1):
                     hit = not hit
     return hit
+
+
+def edge_km(geom: object, lat: float, lon: float) -> float:
+    """Kilometres from the point to the nearest edge of a GeoJSON Polygon /
+    MultiPolygon (flat about the point: good for the few km asked of it);
+    infinite for anything else."""
+    if not isinstance(geom, dict) or geom.get("type") not in ("Polygon", "MultiPolygon"):
+        return math.inf
+    polys = [geom["coordinates"]] if geom["type"] == "Polygon" else geom["coordinates"]
+    kx, ky = 111.195 * math.cos(math.radians(lat)), 111.195
+    best = math.inf
+    for poly in polys:
+        for ring in poly:
+            for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+                ax, ay, bx, by = (x1 - lon) * kx, (y1 - lat) * ky, (x2 - lon) * kx, (y2 - lat) * ky
+                dx, dy = bx - ax, by - ay
+                span = dx * dx + dy * dy
+                t = 0.0 if not span else max(0.0, min(1.0, -(ax * dx + ay * dy) / span))
+                best = min(best, math.hypot(ax + t * dx, ay + t * dy))
+    return best
 
 
 def blob(z: ZimReader, path: str) -> bytes | None:
@@ -147,29 +174,38 @@ def region_file(base: str) -> dict:
     cands = within or cands
     if not cands:
         raise SystemExit("region_json: no place with a Q-ID in the base's wiki-geo-index")
+    def margin(p: dict) -> bool:
+        return edge_km(cfg.get("clipArea"), p["a"], p["o"]) < MARGIN_KM
     def tier(p: dict) -> tuple:
         d = km(center, (p["a"], p["o"]))
         big = p.get("s") in CLASS_RANK
-        return (0 if big and d <= NEAR_KM else 1 if big else 2, CLASS_RANK.get(str(p.get("s")), 9), d, p["n"])
+        return (0 if big and d <= NEAR_KM else 1 if big else 2, margin(p), CLASS_RANK.get(str(p.get("s")), 9), d, p["n"])
     cands.sort(key=tier)
     city = cands[0]
-    cpt = (city["a"], city["o"])
     second = next((p for p in cands[1:] if p["q"] != city["q"]), None)
-    near = sorted((p for p in places if isinstance(p, dict) and p is not city
-                   and isinstance(p.get("a"), (int, float)) and isinstance(p.get("o"), (int, float))
-                   and 1.5 <= km(cpt, (p["a"], p["o"])) <= 8.0),
-                  key=lambda p: km(cpt, (p["a"], p["o"])))
-    dst = (near[0]["a"], near[0]["o"]) if near else (cpt[0] + 0.018, cpt[1])
+    spots = [p for p in places if isinstance(p, dict) and p.get("n")
+             and isinstance(p.get("a"), (int, float)) and isinstance(p.get("o"), (int, float))]
+    roads = [p for p in spots if inside(cfg.get("clipArea"), p["a"], p["o"]) and not margin(p)]
+    start = city
+    if margin(city) and roads:
+        start = min(roads, key=lambda p: (km(center, (p["a"], p["o"])), p["n"]))
+    spt = (start["a"], start["o"])
+    near = sorted((p for p in (roads or spots) if p is not start
+                   and 1.5 <= km(spt, (p["a"], p["o"])) <= 8.0),
+                  key=lambda p: km(spt, (p["a"], p["o"])))
+    dst = (near[0]["a"], near[0]["o"]) if near else (spt[0] + 0.018, spt[1])
     native = city.get("nn") or city["n"]
+    made = {"by": "region_json.py", "city": city["n"], "class": city.get("s"), "base": os.path.basename(base)}
+    if start is not city:
+        made["route_from"] = start["n"]
     return {
         "base_lang": cfg.get("language") or "en",
         "city": {"qid": city["q"], "lon": round(city["o"], 5), "lat": round(city["a"], 5), "zoom": 7},
         "search": {"native": {"q": native, "expect": city["n"]},
                    "english": {"q": city["n"], "expect": city["n"]}},
-        "route": {"src": f"{cpt[0]:.5f},{cpt[1]:.5f}", "dst": f"{dst[0]:.5f},{dst[1]:.5f}"},
+        "route": {"src": f"{spt[0]:.5f},{spt[1]:.5f}", "dst": f"{dst[0]:.5f},{dst[1]:.5f}"},
         "named_qids": ",".join([city["q"]] + ([second["q"]] if second else [])),
-        "generated": {"by": "region_json.py", "city": city["n"], "class": city.get("s"),
-                      "base": os.path.basename(base)},
+        "generated": made,
     }
 
 

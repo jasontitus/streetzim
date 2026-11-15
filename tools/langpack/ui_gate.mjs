@@ -94,9 +94,9 @@ try {
   });
 
   // The city's label at the first zoom of ZOOMS that renders it (labels
-  // collide: a city drawn at z7 can be hidden at z9); the popup check
-  // clicks it at the same zoom.
-  const ZOOMS = [...new Set([R.city.zoom, 7, 8, 6, 9, 10, 5].filter((z) => typeof z === 'number'))];
+  // collide: a city drawn at z7 can be hidden at z9, and La Paz stays under
+  // El Alto's until z12); the popup check clicks it at the same zoom.
+  const ZOOMS = [...new Set([R.city.zoom, 7, 8, 6, 9, 10, 5, 11, 12].filter((z) => typeof z === 'number'))];
   await step('labels', async () => { const r = await page.evaluate(async ({ lang, city, base, isBase, zooms }) => {
     const map = window.__szMap;
     const key = 'name:' + lang;

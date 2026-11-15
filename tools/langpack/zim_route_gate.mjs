@@ -40,7 +40,7 @@ try {
     const st = document.getElementById('routing-status');
     const state = st ? st.getAttribute('data-state') || '' : '';
     if (d.trim()) return { distance: d.trim(), time: ((document.getElementById('route-time') || {}).textContent || '').trim(), state };
-    if (/error|fail|none/i.test(state)) return { distance: '', state, status: st.textContent };
+    if (/error|fail|none|no-route/i.test(state)) return { distance: '', state, status: st.textContent };
     return null;
   }, null, { timeout: TIMEOUT_MS, polling: 500 }).then((h) => h.jsonValue()).catch((e) => ({ distance: '', error: String(e.message || e).slice(0, 200) }));
   Object.assign(out, got, { ms: Date.now() - t0, errors: errors.slice(0, 3) });
