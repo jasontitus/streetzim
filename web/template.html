@@ -1357,14 +1357,38 @@ document.addEventListener('click', function (e) {
     finder.addEventListener('focusout', function (e) { if (e.relatedTarget && !finder.contains(e.relatedTarget)) list.hidden = true; });
   }
 
-  // Screenshots: the round buttons move the row most of a screen at a time.
+  // Screenshots: a round button, or an arrow key on the row, moves the row
+  // one picture on. Presses made while it is still moving add up.
   var strip = doc.getElementById('shots');
-  if (strip) all('[data-strip]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var way = (b.getAttribute('data-strip') === 'next' ? 1 : -1) * (rtl ? -1 : 1);
-      strip.scrollBy({ left: way * strip.clientWidth * 0.8, behavior: calm ? 'auto' : 'smooth' });
+  if (strip) {
+    var aim = null, settled = 0;
+    var move = function (way) {
+      var row = strip.getBoundingClientRect();
+      var pad = parseFloat(getComputedStyle(strip).paddingInlineStart) || 0;
+      var here = Math.abs(strip.scrollLeft), end = strip.scrollWidth - strip.clientWidth;
+      var from = aim === null ? here : aim, to = null;
+      all('.shot', strip).forEach(function (shot) {
+        var r = shot.getBoundingClientRect();
+        // How far the row is scrolled when this picture stands at its start.
+        var p = Math.min(end, Math.max(0, here + (rtl ? row.right - pad - r.right : r.left - row.left - pad)));
+        // The nearest one that way; a move too small to see is no move.
+        if (way > 0 ? p > from + 8 && (to === null || p < to) : p < from - 8 && (to === null || p > to)) to = p;
+      });
+      if (to === null) return;
+      aim = to;
+      clearTimeout(settled);
+      settled = setTimeout(function () { aim = null; }, 700);
+      strip.scrollBy({ left: (to - here) * (rtl ? -1 : 1), behavior: calm ? 'auto' : 'smooth' });
+    };
+    all('[data-strip]').forEach(function (b) {
+      b.addEventListener('click', function () { move(b.getAttribute('data-strip') === 'next' ? 1 : -1); });
     });
-  });
+    strip.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      move((e.key === 'ArrowRight' ? 1 : -1) * (rtl ? -1 : 1));
+    });
+  }
 
   // Viewer: a screenshot or a clip full size, with the ones before and after
   // it a button, an arrow key or a swipe away. Screenshots flip through
