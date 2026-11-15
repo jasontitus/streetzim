@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antártika",
     "description": "Antártika — Estashon McMurdo, Base Scott i Villa Las Estrellas; e Península Antártiko, e Islanan Shetland di Zùit, e plataforma di glas di Ross i Seru Erebus. E mapa ta kaba na 85° zùit i no ta yega Polo Zùit."
+  },
+  "antarctica-polar": {
+    "title": "Antártika ku Polo Zùit",
+    "description": "Henter Antártika, ku Polo Zùit — Estashon McMurdo, Estashon Amundsen–Scott di Polo Zùit, Estashon Vostok, e Península Antártiko i e plataforma di glas di Ross. E mapa ta dibuhá den un proyekshon polar: Polo Zùit ta meimei i nort no ta ariba. Ainda no tin imágen di satelit, relieve ni artíkulo di Wikipedia."
   }
 }

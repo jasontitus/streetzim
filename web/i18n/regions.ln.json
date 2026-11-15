@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctique",
     "description": "Antarctique — Station McMurdo, Base Scott mpe Villa Las Estrellas; Péninsule Antarctique, bisanga South Shetland, Ross Ice Shelf mpe ngomba Erebus. Karte esuki na 85° ya sudi mpe ekomi te na Pôle Sud."
+  },
+  "antarctica-polar": {
+    "title": "Antarctique na Pôle Sud",
+    "description": "Antarctique mobimba, na Pôle Sud — Station McMurdo, Station Amundsen–Scott ya Pôle Sud, Station Vostok, Péninsule Antarctique mpe Ross Ice Shelf. Karte esalemi na projection polaire: Pôle Sud ezali na katikati mpe nord ezali na likolo te. Bililingi ya satellite, relief mpe masolo ya Wikipedia ezali naino te."
   }
 }

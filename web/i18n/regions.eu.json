@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antartika",
     "description": "Antartika — McMurdo estazioa, Scott basea eta Villa Las Estrellas; Antartikako penintsula, Hegoaldeko Shetland uharteak, Rossen izotz-plataforma eta Erebus mendia. Mapa 85° hegoaldean amaitzen da eta ez da Hego Polora iristen."
+  },
+  "antarctica-polar": {
+    "title": "Antartika Hego Poloarekin",
+    "description": "Antartika osoa, Hego Poloarekin — McMurdo estazioa, Amundsen-Scott Hego Poloko estazioa, Vostok estazioa, Antartikako penintsula eta Rossen izotz-plataforma. Proiekzio polarrean marraztua: Hego Poloa erdian dago eta iparra ez dago goian. Oraindik ez dago satelite-irudirik, erlieberik ez Wikipediako artikulurik."
   }
 }

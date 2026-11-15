@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antatik",
     "description": "Antatik — Estasyon McMurdo, Baz Scott ak Villa Las Estrellas; Penensil Antatik la, zile Shetland disid yo, platfòm glas Ross la ak mòn Erebus. Kat la fini nan 85° sid epi li pa rive nan Pòl Sid la."
+  },
+  "antarctica-polar": {
+    "title": "Antatik ak Pòl Sid la",
+    "description": "Tout Antatik la, ak Pòl Sid la — Estasyon McMurdo, Estasyon Pòl Sid Amundsen–Scott, Estasyon Vostok, Penensil Antatik la ak platfòm glas Ross la. Kat la trase nan yon pwojeksyon polè: Pòl Sid la nan mitan epi nò a pa anlè. Poko gen imaj satelit, relyèf ni atik Wikipedya."
   }
 }

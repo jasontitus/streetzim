@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktída",
     "description": "Antarktída — stanica McMurdo, Scottova základňa a Villa Las Estrellas; Antarktický polostrov, Južné Shetlandy, Rossov šelfový ľadovec a Mount Erebus. Mapa sa končí na 85° južnej šírky a nesiaha po južný pól."
+  },
+  "antarctica-polar": {
+    "title": "Antarktída s južným pólom",
+    "description": "Celá Antarktída s južným pólom — stanica McMurdo, polárna stanica Amundsen–Scott na južnom póle, stanica Vostok, Antarktický polostrov a Rossov šelfový ľadovec. Nakreslená v polárnej projekcii: južný pól je v strede a sever nie je hore. Zatiaľ bez satelitných snímok, terénu a článkov z Wikipédie."
   }
 }

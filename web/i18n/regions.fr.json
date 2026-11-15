@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarctique",
   "description": "Antarctique — la base McMurdo, la base Scott et Villa Las Estrellas ; la péninsule Antarctique, les îles Shetland du Sud, la barrière de Ross et le mont Erebus. La carte s’arrête à 85° sud et n’atteint pas le pôle Sud."
+ },
+ "antarctica-polar": {
+  "title": "Antarctique avec le pôle Sud",
+  "description": "Tout l’Antarctique, avec le pôle Sud — la base McMurdo, la base Amundsen-Scott du pôle Sud, la base Vostok, la péninsule Antarctique et la barrière de Ross. Carte dessinée en projection polaire : le pôle Sud est au centre et le nord n’est pas en haut. Pas encore d’images satellite, de relief ni d’articles Wikipédia."
  }
 }

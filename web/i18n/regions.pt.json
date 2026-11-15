@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antártida",
   "description": "Antártida — a Estação McMurdo, a Base Scott e Villa Las Estrellas; a Península Antártica, as Ilhas Shetland do Sul, a Plataforma de Gelo Ross e o monte Erebus. O mapa termina a 85° sul e não chega ao Polo Sul."
+ },
+ "antarctica-polar": {
+  "title": "Antártida com o Polo Sul",
+  "description": "Toda a Antártida, com o Polo Sul — a Estação McMurdo, a Estação Polo Sul Amundsen-Scott, a Estação Vostok, a Península Antártica e a Plataforma de Gelo Ross. Desenhada em projeção polar: o Polo Sul fica no centro e o norte não fica em cima. Ainda sem imagens de satélite, relevo ou artigos da Wikipédia."
  }
 }

@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Etelämanner",
     "description": "Etelämanner — McMurdon asema, Scottin asema ja Villa Las Estrellas; Antarktiksen niemimaa, Etelä-Shetlandinsaaret, Rossin jäähylly ja Mount Erebus. Kartta päättyy 85. eteläiselle leveysasteelle eikä ulotu etelänavalle."
+  },
+  "antarctica-polar": {
+    "title": "Etelämanner ja etelänapa",
+    "description": "Koko Etelämanner etelänapoineen — McMurdon asema, Amundsen–Scottin etelänapa-asema, Vostokin asema, Antarktiksen niemimaa ja Rossin jäähylly. Piirretty napaprojektiossa: etelänapa on keskellä, eikä pohjoinen ole ylhäällä. Ei vielä satelliittikuvia, maastonmuotoja eikä Wikipedia-artikkeleita."
   }
 }

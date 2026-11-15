@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktīda",
     "description": "Antarktīda — Makmērdo stacija, Skota bāze un Villa Las Estrellas; Antarktikas pussala, Dienvidšetlendas salas, Rosa šelfa ledājs un Erebusa kalns. Karte beidzas pie 85° dienvidu platuma un nesniedzas līdz Dienvidpolam."
+  },
+  "antarctica-polar": {
+    "title": "Antarktīda ar Dienvidpolu",
+    "description": "Visa Antarktīda ar Dienvidpolu — Makmērdo stacija, Amundsena–Skota Dienvidpola stacija, Vostokas stacija, Antarktikas pussala un Rosa šelfa ledājs. Zīmēta polārajā projekcijā: Dienvidpols ir vidū, un ziemeļi nav augšpusē. Satelītattēlu, reljefa un Vikipēdijas rakstu pagaidām nav."
   }
 }

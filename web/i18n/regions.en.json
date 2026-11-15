@@ -533,5 +533,9 @@
  "antarctica": {
   "title": "Antarctica",
   "description": "Antarctica — McMurdo Station, Scott Base and Villa Las Estrellas; the Antarctic Peninsula, the South Shetland Islands, the Ross Ice Shelf and Mount Erebus. The map ends at 85° south and does not reach the South Pole."
+ },
+ "antarctica-polar": {
+  "title": "Antarctica with the South Pole",
+  "description": "All of Antarctica, with the South Pole — McMurdo Station, the Amundsen–Scott South Pole Station, Vostok Station, the Antarctic Peninsula and the Ross Ice Shelf. Drawn in a polar projection: the South Pole is in the middle and north is not at the top. No satellite imagery, terrain or Wikipedia articles yet."
  }
 }

@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarktika",
   "description": "Antarktika — McMurdo İstasyonu, Scott Üssü ve Villa Las Estrellas; Antarktika Yarımadası, Güney Shetland Adaları, Ross Buz Sahanlığı ve Erebus Dağı. Harita 85° güney enleminde biter ve Güney Kutbu'na ulaşmaz."
+ },
+ "antarctica-polar": {
+  "title": "Güney Kutbu ile Antarktika",
+  "description": "Güney Kutbu ile birlikte Antarktika'nın tamamı — McMurdo İstasyonu, Amundsen–Scott Güney Kutbu İstasyonu, Vostok İstasyonu, Antarktika Yarımadası ve Ross Buz Sahanlığı. Kutupsal projeksiyonla çizilmiştir: Güney Kutbu ortadadır ve kuzey yukarıda değildir. Henüz uydu görüntüsü, arazi yapısı veya Vikipedi maddesi yok."
  }
 }

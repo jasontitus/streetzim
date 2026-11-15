@@ -1422,7 +1422,8 @@ def _build_routing(
             # system afterwards (streetzim/isolate.py).
             routing_graph_path = run_in_child(
                 extract_routing_graph, rt_pbf, tmpdir, bbox=rt_bbox,
-                precut=bool(work_pbf_cut and rt_pbf == work_pbf))
+                precut=bool(work_pbf_cut and rt_pbf == work_pbf),
+                projection=getattr(args, "projection", None))
             active_clip = _clip.active()
             if routing_graph_path and active_clip is not None and active_clip.border is not None:
                 # The road pieces the clip cut off, closed to cars

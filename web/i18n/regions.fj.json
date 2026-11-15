@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base kei Villa Las Estrellas; na Antarctic Peninsula, na yatu South Shetland, na Ross Ice Shelf kei na ulunivanua o Erebus. E tini na mape ena 85° ki na ceva ka sega ni yacova na South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica kei na South Pole",
+    "description": "Na Antarctica taucoko, kei na South Pole — McMurdo Station, na Amundsen–Scott South Pole Station, Vostok Station, na Antarctic Peninsula kei na Ross Ice Shelf. E droinitaki na mape ena polar projection: e tiko e loma na South Pole ka sega ni tiko e cake na vualiku. Se sega ni tiko na iyaloyalo mai na satelaiti, na ibulibuli ni vanua se na ulutaga ni Wikipedia."
   }
 }

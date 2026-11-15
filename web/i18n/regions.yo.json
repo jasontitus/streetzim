@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base àti Villa Las Estrellas; Antarctic Peninsula, àwọn erékùṣù South Shetland, Ross Ice Shelf àti Òkè Erebus. Àwòrán ilẹ̀ náà parí ní 85° gúúsù, kò sì dé South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica pẹ̀lú South Pole",
+    "description": "Gbogbo Antarctica, pẹ̀lú South Pole — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula àti Ross Ice Shelf. A ya àwòrán ilẹ̀ náà ní polar projection: South Pole wà ní àárín, àríwá kò sì sí ní òkè. Kò tíì sí àwòrán sátẹ́láìtì, ìrísí ilẹ̀ tàbí àwọn àpilẹ̀kọ Wikipedia."
   }
 }

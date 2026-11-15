@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktida",
     "description": "Antarktida — Stacioni McMurdo, Baza Scott dhe Villa Las Estrellas; Gadishulli Antarktik, Ishujt Shetland të Jugut, Shelfi i Akullit Ross dhe mali Erebus. Harta mbaron në 85° jug dhe nuk arrin në Polin e Jugut."
+  },
+  "antarctica-polar": {
+    "title": "Antarktida me Polin e Jugut",
+    "description": "E gjithë Antarktida, me Polin e Jugut — Stacioni McMurdo, Stacioni Amundsen–Scott i Polit të Jugut, Stacioni Vostok, Gadishulli Antarktik dhe Shelfi i Akullit Ross. E vizatuar në projeksion polar: Poli i Jugut është në mes dhe veriu nuk është lart. Ende pa imazhe satelitore, reliev apo artikuj të Wikipedias."
   }
 }

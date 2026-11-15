@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base aur Villa Las Estrellas; Antarctic Peninsula, South Shetland ke taapu, Ross Ice Shelf aur Mount Erebus. Naksa 85° dakkhin pe khatam hoe hae aur South Pole tak nai pahunche hae."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica, South Pole ke saath",
+    "description": "Pura Antarctica, South Pole ke saath — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula aur Ross Ice Shelf. Naksa polar projection me banawa gais hae: South Pole biich me hae aur uttar uppar nai hae. Abhi satellite photo, terrain aur Wikipedia ke lekh nai hae."
   }
 }

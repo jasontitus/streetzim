@@ -893,6 +893,21 @@ def test_wrapper_builds_in_scratch_and_renames_into_place(tmp_path):
     assert not list((tmp_path / "root").glob(".osm-rx-*.copy-*"))
 
 
+def test_wrapper_refuses_a_map_in_its_own_projection(tmp_path):
+    p, env = _wrapper_copy(tmp_path)
+    env.pop("STREETZIM_BUILD_FLAGS_TSV", None)
+    flags = tmp_path / "root" / "cloud" / "region-build-flags.tsv"
+    flags.write_text("# id\tflags\nrx\t--projection antarctic-polar\nry\t--map-zoom 3\n")
+    r = subprocess.run(["bash", str(p), "rx", "1,2,3,4", "Rx"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and "FATAL: rx is not built by its registry box" in r.stderr
+    assert not (tmp_path / "stub.log").exists()
+    assert not list((tmp_path / "root").glob("osm-rx-*"))
+    # another region's flags, and this region's other flags, refuse nothing
+    flags.write_text("# id\tflags\nry\t--projection antarctic-polar\nrx\t--map-zoom 3\n")
+    subprocess.run(["bash", str(p), "rx", "1,2,3,4", "Rx"], env=env, check=True, capture_output=True, text=True, timeout=60)
+    assert list((tmp_path / "root").glob("osm-rx-*.zim"))
+
+
 def test_wrapper_without_scratch_is_unchanged(tmp_path):
     p, env = _wrapper_copy(tmp_path)
     subprocess.run(["bash", str(p), "rx", "1,2,3,4", "Rx"], env=env, check=True,
@@ -1200,8 +1215,10 @@ def test_gate_browser_timeouts_raised():
 
 # ---- the driver's REBUILD_REGATE_ZIM ---------------------------------------
 
-def _driver_regate(tmp: Path, zim: str, uprc: int = 0) -> tuple[str, str, str]:
+def _driver_regate(tmp: Path, zim: str, uprc: int = 0, flags: str = "") -> tuple[str, str, str]:
     p = _driver_copy(tmp)
+    if flags:
+        (tmp / "cloud" / "region-build-flags.tsv").write_text(flags)
     text = p.read_text()
     assert text.count("gate(){  # $1=zim $2=term") == 1
     p.write_text(text.replace("gate(){  # $1=zim $2=term",
@@ -1234,6 +1251,36 @@ def test_driver_regate_gates_and_uploads_without_building(tmp_path, uprc, status
     assert "gate osm-x-2026-10-23.zim Term" in calls
     assert "upload x osm-x-2026-10-23.zim" in calls
     assert last.startswith(f"x\t{status}\tosm-x-2026-10-23.zim\t")
+
+
+POLAR_FLAGS = "# id\tflags\nx\t--projection antarctic-polar\n"
+
+
+def test_driver_does_not_build_a_map_in_its_own_projection(tmp_path):
+    """Its registry box is in map positions: an extract by it would be a
+    piece of some other part of the world."""
+    p = _driver_copy(tmp_path)
+    (tmp_path / "cloud" / "regions.tsv").write_text("# id\tname\tbbox\nx\tX\t1,2,3,4\t\t\t\tTerm\n")
+    (tmp_path / "cloud" / "region-build-flags.tsv").write_text(POLAR_FLAGS)
+    (tmp_path / "w.list").write_text("x\n")
+    env = {**os.environ, "OVERTURE_RELEASE": "2026-10-21.0", "REBUILD_LIST": str(tmp_path / "w.list"),
+           "REBUILD_LOG": str(tmp_path / "w.log"), "REBUILD_PIDFILE": str(tmp_path / "w.pid"),
+           "REBUILD_OV_PORT": "19999", "REBUILD_KW_PORT": "19998", "REBUILD_NO_SKIP": "1"}
+    env.pop("REBUILD_REGATE_ZIM", None)
+    env.pop("STREETZIM_BUILD_FLAGS_TSV", None)
+    subprocess.run(["bash", str(p)], env=env, cwd=tmp_path, check=True, capture_output=True, text=True, timeout=60)
+    log = (tmp_path / "w.log").read_text()
+    assert "skip x: not built by its registry box" in log
+    for step in ("osmium", "build-region-fast", "overture", "Overture", "  built ", "=== x ("):
+        assert step not in log, step
+    assert (tmp_path / "rebuild-old.tsv").read_text().splitlines()[-1].startswith("x\town-build\t-\t")
+
+
+def test_driver_regate_uploads_a_map_in_its_own_projection(tmp_path):
+    log, calls, last = _driver_regate(tmp_path, "osm-x-2026-10-23.zim", flags=POLAR_FLAGS)
+    assert "not built by its registry box" not in log
+    assert "gate osm-x-2026-10-23.zim Term" in calls and "upload x osm-x-2026-10-23.zim" in calls
+    assert last.startswith("x\tuploaded\tosm-x-2026-10-23.zim\t")
 
 
 @pytest.mark.parametrize("zim", ["osm-x-light-2026-10-23.zim", "osm-x-2026-10-24.zim"])

@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antaatika",
     "description": "Antaatika — McMurdo Station, Scott Base an Villa Las Estrellas; di Antarctic Peninsula, di South Shetland ailan dem, di Ross Ice Shelf an Mount Erebus. Di map stap a 85° sout an it no riich di South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antaatika wid di South Pole",
+    "description": "Aal a Antaatika, wid di South Pole — McMurdo Station, di Amundsen–Scott South Pole Station, Vostok Station, di Antarctic Peninsula an di Ross Ice Shelf. Di map jraa inna wahn polar projection: di South Pole de inna di migl an naat no de a tap. No satilait picha, terrain ar Wikipedia aatikl no de yet."
   }
 }

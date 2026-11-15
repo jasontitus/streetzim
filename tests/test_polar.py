@@ -87,3 +87,46 @@ def test_map_config_says_the_map_is_polar():
     assert mc["clipMinZoom"] == 0
     mask = shapely.shape(mc["clipMask"])
     assert mask.contains(shapely.Point(*polar.to_map(10, -59))) and not mask.contains(shapely.Point(0, 0))
+
+
+def test_route_lengths_are_real_metres(tmp_path):
+    """A road from McMurdo towards Scott Base and one beside the pole: the
+    graph's edge lengths are the real ground's, not the moved map's."""
+    import itertools
+    osmium = pytest.importorskip("osmium")
+    from streetzim.routing.astar import haversine_m
+    from streetzim.routing.build import extract_routing_graph
+    from streetzim.routing.reader import load_from_file
+
+    roads = {10: [(166.6687, -77.8484), (166.7200, -77.8490), (166.7679, -77.8495)],
+             20: [(0.0, -89.99), (90.0, -89.99)]}
+    pbf = tmp_path / "moved.osm.pbf"
+    want = {}
+    with osmium.SimpleWriter(str(pbf)) as writer:
+        nid = 0
+        for wid, pts in roads.items():
+            refs = []
+            for lon, lat in pts:
+                nid += 1
+                writer.add_node(osmium.osm.mutable.Node(
+                    id=nid, location=polar.to_map(lon, lat), version=1))
+                refs.append(nid)
+            writer.add_way(osmium.osm.mutable.Way(id=wid, nodes=refs, version=1,
+                                                 tags={"highway": "track"}))
+            want[wid] = sum(haversine_m(a[1], a[0], b[1], b[0]) for a, b in itertools.pairwise(pts))
+
+    def lengths(sub, **kw):
+        out = tmp_path / sub
+        out.mkdir()
+        graph = load_from_file(extract_routing_graph(str(pbf), str(out), **kw))
+        return sorted({round(graph.edge_dist_m(i), 1) for i in range(graph.num_edges)})
+
+    real = lengths("real", projection=polar.NAME)
+    assert real == pytest.approx(sorted(want.values()), rel=2e-3, abs=0.2)
+    # Read as real positions the same roads measure wrong: by 3% near the
+    # pole and more at McMurdo.
+    moved = lengths("moved")
+    assert all(abs(m - r) / r > 0.02 for m, r in zip(moved, real))
+    with pytest.raises(ValueError, match="unknown projection"):
+        (tmp_path / "bad").mkdir()
+        extract_routing_graph(str(pbf), str(tmp_path / "bad"), projection="mercator")

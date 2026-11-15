@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Suðurskautslandið",
     "description": "Suðurskautslandið — McMurdo-stöðin, Scott-stöðin og Villa Las Estrellas; Suðurskautsskaginn, Suður-Hjaltlandseyjar, Ross-íshellan og Erebusfjall. Kortið endar við 85° suðlægrar breiddar og nær ekki til suðurpólsins."
+  },
+  "antarctica-polar": {
+    "title": "Suðurskautslandið með suðurpólnum",
+    "description": "Allt Suðurskautslandið, með suðurpólnum — McMurdo-stöðin, Amundsen–Scott-suðurpólsstöðin, Vostok-stöðin, Suðurskautsskaginn og Ross-íshellan. Teiknað í pólvörpun: suðurpóllinn er í miðjunni og norður snýr ekki upp. Engar gervihnattamyndir, landslag eða Wikipedia-greinar enn sem komið er."
   }
 }

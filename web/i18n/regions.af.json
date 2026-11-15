@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktika",
     "description": "Antarktika — McMurdo-stasie, Scott-basis en Villa Las Estrellas; die Antarktiese Skiereiland, die Suid-Shetland-eilande, die Ross-ysbank en berg Erebus. Die kaart eindig by 85° suid en strek nie tot by die Suidpool nie."
+  },
+  "antarctica-polar": {
+    "title": "Antarktika met die Suidpool",
+    "description": "Die hele Antarktika, met die Suidpool — McMurdo-stasie, die Amundsen-Scott-Suidpoolstasie, Wostok-stasie, die Antarktiese Skiereiland en die Ross-ysbank. Geteken in ’n poolprojeksie: die Suidpool is in die middel en noord is nie bo nie. Nog geen satellietbeelde, terrein of Wikipedia-artikels nie."
   }
 }

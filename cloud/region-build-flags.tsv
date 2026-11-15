@@ -5,3 +5,7 @@
 # Antarctica: imagery and terrain to zoom 11. The box is 360 degrees wide (zoom 12 would be
 # 4.9 million tiles of each), and inland the imagery is one flat white.
 antarctica	--satellite-zoom 11 --satellite-download-zoom 11 --terrain-zoom 11
+# Antarctica with the South Pole: a map in a projection of its own. Its registry box is in map positions, so
+# build-region-fast.sh refuses it (cut from the planet by that box it would be the Gulf of Guinea);
+# ops/build-antarctica-polar.py builds it and passes this flag itself.
+antarctica-polar	--projection antarctic-polar

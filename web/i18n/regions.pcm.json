@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base an Villa Las Estrellas; di Antarctic Peninsula, di South Shetland Islands, di Ross Ice Shelf an Mount Erebus. Di map end for 85° saut an e no rich South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica wit South Pole",
+    "description": "All Antarctica, wit South Pole — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, di Antarctic Peninsula an di Ross Ice Shelf. Dem draw di map for polar projection: South Pole dey for middle an north no dey for top. Satellite picture, terrain an Wikipedia article neva dey."
   }
 }

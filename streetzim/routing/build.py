@@ -337,7 +337,8 @@ def _node_index(loc_dir, scratch):
     return f"sparse_file_array,{path}", path
 
 
-def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
+def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False,
+                          projection=None):
     """Extract road network from OSM PBF and build a compact routing graph.
 
     Streams through the (bbox-filtered) PBF with pyosmium in two passes:
@@ -356,6 +357,9 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
               Critical for regional builds from a planet PBF.
         precut: pbf_path is already cut to bbox: skip the cut, keep bbox for
               the rest (the antimeridian stitching).
+        projection: the name of the projection the PBF's positions were
+              moved to (streetzim/polar.py), or None for real positions.
+              Edge lengths are real metres either way.
 
     Writes SZRG v4 (docs/formats.md). The SZRG v5 split layout (a separate
     SZGM geometry file) is no longer written: nothing in production used it,
@@ -396,7 +400,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
         scratch.append(hw_pbf)
     try:
         return _extract(hw_pbf or source_pbf, output_dir, bbox, scratch,
-                        highways_only=hw_pbf is not None)
+                        highways_only=hw_pbf is not None,
+                        projection=projection)
     finally:
         for p in scratch:
             try:
@@ -405,7 +410,8 @@ def extract_routing_graph(pbf_path, output_dir, bbox=None, precut=False):
                 pass
 
 
-def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
+def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True,
+             projection=None):
     """extract_routing_graph from the highway extract on. Files it creates
     go in `scratch`, which the caller removes. Without highways_only the
     location index holds every node of `source_pbf`, so it is a file (as it
@@ -765,6 +771,20 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
              math.sin(dlon / 2) ** 2)
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+    # A moved map's positions are not real ones: an edge's length is
+    # measured between the real places its points stand for.
+    _length = _hav
+    if projection is not None:
+        from streetzim import polar
+        if projection != polar.NAME:
+            raise ValueError(f"unknown projection {projection!r}")
+
+        def _true_length(lat1, lon1, lat2, lon2):
+            lon1, lat1 = polar.to_true(lon1, lat1)
+            lon2, lat2 = polar.to_true(lon2, lat2)
+            return _hav(lat1, lon1, lat2, lon2)
+        _length = _true_length
+
     def _zigzag32(n):
         return ((n << 1) ^ (n >> 31)) & 0xFFFFFFFF
 
@@ -1036,7 +1056,7 @@ def _extract(source_pbf, output_dir, bbox, scratch, highways_only=True):
                     for j in range(a + 1, b + 1):
                         lat = lats_e7[j] / 1e7
                         lon = lons_e7[j] / 1e7
-                        dist_m += _hav(prev_lat, prev_lon, lat, lon)
+                        dist_m += _length(prev_lat, prev_lon, lat, lon)
                         prev_lat = lat
                         prev_lon = lon
                     dist_dm = int(round(dist_m * 10))

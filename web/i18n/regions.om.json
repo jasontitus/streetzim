@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antaarktikaa",
     "description": "Antaarktikaa — McMurdo Station, Scott Base fi Villa Las Estrellas; Antarctic Peninsula, odoloota South Shetland, Ross Ice Shelf fi Gaara Erebus. Kaartaan kun 85° kibbaatti dhuma, South Pole hin ga'u."
+  },
+  "antarctica-polar": {
+    "title": "Antaarktikaa South Pole waliin",
+    "description": "Antaarktikaa guutuu, South Pole waliin — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula fi Ross Ice Shelf. Kaartaan kun polar projection tiin kaafame: South Pole gidduu jira, kaabni immoo gubbaa hin jiru. Suuraan saatalaayitii, bocni lafaa fi barruuleen Wikipedia ammaaf hin jiran."
   }
 }

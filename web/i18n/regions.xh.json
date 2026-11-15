@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "I-Antarctica",
     "description": "I-Antarctica — iMcMurdo Station, iScott Base neVilla Las Estrellas; i-Antarctic Peninsula, iziqithi zaseSouth Shetland, iRoss Ice Shelf neNtaba i-Erebus. Imephu iphela kwi-85° emazantsi kwaye ayifiki kwiSouth Pole."
+  },
+  "antarctica-polar": {
+    "title": "I-Antarctica kunye neSouth Pole",
+    "description": "Yonke i-Antarctica, kunye neSouth Pole — iMcMurdo Station, i-Amundsen–Scott South Pole Station, iVostok Station, i-Antarctic Peninsula neRoss Ice Shelf. Imephu izotywe nge-polar projection: iSouth Pole isembindini kwaye umntla awukho phezulu. Akukabikho mifanekiso yesathelayithi, ukuma komhlaba okanye amanqaku eWikipedia."
   }
 }

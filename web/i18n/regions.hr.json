@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktika",
     "description": "Antarktika — postaja McMurdo, baza Scott i Villa Las Estrellas; Antarktički poluotok, Južni Shetlandski otoci, Rossova ledena ploča i planina Erebus. Karta završava na 85° južne širine i ne doseže Južni pol."
+  },
+  "antarctica-polar": {
+    "title": "Antarktika s Južnim polom",
+    "description": "Cijela Antarktika, s Južnim polom — postaja McMurdo, postaja Amundsen–Scott na Južnom polu, postaja Vostok, Antarktički poluotok i Rossova ledena ploča. Nacrtana u polarnoj projekciji: Južni pol je u sredini, a sjever nije na vrhu. Zasad bez satelitskih snimaka, reljefa i članaka s Wikipedije."
   }
 }

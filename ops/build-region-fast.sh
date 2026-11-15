@@ -45,6 +45,14 @@ export ZSTD_CLEVEL="${ZSTD_CLEVEL:-22}"
 mkdir -p "$TMPDIR"
 
 ID="$1"; BBOX="$2"; NAME="$3"
+# A map in a projection of its own (--projection among its flags in cloud/region-build-flags.tsv) has its
+# registry box in map positions: cut from the planet by that box it would be a map of some other place.
+# Its own script builds it (ops/build-antarctica-polar.py).
+if awk -F'\t' -v id="$ID" '$1==id && $2 ~ /--projection/ {f=1} END {exit !f}' \
+       "${STREETZIM_BUILD_FLAGS_TSV:-/storage/streetzim/cloud/region-build-flags.tsv}" 2>/dev/null; then
+    echo "FATAL: $ID is not built by its registry box (--projection in cloud/region-build-flags.tsv): its own script builds it" >&2
+    exit 1
+fi
 TODAY=$(date +%Y-%m-%d)
 PY=/storage/streetzim/venv-linux/bin/python3
 SCRIPT=/storage/streetzim/create_osm_zim.py

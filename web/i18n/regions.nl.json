@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarctica",
   "description": "Antarctica — McMurdo Station, Scott Base en Villa Las Estrellas; het Antarctisch Schiereiland, de Zuidelijke Shetlandeilanden, het Ross-ijsplateau en Mount Erebus. De kaart eindigt op 85° zuiderbreedte en reikt niet tot de Zuidpool."
+ },
+ "antarctica-polar": {
+  "title": "Antarctica met de Zuidpool",
+  "description": "Heel Antarctica, met de Zuidpool — McMurdo Station, het Amundsen-Scott-Zuidpoolstation, Vostokstation, het Antarctisch Schiereiland en het Ross-ijsplateau. Getekend in een poolprojectie: de Zuidpool ligt in het midden en het noorden is niet boven. Nog geen satellietbeelden, reliëf of Wikipedia-artikelen."
  }
 }

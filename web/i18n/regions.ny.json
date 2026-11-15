@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base ndi Villa Las Estrellas; Antarctic Peninsula, zilumba za South Shetland, Ross Ice Shelf ndi phiri la Erebus. Mapu amathera pa 85° kumwera ndipo safika ku South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica ndi South Pole",
+    "description": "Antarctica yonse, ndi South Pole — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula ndi Ross Ice Shelf. Mapu ajambulidwa mu polar projection: South Pole ili pakati ndipo kumpoto sikuli pamwamba. Palibe zithunzi za setilaiti, maonekedwe a mtunda kapena nkhani za Wikipedia pakadali pano."
   }
 }

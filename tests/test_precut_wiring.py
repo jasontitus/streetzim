@@ -44,7 +44,8 @@ def seen(monkeypatch, tmp_path):
                         lambda fn, *a, **k: calls.__setitem__("isolated", fn.__name__)
                         or fn(*a, **k))
     monkeypatch.setattr(c, "extract_routing_graph",
-                        lambda p, d, bbox=None, precut=False: calls.__setitem__("rt", (p, bbox, precut)))
+                        lambda p, d, bbox=None, precut=False, projection=None:
+                        calls.__setitem__("rt", (p, bbox, precut, projection)))
     return calls
 
 
@@ -88,6 +89,14 @@ def test_mbtiles_with_pbf_is_still_cut(seen, tmp_path):
     _run(_args(mbtiles=str(mb), pbf="in.pbf"), tmp_path, bbox_str=BOX, geofabrik_path=None,
          pbf_path="in.pbf")
     assert seen["addr"] == ("in.pbf", False) and seen["rt"][2] is False
+
+
+def test_routing_is_told_the_maps_projection(seen, tmp_path):
+    _run(_args(pbf="in.pbf"), tmp_path, bbox_str=BOX, geofabrik_path=None, pbf_path="in.pbf")
+    assert seen["rt"][3] is None
+    _run(_args(pbf="in.pbf", projection="antarctic-polar"), tmp_path, bbox_str=BOX,
+         geofabrik_path=None, pbf_path="in.pbf")
+    assert seen["rt"][3] == "antarctic-polar"
 
 
 def test_precut_routing_still_joins_at_the_antimeridian(tmp_path):

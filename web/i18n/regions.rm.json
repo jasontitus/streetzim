@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "L’Antarctica — la staziun McMurdo, la basa Scott e Villa Las Estrellas; la Peninsla Antarctica, las Inslas Shetland dal Sid, la platta da glatsch da Ross ed il Mount Erebus. La charta finescha tar 85° sid e na tanscha betg fin al Pol dal Sid."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica cun il Pol dal Sid",
+    "description": "Tut l’Antarctica, cun il Pol dal Sid — la staziun McMurdo, la staziun Amundsen-Scott al Pol dal Sid, la staziun Vostok, la Peninsla Antarctica e la platta da glatsch da Ross. Dissegnada en ina projecziun polara: il Pol dal Sid è en il center ed il nord n’è betg sisum. Anc naginas fotografias da satellit, nagin relief e nagins artitgels da Wikipedia."
   }
 }

@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarktis",
   "description": "Antarktis — McMurdo-Station, Scott Base und Villa Las Estrellas; die Antarktische Halbinsel, die Südlichen Shetlandinseln, das Ross-Schelfeis und der Mount Erebus. Die Karte endet bei 85° Süd und reicht nicht bis zum Südpol."
+ },
+ "antarctica-polar": {
+  "title": "Antarktis mit dem Südpol",
+  "description": "Die gesamte Antarktis mit dem Südpol — McMurdo-Station, Amundsen-Scott-Südpolstation, Wostok-Station, die Antarktische Halbinsel und das Ross-Schelfeis. In einer Polarprojektion gezeichnet: Der Südpol liegt in der Mitte, und Norden ist nicht oben. Noch ohne Satellitenbilder, Gelände und Wikipedia-Artikel."
  }
 }

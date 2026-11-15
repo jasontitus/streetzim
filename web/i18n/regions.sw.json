@@ -178,5 +178,9 @@
   "antarctica": {
     "title": "Antaktika",
     "description": "Antaktika — Kituo cha McMurdo, Kituo cha Scott na Villa Las Estrellas; Rasi ya Antaktika, Visiwa vya Shetland Kusini, Rafu ya Barafu ya Ross na Mlima Erebus. Ramani inaishia 85° kusini na haifiki Ncha ya Kusini."
+  },
+  "antarctica-polar": {
+    "title": "Antaktika pamoja na Ncha ya Kusini",
+    "description": "Antaktika nzima, pamoja na Ncha ya Kusini — Kituo cha McMurdo, Kituo cha Ncha ya Kusini cha Amundsen–Scott, Kituo cha Vostok, Rasi ya Antaktika na Rafu ya Barafu ya Ross. Imechorwa kwa makadirio ya ncha: Ncha ya Kusini iko katikati na kaskazini haiko juu. Bado hakuna picha za satelaiti, sura ya ardhi wala makala za Wikipedia."
   }
 }

@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarktyda",
   "description": "Antarktyda — stacja McMurdo, baza Scotta i Villa Las Estrellas; Półwysep Antarktyczny, Szetlandy Południowe, Lodowiec Szelfowy Rossa i Mount Erebus. Mapa kończy się na 85° szerokości południowej i nie sięga bieguna południowego."
+ },
+ "antarctica-polar": {
+  "title": "Antarktyda z biegunem południowym",
+  "description": "Cała Antarktyda z biegunem południowym — stacja McMurdo, stacja Amundsen-Scott na biegunie południowym, stacja Wostok, Półwysep Antarktyczny i Lodowiec Szelfowy Rossa. Narysowana w odwzorowaniu biegunowym: biegun południowy jest pośrodku, a północ nie jest u góry. Na razie bez zdjęć satelitarnych, rzeźby terenu i artykułów z Wikipedii."
  }
 }

@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Antarktika",
   "description": "Antarktika — Stasiun McMurdo, Pangkalan Scott, dan Villa Las Estrellas; Semenanjung Antarktika, Kepulauan Shetland Selatan, Paparan Es Ross, dan Gunung Erebus. Peta berakhir di 85° lintang selatan dan tidak mencapai Kutub Selatan."
+ },
+ "antarctica-polar": {
+  "title": "Antarktika dengan Kutub Selatan",
+  "description": "Seluruh Antarktika, dengan Kutub Selatan — Stasiun McMurdo, Stasiun Kutub Selatan Amundsen–Scott, Stasiun Vostok, Semenanjung Antarktika, dan Paparan Es Ross. Digambar dalam proyeksi kutub: Kutub Selatan berada di tengah dan utara tidak berada di atas. Belum ada citra satelit, relief medan, atau artikel Wikipedia."
  }
 }

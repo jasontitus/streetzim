@@ -278,6 +278,13 @@ for ID in $ORDER; do
     [ -s "$OUT" ] || { log "  regate: no $OUT in $(pwd)"; row "$ID" no-output "$OUT"; continue; }
     log "  regate $OUT ($(du -h "$OUT" | cut -f1)): gates and upload only, no build"
   else
+  # A map in a projection of its own (cloud/region-build-flags.tsv: --projection) has its box in map
+  # positions: no extract, tiles or build by that box. Its own script builds it; --regate uploads it.
+  if awk -F'\t' -v id="$ID" '$1==id && $2 ~ /--projection/ {f=1} END {exit !f}' \
+         "${STREETZIM_BUILD_FLAGS_TSV:-/storage/streetzim/cloud/region-build-flags.tsv}" 2>/dev/null; then
+    log "skip $ID: not built by its registry box (--projection in cloud/region-build-flags.tsv); its own script builds it"
+    row "$ID" own-build "-"; continue
+  fi
   # A Light variant (cloud/region-variants.tsv) is built by build-region-fast.sh
   # from its parent's extracts and Overture parquets, so the data steps below
   # check the parent's files (DATA_ID). Without this, africa-light would get an

@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antártida",
     "description": "Antártida — a base McMurdo, a base Scott e Villa Las Estrellas; a península Antártica, as illas Shetland do Sur, a barreira de xeo de Ross e o monte Erebus. O mapa remata nos 85° sur e non chega ao Polo Sur."
+  },
+  "antarctica-polar": {
+    "title": "Antártida co Polo Sur",
+    "description": "Toda a Antártida, co Polo Sur — a base McMurdo, a base Amundsen-Scott do Polo Sur, a base Vostok, a península Antártica e a barreira de xeo de Ross. Debuxada en proxección polar: o Polo Sur está no centro e o norte non queda arriba. Aínda sen imaxes de satélite, relevo nin artigos da Wikipedia."
   }
 }

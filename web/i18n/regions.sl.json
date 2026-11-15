@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktika",
     "description": "Antarktika — postaja McMurdo, baza Scott in Villa Las Estrellas; Antarktični polotok, Južni Shetlandski otoki, Rossova ledena polica in gora Erebus. Zemljevid se konča pri 85° južne širine in ne seže do južnega tečaja."
+  },
+  "antarctica-polar": {
+    "title": "Antarktika z južnim tečajem",
+    "description": "Celotna Antarktika z južnim tečajem — postaja McMurdo, postaja Amundsen-Scott na južnem tečaju, postaja Vostok, Antarktični polotok in Rossova ledena polica. Narisana v polarni projekciji: južni tečaj je v sredini, sever pa ni zgoraj. Zaenkrat brez satelitskih posnetkov, reliefa in člankov iz Wikipedije."
   }
 }

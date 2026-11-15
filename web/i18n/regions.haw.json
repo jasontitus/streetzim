@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base a me Villa Las Estrellas; ka Antarctic Peninsula, nā mokupuni ʻo South Shetland, ka Ross Ice Shelf a me ka mauna ʻo Erebus. Pau ka palapala ʻāina ma 85° hema, ʻaʻole ia e hiki i ka Wēlau Hema."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica me ka Wēlau Hema",
+    "description": "ʻO Antarctica holoʻokoʻa, me ka Wēlau Hema — McMurdo Station, ka Amundsen–Scott South Pole Station, Vostok Station, ka Antarctic Peninsula a me ka Ross Ice Shelf. Kaha ʻia ka palapala ʻāina ma ka polar projection: aia ka Wēlau Hema ma waenakonu, ʻaʻole ka ʻākau ma luna. ʻAʻohe kiʻi poelele, hiʻona ʻāina, a me nā ʻatikala Wikipedia i kēia manawa."
   }
 }

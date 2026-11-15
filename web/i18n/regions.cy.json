@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — Gorsaf McMurdo, Canolfan Scott a Villa Las Estrellas; Penrhyn Antarctica, Ynysoedd De Shetland, Sgafell Iâ Ross a Mynydd Erebus. Mae'r map yn gorffen ar 85° i'r de ac nid yw'n cyrraedd Pegwn y De."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica gyda Phegwn y De",
+    "description": "Antarctica gyfan, gyda Phegwn y De — Gorsaf McMurdo, Gorsaf Pegwn y De Amundsen–Scott, Gorsaf Vostok, Penrhyn Antarctica a Sgafell Iâ Ross. Wedi'i lunio mewn tafluniad pegynol: mae Pegwn y De yn y canol ac nid yw'r gogledd ar y brig. Dim delweddau lloeren, tirwedd nac erthyglau Wicipedia eto."
   }
 }

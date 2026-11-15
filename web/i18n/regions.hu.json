@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antarktisz",
     "description": "Antarktisz — McMurdo állomás, Scott-bázis és Villa Las Estrellas; az Antarktiszi-félsziget, a Déli-Shetland-szigetek, a Ross-selfjég és a Mount Erebus. A térkép a déli szélesség 85. fokánál ér véget, a Déli-sarkig nem ér el."
+  },
+  "antarctica-polar": {
+    "title": "Antarktisz a Déli-sarkkal",
+    "description": "Az egész Antarktisz a Déli-sarkkal — McMurdo állomás, Amundsen–Scott déli-sarki állomás, Vosztok állomás, az Antarktiszi-félsziget és a Ross-selfjég. Poláris vetületben rajzolva: a Déli-sark középen van, és észak nem felfelé van. Műholdképek, domborzat és Wikipédia-szócikkek egyelőre nincsenek."
   }
 }

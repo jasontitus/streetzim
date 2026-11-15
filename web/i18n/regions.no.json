@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktis",
     "description": "Antarktis — McMurdo-stasjonen, Scott Base og Villa Las Estrellas; Antarktishalvøya, Sør-Shetlandsøyene, Rossbarrieren og Mount Erebus. Kartet slutter ved 85° sør og når ikke Sydpolen."
+  },
+  "antarctica-polar": {
+    "title": "Antarktis med Sydpolen",
+    "description": "Hele Antarktis, med Sydpolen — McMurdo-stasjonen, Amundsen-Scott-basen på Sydpolen, Vostok-stasjonen, Antarktishalvøya og Rossbarrieren. Tegnet i polarprojeksjon: Sydpolen ligger i midten, og nord er ikke opp. Foreløpig ingen satellittbilder, terreng eller Wikipedia-artikler."
   }
 }

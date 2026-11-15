@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antaktika",
     "description": "Antaktika — McMurdo Station, Scott Base mo Villa Las Estrellas; Antarctic Peninsula, ol aelan blong South Shetland, Ross Ice Shelf mo Mount Erebus. Map i finis long 85° saot mo i no kasem South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antaktika wetem South Pole",
+    "description": "Olgeta Antaktika, wetem South Pole — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula mo Ross Ice Shelf. Oli droem map ya long wan polar projection: South Pole i stap long medel mo not i no stap antap. I no gat yet ol satelaet pija, terrain mo ol Wikipedia atikol."
   }
 }

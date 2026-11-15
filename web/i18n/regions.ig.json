@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — McMurdo Station, Scott Base na Villa Las Estrellas; Antarctic Peninsula, agwaetiti South Shetland, Ross Ice Shelf na Ugwu Erebus. Maapụ ahụ na-akwụsị na 85° ndịda, ọ naghị eru South Pole."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica na South Pole",
+    "description": "Antarctica niile, ya na South Pole — McMurdo Station, Amundsen–Scott South Pole Station, Vostok Station, Antarctic Peninsula na Ross Ice Shelf. E sere maapụ a na polar projection: South Pole dị n'etiti, mgbago ugwu (north) anọghịkwa n'elu. Enwebeghị foto satịlaịtị, ọdịdị ala ma ọ bụ edemede Wikipedia."
   }
 }

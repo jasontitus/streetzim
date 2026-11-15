@@ -289,6 +289,13 @@ REGIONS = [
         "zim_file": "osm-antarctica.zim",
         "description": "Antarctica &mdash; McMurdo Station, Scott Base and Villa Las Estrellas; the Antarctic Peninsula, the South Shetland Islands, the Ross Ice Shelf and Mount Erebus. The map ends at 85&deg; south and does not reach the South Pole.",
     },
+    {
+        "id": "antarctica-polar",
+        "tier": "continent",
+        "title": "Antarctica with the South Pole",
+        "zim_file": "osm-antarctica-polar.zim",
+        "description": "All of Antarctica, with the South Pole &mdash; McMurdo Station, the Amundsen&ndash;Scott South Pole Station, Vostok Station, the Antarctic Peninsula and the Ross Ice Shelf. Drawn in a polar projection: the South Pole is in the middle and north is not at the top. No satellite imagery, terrain or Wikipedia articles yet.",
+    },
     # ── Multi-country regions ────────────────────────────────────────
     {
         "id": "west-asia",

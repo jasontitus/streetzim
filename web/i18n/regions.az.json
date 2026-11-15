@@ -178,5 +178,9 @@
   "antarctica": {
     "title": "Antarktida",
     "description": "Antarktida — Mak-Merdo stansiyası, Skott bazası və Villa Las Estrellas; Antarktika yarımadası, Cənubi Şetland adaları, Ross şelf buzlağı və Erebus dağı. Xəritə 85° cənub enliyində bitir və Cənub qütbünə çatmır."
+  },
+  "antarctica-polar": {
+    "title": "Antarktida Cənub qütbü ilə",
+    "description": "Bütün Antarktida, Cənub qütbü ilə birlikdə — Mak-Merdo stansiyası, Amundsen–Skott Cənub qütbü stansiyası, Vostok stansiyası, Antarktika yarımadası və Ross şelf buzlağı. Qütb proyeksiyasında çəkilib: Cənub qütbü ortadadır və şimal yuxarıda deyil. Peyk görüntüləri, relyef və Vikipediya məqalələri hələ yoxdur."
   }
 }

@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antàrtida",
     "description": "Antàrtida — l’estació McMurdo, la base Scott i Villa Las Estrellas; la península Antàrtica, les illes Shetland del Sud, la barrera de gel de Ross i el mont Erebus. El mapa acaba als 85° sud i no arriba al pol Sud."
+  },
+  "antarctica-polar": {
+    "title": "Antàrtida amb el pol Sud",
+    "description": "Tota l’Antàrtida, amb el pol Sud — l’estació McMurdo, la base Amundsen-Scott del pol Sud, l’estació Vostok, la península Antàrtica i la barrera de gel de Ross. Dibuixada en projecció polar: el pol Sud és al mig i el nord no és a dalt. Encara sense imatges de satèl·lit, relleu ni articles de la Viquipèdia."
   }
 }

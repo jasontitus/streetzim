@@ -174,5 +174,9 @@
   "antarctica": {
     "title": "Antarctica",
     "description": "Antarctica — stația McMurdo, baza Scott și Villa Las Estrellas; Peninsula Antarctică, Insulele Shetland de Sud, Bariera de gheață Ross și Muntele Erebus. Harta se termină la 85° sud și nu ajunge la Polul Sud."
+  },
+  "antarctica-polar": {
+    "title": "Antarctica cu Polul Sud",
+    "description": "Toată Antarctica, cu Polul Sud — stația McMurdo, stația Amundsen–Scott de la Polul Sud, stația Vostok, Peninsula Antarctică și Bariera de gheață Ross. Desenată în proiecție polară: Polul Sud este în centru, iar nordul nu este în sus. Deocamdată fără imagini din satelit, relief sau articole Wikipedia."
   }
 }

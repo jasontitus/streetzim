@@ -530,5 +530,9 @@
  "antarctica": {
   "title": "Châu Nam Cực",
   "description": "Châu Nam Cực — Trạm McMurdo, Căn cứ Scott và Villa Las Estrellas; bán đảo Nam Cực, quần đảo Nam Shetland, thềm băng Ross và núi Erebus. Bản đồ kết thúc ở vĩ tuyến 85° nam và không tới Nam Cực điểm."
+ },
+ "antarctica-polar": {
+  "title": "Châu Nam Cực với Nam Cực điểm",
+  "description": "Toàn bộ châu Nam Cực, bao gồm Nam Cực điểm — Trạm McMurdo, Trạm Nam Cực Amundsen–Scott, Trạm Vostok, bán đảo Nam Cực và thềm băng Ross. Được vẽ theo phép chiếu cực: Nam Cực điểm nằm ở giữa và hướng bắc không ở phía trên. Chưa có ảnh vệ tinh, địa hình hay bài viết Wikipedia."
  }
 }

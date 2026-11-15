@@ -170,5 +170,9 @@
   "antarctica": {
     "title": "Antarktida",
     "description": "Antarktida — Makmerdo stotis, Skoto bazė ir Villa Las Estrellas; Antarkties pusiasalis, Pietų Šetlando salos, Roso šelfinis ledynas ir Erebuso kalnas. Žemėlapis baigiasi ties 85° pietų platumos ir Pietų ašigalio nesiekia."
+  },
+  "antarctica-polar": {
+    "title": "Antarktida su Pietų ašigaliu",
+    "description": "Visa Antarktida su Pietų ašigaliu — Makmerdo stotis, Amundseno–Skoto Pietų ašigalio stotis, Vostoko stotis, Antarkties pusiasalis ir Roso šelfinis ledynas. Nubraižyta poliarine projekcija: Pietų ašigalis yra viduryje, o šiaurė nėra viršuje. Palydovinių vaizdų, reljefo ir Vikipedijos straipsnių kol kas nėra."
   }
 }
