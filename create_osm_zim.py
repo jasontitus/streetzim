@@ -536,6 +536,10 @@ Known areas: """ + ", ".join(sorted(KNOWN_AREAS.keys())),
                         help="Include Copernicus GLO-30 terrain tiles for 3D/hillshade")
     parser.add_argument("--terrain-zoom", type=int, default=12,
                         help="Max zoom for terrain tiles (default: 12)")
+    parser.add_argument("--satellite-dir", metavar="PATH", default=None,
+                        help="With --projection: a folder of 256-pixel AVIF imagery "
+                             "tiles made for the map (tools/polar_data.py satellite), "
+                             "to --satellite-zoom")
     parser.add_argument("--terrain-dir", metavar="PATH", default=None,
                         help="Directory for terrain tile cache (default: terrain_cache/)")
     parser.add_argument("--workers", type=int, default=None,
@@ -1462,6 +1466,24 @@ def _satellite_and_terrain(
             args.satellite_source, satellite_format, satellite_tile_size)[1]
     if include_terrain and bbox_str:
         terrain_dir = args.terrain_dir or os.path.join(CACHE_DIR, "terrain_cache")
+    if getattr(args, "projection", None):
+        # The box is in map positions: the imagery and the DEM at those
+        # coordinates are of another place. The tiles were made for this map
+        # (streetzim/polar_satellite.py, polar_terrain.py) and are taken as
+        # they are.
+        satellite_dir = args.satellite_dir if include_satellite else None
+        for what, flag, folder, zoom in (
+                ("Satellite", "satellite", satellite_dir, satellite_download_zoom),
+                ("Terrain", "terrain", terrain_dir, terrain_max_zoom)):
+            if not folder:
+                continue
+            top = os.path.join(folder, str(zoom))
+            if not (os.path.isdir(top) and os.listdir(top)):
+                raise RuntimeError(f"--{flag}-dir {folder} has no tile at zoom "
+                                   f"{zoom} (--{flag}-zoom)")
+            print()
+            print(f"    {what} tiles: {folder}, as made for this map")
+        return satellite_dir, terrain_dir
 
     # Satellite and terrain come after the Wikidata and routing phases.
     step_sat = 5 + (1 if include_wikidata else 0) + (1 if include_routing else 0)
@@ -1516,6 +1538,9 @@ def _verify_terrain(*, args, bbox_str, include_terrain, terrain_dir, terrain_max
     # cell edges) may have partial zero data if generated from a VRT that
     # didn't include all neighboring cells.
     world_vrt = getattr(args, "low_zoom_world_vrt", None)
+    if getattr(args, "projection", None):
+        # Nothing to check the tiles against: the DEM is in real positions.
+        return
     if include_terrain and bbox_str and terrain_min_zoom is None:
         # From the whole area, as generate_terrain_tiles does.
         terrain_min_zoom = _terrain.terrain_min_zoom(
@@ -2133,6 +2158,21 @@ def main(argv=None):
                          f"is --language {args.language} ({_languages.iso639_3(args.language)})")
     if args.cpus is not None and args.cpus < 1:
         parser.error("--cpus must be at least 1")
+    if args.projection and args.terrain and not args.terrain_dir:
+        parser.error("--projection: --terrain needs --terrain-dir, a folder of tiles "
+                     "made for this map (tools/polar_data.py terrain)")
+    if args.satellite_dir and not args.projection:
+        parser.error("--satellite-dir is for a map with --projection; any other "
+                     "map's imagery is downloaded")
+    if args.projection and args.satellite:
+        if not args.satellite_dir or args.satellite_zoom is None:
+            parser.error("--projection: --satellite needs --satellite-dir, a folder of "
+                         "tiles made for this map (tools/polar_data.py satellite), and "
+                         "--satellite-zoom, its deepest zoom")
+        if args.satellite_format != "avif" or args.satellite_tile_size != 256:
+            parser.error("--projection: the tiles of --satellite-dir are 256-pixel AVIF")
+        # Not a choice: the Web Mercator mosaics are of other places.
+        args.satellite_source = satellite_sources.POLAR.key
     _cpus.set_build_cpus(args.cpus)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be greater than zero")
@@ -2176,7 +2216,8 @@ def main(argv=None):
     if include_satellite:
         sat_desc = f"{satellite_format} q{satellite_quality} {satellite_tile_size}px"
         _src = satellite_sources.get(args.satellite_source)
-        print(f"  Including Sentinel-2 satellite imagery (z0-{satellite_max_zoom}, {sat_desc}); "
+        _whose = "Blue Marble" if args.projection else "Sentinel-2"
+        print(f"  Including {_whose} satellite imagery (z0-{satellite_max_zoom}, {sat_desc}); "
               f"{_src.key}, {_src.license}")
         if _src.noncommercial:
             print("  " + "!" * 72)

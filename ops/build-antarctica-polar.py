@@ -17,9 +17,13 @@ unchanged:
   3. tiles: tilemaker from the image region-ml-tiles.py would use for this
      checkout, with the tile profile's layers less the real-world files and
      the same label languages as any other map;
-  4. create_osm_zim.py --projection antarctic-polar, with routing, search
-     and the sign reader. No imagery, terrain or Wikipedia: their sources
-     are in real positions, and nothing moves them yet.
+  4. terrain: every tile pixel's elevation read from the terrain cache's
+     DEM cells at the real place it stands for (streetzim/polar_terrain.py);
+  5. imagery: NASA's Blue Marble, which GIBS serves in the map's own
+     positions, fetched once and cut into tiles (streetzim/polar_satellite.py);
+  6. create_osm_zim.py --projection antarctic-polar, with routing, search,
+     terrain, imagery and the sign reader. No Wikipedia: its places are in
+     real positions, and nothing moves them yet.
 """
 import argparse
 import hashlib
@@ -33,12 +37,15 @@ CODE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, CODE)
 sys.path.insert(0, os.path.join(CODE, "tools"))
 import polar_data  # noqa: E402
-from streetzim import polar  # noqa: E402
+from streetzim import polar, polar_satellite, polar_terrain  # noqa: E402
+from streetzim.satellite import satellite_cache_dirs  # noqa: E402
 
 ID = "antarctica-polar"
 NAME = "Antarctica with the South Pole"
 BBOX = "-31,-30,31,30"
 CONTAINER = "streetzim-polar-build"
+# About 38 m a pixel at 71 S: what the 30 m DEM holds.
+TERRAIN_ZOOM = 12
 XAPIANBUILDER = "/home/ot/experiments/xapianbuilder/target/release/xapianbuilder"
 
 
@@ -129,6 +136,10 @@ def main(argv=None):
     ap.add_argument("--extract", required=True, help="everything south of 60 S, real positions")
     ap.add_argument("--work", required=True, help="where the moved data and the tiles are kept")
     ap.add_argument("--output", required=True, help="the ZIM")
+    ap.add_argument("--dem", default=os.path.join(CODE, "terrain_cache", "dem_sources"),
+                    help="the terrain cache's DEM cells")
+    ap.add_argument("--imagery", default=satellite_cache_dirs(polar_satellite.SOURCE.key)[0],
+                    help="where the imagery's source tiles are kept")
     ap.add_argument("--cpus", type=int, default=6)
     ap.add_argument("--name", default=NAME)
     a, extra = ap.parse_known_args(argv)
@@ -145,6 +156,11 @@ def main(argv=None):
     ocean = os.path.join(work, "polar", "ocean.geojson")
     cfg = os.path.join(work, "cfg", "config-polar.json")
     mbtiles = os.path.join(work, "polar.mbtiles")
+    terrain = os.path.join(work, "terrain")
+    satellite = os.path.join(work, "satellite")
+    box = tuple(float(v) for v in BBOX.split(","))
+    if not os.path.isdir(a.dem):
+        raise SystemExit(f"FATAL: no DEM cells at {a.dem} (--dem)")
 
     def do_move():
         n, left = polar_data.move(a.extract, moved)
@@ -158,11 +174,19 @@ def main(argv=None):
         if not pole:
             raise SystemExit("FATAL: the coastline does not close around the pole")
 
-    say("[1/4] moving the extract")
+    def do_terrain():
+        counts = polar_terrain.build(terrain, TERRAIN_ZOOM, a.dem, workers=a.cpus, say=say)
+        if not counts[TERRAIN_ZOOM]:
+            raise SystemExit(f"FATAL: no terrain tile from {a.dem}: not the DEM of the far south")
+
+    def do_satellite():
+        polar_satellite.build(satellite, a.imagery, box, workers=a.cpus, say=say)
+
+    say("[1/6] moving the extract")
     step(moved, identity(a.extract), do_move)
-    say("[2/4] the sea")
+    say("[2/6] the sea")
     step(ocean, identity(moved), do_ocean)
-    say("[3/4] tiles")
+    say("[3/6] tiles")
     polar_data.write_tile_config(os.path.join(CODE, *ml.PROFILE[0].split("/")[2:]), cfg, "polar/ocean.geojson")
     with open(cfg, "rb") as f:
         cfg_hash = hashlib.sha256(f.read()).hexdigest()
@@ -170,7 +194,17 @@ def main(argv=None):
     made_from = hashlib.sha256(made_from.encode()).hexdigest()
     step(mbtiles, made_from, lambda: tiles(ml, moved, os.path.dirname(ocean), cfg, mbtiles, langs, a.cpus))
 
-    say("[4/4] the ZIM")
+    say("[4/6] terrain")
+    step(terrain, polar_terrain.made_from(a.dem, TERRAIN_ZOOM), do_terrain)
+
+    say("[5/6] imagery")
+    try:
+        polar_satellite.fetch(a.imagery, say=say)
+    except RuntimeError as e:
+        raise SystemExit(f"FATAL: the imagery could not be fetched: {e}") from None
+    step(satellite, polar_satellite.made_from(a.imagery, box), do_satellite)
+
+    say("[6/6] the ZIM")
     writer = ["--zim-builder=python", "--xapian=libzim"]
     if os.access(XAPIANBUILDER, os.X_OK):
         writer = ["--zim-builder=manifest", "--xapian=builder", f"--xapianbuilder-bin={XAPIANBUILDER}"]
@@ -178,6 +212,9 @@ def main(argv=None):
            "--pbf", moved, "--mbtiles", mbtiles, f"--bbox={BBOX}",
            "--projection", polar.NAME, "--name", a.name, "--map-zoom", "3",
            "--cpus", str(a.cpus), "--no-admin-areas",
+           "--terrain", "--terrain-zoom", str(TERRAIN_ZOOM), "--terrain-dir", terrain,
+           "--satellite", "--satellite-zoom", str(polar_satellite.TOP_ZOOM),
+           "--satellite-dir", satellite,
            "--routing", "--spatial-chunk-scale", "10",
            "--split-hot-search-chunks-mb", "10", "--split-find-chips",
            "--ocr", "--no-llm-bundle",

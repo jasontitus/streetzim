@@ -268,6 +268,15 @@ def _chk_terrain_edge_stripe(arc, cfg) -> tuple[str, str]:
         lat_s = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
         return (lon_w, lat_s, lon_e, lat_n)
 
+    # A map in map positions (streetzim/polar.py): the DEM is asked at the
+    # real place a tile's edge stands for, and past the map's edge there is
+    # nothing to miss.
+    polar = None
+    if cfg.get("projection"):
+        from streetzim import polar
+        if cfg["projection"] != polar.NAME:
+            return ("fail", f"terrain in an unknown projection: {cfg['projection']!r}")
+
     def edge_is_ocean(z, x, y, side):
         """True if the VRT shows nodata at the tile's left or right
         midline (i.e. that edge is open ocean, not missing land)."""
@@ -276,6 +285,10 @@ def _chk_terrain_edge_stripe(arc, cfg) -> tuple[str, str]:
         lon_w, lat_s, lon_e, lat_n = tile_bounds(z, x, y)
         lat_mid = (lat_s + lat_n) / 2
         lon = lon_w if side == "left" else lon_e - 1e-6
+        if polar is not None:
+            lon, lat_mid = polar.to_true(lon, lat_mid)
+            if lat_mid > polar.EDGE_LAT:
+                return True
         try:
             val = list(vrt_src.sample([(lon, lat_mid)]))[0][0]
             return (vrt_nodata is not None and val == vrt_nodata) or abs(val) < 1
@@ -1930,6 +1943,11 @@ def _audit_tiles(arc) -> tuple[str, str]:
         "satellite": int(cfg.get("satelliteMaxZoom") or 0) or None,
         "terrain": int(cfg.get("terrainMaxZoom") or 0) or None,
     }
+    # A map in map positions (streetzim/polar_terrain.py) has a terrain tile
+    # only where there is land, and its flat ice makes tiles as small as an
+    # empty one. Nor has it a vector tile where nothing is mapped: the ice
+    # sheet's inside, the box's corners past the map's edge.
+    own_terrain = bool(cfg.get("projection"))
 
     counts: dict[tuple[str, int], int] = {}
     # Blank-tile ledger: (kind, zoom) → list of (path, size) for tiles ≤
@@ -1998,7 +2016,8 @@ def _audit_tiles(arc) -> tuple[str, str]:
             per_zoom_summary.append(f"z{z}={actual}/{expected}({frac*100:.0f}%)")
 
             # Gate 1: coarse zoom must be complete.
-            if z <= COARSE_ZOOM_CUTOFF and actual < expected:
+            if (z <= COARSE_ZOOM_CUTOFF and actual < expected
+                    and not (kind in ("terrain", "vector") and own_terrain)):
                 fails.append(
                     f"{kind}-z{z}: {actual}/{expected} — every "
                     f"coarse-zoom cell should be populated"
@@ -2028,7 +2047,7 @@ def _audit_tiles(arc) -> tuple[str, str]:
     for (kind, z), tiles in blanks.items():
         if kind == "terrain":
             terrain_blanks_by_z[z] = len(tiles)
-    if terrain_blanks_by_z:
+    if terrain_blanks_by_z and not own_terrain:
         total_blank = sum(terrain_blanks_by_z.values())
         per_z = ", ".join(f"z{z}={n}" for z, n in sorted(terrain_blanks_by_z.items()))
         # Include up to 3 concrete tile paths so the person debugging

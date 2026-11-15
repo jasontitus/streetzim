@@ -42,20 +42,61 @@ The script moves the extract (`tools/polar_data.py move`), derives the sea
 from the extract's own coastline (`ocean`: the world water polygons the tile
 profile reads are in real positions), runs tilemaker from the same image as
 any other map with a layer file that reads no real-world file
-(`tile-config`), and builds the ZIM. `--regate` runs the usual gates and
+(`tile-config`), makes the terrain (`terrain`) and the imagery
+(`satellite`), and builds the ZIM. `--regate` runs the usual gates and
 uploads.
+
+## Terrain
+
+The DEM is in real positions, so a terrain tile cannot be cut from it the
+way any other map's is. `streetzim/polar_terrain.py` goes the other way:
+for every pixel of a map tile it finds the real place the pixel stands for
+and reads the elevation there, between the four nearest samples of the
+Copernicus cells the terrain cache holds (`terrain_cache/dem_sources`; they
+reach the pole). Zoom 12, about 38 m a pixel, is made from the DEM; each
+zoom below it is the mean of the four tiles under it. A tile with no land
+is not written, at any zoom, and `create_osm_zim.py --projection --terrain
+--terrain-dir DIR` takes the folder as it is.
+
+The first run reads some 7,000 cells and takes a few hours; a stopped run
+goes on where it was, and a rerun of the script reuses the tiles while the
+cells are unchanged. The validator knows such a map by its `projection`:
+it asks the DEM about a tile's empty side at the real place, and does not
+expect tiles over the sea or take a small tile of flat ice for a blank.
+
+## Imagery
+
+The Sentinel-2 mosaics other maps use are Web Mercator tiles: they end at
+85° S, and over the ice sheet they are a plain white fill. This map has
+NASA's Blue Marble instead, which NASA's Global Imagery Browse Services
+(GIBS) serve in EPSG:3031, the positions the map draws in. So nothing is
+reprojected: `streetzim/polar_satellite.py` fetches the picture once (1,024
+tiles, 512 m a pixel, kept beside the other imagery caches), and every map
+tile is a piece of it, cut out and scaled. Zoom 9 keeps all the picture
+has; the imagery layer stops there while the map zooms on. Every tile of the
+map's box is written, the sea too, and `create_osm_zim.py --projection
+--satellite --satellite-zoom 9 --satellite-dir DIR` takes the folder as it
+is.
+
+The source is `satellite_sources.POLAR`. It is not a choice of
+`--satellite-source` (no Web Mercator map can be built from it); a polar
+map has it whatever source is named. NASA does not copyright the picture and
+asks for a credit: the map shows "Blue Marble, NASA (GIBS)", and the About
+panel and the ZIM's License metadata carry the acknowledgement GIBS asks
+for.
 
 A new viewer reaches this map the same way: the viewer rollout
 (`ops/langpack/fresh_all.py`) skips it, because the rollout's gates open a
 Wikipedia article, and a rerun of the script reuses the moved extract, the
-sea and the tiles while the extract is unchanged.
+sea, the tiles, the terrain and the imagery while what they were made from
+is unchanged.
 
 ## What is not there yet
 
-Satellite imagery, terrain and Wikipedia articles: their sources are in
-real positions and nothing moves them yet. Administrative areas are left
-out for the same reason. A reader far from Antarctica who presses the
-locate button is told the position is not on this map.
+Wikipedia articles: their coordinates are real positions and nothing moves
+them yet. Administrative areas are left out for the same reason. A reader
+far from Antarctica who presses the locate button is told the position is
+not on this map.
 
 Between 60° S and 71° S the route search's estimate of the distance left
 can be up to 4% too long, so a route there may be slightly longer than the

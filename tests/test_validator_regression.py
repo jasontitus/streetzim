@@ -664,3 +664,126 @@ def test_terrain_coverage_starts_at_terrain_min_zoom(tmp_path: Path, tmin: int):
         assert r.status == "pass" and "terrain: z9=1/1" in r.detail, r.detail
     else:
         assert r.status == "fail" and "terrain-z0" in r.detail, r.detail
+
+
+# -----------------------------------------------------------------------
+# Terrain of a map in map positions (streetzim/polar.py, polar_terrain.py).
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("projection", [None, "antarctic-polar"])
+def test_a_polar_maps_terrain_is_only_where_there_is_land(tmp_path: Path, projection):
+    """Its terrain has no tile over the sea, at any zoom, and a tile of flat
+    ice is as small as an empty one; it has no vector tile where nothing is
+    mapped. On any other map all three are faults."""
+    import math
+    from libzim.writer import Creator
+    bbox = [10.0, 10.0, 10.001, 10.001]
+
+    def _ll_to_tile(lon, lat, z):
+        n = 1 << z
+        rad = math.radians(lat)
+        return (int((lon + 180) / 360 * n),
+                int((1 - math.log(math.tan(rad) + 1 / math.cos(rad)) / math.pi) / 2 * n))
+    cfg = {"bbox": bbox, "hasTerrain": True, "terrainMaxZoom": 11}
+    if projection:
+        cfg["projection"] = projection
+
+    def build(path, terrain_from, small, vector_from=0):
+        with Creator(str(path)) as cc:
+            for k, v in (("Title", "t"), ("Description", "d"), ("Language", "en"),
+                         ("Creator", "x"), ("Publisher", "x"), ("Date", "2026-11-15"),
+                         ("Name", "n")):
+                cc.add_metadata(k, v)
+            cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
+            cc.set_mainpath("index.html")
+            cc.add_item(_mk_item("map-config.json", "application/json",
+                                 json.dumps(cfg).encode()))
+            for z in range(0, 15):
+                x, y = _ll_to_tile(10.0005, 10.0005, z)
+                if z >= vector_from:
+                    cc.add_item(_mk_item(f"tiles/{z}/{x}/{y}.pbf", "application/x-protobuf",
+                                         b"\x00" * 1024))
+                if terrain_from <= z <= 11:
+                    cc.add_item(_mk_item(f"terrain/{z}/{x}/{y}.webp", "image/webp",
+                                         b"\x00" * (44 if z == small else 2048)))
+            cc.add_item(_mk_item("search-data/manifest.json", "application/json",
+                                 json.dumps({"chunks": {}}).encode()))
+        return _find(_run_validator(path, audit_tiles=True), "tile_coverage")
+
+    sea = build(tmp_path / "sea.zim", 6, None)          # nothing below z6
+    ice = build(tmp_path / "ice.zim", 0, 10)            # a 44-byte tile at z10
+    bare = build(tmp_path / "bare.zim", 0, None, vector_from=6)
+    if projection:
+        assert sea.status == "pass", sea.detail
+        assert ice.status == "pass", ice.detail
+        assert bare.status == "pass", bare.detail
+    else:
+        assert bare.status == "fail" and "vector-z0" in bare.detail, bare.detail
+        assert sea.status == "fail" and "terrain-z0" in sea.detail, sea.detail
+        assert ice.status == "fail" and "blank" in ice.detail, ice.detail
+
+
+def _terrain_zim(tmp_path: Path, cfg: dict, tiles: dict) -> Path:
+    from libzim.writer import Creator
+    zim = tmp_path / f"stripe-{len(list(tmp_path.iterdir()))}.zim"
+    with Creator(str(zim)) as cc:
+        for k, v in (("Title", "t"), ("Description", "d"), ("Language", "en"),
+                     ("Creator", "x"), ("Publisher", "x"), ("Date", "2026-11-15"),
+                     ("Name", "n")):
+            cc.add_metadata(k, v)
+        cc.add_item(_mk_item("index.html", "text/html", b"<html></html>"))
+        cc.set_mainpath("index.html")
+        cc.add_item(_mk_item("map-config.json", "application/json", json.dumps(cfg).encode()))
+        for path, data in tiles.items():
+            cc.add_item(_mk_item(path, "image/webp", data, compress=False))
+    return zim
+
+
+def test_a_polar_maps_edge_stripes_are_judged_at_the_real_place(tmp_path: Path, monkeypatch):
+    """A low-zoom terrain tile with an empty side is a fault unless the DEM
+    says that side is sea. On a polar map the DEM is asked at the real place
+    the tile's side stands for, and past the 60 S circle nothing is missing."""
+    np = pytest.importorskip("numpy")
+    rasterio = pytest.importorskip("rasterio")
+    from rasterio.transform import from_origin
+    from libzim.reader import Archive
+    from streetzim import polar, terrain
+
+    # A world DEM that is land everywhere but between the equator and 30 N:
+    # where these tiles' sides are, read as real positions.
+    root = tmp_path / "root"
+    dem_dir = root / "terrain_cache" / "dem_sources"
+    dem_dir.mkdir(parents=True)
+    world = np.full((180, 360), 500.0, dtype="float32")
+    world[60:90, :] = 0.0
+    with rasterio.open(dem_dir / "comprehensive.vrt", "w", driver="GTiff", width=360, height=180,
+                       count=1, dtype="float32", crs="EPSG:4326",
+                       transform=from_origin(-180, 90, 1, 1)) as dst:
+        dst.write(world, 1)
+    monkeypatch.setattr(validate_zim, "ROOT", root)
+    monkeypatch.delenv("TERRAIN_STRIPE_TOLERATE", raising=False)
+
+    elev = np.full((256, 256), 1000.0, dtype="float32")
+    elev[:, :20] = 0.0
+    terrain.save_terrain_tile(elev, str(tmp_path / "t"), 0, 0, 0)
+    tile = (tmp_path / "t" / "0" / "0" / "0.webp").read_bytes()
+
+    def stripe(tile_path, **cfg):
+        zim = _terrain_zim(tmp_path, {"hasTerrain": True, **cfg}, {tile_path: tile})
+        return validate_zim._chk_terrain_edge_stripe(Archive(str(zim)), {"hasTerrain": True, **cfg})
+
+    # z4 7/7: its left side is 65 S on the map, inside the circle, where the
+    # DEM has land. As real coordinates (22.5 W, 11 N) it would be sea.
+    inside = "terrain/4/7/7.webp"
+    lat = polar.to_true(-22.5, 11.2)[1]
+    assert -90 < lat < polar.EDGE_LAT
+    assert stripe(inside, projection=polar.NAME)[0] == "fail"
+    assert stripe(inside)[0] == "pass"
+    # z3 3/3: its left side is past the circle. The real place it would stand
+    # for (Patagonia) has land in the DEM, and the map has nothing there.
+    outside = "terrain/3/3/3.webp"
+    lon, lat = polar.to_true(-45.0, 21.9)
+    assert lat > polar.EDGE_LAT and world[int(90 - lat), int(lon + 180)] == 500.0
+    assert stripe(outside, projection=polar.NAME)[0] == "pass"
+    assert stripe(outside, projection="some-other")[0] == "fail"

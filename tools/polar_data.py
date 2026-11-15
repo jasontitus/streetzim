@@ -2,8 +2,8 @@
 """The inputs of a polar map (streetzim/polar.py, create_osm_zim --projection).
 
 A polar map is built from data that has already been moved to its "map"
-positions. Three steps make that data from a real extract of everything
-south of 60 S:
+positions. These steps make that data from a real extract of everything
+south of 60 S, and from the terrain cache's DEM cells:
 
     polar_data.py move REAL.osm.pbf MOVED.osm.pbf
         Every node at its map position. Ways and relations are copied.
@@ -16,9 +16,18 @@ south of 60 S:
         The tile profile's layer file with the sea read from OCEAN-PATH (as
         tilemaker will see it) and without the layers that come from other
         real-position world files (urban areas, ice shelves, glaciers).
+    polar_data.py terrain DEM-DIR OUT-DIR ZOOM [WORKERS]
+        Terrain tiles for zooms 0..ZOOM, each pixel's elevation read from
+        the Copernicus cells in DEM-DIR at the real place it stands for
+        (streetzim/polar_terrain.py).
+    polar_data.py satellite CACHE-DIR OUT-DIR BOX [WORKERS]
+        Imagery tiles of BOX (west,south,east,north in map positions) cut
+        from NASA's Blue Marble, whose source tiles are fetched into
+        CACHE-DIR once (streetzim/polar_satellite.py).
 
 tilemaker then runs on MOVED.osm.pbf with OUT.json and the box
--31,-30,31,30, and create_osm_zim on its tiles with --projection.
+-31,-30,31,30, and create_osm_zim on its tiles with --projection (and
+--terrain --terrain-dir, --satellite --satellite-dir).
 """
 import json
 import os
@@ -175,6 +184,27 @@ def main(argv=None):
             raise SystemExit("the coastline does not close around the pole: the sea would cover the continent")
     elif len(argv) == 4 and argv[0] == "tile-config":
         write_tile_config(argv[1], argv[2], argv[3])
+    elif len(argv) in (4, 5) and argv[0] == "terrain":
+        from streetzim import polar_terrain
+        counts = polar_terrain.build(argv[2], int(argv[3]), argv[1],
+                                     workers=int(argv[4]) if len(argv) == 5 else 1,
+                                     say=lambda m: print(m, flush=True))
+        print(f"terrain: {sum(counts.values())} tiles", flush=True)
+        if not counts[int(argv[3])]:
+            raise SystemExit("no terrain tile was made: is this the DEM of the far south?")
+    elif len(argv) in (4, 5) and argv[0] == "satellite":
+        from streetzim import polar_satellite
+
+        def say(m):
+            print(m, flush=True)
+
+        box = tuple(float(v) for v in argv[3].split(","))
+        if len(box) != 4:
+            raise SystemExit("BOX is west,south,east,north")
+        polar_satellite.fetch(argv[1], say=say)
+        counts = polar_satellite.build(argv[2], argv[1], box, say=say,
+                                       workers=int(argv[4]) if len(argv) == 5 else 4)
+        print(f"satellite: {sum(counts.values())} tiles", flush=True)
     else:
         raise SystemExit(__doc__)
 

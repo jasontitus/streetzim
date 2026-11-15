@@ -322,3 +322,24 @@ def test_legacy_satellite_license_unchanged_in_substance(tmp_path):
     lic = md["License"].decode()
     assert lic.startswith("Non-commercial use only") and NC.license_metadata in lic
     assert md["Flavour"] == b"maxi"
+
+
+def test_the_polar_imagery_is_no_choice_of_source_but_has_its_credit():
+    polar = ss.POLAR
+    assert polar.key not in ss.SOURCES and ss.get(polar.key) is polar
+    with pytest.raises(ValueError, match=r"s2cloudless-2016, s2cloudless-2021$"):
+        ss.get("bluemarble")
+    assert polar.tile_url.format(z=4, y=3, x=7) == (
+        "https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/"
+        "BlueMarble_ShadedRelief_Bathymetry/default/500m/4/3/7.jpeg")
+    # EOX's tiles are found by the layer.
+    assert ss.SOURCES["s2cloudless-2016"].tile_url.format(z=1, y=2, x=3) == (
+        "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/1/2/3.jpg")
+    cfg = ss.map_config(polar)
+    assert cfg["satelliteCredit"] == "Blue Marble, NASA (GIBS)"
+    assert cfg["satelliteSource"] == polar.key and "satelliteRestricted" not in cfg
+    assert "NASA's Global Imagery Browse Services (GIBS)" in cfg["satelliteAttribution"]
+    assert not polar.noncommercial and ss.flavour(polar) == ss.FLAVOUR_FREE
+    assert polar.license_metadata.startswith("Satellite imagery: Public domain, https://")
+    for src in ss.SOURCES.values():
+        assert "satelliteCredit" not in ss.map_config(src)

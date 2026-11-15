@@ -18,6 +18,12 @@ from EOX's public WMTS. EOX licenses each year separately; as published on
   them commercially needs a licence bought from EOX.
 
 The attribution strings are the ones that page requires for each year.
+
+A map in a projection of its own (streetzim/polar.py) cannot use them: they
+are Web Mercator tiles. Its imagery is NASA's Blue Marble, which NASA's
+Global Imagery Browse Services (GIBS) serve in Antarctic polar stereographic
+(EPSG:3031); NASA does not copyright it and asks to be credited
+(POLAR, streetzim/polar_satellite.py).
 """
 from __future__ import annotations
 
@@ -27,17 +33,19 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SatelliteSource:
     key: str               # what --satellite-source takes
-    layer: str             # EOX WMTS layer id (Web Mercator)
-    year: str              # the mosaic's year, as EOX names it
+    layer: str             # WMTS layer id (EOX's are Web Mercator)
+    year: str              # the mosaic's year, as its maker names it
     license: str           # short licence name
     license_url: str
     noncommercial: bool
-    attribution: str       # the text EOX requires wherever the imagery is shown
+    attribution: str       # the text its maker requires wherever the imagery is shown
+    url: str = ""          # its tiles, when they are not EOX's
+    credit: str = ""       # and the short credit shown on the map with them
 
     @property
     def tile_url(self) -> str:
-        return (f"https://tiles.maps.eox.at/wmts/1.0.0/{self.layer}"
-                "/default/g/{z}/{y}/{x}.jpg")
+        return self.url or (f"https://tiles.maps.eox.at/wmts/1.0.0/{self.layer}"
+                            "/default/g/{z}/{y}/{x}.jpg")
 
     @property
     def license_metadata(self) -> str:
@@ -77,7 +85,27 @@ TAG = "satellite"
 TAG_NONCOMMERCIAL = "non-commercial"
 
 
+# The imagery of a polar map. Not in SOURCES: no Web Mercator map can be
+# built from it, so it is not a choice of --satellite-source.
+POLAR = SatelliteSource(
+    key="bluemarble-antarctic", layer="BlueMarble_ShadedRelief_Bathymetry", year="2004",
+    license="Public domain",
+    license_url="https://www.earthdata.nasa.gov/engage/open-data-services-software-policies",
+    noncommercial=False,
+    # The second sentence is the acknowledgement GIBS asks for, word for word
+    # (https://nasa-gibs.github.io/gibs-api-docs/).
+    attribution="Blue Marble: Next Generation, NASA Earth Observatory. We acknowledge "
+                "the use of imagery provided by services from NASA's Global Imagery "
+                "Browse Services (GIBS), part of NASA's Earth Science Data and "
+                "Information System (ESDIS).",
+    credit="Blue Marble, NASA (GIBS)",
+    url="https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/"
+        "BlueMarble_ShadedRelief_Bathymetry/default/500m/{z}/{y}/{x}.jpeg")
+
+
 def get(key: str) -> SatelliteSource:
+    if key == POLAR.key:
+        return POLAR
     try:
         return SOURCES[key]
     except KeyError:
@@ -116,7 +144,11 @@ def restricted_note(src: SatelliteSource) -> str:
 
 def map_config(src: SatelliteSource) -> dict[str, str | bool]:
     """What the viewer needs to credit the imagery (map-config.json)."""
-    return {"satelliteSource": src.key, "satelliteYear": src.year,
-            "satelliteLicense": src.license, "satelliteLicenseUrl": src.license_url,
-            "satelliteAttribution": src.attribution,
-            "satelliteNonCommercial": src.noncommercial}
+    cfg: dict[str, str | bool] = {
+        "satelliteSource": src.key, "satelliteYear": src.year,
+        "satelliteLicense": src.license, "satelliteLicenseUrl": src.license_url,
+        "satelliteAttribution": src.attribution,
+        "satelliteNonCommercial": src.noncommercial}
+    if src.credit:
+        cfg["satelliteCredit"] = src.credit
+    return cfg

@@ -465,9 +465,12 @@ function _szEsc(s) {
 // The short credit on the map itself while the imagery is shown (the full
 // one is in About): links are fixed EOX addresses, and the licence link only
 // a Creative Commons 4.0 URL; everything taken from map-config is escaped.
+// Imagery that is not EOX's names its own short credit (satelliteCredit),
+// shown as it is.
 function _szSatelliteCreditHtml(config) {
   var sat = _szSatellite(config);
   if (!sat) return '';
+  if (config.satelliteCredit) return _szEsc(config.satelliteCredit);
   var year = sat.year || (config.satelliteAttribution ? '' : '2021');
   var lic = _szEsc(sat.license);
   if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {

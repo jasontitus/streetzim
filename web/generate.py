@@ -294,7 +294,7 @@ REGIONS = [
         "tier": "continent",
         "title": "Antarctica with the South Pole",
         "zim_file": "osm-antarctica-polar.zim",
-        "description": "All of Antarctica, with the South Pole &mdash; McMurdo Station, the Amundsen&ndash;Scott South Pole Station, Vostok Station, the Antarctic Peninsula and the Ross Ice Shelf. Drawn in a polar projection: the South Pole is in the middle and north is not at the top. No satellite imagery, terrain or Wikipedia articles yet.",
+        "description": "All of Antarctica, with the South Pole &mdash; McMurdo Station, the Amundsen&ndash;Scott South Pole Station, Vostok Station, the Antarctic Peninsula and the Ross Ice Shelf. Drawn in a polar projection: the South Pole is in the middle and north is not at the top. No Wikipedia articles yet.",
     },
     # ── Multi-country regions ────────────────────────────────────────
     {

@@ -52,7 +52,6 @@ def _generate_one_terrain_tile(args):
     from rasterio.warp import reproject, Resampling, transform_bounds
     from rasterio.transform import from_bounds
     import numpy as np
-    from PIL import Image
 
     tile_bounds_3857 = transform_bounds(
         "EPSG:4326", "EPSG:3857", tb_west, tb_south, tb_east, tb_north
@@ -88,8 +87,23 @@ def _generate_one_terrain_tile(args):
         resampling=Resampling.cubic,
     )
 
-    elev = elevation[0, HALO:HALO + 256, HALO:HALO + 256]
-    elev = np.round(elev / 10.0) * 10.0  # quantize to 10m for ~74% compression savings
+    save_terrain_tile(elevation[0, HALO:HALO + 256, HALO:HALO + 256],
+                      dest_dir_local, z, tile_x, tile_y)
+
+
+def quantize_terrain(elev):
+    """Elevations (m) as a tile stores them: in 10 m steps (~74% smaller)."""
+    import numpy as np
+    return np.round(elev / 10.0) * 10.0
+
+
+def save_terrain_tile(elev, dest_dir_local, z, tile_x, tile_y):
+    """Write the 256x256 elevations `elev` (m) as the terrain-RGB tile
+    z/tile_x/tile_y under `dest_dir_local`."""
+    import numpy as np
+    from PIL import Image
+
+    elev = quantize_terrain(elev)
     encoded = ((elev + 10000.0) / 0.1).astype(np.uint32)
     encoded = np.clip(encoded, 0, 16777215)
 

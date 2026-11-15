@@ -4682,7 +4682,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '8bc4dbff';
+var SZ_VIEWER_BUILD = '7776701d';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -5005,6 +5005,7 @@ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt
 function _szSatelliteCreditHtml(config) {
 var sat = _szSatellite(config);
 if (!sat) return '';
+if (config.satelliteCredit) return _szEsc(config.satelliteCredit);
 var year = sat.year || (config.satelliteAttribution ? '' : '2021');
 var lic = _szEsc(sat.license);
 if (/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/4\.0\/$/.test(sat.licenseUrl)) {

@@ -641,6 +641,11 @@ await ok('on-map satellite credit: short, linked, escaped, wired into the source
   assert.match(nc, /EOxCloudless<\/a> 2021 .*CC BY-NC-SA 4\.0<\/a> \(non-commercial\)$/);
   assert.match(v._szSatelliteCreditHtml({ hasSatellite: true }), /EOxCloudless<\/a> 2021 .*CC BY-NC-SA 4\.0/);
   assert.strictEqual(v._szSatelliteCreditHtml({}), '');
+  // Imagery that is not EOX's is not credited to EOX.
+  assert.strictEqual(v._szSatelliteCreditHtml({ hasSatellite: true, satelliteYear: '2004',
+    satelliteLicense: 'Public domain', satelliteAttribution: 'long', satelliteCredit: 'Blue Marble, NASA <b>' }),
+    'Blue Marble, NASA &lt;b&gt;');
+  assert.strictEqual(v._szSatelliteCreditHtml({ satelliteCredit: 'x' }), '');
   // map-config values are data: escaped, and only a CC 4.0 URL becomes a link.
   const bad = v._szSatelliteCreditHtml({ hasSatellite: true, satelliteYear: '<img src=x onerror=alert(1)>',
     satelliteLicense: '<b>L</b>', satelliteLicenseUrl: 'javascript:alert(1)', satelliteAttribution: 'a' });
