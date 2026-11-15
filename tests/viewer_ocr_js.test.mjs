@@ -1485,4 +1485,80 @@ ok('a vertical Chinese board read one character at a time is one line, top to bo
   assert.deepStrictEqual(texts([box('五', 0, 0), box('福', 46, 0), box('商', 92, 0), box('店', 138, 0)]), ['五福商店']);
 });
 
+// The bar under the head (sign-progress): shown while a photo is read and
+// searched, forward only, creeping between steps, gone with the answer.
+{
+  const make = () => {
+    const ticks = [];
+    const fill = { style: { width: '' } };
+    const el = { hidden: true, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+    const B = new Function('barEl', 'barFill', 'bar', 'BAR_READ', 'setInterval', 'clearInterval',
+      slice(HTML, '// BEGIN sign-progress', '// END sign-progress') +
+      '\nreturn { barGo, barStep, barStart, barStop, loadStep, bar };')(
+      el, fill, { on: false, at: 0, to: 0, load: 0, timer: null }, 0.9,
+      (fn) => { ticks.push(fn); return ticks.length; }, (id) => { if (id) ticks[id - 1] = null; });
+    const tick = (n) => { for (let i = 0; i < n; i++) ticks.forEach((f) => f && f()); };
+    return { B, el, fill, tick, ticks };
+  };
+  ok('progress: nothing moves before a reading starts', () => {
+    const { B, el } = make();
+    B.barGo(0.5, 0.6); B.barStep(0, 1, 1, 2);
+    assert.equal(B.bar.at, 0);
+    assert.equal(el.hidden, true);
+  });
+  ok('progress: a reading shows the bar and it creeps toward the step under way', () => {
+    const { B, el, fill, tick, ticks } = make();
+    B.barStart();
+    assert.equal(el.hidden, false);
+    assert.equal(ticks.length, 1);
+    B.barStart();
+    assert.equal(ticks.length, 1, 'one timer, however often it starts');
+    B.barStep(0, 0.9, 1, 3);
+    assert.ok(Math.abs(B.bar.at - 0.3) < 1e-9 && Math.abs(B.bar.to - 0.6) < 1e-9);
+    assert.equal(fill.style.width, '30.0%');
+    assert.equal(el.attrs['aria-valuenow'], '30');
+    let last = B.bar.at;
+    for (let i = 0; i < 200; i++) { tick(1); assert.ok(B.bar.at >= last && B.bar.at < 0.6); last = B.bar.at; }
+    assert.ok(B.bar.at > 0.59, 'close to the end of the step, never past it');
+  });
+  ok('progress: never goes back, never past the end', () => {
+    const { B } = make();
+    B.barStart();
+    B.barGo(0.7, 0.8);
+    B.barGo(0.2, 0.3);
+    assert.equal(B.bar.at, 0.7); assert.equal(B.bar.to, 0.8);
+    B.barStep(0, 0.9, 9, 3);
+    assert.equal(B.bar.at, 0.9); assert.equal(B.bar.to, 0.9);
+    B.barGo(3, 4);
+    assert.equal(B.bar.at, 1); assert.equal(B.bar.to, 1);
+  });
+  ok('progress: steps not yet counted take a third each', () => {
+    const { B } = make();
+    B.barStart();
+    B.barStep(0.3, 0.9, 1, 0);
+    assert.ok(Math.abs(B.bar.at - 0.5) < 1e-9 && Math.abs(B.bar.to - 0.7) < 1e-9);
+  });
+  ok('progress: loading takes a share only while the reader is not up', () => {
+    const { B } = make();
+    B.barStart();
+    B.loadStep(5, 10);
+    assert.equal(B.bar.at, 0, 'no share: the reader is up');
+    B.bar.load = 0.5;
+    B.loadStep(5, 10);
+    assert.ok(Math.abs(B.bar.at - 0.25) < 1e-9 && Math.abs(B.bar.to - 0.3) < 1e-9);
+  });
+  ok('progress: the answer hides the bar and the next photo starts from the left', () => {
+    const { B, el, ticks } = make();
+    B.barStart(); B.barGo(0.92, 0.985);
+    B.barStop();
+    assert.equal(el.hidden, true);
+    assert.equal(B.bar.on, false); assert.equal(B.bar.at, 0); assert.equal(B.bar.timer, null);
+    assert.equal(ticks[0], null, 'the timer is cleared');
+    B.barStart();
+    assert.equal(el.hidden, false);
+    assert.ok(B.bar.at <= 0.03 && B.bar.to === 0.05);
+    assert.equal(ticks.length, 2);
+  });
+}
+
 console.log(`${pass} passed`);

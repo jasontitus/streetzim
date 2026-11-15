@@ -6,8 +6,8 @@
    (305-ocr-search.js) fetches every file itself -- this worker runs from a
    blob: URL, as routing-worker.js does, and a ZIM reader may not serve a
    worker's own requests -- and posts:
-     {type: 'load', engine, wasm, det: {model, preset}, rec: [{script, model, dict, reverse}]}
-     {type: 'read', id, image: {width, height, data}}
+     {type: 'load', steps, engine, wasm, det: {model, preset}, rec: [{script, model, dict, reverse}]}
+     {type: 'read', id, steps, image: {width, height, data}}
    engine is the text of ocr/ocr-engine.js (ONNX Runtime Web and the
    paddleocr runtime, vendored: tools/pin_viewer_assets.py --ocr), wasm the
    bytes of ONNX Runtime's WebAssembly, the models' bytes and dictionaries
@@ -18,6 +18,10 @@
    readable one ({text, confidence, script}), which the page puts together
    where they read different parts of a line (_szSignCompose: the digits
    of "2912 طريق" from the Latin model, the word from the Arabic one).
+   Asked with `steps`, it also says how far it is, for the page's progress
+   bar: {type: 'loading', done, of} as each model is ready and {type:
+   'step', id, done, of} as the detector and each recognizer finish a
+   photo. A page that does not ask (an older one) gets none.
    The page runs its own copy of this file (tools/build_viewer.py inlines it
    as part 026), so a viewer swap updates it; ocr/ocr-worker.js in the ZIM
    is what an older page runs. */
@@ -35,7 +39,10 @@ function load(m) {
   ort.env.logLevel = 'error';         // not the models' unused-initializer warnings
   var opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
   var preset = SZOCR.getModelPresetOptions(m.det.preset);
+  var of = 1 + m.rec.length, done = 0;
+  var say = function () { done++; if (m.steps) self.postMessage({ type: 'loading', done: done, of: of }); };
   var det = ort.InferenceSession.create(new Uint8Array(m.det.model), opts).then(function (s) {
+    say();
     return new SZOCR.DetectionService(ort, s, Object.assign({}, preset.detection, m.det.options || {}));
   });
   // One session at a time: creating them all at once peaks higher.
@@ -47,6 +54,7 @@ function load(m) {
           var dict = String(r.dict).replace(/\n$/, '').split('\n').concat([' ']);
           recs.push({ script: r.script, svc: new SZOCR.RecognitionService(ort, s,
             Object.assign({}, preset.recognition, { charactersDictionary: dict, reverseText: !!r.reverse })) });
+          say();
         });
       });
     }, Promise.resolve()).then(function () { return { det: d, recs: recs }; });
@@ -63,14 +71,16 @@ var READABLE = /[\p{L}\p{N}]/u;
 
 // Each detected box is read by every recognizer; the most confident
 // readable reading wins, and every readable one goes along with it.
-function read(e, input) {
+function read(e, input, say) {
   var image = SZOCR.normalizeInputToRgb(input);
   return e.det.run(image).then(function (boxes) {
     var best = {}, all = {};
+    say();
     return e.recs.reduce(function (p, r) {
       return p.then(function () {
         if (!boxes.length) return null;
         return r.svc.run(image, boxes, { ordering: { sortByReadingOrder: false } }).then(function (res) {
+          say();
           for (var i = 0; i < res.length; i++) {
             var k = boxKey(res[i].box), cur = best[k];
             if (!READABLE.test(res[i].text || '')) continue;
@@ -100,7 +110,13 @@ self.onmessage = function (ev) {
       function (err) { loading = null; self.postMessage({ type: 'loaded', error: String(err && err.message || err) }); });
   } else if (m.type === 'read') {
     (engine ? Promise.resolve(engine) : loading || Promise.reject(new Error('not loaded')))
-      .then(function (e) { return read(e, m.image); })
+      .then(function (e) {
+        var of = 1 + e.recs.length, done = 0;
+        return read(e, m.image, function () {
+          done++;
+          if (m.steps) self.postMessage({ type: 'step', id: m.id, done: done, of: of });
+        });
+      })
       .then(function (lines) { self.postMessage({ id: m.id, lines: lines }); },
         function (err) { self.postMessage({ id: m.id, error: String(err && err.message || err) }); });
   }

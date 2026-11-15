@@ -1272,6 +1272,50 @@ function initSignSearch(map, config) {
     return getBytes(rel).then(function (b) { return new TextDecoder().decode(b); });
   }
 
+  // How far a reading is, in the bar under the head: the reader's files and
+  // models (the first photo only: most of a minute on a map streamed over
+  // the network), the photo's readings step by step, then the search.
+  // Between steps the bar creeps toward the end of the one under way, so it
+  // never stands still, and it only goes forward. `bar.load` is the share of
+  // the bar the loading takes in this reading (none once the reader is up).
+  var barEl = document.getElementById('ocr-progress'), barFill = barEl && barEl.firstElementChild;
+  var bar = { on: false, at: 0, to: 0, load: 0, timer: null };
+  var BAR_READ = 0.9;      // where the reading ends and the search begins
+  var loadedWorker = null; // the worker, once its models are ready
+  // BEGIN sign-progress
+  function barDraw() {
+    barFill.style.width = (bar.at * 100).toFixed(1) + '%';
+    barEl.setAttribute('aria-valuenow', String(Math.round(bar.at * 100)));
+  }
+  // Done as far as `at`; the step under way ends at `to`.
+  function barGo(at, to) {
+    if (!barFill || !bar.on) return;
+    bar.at = Math.min(1, Math.max(bar.at, at));
+    bar.to = Math.min(1, Math.max(bar.to, to, bar.at));
+    barDraw();
+  }
+  // `done` of `of` steps of the stretch lo..hi (`of` 0: not known yet).
+  function barStep(lo, hi, done, of) {
+    var n = of || 3;
+    barGo(lo + (hi - lo) * Math.min(n, done) / n, lo + (hi - lo) * Math.min(n, done + 1) / n);
+  }
+  function barStart() {
+    if (!barFill) return;
+    bar.on = true;
+    bar.at = Math.min(bar.at, 0.03); bar.to = 0.05;
+    barEl.hidden = false;
+    if (!bar.timer) bar.timer = setInterval(function () { bar.at += (bar.to - bar.at) * 0.04; barDraw(); }, 200);
+    barDraw();
+  }
+  function barStop() {
+    bar.on = false;
+    clearInterval(bar.timer);
+    bar.timer = null; bar.at = bar.to = 0;
+    if (barEl) barEl.hidden = true;
+  }
+  function loadStep(done, of) { if (bar.load) barStep(0, bar.load, done, of); }
+  // END sign-progress
+
   // BEGIN sign-worker
   function release() {
     clearTimeout(idleTimer);
@@ -1284,15 +1328,18 @@ function initSignSearch(map, config) {
   // while one is under way (a photo read just before the minute was up,
   // after a long search on a big map, was stopped), and at once when a
   // reading has had no answer for three minutes (a worker that hangs).
-  function read(image) {
+  // `step(done, of)`, when given, hears how far the reading is: (0, 0) as
+  // it starts, then the worker's count of the detector and recognizers done.
+  function read(image, step) {
     busy++;
     clearTimeout(idleTimer);
     var done = function () { if (--busy <= 0) { busy = 0; idleTimer = setTimeout(release, IDLE_MS); } };
     return start().then(function (w) {
       var id = ++reqSeq;
       return new Promise(function (resolve, reject) {
-        waiting[id] = { resolve: resolve, reject: reject };
-        w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
+        waiting[id] = { resolve: resolve, reject: reject, step: step };
+        if (step) step(0, 0);
+        w.postMessage({ type: 'read', id: id, steps: !!step, image: image }, [image.data.buffer]);
         setTimeout(function () { if (waiting[id]) release(); }, 3 * IDLE_MS);
       });
     }).then(function (items) { done(); return items; }, function (err) { done(); throw err; });
@@ -1309,6 +1356,9 @@ function initSignSearch(map, config) {
       var recs = m.rec || [];
       // the worker: the page's own copy (part 026), else the ZIM's
       var own = document.getElementById('sz-ocr-worker');
+      // For the bar: each file fetched, then each model the worker has ready.
+      var files = 4 + recs.length, steps = files + 1 + recs.length, fetched = 0;
+      loadStep(0, steps);
       return _szInTurn([function () { return own ? Promise.resolve(own.textContent) : getText(m.worker); },
                         function () { return getBytes(m.engine); },
                         function () { return getBytes(m.wasm); },
@@ -1316,12 +1366,14 @@ function initSignSearch(map, config) {
         .concat(recs.map(function (r) {
           return function () { return _szInTurn([function () { return getBytes(r.model); },
                                                  function () { return getText(r.dict); }]); };
-        })))
+        })).map(function (fetchOne) {
+          return function () { return fetchOne().then(function (v) { loadStep(++fetched, steps); return v; }); };
+        }))
         .then(function (got) {
           var url = URL.createObjectURL(new Blob([got[0]], { type: 'application/javascript' }));
           worker = new Worker(url);
           URL.revokeObjectURL(url);
-          var msg = { type: 'load', engine: got[1], wasm: got[2],
+          var msg = { type: 'load', steps: true, engine: got[1], wasm: got[2],
                       det: { model: got[3], preset: m.det.preset, options: m.det.options },
                       rec: recs.map(function (r, i) {
                         return { script: (r.scripts || [r.name])[0], model: got[4 + i][0],
@@ -1332,10 +1384,12 @@ function initSignSearch(map, config) {
             worker.onmessage = function (ev) {
               var d = ev.data || {};
               if (d.type === 'loaded') {
-                if (d.error) reject(new Error(d.error)); else resolve(worker);
+                if (d.error) reject(new Error(d.error)); else { loadedWorker = worker; resolve(worker); }
                 return;
               }
+              if (d.type === 'loading') { loadStep(files + d.done, steps); return; }
               var w = waiting[d.id];
+              if (d.type === 'step') { if (w && w.step) w.step(d.done, d.of); return; }
               if (!w) return;
               delete waiting[d.id];
               if (d.error) w.reject(new Error(d.error)); else w.resolve(d.lines || []);
@@ -1359,6 +1413,13 @@ function initSignSearch(map, config) {
   function setStatus(text, state) {
     statusEl.textContent = text || '';
     sheet.setAttribute('data-sz-ocr', state);
+    // The bar shows while reading and searching: a search alone (a line
+    // tapped) has all of it.
+    if (state === 'reading') barStart();
+    else if (state === 'lines') {
+      if (bar.on) barGo(BAR_READ + 0.02, 0.985);
+      else { barStart(); barGo(0, 0.9); }
+    } else barStop();
   }
 
   // The sheet hides; the photo, its lines and its search stay for the way
@@ -1379,6 +1440,7 @@ function initSignSearch(map, config) {
     if (photo && photo.url) URL.revokeObjectURL(photo.url);
     photo = null;
     sheet.setAttribute('data-sz-ocr', '');
+    barStop();
   }
   function forget() {
     last = null;
@@ -1863,12 +1925,14 @@ function initSignSearch(map, config) {
   }
   // Both readings of a photo: as drawn, then shrunk; the coarse one's lines
   // join the fine one's.
-  function readBoth(image) {
+  // `steps(a, b)` gives the listener of the reading that takes the bar's
+  // stretch a..b of the whole (read's `step`): the fine one is most of it.
+  function readBoth(image, steps) {
     var coarse = coarseCopy();
-    return read(image).then(function (fine) {
+    return read(image, steps(0, coarse ? 0.75 : 1)).then(function (fine) {
       if (!coarse) return fine;
-      return read(coarse.image).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
-                                     function () { return fine; });
+      return read(coarse.image, steps(0.75, 1)).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
+                                                     function () { return fine; });
     });
   }
 
@@ -2136,7 +2200,15 @@ function initSignSearch(map, config) {
     // tools/ocr_photos.mjs: what the recognizers read, kept to search again
     // (__szSignItems.keep), or given in its place (.give, one per read).
     var hook = window.__szSignItems, given = hook && hook.give && hook.give.length ? hook.give.shift() : null;
-    return (given ? Promise.resolve(given) : readBoth(image)).then(function (items) {
+    // The bar: the reader's loading first when it is not up yet, then the readings.
+    var from = bar.load = worker && loadedWorker === worker ? 0 : 0.5;
+    var steps = function (a, b) {
+      return function (done, of) {
+        if (rs === readSeq) barStep(from + (BAR_READ - from) * a, from + (BAR_READ - from) * b, done, of);
+      };
+    };
+    if (from) loadStep(0, 0);
+    return (given ? Promise.resolve(given) : readBoth(image, steps)).then(function (items) {
       if (hook && hook.keep) hook.keep(items);
       if (rs !== readSeq) return;   // another photo or part since: not this sheet's
       var lines = _szSignLineGroups(items);

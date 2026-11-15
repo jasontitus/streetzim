@@ -775,6 +775,36 @@ background: none; border: none; font-size: 18px; line-height: 1; padding: 0 4px;
 color: var(--text-tertiary); cursor: pointer;
 }
 #ocr-close:hover, #ocr-again:hover { color: var(--text-secondary); }
+#ocr-progress {
+height: 8px; margin: 0 0 10px; border-radius: 4px; overflow: hidden; box-sizing: border-box;
+background: var(--hover-bg); border: 1px solid var(--border);
+}
+#ocr-progress[hidden] { display: none; }
+#ocr-progress i {
+display: block; width: 0; height: 100%; border-radius: 4px; background-color: var(--accent, #2563eb);
+background-image: linear-gradient(110deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0) 70%);
+background-size: 120px 100%; transition: width 0.25s linear; animation: sz-ocr-run 1.1s linear infinite;
+}
+@keyframes sz-ocr-run { from { background-position: 0 0; } to { background-position: 120px 0; } }
+#ocr-sheet[data-sz-ocr="reading"] #ocr-status, #ocr-sheet[data-sz-ocr="lines"] #ocr-status {
+font-size: 15px; font-weight: 600; color: var(--text-primary);
+}
+#ocr-sheet[data-sz-ocr="reading"] #ocr-status::before, #ocr-sheet[data-sz-ocr="lines"] #ocr-status::before {
+content: ''; display: inline-block; width: 14px; height: 14px; margin-inline-end: 8px; vertical-align: -3px;
+box-sizing: border-box; border: 2px solid var(--border); border-top-color: var(--accent, #2563eb); border-radius: 50%;
+animation: sz-ocr-spin 0.8s linear infinite;
+}
+@keyframes sz-ocr-spin { to { transform: rotate(360deg); } }
+#ocr-sheet[data-sz-ocr="reading"] #ocr-frame::after {
+content: ''; position: absolute; left: 0; right: 0; top: 0; height: 22%; pointer-events: none;
+background: linear-gradient(to bottom, rgba(37,99,235,0), rgba(37,99,235,0.25) 80%, rgba(255,255,255,0.85) 96%, rgba(37,99,235,0));
+animation: sz-ocr-scan 1.7s ease-in-out infinite alternate;
+}
+@keyframes sz-ocr-scan { from { transform: translateY(-100%); } to { transform: translateY(455%); } }
+@media (prefers-reduced-motion: reduce) {
+#ocr-progress i, #ocr-sheet #ocr-status::before, #ocr-sheet #ocr-frame::after { animation: none; }
+#ocr-sheet[data-sz-ocr="reading"] #ocr-frame::after { display: none; }
+}
 #search-photo.has-last {
 background-position: center; background-size: cover; background-repeat: no-repeat;
 background-origin: content-box; background-clip: content-box; border-radius: 6px;
@@ -1809,6 +1839,7 @@ arm();
             aria-label="Search with a photo" data-i18n-aria-label="search.photo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
     <button id="ocr-close" type="button" title="Close" data-i18n-title="common.close">&times;</button>
   </div>
+  <div id="ocr-progress" hidden role="progressbar" aria-labelledby="ocr-status" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
   <div id="ocr-pick" hidden>
     <button id="ocr-take" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 4.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg><span data-i18n="search.photo_take">Take a photo</span></button>
     <button id="ocr-choose" type="button" class="ocr-tile"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-5.5-7.5-3 3.9-2-2.4L5.5 17h13l-5-6.5zM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3z"/></svg><span data-i18n="search.photo_choose">Choose a photo</span></button>
@@ -2042,8 +2073,8 @@ details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAg
    (305-ocr-search.js) fetches every file itself -- this worker runs from a
    blob: URL, as routing-worker.js does, and a ZIM reader may not serve a
    worker's own requests -- and posts:
-     {type: 'load', engine, wasm, det: {model, preset}, rec: [{script, model, dict, reverse}]}
-     {type: 'read', id, image: {width, height, data}}
+     {type: 'load', steps, engine, wasm, det: {model, preset}, rec: [{script, model, dict, reverse}]}
+     {type: 'read', id, steps, image: {width, height, data}}
    engine is the text of ocr/ocr-engine.js (ONNX Runtime Web and the
    paddleocr runtime, vendored: tools/pin_viewer_assets.py --ocr), wasm the
    bytes of ONNX Runtime's WebAssembly, the models' bytes and dictionaries
@@ -2054,6 +2085,10 @@ details: 'Missing: ' + missing.join(', ') + '\nUser agent: ' + (navigator.userAg
    readable one ({text, confidence, script}), which the page puts together
    where they read different parts of a line (_szSignCompose: the digits
    of "2912 طريق" from the Latin model, the word from the Arabic one).
+   Asked with `steps`, it also says how far it is, for the page's progress
+   bar: {type: 'loading', done, of} as each model is ready and {type:
+   'step', id, done, of} as the detector and each recognizer finish a
+   photo. A page that does not ask (an older one) gets none.
    The page runs its own copy of this file (tools/build_viewer.py inlines it
    as part 026), so a viewer swap updates it; ocr/ocr-worker.js in the ZIM
    is what an older page runs. */
@@ -2071,7 +2106,10 @@ function load(m) {
   ort.env.logLevel = 'error';         // not the models' unused-initializer warnings
   var opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
   var preset = SZOCR.getModelPresetOptions(m.det.preset);
+  var of = 1 + m.rec.length, done = 0;
+  var say = function () { done++; if (m.steps) self.postMessage({ type: 'loading', done: done, of: of }); };
   var det = ort.InferenceSession.create(new Uint8Array(m.det.model), opts).then(function (s) {
+    say();
     return new SZOCR.DetectionService(ort, s, Object.assign({}, preset.detection, m.det.options || {}));
   });
   // One session at a time: creating them all at once peaks higher.
@@ -2083,6 +2121,7 @@ function load(m) {
           var dict = String(r.dict).replace(/\n$/, '').split('\n').concat([' ']);
           recs.push({ script: r.script, svc: new SZOCR.RecognitionService(ort, s,
             Object.assign({}, preset.recognition, { charactersDictionary: dict, reverseText: !!r.reverse })) });
+          say();
         });
       });
     }, Promise.resolve()).then(function () { return { det: d, recs: recs }; });
@@ -2099,14 +2138,16 @@ var READABLE = /[\p{L}\p{N}]/u;
 
 // Each detected box is read by every recognizer; the most confident
 // readable reading wins, and every readable one goes along with it.
-function read(e, input) {
+function read(e, input, say) {
   var image = SZOCR.normalizeInputToRgb(input);
   return e.det.run(image).then(function (boxes) {
     var best = {}, all = {};
+    say();
     return e.recs.reduce(function (p, r) {
       return p.then(function () {
         if (!boxes.length) return null;
         return r.svc.run(image, boxes, { ordering: { sortByReadingOrder: false } }).then(function (res) {
+          say();
           for (var i = 0; i < res.length; i++) {
             var k = boxKey(res[i].box), cur = best[k];
             if (!READABLE.test(res[i].text || '')) continue;
@@ -2136,7 +2177,13 @@ self.onmessage = function (ev) {
       function (err) { loading = null; self.postMessage({ type: 'loaded', error: String(err && err.message || err) }); });
   } else if (m.type === 'read') {
     (engine ? Promise.resolve(engine) : loading || Promise.reject(new Error('not loaded')))
-      .then(function (e) { return read(e, m.image); })
+      .then(function (e) {
+        var of = 1 + e.recs.length, done = 0;
+        return read(e, m.image, function () {
+          done++;
+          if (m.steps) self.postMessage({ type: 'step', id: m.id, done: done, of: of });
+        });
+      })
       .then(function (lines) { self.postMessage({ id: m.id, lines: lines }); },
         function (err) { self.postMessage({ id: m.id, error: String(err && err.message || err) }); });
   }
@@ -4682,7 +4729,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '7776701d';
+var SZ_VIEWER_BUILD = '0bae64f1';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -9567,6 +9614,41 @@ return r.arrayBuffer();
 function getText(rel) {
 return getBytes(rel).then(function (b) { return new TextDecoder().decode(b); });
 }
+var barEl = document.getElementById('ocr-progress'), barFill = barEl && barEl.firstElementChild;
+var bar = { on: false, at: 0, to: 0, load: 0, timer: null };
+var BAR_READ = 0.9;
+var loadedWorker = null; // the worker, once its models are ready
+// BEGIN sign-progress
+function barDraw() {
+barFill.style.width = (bar.at * 100).toFixed(1) + '%';
+barEl.setAttribute('aria-valuenow', String(Math.round(bar.at * 100)));
+}
+function barGo(at, to) {
+if (!barFill || !bar.on) return;
+bar.at = Math.min(1, Math.max(bar.at, at));
+bar.to = Math.min(1, Math.max(bar.to, to, bar.at));
+barDraw();
+}
+function barStep(lo, hi, done, of) {
+var n = of || 3;
+barGo(lo + (hi - lo) * Math.min(n, done) / n, lo + (hi - lo) * Math.min(n, done + 1) / n);
+}
+function barStart() {
+if (!barFill) return;
+bar.on = true;
+bar.at = Math.min(bar.at, 0.03); bar.to = 0.05;
+barEl.hidden = false;
+if (!bar.timer) bar.timer = setInterval(function () { bar.at += (bar.to - bar.at) * 0.04; barDraw(); }, 200);
+barDraw();
+}
+function barStop() {
+bar.on = false;
+clearInterval(bar.timer);
+bar.timer = null; bar.at = bar.to = 0;
+if (barEl) barEl.hidden = true;
+}
+function loadStep(done, of) { if (bar.load) barStep(0, bar.load, done, of); }
+// END sign-progress
 // BEGIN sign-worker
 function release() {
 clearTimeout(idleTimer);
@@ -9575,15 +9657,16 @@ worker = null; ready = null;
 for (var k in waiting) waiting[k].reject(new Error('stopped'));
 waiting = {};
 }
-function read(image) {
+function read(image, step) {
 busy++;
 clearTimeout(idleTimer);
 var done = function () { if (--busy <= 0) { busy = 0; idleTimer = setTimeout(release, IDLE_MS); } };
 return start().then(function (w) {
 var id = ++reqSeq;
 return new Promise(function (resolve, reject) {
-waiting[id] = { resolve: resolve, reject: reject };
-w.postMessage({ type: 'read', id: id, image: image }, [image.data.buffer]);
+waiting[id] = { resolve: resolve, reject: reject, step: step };
+if (step) step(0, 0);
+w.postMessage({ type: 'read', id: id, steps: !!step, image: image }, [image.data.buffer]);
 setTimeout(function () { if (waiting[id]) release(); }, 3 * IDLE_MS);
 });
 }).then(function (items) { done(); return items; }, function (err) { done(); throw err; });
@@ -9597,6 +9680,8 @@ return manifest;
 })).then(function (m) {
 var recs = m.rec || [];
 var own = document.getElementById('sz-ocr-worker');
+var files = 4 + recs.length, steps = files + 1 + recs.length, fetched = 0;
+loadStep(0, steps);
 return _szInTurn([function () { return own ? Promise.resolve(own.textContent) : getText(m.worker); },
 function () { return getBytes(m.engine); },
 function () { return getBytes(m.wasm); },
@@ -9604,12 +9689,14 @@ function () { return getBytes(m.det.model); }]
 .concat(recs.map(function (r) {
 return function () { return _szInTurn([function () { return getBytes(r.model); },
 function () { return getText(r.dict); }]); };
-})))
+})).map(function (fetchOne) {
+return function () { return fetchOne().then(function (v) { loadStep(++fetched, steps); return v; }); };
+}))
 .then(function (got) {
 var url = URL.createObjectURL(new Blob([got[0]], { type: 'application/javascript' }));
 worker = new Worker(url);
 URL.revokeObjectURL(url);
-var msg = { type: 'load', engine: got[1], wasm: got[2],
+var msg = { type: 'load', steps: true, engine: got[1], wasm: got[2],
 det: { model: got[3], preset: m.det.preset, options: m.det.options },
 rec: recs.map(function (r, i) {
 return { script: (r.scripts || [r.name])[0], model: got[4 + i][0],
@@ -9620,10 +9707,12 @@ return new Promise(function (resolve, reject) {
 worker.onmessage = function (ev) {
 var d = ev.data || {};
 if (d.type === 'loaded') {
-if (d.error) reject(new Error(d.error)); else resolve(worker);
+if (d.error) reject(new Error(d.error)); else { loadedWorker = worker; resolve(worker); }
 return;
 }
+if (d.type === 'loading') { loadStep(files + d.done, steps); return; }
 var w = waiting[d.id];
+if (d.type === 'step') { if (w && w.step) w.step(d.done, d.of); return; }
 if (!w) return;
 delete waiting[d.id];
 if (d.error) w.reject(new Error(d.error)); else w.resolve(d.lines || []);
@@ -9643,6 +9732,11 @@ return ready;
 function setStatus(text, state) {
 statusEl.textContent = text || '';
 sheet.setAttribute('data-sz-ocr', state);
+if (state === 'reading') barStart();
+else if (state === 'lines') {
+if (bar.on) barGo(BAR_READ + 0.02, 0.985);
+else { barStart(); barGo(0, 0.9); }
+} else barStop();
 }
 function hide() {
 sheet.hidden = true;
@@ -9659,6 +9753,7 @@ readSeq++; loadSeq++;
 if (photo && photo.url) URL.revokeObjectURL(photo.url);
 photo = null;
 sheet.setAttribute('data-sz-ocr', '');
+barStop();
 }
 function forget() {
 last = null;
@@ -10069,11 +10164,11 @@ ctx.drawImage(readCanvas, 0, 0, c.width, c.height);
 var d = ctx.getImageData(0, 0, c.width, c.height);
 return { k: c.width / readCanvas.width, image: { width: d.width, height: d.height, data: new Uint8Array(d.data.buffer) } };
 }
-function readBoth(image) {
+function readBoth(image, steps) {
 var coarse = coarseCopy();
-return read(image).then(function (fine) {
+return read(image, steps(0, coarse ? 0.75 : 1)).then(function (fine) {
 if (!coarse) return fine;
-return read(coarse.image).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
+return read(coarse.image, steps(0.75, 1)).then(function (big) { return _szSignMerge(fine, big, 1 / coarse.k); },
 function () { return fine; });
 });
 }
@@ -10295,7 +10390,14 @@ var image = drawPart(part, readCanvas);
 readK = image.k;
 paint([]);
 var hook = window.__szSignItems, given = hook && hook.give && hook.give.length ? hook.give.shift() : null;
-return (given ? Promise.resolve(given) : readBoth(image)).then(function (items) {
+var from = bar.load = worker && loadedWorker === worker ? 0 : 0.5;
+var steps = function (a, b) {
+return function (done, of) {
+if (rs === readSeq) barStep(from + (BAR_READ - from) * a, from + (BAR_READ - from) * b, done, of);
+};
+};
+if (from) loadStep(0, 0);
+return (given ? Promise.resolve(given) : readBoth(image, steps)).then(function (items) {
 if (hook && hook.keep) hook.keep(items);
 if (rs !== readSeq) return;
 var lines = _szSignLineGroups(items);
