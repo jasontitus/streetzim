@@ -45,6 +45,11 @@ any other map with a layer file that reads no real-world file
 (`tile-config`), and builds the ZIM. `--regate` runs the usual gates and
 uploads.
 
+A new viewer reaches this map the same way: the viewer rollout
+(`ops/langpack/fresh_all.py`) skips it, because the rollout's gates open a
+Wikipedia article, and a rerun of the script reuses the moved extract, the
+sea and the tiles while the extract is unchanged.
+
 ## What is not there yet
 
 Satellite imagery, terrain and Wikipedia articles: their sources are in

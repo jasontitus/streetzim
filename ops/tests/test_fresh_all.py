@@ -85,6 +85,21 @@ def test_each_live_file_gets_todays_viewer_once(tmp_path: Path) -> None:
     assert json.loads((tmp_path / "preview" / "alpha-viewer" / "fresh.json").read_text())["base"]["md5"] == "9" * 32
 
 
+def test_a_map_built_by_its_own_script_is_left_alone(tmp_path: Path) -> None:
+    setup(tmp_path)
+    flags = tmp_path / "flags.tsv"
+    flags.write_text("# id\tflags\nalpha\t--projection antarctic-polar\nbad\t--projections x\n")
+    r = run(tmp_path, "--regions", "alpha,bad", "--build-flags", str(flags))
+    assert "alpha: built by a script of its own" in r.stdout
+    assert not (tmp_path / "log").exists()
+    assert not (tmp_path / "site" / "alpha-viewer").exists()
+    assert "bad" in r.stdout and r.returncode == 1          # another flag skips nothing: bad still fails
+    # without the flag the same map is made
+    flags.write_text("# id\tflags\n")
+    r = run(tmp_path, "--regions", "alpha", "--build-flags", str(flags))
+    assert r.returncode == 0 and (tmp_path / "log").read_text().split() == ["alpha"]
+
+
 def test_a_dry_run_makes_nothing(tmp_path: Path) -> None:
     setup(tmp_path)
     r = run(tmp_path, "--regions", "alpha", "--dry-run")

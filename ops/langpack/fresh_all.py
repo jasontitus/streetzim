@@ -14,7 +14,9 @@ preview channel the build worker reads). A region whose fresh.json already
 names that live file and today's viewer code is skipped, as is one without a
 local copy (said so); one whose index lacks only the item's current nodes
 gets them written in. A region whose metadata archive.org did not give is a
-failure. --deploy then deploys the preview channel and, under
+failure. A map built by a script of its own (a --projection flag in
+cloud/region-build-flags.tsv, docs/polar-maps.md) is skipped: its viewer
+comes with a rebuild. --deploy then deploys the preview channel and, under
 the site-deploy lock, the live site (web/generate.py, firebase deploy), as
 ops/langpack/pack_queue.sh does. Exit 0 when every region is done or
 skipped for being current, 1 when any failed or had no local copy.
@@ -54,6 +56,20 @@ def regions(path: str) -> list[str]:
         if line.startswith("#") or not line.strip():
             continue
         out.append(line.split("\t", 1)[0].strip())
+    return out
+
+
+def own_builds(path: str) -> set[str]:
+    """The regions whose build flags carry --projection."""
+    out = set()
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        rid, _, flags = line.partition("\t")
+        if not line.startswith("#") and "--projection" in flags.split():
+            out.add(rid.strip())
     return out
 
 
@@ -178,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
                     help=argparse.SUPPRESS)
     ap.add_argument("--deploy", action="store_true", help="deploy the preview channel and the live site at the end")
     ap.add_argument("--dry-run", action="store_true", help="say what would be made, make nothing")
+    ap.add_argument("--build-flags", default=os.path.join(ROOT, "cloud", "region-build-flags.tsv"),
+                    help="the build flags file: a region with --projection there is skipped")
     a = ap.parse_args(argv)
     code = viewer_code(open(os.path.join(ROOT, "resources", "viewer", "index.html"), "rb").read())
     if not code:
@@ -186,9 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     ids = a.regions.split(",") if a.regions else regions(os.path.join(ROOT, "cloud", "regions.tsv"))
     work = a.work or os.path.join(a.maps, "langpack-work", "fresh-viewer")
     made, failed, missing = [], [], []
+    own = own_builds(a.build_flags)
     for rid in ids:
         if not re.fullmatch(r"[a-z0-9-]+", rid):
             say(f"{rid!r}: not a region id; skipped"); continue
+        if rid in own:
+            say(f"{rid}: built by a script of its own, which brings its viewer; skipped"); continue
         item = f"streetzim-{rid}"
         meta = item_meta(item, a.meta_dir)
         if meta is None or "error" in meta:
