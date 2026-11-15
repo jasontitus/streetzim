@@ -15,6 +15,7 @@ import os
 import sys
 import uuid as uuidlib
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
@@ -37,6 +38,41 @@ def counter_gaps(stored: dict[bytes, int], recount: dict[bytes, int]) -> dict[st
     says (fewer: negative); only the types where the two differ."""
     gaps = {k: recount.get(k, 0) - stored.get(k, 0) for k in set(stored) | set(recount)}
     return {k.decode(): g for k, g in gaps.items() if g}
+
+
+def compare_keys(merged, base, added) -> SimpleNamespace:
+    """The merged file's keys against what they must be: the base's and those
+    in `added`. `merged`: its keys in the file's order; `base`: a function
+    that gives the base's keys, each once (it is asked again when the merged
+    file holds a key too many). The result: `merged` (the keys, a set), `n`
+    (how many the file listed), `in_order` (strictly sorted), `missing` (how
+    many it lacks), `extra_n` (how many more it has than it must; not 0 for
+    a count that does not add up either) and `extra` (the first three).
+
+    A map of a wide, empty land has millions of entries (Greenland: 13.7
+    million): the merged file's keys are the one set held, and the base's
+    are read past it."""
+    mset, prev, in_order, n = set(), None, True, 0
+    for k in merged:
+        in_order = in_order and (prev is None or prev < k)
+        prev = k
+        n += 1
+        mset.add(k)
+    added = set(added)
+    n_base = missing = 0
+    for k in base():
+        n_base += 1
+        missing += k not in mset
+        added.discard(k)
+    extra_n = len(mset) - (n_base - missing) - sum(k in mset for k in added)
+    missing += sum(k not in mset for k in added)
+    extra = []
+    if extra_n:
+        rest = mset - added
+        for k in base():
+            rest.discard(k)
+        extra = sorted(rest)[:3]
+    return SimpleNamespace(merged=mset, n=n, in_order=in_order, missing=missing, extra_n=extra_n, extra=extra)
 
 
 def check(name, ok, detail=""):
@@ -121,28 +157,26 @@ def main():
           range_hash(a.merged, cs, d1) == range_hash(a.base, cs, d1), f"[{cs}, {d1})")
 
     # key set
-    mkeys = [d.key for d in zm.iter_dirents()]
-    check("merged keys strictly sorted", all(x < y for x, y in itertools.pairwise(mkeys)), f"n={len(mkeys)}")
-    bkeys = {d.key for d in zb.iter_dirents()}
     pkeys = {}
     for k, p in enumerate(packs):
         for d in p.z.iter_dirents():
             if d.ns == C:
                 pkeys[d.key] = k
-    gen_new = {(M, b"Flavour"), (M, b"Name"), (M, b"Title"), (M, b"Language")} - bkeys
-    expected = bkeys | set(pkeys) | gen_new | ({(X, b"fulltext/xapian"), (X, b"title/xapian")} if ix else set())
-    mset = set(mkeys)
-    check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)", mset == expected,
-          f"missing={len(expected - mset)} extra={sorted(mset - expected)[:3]}")
-    check("no pack M/X/W entry leaked", not any(k in pkeys for k in mkeys if k[0] != C))
-    # A map of a wide, empty land has millions of entries (Greenland: 13.7
-    # million): the key sets go before the next list comes, and that list
-    # holds each entry's place and path, not the entry.
-    del mkeys, bkeys, expected, mset
+    # what the merge adds to the base's keys: the packs' entries, the generated
+    # metadata the base lacks, the search pack's indexes
+    added = set(pkeys) | {(M, b"Flavour"), (M, b"Name"), (M, b"Title"), (M, b"Language")} \
+        | ({(X, b"fulltext/xapian"), (X, b"title/xapian")} if ix else set())
+    keys = compare_keys((d.key for d in zm.iter_dirents()), lambda: (d.key for d in zb.iter_dirents()), added)
+    check("merged keys strictly sorted", keys.in_order, f"n={keys.n}")
+    check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)",
+          not keys.missing and not keys.extra_n, f"missing={keys.missing} extra={keys.extra}")
+    check("no pack M/X/W entry leaked", not any(k in pkeys for k in keys.merged if k[0] != C))
+    del keys
 
     # base C entries
     bad = []
     n = 0
+    # each entry's place and path, not the entry: see the key set
     order = sorted((*cluster_order(d), d.path) for d in zb.iter_dirents()
                    if d.ns == C and d.path != b"map-config.json")
     for *_, raw in order:

@@ -371,3 +371,33 @@ def test_a_base_whose_counter_misses_entries_still_merges(lp: SimpleNamespace, t
     assert merged[b"application/json"] > stored[b"application/json"]          # the packs' JSON
     r = tool("verify_merge.py", out, base, *packs, "--lang", "de", "--region-langs", "en", "--title", "Testland")
     assert "PASS  M/Counter" in r.stdout and r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+
+
+def test_the_merge_checks_key_comparison() -> None:
+    """verify_merge.compare_keys holds the merged keys only; what it says
+    must be what comparing two whole sets would."""
+    from tools.langpack.verify_merge import compare_keys
+    C, M = ord("C"), ord("M")
+    base = [(C, b"a"), (C, b"c"), (M, b"Title")]
+    added = {(C, b"b"), (M, b"Name"), (M, b"Title")}
+    whole = sorted(set(base) | added)
+    r = compare_keys(iter(whole), lambda: iter(base), added)
+    assert (r.n, r.in_order, r.missing, r.extra_n, r.extra) == (5, True, 0, 0, []) and r.merged == set(whole)
+    # an entry of the base lost, one of a pack lost
+    r = compare_keys([k for k in whole if k != (C, b"c")], lambda: iter(base), added)
+    assert (r.missing, r.extra_n, r.extra) == (1, 0, [])
+    r = compare_keys([k for k in whole if k != (C, b"b")], lambda: iter(base), added)
+    assert (r.missing, r.extra_n, r.extra) == (1, 0, [])
+    # entries nobody asked for, with and without one lost
+    r = compare_keys(sorted(whole + [(C, b"x"), (C, b"y")]), lambda: iter(base), added)
+    assert (r.missing, r.extra_n, r.extra, r.in_order) == (0, 2, [(C, b"x"), (C, b"y")], True)
+    r = compare_keys(sorted([k for k in whole if k != (C, b"a")] + [(C, b"x")]), lambda: iter(base), added)
+    assert (r.missing, r.extra_n, r.extra) == (1, 1, [(C, b"x")])
+    # out of order, or listed twice
+    r = compare_keys(whole[::-1], lambda: iter(base), added)
+    assert not r.in_order and (r.missing, r.extra_n) == (0, 0)
+    r = compare_keys(whole + whole[-1:], lambda: iter(base), added)
+    assert not r.in_order and r.n == 6 and (r.missing, r.extra_n) == (0, 0)
+    # the caller's set is left as it was
+    assert added == {(C, b"b"), (M, b"Name"), (M, b"Title")}
+
