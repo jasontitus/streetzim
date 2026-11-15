@@ -307,13 +307,12 @@
   .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
   .section-head p { margin-bottom: 0; }
 
-  /* Clips. The first plays in the page; the cards and the signs open theirs
-     in the viewer (a plain link to the file where there is no script). */
+  /* Clips. Each is a picture that opens its clip on the whole screen (a
+     plain link to the file where there is no script). */
   .feature-clip { margin: 30px 0 0; }
   .feature-clip h3 { margin: 0 0 6px; font-size: 22px; }
   .feature-clip p { max-width: 780px; }
-  .feature-clip .frame { margin-top: 18px; }
-  .feature-clip video { background: #000; }
+  .feature-clip .frame { display: block; margin-top: 18px; aspect-ratio: 16 / 10; }
   .hero-credit { margin: 10px 0 0; max-width: none; padding-inline-end: 32%; font-size: 11.5px; color: var(--text-faint); }
   .feature-clip .clip-credit { margin: 8px 0 0; max-width: none; font-size: 11.5px; color: var(--text-faint); }
   .clips {
@@ -325,9 +324,9 @@
     display: flex; flex-direction: column;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
   }
-  .clip-media { position: relative; display: block; aspect-ratio: 16 / 10; background: #0a0f1a; }
+  .clip-media { position: relative; display: block; aspect-ratio: 16 / 9; background: #0a0f1a; }
   .clip-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .clip-tall img { object-position: top; }
+  .clip-tall img { object-fit: contain; }
   .clip figcaption { padding: 14px 18px 16px; }
   .clip h3 { margin: 0 0 4px; font-size: 16.5px; }
   .clip p { margin: 0; font-size: 14px; }
@@ -411,10 +410,12 @@
     display: flex; align-items: center; justify-content: center;
     padding: 58px 0 6px;
   }
-  .lb-stage img, .lb-stage video {
+  .lb-stage img {
     max-width: 100%; max-height: 100%; width: auto; height: auto;
     border-radius: 10px; background: #000;
   }
+  /* A clip takes the screen; where it cannot, all the room the viewer has. */
+  .lb-stage video { width: 100%; height: 100%; object-fit: contain; }
   .lb-prev { grid-area: prev; justify-self: center; }
   .lb-next { grid-area: next; justify-self: center; }
   .lb-close { position: absolute; inset-block-start: 10px; inset-inline-end: 14px; z-index: 2; }
@@ -880,11 +881,7 @@
       <h3>{{t:tour_photo_h}}</h3>
       <p>{{t:tour_photo_p}}</p>
       <p class="note"><span class="map-badge badge-photo">{{t:badge_photo}}</span> {{t:tour_photo_note}}</p>
-      <div class="frame frame-wide">
-        <video controls playsinline preload="none" poster="{{m:poster-photo.webp}}">
-          <source src="{{m:tour-photo.mp4}}" type="video/mp4">
-        </video>
-      </div>
+      <a class="frame frame-wide" href="{{m:tour-photo.mp4}}" data-video data-poster="{{m:poster-photo.webp}}" data-credit="{{mc:tour-photo.mp4}}" data-caption="{{a:tour_photo_h}}" aria-label="{{a:tour_photo_h}}"><img src="{{m:poster-photo.webp}}" alt="" loading="lazy"><span class="play"></span></a>
       <p class="note clip-credit">{{mc:tour-photo.mp4}}</p>
     </div>
 
@@ -1371,21 +1368,53 @@ document.addEventListener('click', function (e) {
 
   // Viewer: a screenshot or a clip full size, with the ones before and after
   // it a button, an arrow key or a swipe away. Screenshots flip through
-  // screenshots and clips through clips. Where <dialog> is missing the links
-  // stay plain links to the files.
+  // screenshots and clips through clips. A clip takes the whole screen as it
+  // starts, turned the way it was recorded where the device allows, and
+  // leaving the full screen (or the clip's end) leads back to the page; the
+  // viewer shows it only where the screen cannot be taken. Where <dialog> is
+  // missing the links stay plain links to the files.
   var viewer = doc.getElementById('lightbox');
   if (viewer && typeof viewer.showModal === 'function') {
     var stage = doc.getElementById('lb-stage'), caption = doc.getElementById('lb-caption');
     var credit = doc.getElementById('lb-credit'), count = doc.getElementById('lb-count');
-    var items = [], at = 0, x0 = null;
+    var items = [], at = 0, x0 = null, full = false;
+    var quiet = function (p) { if (p && p.catch) p.catch(function () {}); };
+    var onScreen = function () { return doc.fullscreenElement || doc.webkitFullscreenElement || null; };
+    var canFill = function (el) { return el.requestFullscreen || el.webkitRequestFullscreen; };
+    var fill = function (el) {
+      try { quiet(canFill(el).call(el)); } catch (err) {}
+    };
+    var leave = function (el) {
+      try {
+        if (onScreen() === el) quiet((doc.exitFullscreen || doc.webkitExitFullscreen).call(doc));
+        else if (el.webkitDisplayingFullscreen) el.webkitExitFullscreen();
+      } catch (err) {}
+    };
+    var turn = function () {
+      var el = onScreen(), o = window.screen && screen.orientation;
+      if (!el || el.tagName !== 'VIDEO' || !el.videoWidth || !o || !o.lock) return;
+      try { quiet(o.lock(el.videoWidth > el.videoHeight ? 'landscape' : 'portrait')); } catch (err) {}
+    };
+    var screenChanged = function () {
+      var el = onScreen();
+      if (el && stage.contains(el)) { full = true; turn(); }
+      else if (full) { full = false; viewer.close(); }
+    };
+    doc.addEventListener('fullscreenchange', screenChanged);
+    doc.addEventListener('webkitfullscreenchange', screenChanged);
     var show = function (i) {
       at = (i + items.length) % items.length;
       var a = items[at], el;
       if (a.hasAttribute('data-video')) {
         el = doc.createElement('video');
-        el.controls = true; el.autoplay = true; el.playsInline = true;
-        el.setAttribute('playsinline', '');
+        el.controls = true; el.autoplay = true;
+        // A phone whose pages cannot take the screen plays a clip on it by
+        // itself, unless the clip is told to stay in the page.
+        if (canFill(el)) { el.playsInline = true; el.setAttribute('playsinline', ''); }
         if (a.getAttribute('data-poster')) el.poster = a.getAttribute('data-poster');
+        el.addEventListener('loadedmetadata', turn);
+        el.addEventListener('ended', function () { leave(el); });
+        el.addEventListener('webkitendfullscreen', function () { if (stage.contains(el)) viewer.close(); });
       } else {
         el = doc.createElement('img');
         el.alt = a.getAttribute('data-caption') || '';
@@ -1396,15 +1425,23 @@ document.addEventListener('click', function (e) {
       caption.textContent = a.getAttribute('data-caption') || '';
       credit.textContent = a.getAttribute('data-credit') || '';
       count.textContent = items.length > 1 ? (at + 1) + ' / ' + items.length : '';
+      return el;
     };
-    var step = function (way) { if (items.length > 1) show(at + way); };
+    // Called from a click or a key, which is what lets a clip take the screen.
+    var play = function (el) {
+      if (el.tagName !== 'VIDEO') return;
+      if (canFill(el)) fill(el);
+      try { quiet(el.play()); } catch (err) {}
+    };
+    var step = function (way) { if (items.length > 1 && !onScreen()) play(show(at + way)); };
     doc.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('a[data-shot], a[data-video]');
       if (!a || !plain(e)) return;
       e.preventDefault();
       items = all(a.hasAttribute('data-video') ? 'a[data-video]' : 'a[data-shot]');
-      show(items.indexOf(a));
+      var el = show(items.indexOf(a));
       viewer.showModal();
+      play(el);
     });
     viewer.addEventListener('click', function (e) {
       var b = e.target.closest('[data-lb]'), what = b && b.getAttribute('data-lb');
@@ -1419,7 +1456,10 @@ document.addEventListener('click', function (e) {
       if (e.key === 'ArrowRight') step(rtl ? -1 : 1);
       else if (e.key === 'ArrowLeft') step(rtl ? 1 : -1);
     });
-    stage.addEventListener('touchstart', function (e) { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+    // A finger drawn across a clip moves along it; across a picture, to the next.
+    stage.addEventListener('touchstart', function (e) {
+      x0 = e.touches.length === 1 && e.target.tagName !== 'VIDEO' ? e.touches[0].clientX : null;
+    }, { passive: true });
     stage.addEventListener('touchend', function (e) {
       if (x0 === null) return;
       var dx = e.changedTouches[0].clientX - x0;

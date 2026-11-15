@@ -357,9 +357,10 @@ def test_each_picture_with_someone_elses_work_says_whose(site):
         assert s["credits"] == [s["id"]] and gen.escape(MANIFEST["credits"][s["id"]]["author"]) in a
     for clip, cids in MANIFEST["video_credits"].items():
         url = re.escape(gen.media_file(clip)[0])
-        if clip == "tour-photo.mp4":                             # plays in the page: the line under it
-            credit = re.search(rf'<source src="{url}"[^>]*>\s*</video>\s*</div>\s*'
-                               r'<p class="note clip-credit">([^<]*)</p>', page).group(1)
+        if clip == "tour-photo.mp4":                             # the wide one: under it, and with the clip
+            a, credit = re.search(rf'(<a class="frame frame-wide" href="{url}"[^>]*>).*?</a>\s*'
+                                  r'<p class="note clip-credit">([^<]*)</p>', page).groups()
+            assert f'data-credit="{credit}"' in a
         elif clip == "hero-loop.mp4":                            # the opening loop: the line under it
             assert f'data-src="{gen.media_file(clip)[0]}"' in page
             credit = re.search(r'<p class="note hero-credit">([^<]*)</p>', page).group(1)
@@ -614,3 +615,20 @@ def test_the_host_serves_the_media_as_never_changing_and_keeps_the_manifest_to_i
     # nothing is served for a year under a name that does not change with its contents
     assert all(re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)?\.[0-9a-f]{8}\.(webp|mp4)", f["file"])
                for f in MANIFEST["files"].values())
+
+
+def test_every_clip_is_a_link_the_viewer_opens(site):
+    """No clip plays boxed in the page: each is a picture linking to its file,
+    which the viewer plays on the whole screen."""
+    page = _page(site, "en")
+    assert re.findall(r"<video\b[^>]*>", page) == [re.search(r'<video id="hero-video"[^>]*>', page).group(0)]
+    clips = [k for k in MANIFEST["files"] if k.endswith(".mp4") and k != "hero-loop.mp4"]
+    assert len(clips) >= 13
+    for clip in clips:
+        a = re.search(rf'<a class="[^"]*" href="{re.escape(gen.media_file(clip)[0])}"[^>]*>', page)
+        assert a and " data-video " in a.group(0) and 'data-poster="/media/' in a.group(0), clip
+    # the wide clip's picture is shown whole: its frame has the picture's shape
+    poster = MANIFEST["files"]["poster-photo.webp"]
+    css = Path(gen.TEMPLATE_PATH).read_text(encoding="utf-8")
+    w, h = re.search(r"\.feature-clip \.frame \{[^}]*aspect-ratio: (\d+) / (\d+)", css).groups()
+    assert int(w) * poster["h"] == int(h) * poster["w"]
