@@ -359,7 +359,10 @@ every page of the base, so it grows with the map: Greece 56 MB, Italy
 entries are over the 2 GiB budget, so `ship_packs.sh` refuses a continent
 (and any base over `SHIP_MAX_BASE_GB`, 8) in its first step, before any
 download or build (exit 4); maps up to about 5 GB come first, continents
-after a measured design. Indexing the base's pages by title only is no way out: on
+after a measured design. The one exception is Antarctica
+(`SHIP_CONTINENTS_OK`, default `antarctica`): few pages, so small search
+packs, and no smaller map covers it; the size limit and the per-entry budget
+still apply to it. Indexing the base's pages by title only is no way out: on
 Greece it saves 14% (the base's share of a search pack 36.8 → 28.7 MB;
 most of it is the title index of its 64,457 pages, which the base's own
 suggestions need).
@@ -568,7 +571,8 @@ Exits: 0 ready to publish; 6 listing pending; 2 another run holds the
 region's lock or a pack build lock; 3 `SHIP_SKIP_UPLOAD=1` stopped after the
 gates (nothing published); 4 a map v1 gives no packs: a continent
 (`cloud/regions.tsv`) or a base over `SHIP_MAX_BASE_GB` (8), refused in step
-1 before any download, pack build or gate; 5 nothing publishable: every
+1 before any download, pack build or gate (a continent in
+`SHIP_CONTINENTS_OK`, default `antarctica`, goes on); 5 nothing publishable: every
 entry with a Wikipedia pack that passed its gates is over the per-entry
 budget (each refusal logged as `REFUSED <lang>: ...` before anything is
 sent; the previous site files stay); 7 nothing publishable yet: as 5, while

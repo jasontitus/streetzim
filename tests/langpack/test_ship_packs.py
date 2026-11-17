@@ -549,6 +549,27 @@ def test_a_continent_or_a_big_base_gets_no_packs(ship: SimpleNamespace) -> None:
     assert "a continent map" in (ship.work / "logs" / f"ship-europe-{ship.tag}.log").read_text()
 
 
+def test_antarctica_is_the_continent_that_gets_packs(ship: SimpleNamespace) -> None:
+    """Antarctica, a continent with no smaller map, goes past the continent
+    rule (SHIP_CONTINENTS_OK, default antarctica) to its downloads; taken out
+    of the list it is refused like any continent; the size limit still holds."""
+    def go(**extra: str) -> tuple[int, str]:
+        for f in ship.logs.values():
+            Path(f).unlink(missing_ok=True)
+        log = ship.work / "logs" / f"ship-antarctica-{ship.tag}.log"
+        log.unlink(missing_ok=True)
+        r = subprocess.run(["bash", str(SHIP), "antarctica", str(ship.base)], capture_output=True, text=True,
+                           timeout=600, env={**ship.env, "SHIP_PREFETCH_ONLY": "1", **extra})
+        return r.returncode, log.read_text()
+
+    rc, log = go()
+    assert rc == 0 and "no language packs in v1" not in log and _lines(ship.logs["prefetch"]), (rc, log[-1500:])
+    rc, log = go(SHIP_CONTINENTS_OK="")
+    assert rc == 4 and "a continent map" in log and _lines(ship.logs["prefetch"]) == [], (rc, log[-1500:])
+    rc, log = go(SHIP_MAX_BASE_GB="0.000001")
+    assert rc == 4 and "no language packs in v1" in log and _lines(ship.logs["prefetch"]) == [], (rc, log[-1500:])
+
+
 def test_budget_refusals_are_loud(ship: SimpleNamespace) -> None:
     """Re-review: entries over the per-entry budget are refused before
     anything is sent, each said in the log; when no entry with a Wikipedia

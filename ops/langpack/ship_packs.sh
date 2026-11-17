@@ -88,7 +88,8 @@
 # failed (what was sent before it is not sent again): run again later; 2 another run holds the region's lock,
 # or a language's pack build lock; 3 SHIP_SKIP_UPLOAD=1 stopped after the
 # gates (a dry run: nothing published); 4 a map v1 gives no packs (a
-# continent, or a base over SHIP_MAX_BASE_GB (8 GB): refused in step 1, before
+# continent not in SHIP_CONTINENTS_OK, default antarctica, or a base over
+# SHIP_MAX_BASE_GB (8 GB): refused in step 1, before
 # any download or build); 5 nothing publishable: every entry with a
 # Wikipedia pack that passed its gates is over the per-entry budget
 # (make_site.py's; each refusal is logged as REFUSED, before anything is
@@ -181,9 +182,14 @@ printf '%s\n' "$META" > "$W/regions/$TAG.meta.json"
 mget() { "$PY" -c 'import json,sys; v=json.loads(sys.argv[1])[sys.argv[2]]; print(v if isinstance(v, str) else (",".join(v) if isinstance(v, list) else json.dumps(v, ensure_ascii=False)))' "$META" "$1"; }
 LANGS=$(mget langs); RL=$(mget region_langs); PACK_LANGS=$(mget pack_langs); TITLE=$(mget region_title)
 # v1: no packs for a continent, or for a base over SHIP_MAX_BASE_GB (its
-# search packs alone are over the per-entry budget), before any work
+# search packs alone are over the per-entry budget), before any work. A
+# continent in SHIP_CONTINENTS_OK (space-separated region ids; default
+# antarctica: few pages, small search packs, and no smaller map covers it)
+# goes on; the base size limit and the per-entry budget still apply to it.
 TIER=$(mget tier); BASE_BYTES=$(stat -c %s "$BASE")
-if [ "$TIER" = continent ] || "$PY" -c 'import sys; sys.exit(0 if int(sys.argv[1]) > float(sys.argv[2]) * 1e9 else 1)' \
+CONTINENT_OK=0
+for c in ${SHIP_CONTINENTS_OK-antarctica}; do [ "$c" = "$REGION" ] && CONTINENT_OK=1; done
+if { [ "$TIER" = continent ] && [ $CONTINENT_OK = 0 ]; } || "$PY" -c 'import sys; sys.exit(0 if int(sys.argv[1]) > float(sys.argv[2]) * 1e9 else 1)' \
      "$BASE_BYTES" "${SHIP_MAX_BASE_GB:-8}"; then
   say "$REGION: a ${TIER/null/unregistered} map, $(( BASE_BYTES / 1000000 )) MB: no language packs in v1 (continents and bases over ${SHIP_MAX_BASE_GB:-8} GB come after a measured design)"
   exit 4
