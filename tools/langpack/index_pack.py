@@ -277,6 +277,7 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
 # Pack titles the gate sets aside, at most, because same-named entries fill
 # both indexes' first pages for them (gate: first).
 CROWD_TRIES = 50
+LATIN_DOT = re.compile(r"[A-Za-z]\u00b7|\u00b7[A-Za-z]")
 
 
 def sampleable(t: str, full_text: bool = False) -> bool:
@@ -284,7 +285,13 @@ def sampleable(t: str, full_text: bool = False) -> bool:
     alone (a Thailand record named "ัีีั": vowel signs with no consonant)
     folds to nothing, so no title index holds it; full text holds no folded
     word over Xapian's 64-byte term limit (one unspaced Thai name of 22
-    letters or more)."""
+    letters or more). Nor one with a Latin letter beside a middle dot
+    ("R·巴巴站", "丹尼爾·Z·羅穆亞爾德斯機場" in the Philippines' Chinese
+    pack): the article is found by its Chinese name, but Xapian's query
+    parser reads the whole title as other terms, so neither index finds it
+    by that title."""
+    if LATIN_DOT.search(t):
+        return False
     f = fold(t)
     if not any(c.isalnum() for c in f):
         return False

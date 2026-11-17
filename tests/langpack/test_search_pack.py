@@ -656,3 +656,10 @@ def test_the_gate_still_fails_a_crowded_pack_with_nothing_else(tmp_path: Path, m
     out = tmp_path / "osm_testland_search-de_2026-10-13_d.zim"
     side = index_pack.build(str(base), [str(de)], "de", "testland", str(out), None, log=lambda m: None)
     assert not side["gate"]["ok"] and side["gate"]["found"][de.name]["title"] == "Abacan River", side["gate"]
+
+
+def test_the_gate_samples_past_a_title_with_a_latin_letter_beside_a_middle_dot() -> None:
+    """The Philippines' Chinese pack starts with "R·巴巴站": the query parser
+    reads that whole title as other terms, so no index finds it by it."""
+    assert not index_pack.sampleable("R·巴巴站") and not index_pack.sampleable("丹尼爾·Z·羅穆亞爾德斯機場", True)
+    assert index_pack.sampleable("罗德里戈·杜特尔特", True) and index_pack.sampleable("Ratchaburi", True)
