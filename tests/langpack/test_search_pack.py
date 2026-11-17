@@ -622,3 +622,37 @@ def test_the_gate_fails_a_pack_with_no_title_to_sample(tmp_path: Path) -> None:
     out = tmp_path / "osm_testland_search-th_2026-10-13_n.zim"
     side = index_pack.build(str(base), [str(th)], "th", "testland", str(out), None, log=lambda m: None)
     assert not side["gate"]["ok"] and f"{th.name}: no title to sample" in side["gate"]["problems"], side["gate"]
+
+
+def test_the_gate_sets_aside_a_pack_title_same_named_pages_crowd_off(tmp_path: Path) -> None:
+    """The Philippines' Cebuano pack starts with "Abacan River", a river the
+    base holds as 90 search pages of the same name: they fill both indexes'
+    first pages, so the gate failed every version over a title no index
+    could show. It checks the next title instead and names the one set
+    aside; a title that is simply missing still fails."""
+    from tests.langpack import lpzims
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    river = [(f"search/abacan-river-{i}.html", "Abacan River", "") for i in range(60)]
+    u = lpzims.write_base(base, pages=river + [("search/-1.html", "Ratchaburi", "")])
+    de = tmp_path / f"osm_testland_wiki-de_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(de, "de", u, articles=[("Abacan_River", "Abacan River"), ("Bacolod", "Bacolod")])
+    out = tmp_path / "osm_testland_search-de_2026-10-13_c.zim"
+    side = index_pack.build(str(base), [str(de)], "de", "testland", str(out), None, log=lambda m: None)
+    g = side["gate"]
+    assert g["ok"], g
+    assert g["found"][de.name]["title"] == "Bacolod" and g["crowded"] == {de.name: ["Abacan River"]}, g
+
+
+def test_the_gate_still_fails_a_crowded_pack_with_nothing_else(tmp_path: Path, monkeypatch) -> None:
+    """Setting aside stops at CROWD_TRIES: the title after them is checked
+    as it is, and fails when crowded."""
+    from tests.langpack import lpzims
+    monkeypatch.setattr(index_pack, "CROWD_TRIES", 0)
+    base = tmp_path / "osm-testland-2026-10-13.zim"
+    river = [(f"search/abacan-river-{i}.html", "Abacan River", "") for i in range(60)]
+    u = lpzims.write_base(base, pages=river + [("search/-1.html", "Ratchaburi", "")])
+    de = tmp_path / f"osm_testland_wiki-de_2026-10-13_{u[:8]}.zim"
+    lpzims.write_pack(de, "de", u, articles=[("Abacan_River", "Abacan River"), ("Bacolod", "Bacolod")])
+    out = tmp_path / "osm_testland_search-de_2026-10-13_d.zim"
+    side = index_pack.build(str(base), [str(de)], "de", "testland", str(out), None, log=lambda m: None)
+    assert not side["gate"]["ok"] and side["gate"]["found"][de.name]["title"] == "Abacan River", side["gate"]

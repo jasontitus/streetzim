@@ -274,6 +274,11 @@ def build(base: str, packs: list[str], lang: str, region: str, out: str, cache: 
     return side
 
 
+# Pack titles the gate sets aside, at most, because same-named entries fill
+# both indexes' first pages for them (gate: first).
+CROWD_TRIES = 50
+
+
 def sampleable(t: str, full_text: bool = False) -> bool:
     """A title the indexes can hold, for the gate to sample. One of marks
     alone (a Thailand record named "ัีีั": vowel signs with no consonant)
@@ -294,7 +299,8 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
     place's page first) and redirects, not its front listing, which a
     published base leaves empty: a gate that sampled from it checked nothing
     of the base. A sample is one the indexes can hold (sampleable); a
-    source with none fails."""
+    source with none fails. A pack title that same-named entries crowd off
+    an index's first page is set aside for the next one ("crowded")."""
     from libzim.reader import Archive
     from libzim.search import Query, Searcher
     from libzim.suggestion import SuggestionSearcher
@@ -305,14 +311,47 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
     if not (a.has_title_index and a.has_fulltext_index):
         problems.append(f"indexes: title={a.has_title_index} fulltext={a.has_fulltext_index}")
 
-    def first(z, redirect: bool):
+    def firsts(z):
         v1 = z.v1_listing()
         for i in (z.iter_u32_blob(*v1) if v1 else []):
             d = z.dirent_at(i)
             t = d.title.decode("utf-8", "replace")
-            if d.ns == ord("C") and d.is_redirect == redirect and len(t) >= 4 and sampleable(t, True):
-                return d.path.decode("utf-8", "replace"), t
-        return None
+            if d.ns == ord("C") and not d.is_redirect and len(t) >= 4 and sampleable(t, True):
+                yield d.path.decode("utf-8", "replace"), t
+
+    def crowded(p: str, t: str, top: list[str], n: int) -> bool:
+        """The first page (n) is all other entries whose titles hold each of
+        the sample's words: one place in many pieces ("Abacan River" in 90
+        search pages, the towns named "25 de Mayo"), so no index could show
+        the pack's article there."""
+        want = set(re.findall(r"\w+", fold(t)))
+        if not want or len(top) < n:
+            return False
+        try:
+            return all(want <= set(re.findall(r"\w+", fold(a.get_entry_by_path(q).title))) for q in top)
+        except Exception:  # noqa: BLE001 - an entry it cannot read: not crowded
+            return False
+
+    def suggest(t: str) -> list[str]:
+        return list(SuggestionSearcher(a).suggest(t).getResults(0, 20)) if a.has_title_index else []
+
+    def fulltext(t: str) -> list[str]:
+        return list(Searcher(a).search(Query().set_query(t)).getResults(0, 50)) if a.has_fulltext_index else []
+
+    def first(z):
+        """A pack's first sampleable title that same-named entries do not
+        crowd off either index's first page (at most CROWD_TRIES set aside;
+        then the next one is checked as it is)."""
+        skipped = []
+        for p, t in firsts(z):
+            if len(skipped) >= CROWD_TRIES:
+                return (p, t), skipped
+            sug, ful = suggest(t), fulltext(t)
+            if (p not in sug and crowded(p, t, sug, 20)) or (p not in ful and crowded(p, t, ful, 50)):
+                skipped.append(t)
+                continue
+            return (p, t), skipped
+        return None, skipped
 
     def base_sample(z, redirect: bool):
         hm, best = html_mimes(z), None
@@ -329,26 +368,30 @@ def gate(out: str, base: str, packs: list[str]) -> dict:
                 best = best or (p, t)
         return best
 
-    found = {}
+    found, set_aside = {}, {}
     for src in [base, *packs]:
         z = ZimReader(src)
-        samples = (("page", base_sample(z, False)), ("redirect", base_sample(z, True))) if src == base \
-            else (("page", first(z, False)), ("redirect", None))
+        if src == base:
+            samples = (("page", base_sample(z, False)), ("redirect", base_sample(z, True)))
+        else:
+            pick, skipped = first(z)
+            samples = (("page", pick), ("redirect", None))
+            if skipped:
+                set_aside[os.path.basename(src)] = skipped
         for kind, sample in samples:
             if sample is None:
                 if kind == "page":
                     problems.append(f"{os.path.basename(src)}: no title to sample")
                 continue
             p, t = sample
-            sug = list(SuggestionSearcher(a).suggest(t).getResults(0, 20)) if a.has_title_index else []
-            ful = list(Searcher(a).search(Query().set_query(t)).getResults(0, 50)) if a.has_fulltext_index else []
+            sug, ful = suggest(t), fulltext(t)
             key = os.path.basename(src) + ("" if kind == "page" else " (redirect)")
             found[key] = {"title": t, "suggest": p in sug, "fulltext": p in ful}
             if p not in sug:
                 problems.append(f"{key}: suggestion for {t!r} misses {p}")
             if src != base and p not in ful:
                 problems.append(f"{key}: full text for {t!r} misses {p}")
-    g = {"ok": not problems, "problems": problems, "found": found, "pack_md5": md5_file(out),
+    g = {"ok": not problems, "problems": problems, "found": found, "crowded": set_aside, "pack_md5": md5_file(out),
          "kind": "search"}
     with open(out + ".gate.json", "w") as fh:
         json.dump(g, fh, ensure_ascii=False, indent=1)
