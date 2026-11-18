@@ -8,7 +8,9 @@ Every check prints PASS/FAIL with its discriminator. Exit 1 on any FAIL.
 from __future__ import annotations
 
 import argparse
+import array
 import hashlib
+import heapq
 import itertools
 import json
 import os
@@ -20,6 +22,7 @@ from types import SimpleNamespace
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+import numpy as np  # noqa: E402
 from libzim.reader import Archive  # noqa: E402
 from libzim.search import Query, Searcher  # noqa: E402
 from libzim.suggestion import SuggestionSearcher  # noqa: E402
@@ -42,16 +45,65 @@ def counter_gaps(stored: dict[bytes, int], recount: dict[bytes, int]) -> dict[st
 
 def compare_keys(merged, base, added) -> SimpleNamespace:
     """The merged file's keys against what they must be: the base's and those
-    in `added`. `merged`: its keys in the file's order; `base`: a function
-    that gives the base's keys, each once (it is asked again when the merged
-    file holds a key too many). The result: `merged` (the keys, a set), `n`
-    (how many the file listed), `in_order` (strictly sorted), `missing` (how
-    many it lacks), `extra_n` (how many more it has than it must; not 0 for
-    a count that does not add up either) and `extra` (the first three).
+    in `added`. `merged` and `base`: functions that give each file's keys in
+    its order (each may be asked twice). The result: `other` (the merged
+    keys outside namespace C, a set), `n` (how many the file listed),
+    `in_order` (strictly sorted), `missing` (how many it lacks), `extra_n`
+    (how many more it has than it must; not 0 for a count that does not add
+    up either) and `extra` (the first three).
 
-    A map of a wide, empty land has millions of entries (Greenland: 13.7
-    million): the merged file's keys are the one set held, and the base's
-    are read past it."""
+    A map of a wide, empty land has millions of entries (Antarctica: 42.9
+    million): sorted listings, as every good file has, are walked side by
+    side and no key is held; a file out of order is compared by sets."""
+    r = _walk_keys(merged(), base(), added)
+    return r if r is not None else _keys_by_set(merged(), base, added)
+
+
+def _walk_keys(merged, base, added) -> SimpleNamespace | None:
+    """compare_keys on sorted listings; None when either is out of order."""
+    broken = []
+
+    def expected():
+        prev = None
+        for k in heapq.merge(base, sorted(set(added))):
+            if prev is not None and k <= prev:
+                if k < prev:
+                    broken.append(k)
+                continue
+            prev = k
+            yield k
+
+    end = object()
+    exp = expected()
+    e = next(exp, end)
+    other, prev, n, missing, extra_n, extra = set(), None, 0, 0, 0, []
+    for k in merged:
+        if prev is not None and not prev < k:
+            return None
+        prev = k
+        n += 1
+        if k[0] != C:
+            other.add(k)
+        while e is not end and e < k:
+            missing += 1
+            e = next(exp, end)
+        if e is not end and e == k:
+            e = next(exp, end)
+        else:
+            extra_n += 1
+            if len(extra) < 3:
+                extra.append(k)
+    while e is not end:
+        missing += 1
+        e = next(exp, end)
+    if broken:
+        return None
+    return SimpleNamespace(other=other, n=n, in_order=True, missing=missing, extra_n=extra_n, extra=extra)
+
+
+def _keys_by_set(merged, base, added) -> SimpleNamespace:
+    """compare_keys for a listing out of order: the merged keys as one set,
+    the base's read past it."""
     mset, prev, in_order, n = set(), None, True, 0
     for k in merged:
         in_order = in_order and (prev is None or prev < k)
@@ -72,7 +124,8 @@ def compare_keys(merged, base, added) -> SimpleNamespace:
         for k in base():
             rest.discard(k)
         extra = sorted(rest)[:3]
-    return SimpleNamespace(merged=mset, n=n, in_order=in_order, missing=missing, extra_n=extra_n, extra=extra)
+    return SimpleNamespace(other={k for k in mset if k[0] != C}, n=n, in_order=in_order, missing=missing,
+                           extra_n=extra_n, extra=extra)
 
 
 def check(name, ok, detail=""):
@@ -96,6 +149,44 @@ def cluster_order(d):
     images jump from cluster to cluster (Switzerland: 328 of 480 s); the same
     entries are compared either way."""
     return (d.cluster is None, d.cluster or 0, d.blob or 0)
+
+
+def base_c_order(z: ZimReader):
+    """The indexes of the base's C entries but map-config.json, in
+    cluster_order (ties in index order): one packed number per entry
+    (Antarctica's 42.9 million entries as tuples with their paths would not
+    fit the gate's memory)."""
+    keys, idx = array.array("Q"), array.array("Q")
+    for d in z.iter_dirents():
+        if d.ns == C and d.path != b"map-config.json":
+            none, cl, bl = cluster_order(d)
+            if cl >= 1 << 32 or bl >= 1 << 31:
+                raise ValueError(f"cluster {cl} blob {bl} out of range for the packed order")
+            keys.append((int(none) << 63) | (cl << 31) | bl)
+            idx.append(d.index)
+    k = np.frombuffer(keys, dtype=np.uint64)
+    return np.frombuffer(idx, dtype=np.uint64)[np.argsort(k, kind="stable")]
+
+
+def recount_mimes(z: ZimReader) -> dict[bytes, int]:
+    """Per MIME type (strip_mime), how many distinct contents the C entries
+    hold: one count per (cluster, blob), under the type of the first entry
+    in path order that points at it; redirects not counted. The pairs are
+    packed numbers, not a set of tuples (Antarctica: 42.9 million)."""
+    keys, mimes = array.array("Q"), array.array("H")
+    for d in z.iter_dirents():
+        if d.ns == C and not d.is_redirect:
+            if d.cluster >= 1 << 32 or d.blob >= 1 << 31:
+                raise ValueError(f"cluster {d.cluster} blob {d.blob} out of range for the packed recount")
+            keys.append((d.cluster << 31) | d.blob)
+            mimes.append(d.mime)
+    _, first = np.unique(np.frombuffer(keys, dtype=np.uint64), return_index=True)
+    out: dict[bytes, int] = {}
+    for m, c in enumerate(np.bincount(np.frombuffer(mimes, dtype=np.uint16)[first]).tolist()):
+        if c:
+            km = strip_mime(z.mimes[m])
+            out[km] = out.get(km, 0) + c
+    return out
 
 
 def fronts(z: ZimReader):
@@ -166,25 +257,22 @@ def main():
     # metadata the base lacks, the search pack's indexes
     added = set(pkeys) | {(M, b"Flavour"), (M, b"Name"), (M, b"Title"), (M, b"Language")} \
         | ({(X, b"fulltext/xapian"), (X, b"title/xapian")} if ix else set())
-    keys = compare_keys((d.key for d in zm.iter_dirents()), lambda: (d.key for d in zb.iter_dirents()), added)
+    keys = compare_keys(lambda: (d.key for d in zm.iter_dirents()), lambda: (d.key for d in zb.iter_dirents()), added)
     check("merged keys strictly sorted", keys.in_order, f"n={keys.n}")
     check("key set == base + pack C entries (+ generated metadata, + the search pack's indexes)",
           not keys.missing and not keys.extra_n, f"missing={keys.missing} extra={keys.extra}")
-    check("no pack M/X/W entry leaked", not any(k in pkeys for k in keys.merged if k[0] != C))
+    check("no pack M/X/W entry leaked", not any(k in pkeys for k in keys.other))
     del keys
 
     # base C entries
     bad = []
     n = 0
     # each entry's place and path, not the entry: see the key set
-    order = sorted((*cluster_order(d), d.path) for d in zb.iter_dirents()
-                   if d.ns == C and d.path != b"map-config.json")
-    for *_, raw in order:
+    for i in base_c_order(zb):
         n += 1
-        p = raw.decode()
+        p = zb.dirent_at(int(i)).path.decode()
         if sig(am, p) != sig(ab, p):
             bad.append(p)
-    del order
     check("base C entries identical (title, mime, content, redirect target)", not bad, f"checked={n} bad={sorted(bad)[:3]}")
 
     # map-config.json
@@ -244,23 +332,13 @@ def main():
     check("other metadata (incl. illustration) == base", not other_bad, f"bad={other_bad}")
 
     # counter
-    recount, seen = {}, set()
-    for d in zm.iter_dirents():
-        if d.ns == C and not d.is_redirect and (d.cluster, d.blob) not in seen:
-            seen.add((d.cluster, d.blob))
-            km = strip_mime(zm.mimes[d.mime])
-            recount[km] = recount.get(km, 0) + 1
+    recount = recount_mimes(zm)
     stored = parse_counter(bytes(am.get_metadata("Counter")))
     diff = {k.decode(): (stored.get(k), recount.get(k)) for k in set(stored) | set(recount)
             if stored.get(k) != recount.get(k)}
     # the base's own Counter may already disagree with a recount (aliases); the merge must not add to that
     bstored = parse_counter(bytes(ab.get_metadata("Counter")))
-    brecount, bseen = {}, set()
-    for d in zb.iter_dirents():
-        if d.ns == C and not d.is_redirect and (d.cluster, d.blob) not in bseen:
-            bseen.add((d.cluster, d.blob))
-            km = strip_mime(zb.mimes[d.mime])
-            brecount[km] = brecount.get(km, 0) + 1
+    brecount = recount_mimes(zb)
     bdiff = {k.decode(): (bstored.get(k), brecount.get(k)) for k in set(bstored) | set(brecount)
              if bstored.get(k) != brecount.get(k)}
     # The gaps, not the counts: a base whose Counter missed entries (a viewer

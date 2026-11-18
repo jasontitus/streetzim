@@ -374,30 +374,104 @@ def test_a_base_whose_counter_misses_entries_still_merges(lp: SimpleNamespace, t
 
 
 def test_the_merge_checks_key_comparison() -> None:
-    """verify_merge.compare_keys holds the merged keys only; what it says
-    must be what comparing two whole sets would."""
+    """verify_merge.compare_keys walks sorted listings side by side and holds
+    no key; what it says must be what comparing two whole sets would, in
+    order or not."""
+    from tools.langpack import verify_merge
     from tools.langpack.verify_merge import compare_keys
     C, M = ord("C"), ord("M")
     base = [(C, b"a"), (C, b"c"), (M, b"Title")]
     added = {(C, b"b"), (M, b"Name"), (M, b"Title")}
     whole = sorted(set(base) | added)
-    r = compare_keys(iter(whole), lambda: iter(base), added)
-    assert (r.n, r.in_order, r.missing, r.extra_n, r.extra) == (5, True, 0, 0, []) and r.merged == set(whole)
-    # an entry of the base lost, one of a pack lost
-    r = compare_keys([k for k in whole if k != (C, b"c")], lambda: iter(base), added)
-    assert (r.missing, r.extra_n, r.extra) == (1, 0, [])
-    r = compare_keys([k for k in whole if k != (C, b"b")], lambda: iter(base), added)
-    assert (r.missing, r.extra_n, r.extra) == (1, 0, [])
-    # entries nobody asked for, with and without one lost
-    r = compare_keys(sorted(whole + [(C, b"x"), (C, b"y")]), lambda: iter(base), added)
+
+    def cmp(merged, b=base):
+        r = compare_keys(lambda: iter(merged), lambda: iter(b), added)
+        return r
+
+    r = cmp(whole)
+    assert (r.n, r.in_order, r.missing, r.extra_n, r.extra) == (5, True, 0, 0, []) and r.other == {k for k in whole if k[0] != C}
+    # an entry of the base lost, one of a pack lost, the last one lost
+    assert (lambda r: (r.missing, r.extra_n, r.extra))(cmp([k for k in whole if k != (C, b"c")])) == (1, 0, [])
+    assert (lambda r: (r.missing, r.extra_n, r.extra))(cmp([k for k in whole if k != (C, b"b")])) == (1, 0, [])
+    assert (lambda r: (r.missing, r.extra_n, r.extra))(cmp(whole[:-1])) == (1, 0, [])
+    # entries nobody asked for, with and without one lost; past the end
+    r = cmp(sorted(whole + [(C, b"x"), (C, b"y")]))
     assert (r.missing, r.extra_n, r.extra, r.in_order) == (0, 2, [(C, b"x"), (C, b"y")], True)
-    r = compare_keys(sorted([k for k in whole if k != (C, b"a")] + [(C, b"x")]), lambda: iter(base), added)
+    r = cmp(sorted([k for k in whole if k != (C, b"a")] + [(C, b"x")]))
     assert (r.missing, r.extra_n, r.extra) == (1, 1, [(C, b"x")])
-    # out of order, or listed twice
-    r = compare_keys(whole[::-1], lambda: iter(base), added)
+    r = cmp(sorted(whole + [(C, b"0")] + [(ord("Z"), b"z%d" % i) for i in range(5)]))
+    assert (r.missing, r.extra_n, r.extra) == (0, 6, [(C, b"0"), (ord("Z"), b"z0"), (ord("Z"), b"z1")])
+    # out of order, or listed twice: compared by sets
+    r = cmp(whole[::-1])
     assert not r.in_order and (r.missing, r.extra_n) == (0, 0)
-    r = compare_keys(whole + whole[-1:], lambda: iter(base), added)
+    r = cmp(whole + whole[-1:])
     assert not r.in_order and r.n == 6 and (r.missing, r.extra_n) == (0, 0)
+    # a base out of order: by sets too, so its keys are all found
+    r = cmp(whole, b=base[::-1])
+    assert r.in_order and (r.missing, r.extra_n) == (0, 0)
+    # sorted listings take the walk, which holds no key
+    seen = []
+    orig = verify_merge._keys_by_set
+    verify_merge._keys_by_set = lambda *x: seen.append(1) or orig(*x)
+    try:
+        cmp(whole); cmp(whole[:-1]); cmp(sorted(whole + [(C, b"x")]))
+        assert seen == []
+        cmp(whole[::-1])
+        assert seen == [1]
+    finally:
+        verify_merge._keys_by_set = orig
     # the caller's set is left as it was
     assert added == {(C, b"b"), (M, b"Name"), (M, b"Title")}
 
+
+
+def test_the_merge_check_reads_the_base_in_cluster_order(lp: SimpleNamespace) -> None:
+    """verify_merge.base_c_order keeps one packed number per entry and gives
+    the base's C entries (but map-config.json) in the order the tuples with
+    their paths gave: by cluster, blob, redirects last, then path."""
+    from tools.langpack.verify_merge import C, base_c_order, cluster_order
+    from tools.langpack.zimfmt import ZimReader
+    z = ZimReader(str(lp.base))
+    want = [d.path for d in sorted((d for d in z.iter_dirents() if d.ns == C and d.path != b"map-config.json"),
+                                   key=lambda d: (*cluster_order(d), d.path))]
+    got = [z.dirent_at(int(i)).path for i in base_c_order(z)]
+    assert got == want and len(got) >= 10 and b"map-config.json" not in got
+
+
+def test_the_merge_check_recounts_contents_as_the_set_did(lp: SimpleNamespace, tmp_path: Path) -> None:
+    """verify_merge.recount_mimes (packed numbers) counts what a set of
+    (cluster, blob) pairs counted: per type, each content once, under the
+    first entry's type, redirects not counted; on a base and on a merge."""
+    from tools.langpack.merge_zim import strip_mime
+    from tools.langpack.verify_merge import C, recount_mimes
+    from tools.langpack.zimfmt import ZimReader
+
+    def by_set(z: ZimReader) -> dict[bytes, int]:
+        out: dict[bytes, int] = {}
+        seen: set[tuple[int, int]] = set()
+        for d in z.iter_dirents():
+            if d.ns == C and not d.is_redirect and (d.cluster, d.blob) not in seen:
+                seen.add((d.cluster, d.blob))
+                km = strip_mime(z.mimes[d.mime])
+                out[km] = out.get(km, 0) + 1
+        return out
+
+    out = tmp_path / "m-de.zim"
+    merge_zim.merge(str(lp.base), _packs(lp), str(out), "de", region_langs=["en"], title="Testland")
+    for f in (lp.base, out):
+        z = ZimReader(str(f))
+        want = by_set(z)
+        assert recount_mimes(z) == want and len(want) >= 2 and sum(want.values()) >= 5, (f, want)
+
+
+def test_the_recount_counts_a_shared_content_once_under_its_first_type() -> None:
+    """Two entries on one (cluster, blob) count once, under the type of the
+    first in path order; a redirect is not counted."""
+    from tools.langpack.verify_merge import C, M, recount_mimes
+
+    def d(ns, mime, cluster, blob, redirect=False):
+        return SimpleNamespace(ns=ns, mime=mime, cluster=None if redirect else cluster,
+                               blob=None if redirect else blob, is_redirect=redirect)
+    z = SimpleNamespace(mimes=[b"text/html", b"image/png", b"application/json"], iter_dirents=lambda: iter([
+        d(C, 0, 1, 0), d(C, 1, 1, 0), d(C, 1, 1, 1), d(C, 2, 2, 0), d(C, 2, 0, 0, redirect=True), d(M, 2, 3, 0)]))
+    assert recount_mimes(z) == {b"text/html": 1, b"image/png": 1, b"application/json": 1}
