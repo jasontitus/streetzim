@@ -176,9 +176,10 @@ def recount_mimes(z: ZimReader) -> dict[bytes, int]:
     keys, mimes = array.array("Q"), array.array("H")
     for d in z.iter_dirents():
         if d.ns == C and not d.is_redirect:
-            if d.cluster >= 1 << 32 or d.blob >= 1 << 31:
-                raise ValueError(f"cluster {d.cluster} blob {d.blob} out of range for the packed recount")
-            keys.append((d.cluster << 31) | d.blob)
+            _, cl, bl = cluster_order(d)
+            if cl >= 1 << 32 or bl >= 1 << 31:
+                raise ValueError(f"cluster {cl} blob {bl} out of range for the packed recount")
+            keys.append((cl << 31) | bl)
             mimes.append(d.mime)
     _, first = np.unique(np.frombuffer(keys, dtype=np.uint64), return_index=True)
     out: dict[bytes, int] = {}
