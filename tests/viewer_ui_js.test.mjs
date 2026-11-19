@@ -502,6 +502,67 @@ await ok('a result held at the box edge under a sheet is cleared by zooming in',
   }
 });
 
+await ok('the ease-in after a flight waits for the event and gives way to a newer move', () => {
+  // A MapLibre-like camera: a new flight or stop() ends the one going,
+  // which fires its moveend inside that call. MapLibre 5 left a second
+  // frame callback when an easeTo began inside such a moveend, and it
+  // threw "_onEaseFrame is not a function" (Alaska, landscape, slow CPU).
+  const v = loadView({});
+  const on = {};
+  let moving = false, inEvent = 0;
+  const eases = [], flights = [];
+  const fire = (t) => {
+    const fs = on[t] || [];
+    on[t] = fs.filter((x) => !x.once);
+    inEvent++;
+    try { fs.forEach((x) => x.f()); } finally { inEvent--; }
+  };
+  const map = {
+    getMaxBounds: () => ({ getNorth: () => 72, getSouth: () => 51 }),
+    once: (t, f) => (on[t] = on[t] || []).push({ f, once: true }),
+    isMoving: () => moving,
+    stop: () => { if (moving) { moving = false; fire('moveend'); } },
+    flyTo: (o) => { map.stop(); moving = true; flights.push(o.center); },
+    easeTo: (o) => { assert.strictEqual(inEvent, 0, 'easeTo inside a moveend'); map.stop(); moving = true; eases.push(o); },
+    land: () => { moving = false; fire('moveend'); },
+    getCanvas: () => ({ clientHeight: 844, getBoundingClientRect: () => ({ top: 0, bottom: 844, height: 844 }) }),
+    getZoom: () => 12, getMaxZoom: () => 20,
+    // the target just below the screen, the box's edges far off
+    project: (p) => ({ y: (p.lat ?? p[1]) === 72 ? -5000 : (p.lat ?? p[1]) === 51 ? 5000 : 900 }),
+  };
+  const fly = v.window.__szFlyToClear;
+  globalThis.maplibregl = { LngLat: { convert: (c) => ({ lng: c[0], lat: c[1] }) } };
+  try {
+    // One flight: once it lands, the ease-in comes after the event.
+    fly(map, { center: [-150, 61], zoom: 12 });
+    map.land();
+    assert.strictEqual(eases.length, 0);
+    v.runTimers();
+    assert.deepStrictEqual(eases.map((o) => [o.center.lng, o.center.lat, o.zoom]), [[-150, 61, 12]]);
+    map.land();
+    // A second pin mid-flight: the first flight's end eases nowhere, the
+    // second's eases in on the second pin.
+    eases.length = 0;
+    fly(map, { center: [-149, 61.2], zoom: 12 });
+    fly(map, { center: [-147, 64.8], zoom: 12 });
+    v.runTimers();
+    assert.strictEqual(eases.length, 0);
+    map.land();
+    v.runTimers();
+    assert.deepStrictEqual(eases.map((o) => [o.center.lng, o.center.lat]), [[-147, 64.8]]);
+    // A drag begun before the timer: no ease-in.
+    map.land();
+    eases.length = 0;
+    fly(map, { center: [-150, 61], zoom: 12 });
+    map.land();
+    moving = true;
+    v.runTimers();
+    assert.strictEqual(eases.length, 0);
+  } finally {
+    delete globalThis.maplibregl;
+  }
+});
+
 await ok('units: one setting for every distance, locale default, kept across visits', () => {
   const v = loadView({ storage: memStorage() });
   const f = v.szFormatDistance;

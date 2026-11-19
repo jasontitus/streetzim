@@ -293,11 +293,21 @@ function _szCoveredEdges(map) {
 }
 
 // flyTo; then, if maxBounds left the target under the chrome, ease in on it.
+// The ease waits for the event to be over and is dropped when another
+// camera move has started: a flight cut short by the next one (a second
+// pin tapped mid-flight) ends inside that one's start, and an easeTo begun
+// there left MapLibre 5 a second frame callback that threw "_onEaseFrame
+// is not a function" once the ease was done (Alaska, landscape, slow CPU).
 function _szFlyToClear(map, opts) {
   var mb = map.getMaxBounds && map.getMaxBounds();
   if (!mb) { map.flyTo(opts); return; }
-  // Listen first: a flyTo with duration 0 ends inside the call.
-  map.once('moveend', function() {
+  // End a flight still going first (flyTo would, inside the call), so the
+  // listener below hears this flight's end, not that one's; and listen
+  // before flying: a flyTo with duration 0 ends inside the call.
+  map.stop();
+  map.once('moveend', function() { setTimeout(easeIn, 0); });
+  function easeIn() {
+    if (map.isMoving && map.isMoving()) return;
     try {
       var c = maplibregl.LngLat.convert(opts.center);
       var h = map.getCanvas().clientHeight, e = _szCoveredEdges(map);
@@ -306,7 +316,7 @@ function _szFlyToClear(map, opts) {
                            map.project([c.lng, mb.getSouth()]).y);
       if (z !== null) map.easeTo({ center: c, zoom: z, duration: 300 });
     } catch (err) {}
-  });
+  }
   map.flyTo(opts);
 }
 window.__szFlyToClear = _szFlyToClear;   // for tests and probes
