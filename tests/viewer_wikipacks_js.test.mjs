@@ -1426,4 +1426,34 @@ ok('back from an article: a page the browser kept is loaded afresh; Kiwix is ask
   // outside Kiwix, no handler: nothing posted, nothing thrown
   new Function('window', slice('// BEGIN page-back', '// END page-back'))({ location: {}, addEventListener() {} });
 });
+// The page snaps back to the top (page-pin, 100-wiki-bridge-and-viewport.js).
+ok('the page goes back to the top when a WebView scrolls it, unless a box is being typed in', () => {
+  const on = {}, don = {}, timers = [];
+  const cls = new Set();
+  const se = { scrollTop: 0, scrollLeft: 0 };
+  const doc = { activeElement: null, scrollingElement: se, body: { scrollTop: 0, scrollLeft: 0 },
+                documentElement: { classList: { contains: (c) => cls.has(c) } },
+                addEventListener(t, f) { don[t] = f; } };
+  const win = { pageYOffset: 0, pageXOffset: 0, scrolls: 0,
+                scrollTo(x, y) { this.scrolls++; this.pageYOffset = y; this.pageXOffset = x; },
+                addEventListener(t, f) { on[t] = f; } };
+  const hist = { scrollRestoration: 'auto' };
+  new Function('window', 'document', 'history', 'setTimeout', slice('// BEGIN page-pin', '// END page-pin'))(
+    win, doc, hist, (f) => timers.push(f));
+  assert.strictEqual(hist.scrollRestoration, 'manual');   // a reload does not bring an old offset back
+  on.scroll();                                            // at the top already: nothing
+  assert.strictEqual(win.scrolls, 0);
+  win.pageYOffset = 120; on.scroll();                     // moved (Back from an article): put back
+  assert.strictEqual(win.scrolls, 1); assert.strictEqual(win.pageYOffset, 0);
+  se.scrollTop = 80; on.scroll();                         // a scrolled root element counts too
+  assert.strictEqual(win.scrolls, 2); assert.strictEqual(se.scrollTop, 0);
+  doc.activeElement = { tagName: 'INPUT' }; win.pageYOffset = 200; on.scroll();
+  assert.strictEqual(win.scrolls, 2);                     // typing: the keyboard may lift the page
+  doc.activeElement = null; don.focusout(); timers.shift()();
+  assert.strictEqual(win.scrolls, 3); assert.strictEqual(win.pageYOffset, 0);   // left the box: back
+  cls.add('drive-fullscreen-pseudo'); win.pageYOffset = 1; on.scroll();
+  assert.strictEqual(win.scrolls, 3);                     // driving's one-pixel scroll stays
+  cls.delete('drive-fullscreen-pseudo'); on.pageshow();
+  assert.strictEqual(win.scrolls, 4);                     // shown again (Back): put back at once
+});
 console.log(`\n${pass} passed`);

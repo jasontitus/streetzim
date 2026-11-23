@@ -54,6 +54,33 @@ function _szMapLibreLocale() {
   };
 }
 
+// BEGIN popup-focus
+// A MapLibre popup puts the focus on its first button when it opens and
+// again each time its content is set. The place popups fill in after they
+// open (the place's details, its articles), so a search box tapped in the
+// meantime lost the cursor to the popup's close button and the typing went
+// nowhere. A popup may take the focus when it opens, unless a box is being
+// typed in; never again after.
+function _szTypingInBox() {
+  var a = document.activeElement;
+  return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || !!a.isContentEditable);
+}
+function _szQuietPopups(ml) {
+  var P = ml && ml.Popup && ml.Popup.prototype;
+  if (!P || typeof P.addTo !== 'function' || P.addTo._szQuiet) return;
+  var addTo = P.addTo;
+  P.addTo = function() {
+    // each opening (a marker's popup opens again with addTo) as asked
+    if (this.options && this._szFocusAsked === undefined) this._szFocusAsked = this.options.focusAfterOpen !== false;
+    if (this.options) this.options.focusAfterOpen = this._szFocusAsked && !_szTypingInBox();
+    var r = addTo.apply(this, arguments);
+    if (this.options) this.options.focusAfterOpen = false;
+    return r;
+  };
+  P.addTo._szQuiet = true;
+}
+// END popup-focus
+
 // 025-home-about-fatal.html has already replaced the page when the browser
 // lacks what the viewer needs (Fetch, Promise, MapLibre).
 if (!window.__szUnsupported) fetchConfig(1)
@@ -97,6 +124,7 @@ if (!window.__szUnsupported) fetchConfig(1)
     // on `load`, must not read that and fly the map back to it.
     var openHash = window.location.hash || '';
     var openCam = _szOpeningCamera(config, openHash, _szStorage());
+    _szQuietPopups(maplibregl);
     var map = new maplibregl.Map({
       container: 'map',
       locale: _szMapLibreLocale(),

@@ -2673,6 +2673,33 @@ var kiwixScroll = window.webkit && window.webkit.messageHandlers && window.webki
 if (kiwixScroll) kiwixScroll.postMessage('up');
 } catch (e) {}
 // END page-back
+// BEGIN page-pin
+try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) {}
+function _szPageTyping() {
+var a = document.activeElement;
+return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable);
+}
+function _szPinPage() {
+try {
+if (_szPageTyping()) return;
+if (document.documentElement.classList.contains('drive-fullscreen-pseudo')) return;
+var se = document.scrollingElement || document.documentElement;
+if (window.pageYOffset || window.pageXOffset || se.scrollTop || se.scrollLeft
+|| document.body.scrollTop || document.body.scrollLeft) {
+window.scrollTo(0, 0);
+se.scrollTop = 0; se.scrollLeft = 0;
+document.body.scrollTop = 0; document.body.scrollLeft = 0;
+}
+} catch (e) {}
+}
+window.addEventListener('scroll', _szPinPage, { passive: true });
+document.addEventListener('focusout', function() { setTimeout(_szPinPage, 350); });
+window.addEventListener('resize', function() { setTimeout(_szPinPage, 120); });
+window.addEventListener('pageshow', function() { _szPinPage(); setTimeout(_szPinPage, 400); });
+if (window.visualViewport) {
+window.visualViewport.addEventListener('resize', function() { setTimeout(_szPinPage, 120); });
+}
+// END page-pin
 var DEBUG = /[?&]debug=1/.test(window.location.search);
 var _debugLog = [];
 function dbg() {
@@ -2844,6 +2871,25 @@ return {
 'Popup.Close': szT('maplibre.close_popup', 'Close popup')
 };
 }
+// BEGIN popup-focus
+function _szTypingInBox() {
+var a = document.activeElement;
+return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || !!a.isContentEditable);
+}
+function _szQuietPopups(ml) {
+var P = ml && ml.Popup && ml.Popup.prototype;
+if (!P || typeof P.addTo !== 'function' || P.addTo._szQuiet) return;
+var addTo = P.addTo;
+P.addTo = function() {
+if (this.options && this._szFocusAsked === undefined) this._szFocusAsked = this.options.focusAfterOpen !== false;
+if (this.options) this.options.focusAfterOpen = this._szFocusAsked && !_szTypingInBox();
+var r = addTo.apply(this, arguments);
+if (this.options) this.options.focusAfterOpen = false;
+return r;
+};
+P.addTo._szQuiet = true;
+}
+// END popup-focus
 if (!window.__szUnsupported) fetchConfig(1)
 .then(function(config) {
 szUseLanguage(config && config.language, location.search);
@@ -2866,6 +2912,7 @@ return;
 }
 var openHash = window.location.hash || '';
 var openCam = _szOpeningCamera(config, openHash, _szStorage());
+_szQuietPopups(maplibregl);
 var map = new maplibregl.Map({
 container: 'map',
 locale: _szMapLibreLocale(),
@@ -4729,7 +4776,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = '7b470be1';
+var SZ_VIEWER_BUILD = 'c4d41607';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -13057,6 +13104,10 @@ type: 'Feature',
 geometry: { type: 'LineString', coordinates: coords }
 }
 });
+var labels = (map.getStyle().layers || []).filter(function(l) {
+return l.type === 'symbol' || l.id === 'clip-mask' || l.id === 'clip-outline';
+})[0];
+var beforeId = labels ? labels.id : undefined;
 map.addLayer({
 id: 'route-outline',
 type: 'line',
@@ -13066,7 +13117,7 @@ paint: {
 'line-width': 8,
 'line-opacity': 0.4
 }
-});
+}, beforeId);
 map.addLayer({
 id: 'route-line',
 type: 'line',
@@ -13076,7 +13127,7 @@ paint: {
 'line-width': 4,
 'line-opacity': 0.9
 }
-});
+}, beforeId);
 routeDrawn = true;
 }
 }
@@ -13402,7 +13453,9 @@ map.fitBounds(bounds, { padding: 60, duration: 1000 });
 try {
 var panelH = panel.getBoundingClientRect().height;
 var vh = window.innerHeight || document.documentElement.clientHeight;
-if (vh > 0 && panelH / vh > 0.5
+var typing = document.activeElement && panel.contains(document.activeElement)
+&& /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+if (vh > 0 && panelH / vh > 0.5 && !typing
 && !panel.classList.contains('minimized')) {
 panel.classList.add('minimized');
 if (minBtn) {

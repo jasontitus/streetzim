@@ -557,6 +557,14 @@
           geometry: { type: 'LineString', coordinates: coords }
         }
       });
+      // Under the map's labels: drawn on top, the route hid the name of
+      // the very road it follows, leaving only bits of letters showing.
+      // Over a border-cut map's grey mask and outline (130), which come
+      // after the labels: the route beyond the border stays bright.
+      var labels = (map.getStyle().layers || []).filter(function(l) {
+        return l.type === 'symbol' || l.id === 'clip-mask' || l.id === 'clip-outline';
+      })[0];
+      var beforeId = labels ? labels.id : undefined;
       map.addLayer({
         id: 'route-outline',
         type: 'line',
@@ -566,7 +574,7 @@
           'line-width': 8,
           'line-opacity': 0.4
         }
-      });
+      }, beforeId);
       map.addLayer({
         id: 'route-line',
         type: 'line',
@@ -576,7 +584,7 @@
           'line-width': 4,
           'line-opacity': 0.9
         }
-      });
+      }, beforeId);
       routeDrawn = true;
     }
   }

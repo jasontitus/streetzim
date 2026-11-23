@@ -383,7 +383,11 @@
         try {
           var panelH = panel.getBoundingClientRect().height;
           var vh = window.innerHeight || document.documentElement.clientHeight;
-          if (vh > 0 && panelH / vh > 0.5
+          // Not while a box in the panel is being typed in: folding hides
+          // it, the cursor with it, and the typing goes nowhere.
+          var typing = document.activeElement && panel.contains(document.activeElement)
+            && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+          if (vh > 0 && panelH / vh > 0.5 && !typing
               && !panel.classList.contains('minimized')) {
             panel.classList.add('minimized');
             if (minBtn) {

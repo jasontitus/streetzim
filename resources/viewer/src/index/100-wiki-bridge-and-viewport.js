@@ -713,3 +713,40 @@ try {
   if (kiwixScroll) kiwixScroll.postMessage('up');
 } catch (e) {}
 // END page-back
+
+// BEGIN page-pin
+// The page itself never scrolls: everything sits in fixed places over the
+// map. Yet a WebView can still move it — Back from an article (Kiwix hid its
+// bars while the article scrolled and brings them back here; a reload's
+// restored scroll position), the keyboard, a script scrolling some ancestor —
+// and then the search bar is above the top of the screen with no way to drag
+// it back. Put it back whenever it moves, except while a box is being typed
+// in (the keyboard may lift the page for it; it goes back on leaving the
+// box) and in driving's pseudo-fullscreen, which scrolls by one pixel on
+// purpose.
+try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) {}
+function _szPageTyping() {
+  var a = document.activeElement;
+  return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable);
+}
+function _szPinPage() {
+  try {
+    if (_szPageTyping()) return;
+    if (document.documentElement.classList.contains('drive-fullscreen-pseudo')) return;
+    var se = document.scrollingElement || document.documentElement;
+    if (window.pageYOffset || window.pageXOffset || se.scrollTop || se.scrollLeft
+        || document.body.scrollTop || document.body.scrollLeft) {
+      window.scrollTo(0, 0);
+      se.scrollTop = 0; se.scrollLeft = 0;
+      document.body.scrollTop = 0; document.body.scrollLeft = 0;
+    }
+  } catch (e) {}
+}
+window.addEventListener('scroll', _szPinPage, { passive: true });
+document.addEventListener('focusout', function() { setTimeout(_szPinPage, 350); });
+window.addEventListener('resize', function() { setTimeout(_szPinPage, 120); });
+window.addEventListener('pageshow', function() { _szPinPage(); setTimeout(_szPinPage, 400); });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', function() { setTimeout(_szPinPage, 120); });
+}
+// END page-pin

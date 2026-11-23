@@ -51,6 +51,9 @@ function make(opts = {}) {
   panel.classList = { add(c) { panelClasses.add(c); }, remove(c) { panelClasses.delete(c); },
                       contains(c) { return panelClasses.has(c); } };
   panel.getBoundingClientRect = function() { return { height: ${opts.panelH || 10} }; };
+  var document = { activeElement: null, documentElement: { clientHeight: 0 } };
+  originInput.tagName = destInput.tagName = 'INPUT';
+  panel.contains = function(x) { return x === originInput || x === destInput; };
   var minBtn = null; var travelMode = 'drive'; var navPlanSeq = 0; var routingModes = ['drive', 'walk', 'bike'];
   var originNode = -1, destNode = -1, originCoordE7 = null, destCoordE7 = null, originMarker = null,
       destMarker = null, lastRoute = null, routeDrawn = false;
@@ -80,7 +83,8 @@ function make(opts = {}) {
   ${PICK}
   ${CLEAR}
   env.SZ_HERE = SZ_HERE;
-  env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput,
+  env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput, destInput,
+    focus(x) { document.activeElement = x; },
     graphLoading() { loadGraphInflight = true; },
     graphLoaded() { graph = {}; loadGraphInflight = false; },
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
@@ -364,6 +368,18 @@ await ok('folded (a phone), the header carries the far-end note in short', async
   a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20, 2, 2.001);
   await route(e, {});
   assert.ok(!a.state.hint.includes('away'), a.state.hint);
+});
+await ok('a phone\'s panel does not fold away from a box being typed in', async () => {
+  // Folding hides the boxes; a box with the cursor would lose it and the
+  // typing with it. Not in a box (a suggestion picked takes the cursor out): folds.
+  for (const [inBox, folds] of [['originInput', false], ['destInput', false], [null, true]]) {
+    const e = make({ vh: 100, panelH: 80 }); const a = e.api;
+    a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+    a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+    if (inBox) a.focus(a[inBox]);
+    await route(e, {});
+    assert.strictEqual(a.state.minimized, folds, String(inBox));
+  }
 });
 await ok('the short note names the start, or both ends', async () => {
   let st = await farRoute([1.05, 1], [2, 2]);

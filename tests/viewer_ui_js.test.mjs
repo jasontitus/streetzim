@@ -1701,4 +1701,45 @@ await ok('preview banner: on a landscape phone it keeps left of About, which sta
   assert.ok(HTML.indexOf(LAND) > HTML.indexOf('\n  #preview-banner {'));
 });
 
+// Popups and the cursor (popup-focus, 120-map-init-and-style.js).
+await ok('a popup takes the cursor only as it opens, and not from a box being typed in', () => {
+  const doc = { activeElement: null };
+  // As MapLibre's Popup: the focus goes to its first button on addTo and on
+  // every setDOMContent, while options.focusAfterOpen (default true) says so.
+  class Popup {
+    constructor(o) { this.options = Object.assign({ focusAfterOpen: true }, o); this.button = { tagName: 'BUTTON' }; }
+    _focusFirstElement() { if (this.options.focusAfterOpen && this.open) doc.activeElement = this.button; }
+    addTo() { this.open = true; this._focusFirstElement(); return this; }
+    setDOMContent() { this._focusFirstElement(); return this; }
+  }
+  const ml = { Popup };
+  new Function('document', 'ml', slice('// BEGIN popup-focus', '// END popup-focus') + '\n_szQuietPopups(ml); _szQuietPopups(ml);')(doc, ml);
+  const box = { tagName: 'INPUT' };
+  let p = new Popup({}).addTo();
+  assert.strictEqual(doc.activeElement, p.button);          // nothing typed in: it takes the focus as it opens
+  doc.activeElement = box;                                  // the search box tapped
+  p.setDOMContent();                                        // the place's details arrive
+  assert.strictEqual(doc.activeElement, box);               // the box keeps the cursor
+  doc.activeElement = box;
+  p = new Popup({}).addTo();                                // opened while typing in a box
+  assert.strictEqual(doc.activeElement, box);
+  p.setDOMContent();
+  assert.strictEqual(doc.activeElement, box);
+  // a marker's popup opened again (addTo again): it takes the focus again
+  doc.activeElement = null;
+  p = new Popup({}).addTo(); doc.activeElement = null; p.open = false;
+  p.addTo();
+  assert.strictEqual(doc.activeElement, p.button);
+  doc.activeElement = box; p.open = false; p.addTo();       // reopened while typing: not
+  assert.strictEqual(doc.activeElement, box);
+  // a popup made not to take the focus never does
+  doc.activeElement = null; p = new Popup({ focusAfterOpen: false }).addTo(); p.open = false; p.addTo();
+  assert.strictEqual(doc.activeElement, null);
+  // wrapped once, however often it is called
+  let calls = 0; const orig = Popup.prototype._focusFirstElement;
+  Popup.prototype._focusFirstElement = function () { calls++; return orig.call(this); };
+  doc.activeElement = null; new Popup({}).addTo();
+  assert.strictEqual(calls, 1);
+});
+
 console.log(`\n${pass} passed`);
