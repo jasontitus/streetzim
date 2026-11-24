@@ -296,6 +296,7 @@
  "search.photo_take": "Ambil foto",
  "search.photo_drop": "Seret foto ke peta, atau tempel dengan ⌘V.",
  "search.photo_failed": "Foto tidak dapat dibaca",
+ "search.photo_kiwix_ios": "Di aplikasi Kiwix, pilih foto dari galeri Anda: mengambil foto baru di sini menutup aplikasi, yang belum bisa memakai kamera.",
  "search.photo_lines": "Teks di foto: ketuk baris untuk menelusurinya",
  "search.photo_none": "Tidak ada teks di foto",
  "search.photo_part": "Cari bagian ini",

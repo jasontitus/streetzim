@@ -346,7 +346,7 @@ vowel sign ை (drawn before its consonant) even on a clean sign:
 | reader | camera / photo |
 |---|---|
 | a browser (kiwix-serve, the `/drive/` PWA, kiwix-js) | yes: camera and photo library on a phone (on an iPhone or iPad, iOS's own menu at once), file picker on a desktop |
-| Kiwix for iOS | as in Safari: the camera button opens iOS's own menu at once (Photo Library, Take Photo, Choose File). Take Photo needs the app's camera permission (`INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml`); a build without it closes when the camera opens (reported 2026-10-28) |
+| Kiwix for iOS | the photo library only. The app has no camera permission (no `NSCameraUsageDescription` in its Info.plist), and iOS closes an app that opens the camera without one: the file picker's Take Photo crashed Kiwix (reported 2026-10-28). So there (the `zim:` scheme on an iPhone or iPad, the `sign-env` block) the camera's choice shows Take a photo off, with a note saying why, and Choose a photo as the blue one (`_szSignPickMode`). The fix belongs in the app: one line, `INFOPLIST_KEY_NSCameraUsageDescription` in kiwix-apple's `project.yml` |
 | Kiwix for macOS | drop a photo on the map, or paste one with ⌘V. The app does not answer the web view's open-panel request (`WKUIDelegate` `runOpenPanelWith`, absent from kiwix-apple as of 2026-10-23), so the file picker never opens: the camera button first shows a note saying so (the `zim:` scheme on a Mac, `sign-env`). The fix belongs in the app |
 | Kiwix for Android | no: its WebView opens no file chooser, so the viewer hides the button there (an Android WebView's user agent says `; wv)`) |
 

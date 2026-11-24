@@ -299,6 +299,7 @@
  "search.photo_take": "Fotó készítése",
  "search.photo_drop": "Húzzon egy fotót a térképre, vagy illessze be ⌘V-vel.",
  "search.photo_failed": "A fotót nem sikerült elolvasni",
+ "search.photo_kiwix_ios": "A Kiwix alkalmazásban válasszon fotót a könyvtárából: itt új fotó készítése bezárja az alkalmazást, amely még nem tudja használni a kamerát.",
  "search.photo_lines": "Szöveg a fotón: koppintson egy sorra a kereséshez",
  "search.photo_none": "A fotón nem található szöveg",
  "search.photo_part": "Keresés ebben a részben",

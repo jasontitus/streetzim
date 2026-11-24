@@ -298,6 +298,7 @@
  "search.photo_take": "拍照",
  "search.photo_drop": "将照片拖到地图上，或用 ⌘V 粘贴。",
  "search.photo_failed": "无法识别照片",
+ "search.photo_kiwix_ios": "在 Kiwix 应用中，请从照片图库选择照片：在这里拍新照片会关闭应用，因为它暂时无法使用相机。",
  "search.photo_lines": "照片中的文字：点按一行即可搜索",
  "search.photo_none": "照片中未找到文字",
  "search.photo_part": "搜索这一部分",

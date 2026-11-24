@@ -781,14 +781,14 @@ await (async () => {
 })();
 
 const P = new Function(slice(HTML, '// BEGIN sign-pick', '// END sign-pick') + '\nreturn { _szSignPickMode };')();
-ok('the camera button offers the camera and the library on a phone, iOS\'s own menu on iOS', () => {
+ok('the camera button offers the camera and the library on a phone, the library first in Kiwix on iOS', () => {
   assert.strictEqual(P._szSignPickMode('', true), 'both');        // a phone or tablet browser
   assert.strictEqual(P._szSignPickMode('', true, true), 'picker');  // iOS's own menu at once: camera, library, files
-  assert.strictEqual(P._szSignPickMode('ios', true, true), 'picker');   // in Kiwix too: its menu, camera included
+  assert.strictEqual(P._szSignPickMode('ios', true, true), 'library');  // but in Kiwix, whose Take Photo closes it
   assert.strictEqual(P._szSignPickMode('mac', false, false), 'drop');
   assert.strictEqual(P._szSignPickMode('', false), 'picker');     // a desktop: the file picker at once
-  assert.strictEqual(P._szSignPickMode('ios', true), 'picker');
-  assert.strictEqual(P._szSignPickMode('ios', false), 'picker');
+  assert.strictEqual(P._szSignPickMode('ios', true), 'library');  // Take Photo closes the Kiwix app
+  assert.strictEqual(P._szSignPickMode('ios', false), 'library');
   assert.strictEqual(P._szSignPickMode('mac', false), 'drop');    // no picker opens in Kiwix for macOS
   assert.strictEqual(P._szSignPickMode('mac', true), 'drop');
 });

@@ -11,9 +11,9 @@
 // own camera takes another; its x lets it go). The search field holds the
 // line the first place matched. A photo can also be dropped on the page or
 // pasted. The camera button opens the choice _szSignPickMode gives: on a
-// phone or tablet, Take a photo (the camera at once) or Choose a photo; on
-// iOS (Safari or Kiwix) iOS's own menu at once; in Kiwix on macOS a note to
-// drop or paste; on a desktop, the file picker at once.
+// phone or tablet, Take a photo (the camera at once) or Choose a photo; in
+// Kiwix on iOS Take a photo is off and the library comes first; in Kiwix
+// on macOS a note to drop or paste; on a desktop, the file picker at once.
 // Nothing is fetched before the first photo;
 // the worker, a few hundred MB while it reads, is let go a minute after
 // the last one.
@@ -1089,9 +1089,11 @@ function _szSignClearFrame(w, h, boxes) {
 // BEGIN sign-env
 // Kiwix's Apple apps serve the in-ZIM viewer on their zim: scheme, and
 // neither opens the file picker as a browser does (kiwix-apple, 2026-10):
-// - 'ios' (an iPhone or iPad, as 000-head.html tells it): iOS's own menu
-//   opens (Photo Library, Take Photo, Choose File), as in Safari. Its Take
-//   Photo needs the app's camera permission (NSCameraUsageDescription).
+// - 'ios' (an iPhone or iPad, as 000-head.html tells it): the system
+//   picker opens, but the app has no camera permission (no
+//   NSCameraUsageDescription) and iOS closes an app that opens the camera
+//   without one, so its Take Photo crashes Kiwix: the reader is pointed at
+//   the photo library first.
 // - 'mac': the app does not answer the web view's open-panel request
 //   (WKUIDelegate runOpenPanelWith), so the picker never opens: the reader
 //   is told to drop or paste a photo instead.
@@ -1111,15 +1113,17 @@ function _szSignIOS(nav) {
 // BEGIN sign-pick
 // What the camera button offers, from sign-env's app, whether the pointer
 // is coarse (a finger) and whether it is an iPhone or iPad: 'drop' in Kiwix
-// for macOS, where no picker opens; 'picker' on iOS, in a browser or in
-// Kiwix, whose own menu (Take Photo, Photo Library, Choose File) opens
-// straight away, the tiles would only come before it,
+// for macOS, where no picker opens; 'library' in Kiwix on iOS, where Take
+// Photo closes the app (the camera tile shows, off, and a note says so);
+// 'picker' in a browser on iOS, whose own menu (Take Photo, Photo Library,
+// Choose File) opens straight away, the tiles would only come before it,
 // and on a desktop, the file picker at once; 'both' on another phone or
 // tablet (Android: its "Choose" opens the photo picker, no camera in it),
 // the camera at once or a photo.
 function _szSignPickMode(app, coarse, ios) {
   if (app === 'mac') return 'drop';
-  if (app === 'ios' || ios) return 'picker';
+  if (app === 'ios') return 'library';
+  if (ios) return 'picker';
   return coarse ? 'both' : 'picker';
 }
 // END sign-pick
@@ -1492,8 +1496,9 @@ function initSignSearch(map, config) {
     };
     map._searchSign(last.lines, opts).then(done, done);
   }
-  // A new photo, as _szSignPickMode says: the two tiles, the note to drop
-  // or paste in Kiwix on macOS, or the picker at once (iOS, a desktop).
+  // A new photo, as _szSignPickMode says: the two tiles (the camera off in
+  // Kiwix on iOS), the note to drop or paste in Kiwix on macOS, or the
+  // file picker at once on a desktop.
   function pick() {
     var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     var mode = _szSignPickMode(kiwixApp(), coarse, window.__szSignIOS != null ? !!window.__szSignIOS : _szSignIOS(navigator));
@@ -1509,9 +1514,12 @@ function initSignSearch(map, config) {
     linesEl.innerHTML = '';
     pickRow.hidden = mode === 'drop';
     againBtn.hidden = true;
-    takeBtn.disabled = mode !== 'both';     // the camera only where its tile shows
+    takeBtn.disabled = mode !== 'both';
     takeBtn.classList.toggle('primary', mode === 'both');
-    if (mode === 'drop') {
+    chooseBtn.classList.toggle('primary', mode === 'library');
+    if (mode === 'library') {
+      setStatus(szT('search.photo_kiwix_ios', 'In the Kiwix app, choose a photo from your library: taking a new photo here closes the app, which cannot use the camera yet.'), 'pick');
+    } else if (mode === 'drop') {
       setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
     } else {
       setStatus(szT('search.photo', 'Search with a photo'), 'choose');
