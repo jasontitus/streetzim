@@ -66,9 +66,9 @@ try {
 
   // The camera opens a choice (305-ocr-search.js, _szSignPickMode). On a
   // phone (this page: a touch screen) Take a photo and Choose a photo, the
-  // camera first. In Kiwix's Apple apps (forced: no zim: scheme here): on
-  // iOS the camera tile is off (Take Photo closes the app) and the library
-  // first; on macOS a note to drop or paste, no tiles (no picker opens).
+  // camera first. On iOS, in a browser or in Kiwix (forced: no zim: scheme
+  // here), iOS's own menu at once; in Kiwix for macOS a note to drop or
+  // paste, no tiles (no picker opens).
   // The x lets it go.
   for (const app of ['', 'ios', 'mac', 'safari-ios']) {
     const got = await p.evaluate((a) => {
@@ -97,15 +97,14 @@ try {
       window.__szSignIOS = null;
       return r;
     }, app);
-    if (app === 'safari-ios') {
+    if (app === 'safari-ios' || app === 'ios') {
       // no tiles: iOS's own menu (Take Photo, Photo Library, Choose File) from the button
       if (got.open || got.direct.join(',') !== 'search-photo-file') {
-        errs.push(`a browser on iOS: the camera button should open iOS's menu at once: ${JSON.stringify(got)}`);
+        errs.push(`${app === 'ios' ? 'Kiwix' : 'a browser'} on iOS: the camera button should open iOS's menu at once: ${JSON.stringify(got)}`);
       }
       continue;
     }
     const want = { '': { state: 'choose', take: 'first', choose: 'on', opened: 'search-photo-take+environment,search-photo-file' },
-                   ios: { state: 'pick', take: 'off', choose: 'first', opened: 'search-photo-file' },
                    mac: { state: 'drop', take: 'none', choose: 'none', opened: 'search-photo-file' } }[app];
     if (!(got.open && !got.photo && !got.again && got.state === want.state && got.take === want.take &&
           got.choose === want.choose && got.opened.join(',') === want.opened && !got.direct.length)) {

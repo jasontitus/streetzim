@@ -299,7 +299,6 @@
  "search.photo_take": "Tag et foto",
  "search.photo_drop": "Træk et foto ind på kortet, eller indsæt et med ⌘V.",
  "search.photo_failed": "Kunne ikke læse fotoet",
- "search.photo_kiwix_ios": "I Kiwix-appen skal du vælge et foto fra dit bibliotek: tager du et nyt foto her, lukker appen, som endnu ikke kan bruge kameraet.",
  "search.photo_lines": "Tekst i fotoet: tryk på en linje for at søge efter den",
  "search.photo_none": "Ingen tekst fundet i fotoet",
  "search.photo_part": "Søg i denne del",

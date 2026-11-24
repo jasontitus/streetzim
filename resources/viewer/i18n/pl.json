@@ -305,7 +305,6 @@
  "search.photo_take": "Zrób zdjęcie",
  "search.photo_drop": "Przeciągnij zdjęcie na mapę lub wklej je skrótem ⌘V.",
  "search.photo_failed": "Nie udało się odczytać zdjęcia",
- "search.photo_kiwix_ios": "W aplikacji Kiwix wybierz zdjęcie z biblioteki: zrobienie tu nowego zdjęcia zamyka aplikację, która nie może jeszcze używać aparatu.",
  "search.photo_lines": "Tekst na zdjęciu: dotknij wiersza, aby go wyszukać",
  "search.photo_none": "Na zdjęciu nie znaleziono tekstu",
  "search.photo_part": "Szukaj w tej części",

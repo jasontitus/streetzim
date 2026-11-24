@@ -299,7 +299,6 @@
  "search.photo_take": "Scatta una foto",
  "search.photo_drop": "Trascina una foto sulla mappa o incollala con ⌘V.",
  "search.photo_failed": "Impossibile leggere la foto",
- "search.photo_kiwix_ios": "Nell’app Kiwix scegli una foto dalla libreria: scattarne una nuova qui chiude l’app, che non può ancora usare la fotocamera.",
  "search.photo_lines": "Testo nella foto: tocca una riga per cercarla",
  "search.photo_none": "Nessun testo trovato nella foto",
  "search.photo_part": "Cerca questa parte",

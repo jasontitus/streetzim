@@ -302,7 +302,6 @@
  "search.photo_take": "Uzņemiet fotoattēlu",
  "search.photo_drop": "Ievelciet fotoattēlu kartē vai ielīmējiet to ar ⌘V.",
  "search.photo_failed": "Fotoattēlu neizdevās nolasīt",
- "search.photo_kiwix_ios": "Lietotnē Kiwix izvēlieties fotoattēlu no savas bibliotēkas: jauna fotoattēla uzņemšana šeit aizver lietotni, kas vēl nevar izmantot kameru.",
  "search.photo_lines": "Teksts fotoattēlā: pieskarieties rindai, lai to meklētu",
  "search.photo_none": "Fotoattēlā nav atrasts teksts",
  "search.photo_part": "Meklēt šajā daļā",
