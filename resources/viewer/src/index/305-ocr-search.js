@@ -1843,8 +1843,10 @@ function initSignSearch(map, config) {
   // another way of looking at the map takes them away: a category, directions
   document.getElementById('find-chips').addEventListener('click', clearGroup, true);
   var routing = document.getElementById('routing-panel');
-  if (routing) new MutationObserver(function () { if (routing.style.display === 'block') clearGroup(); })
-    .observe(routing, { attributes: true, attributeFilter: ['style'] });
+  // (Directions shows: opened, or back from under another panel, 145)
+  if (routing) new MutationObserver(function () {
+    if (routing.style.display === 'block' && !routing.classList.contains('sz-card-hidden')) clearGroup();
+  }).observe(routing, { attributes: true, attributeFilter: ['style', 'class'] });
   mapBtn.addEventListener('click', function () {
     hide();
     resultsEl.style.display = 'none';

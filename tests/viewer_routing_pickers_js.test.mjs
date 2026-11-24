@@ -62,6 +62,7 @@ function make(opts = {}) {
   function setRoutingStatus(t, st) { statusEl.textContent = t; statusEl.state = st || ''; }
   var expandHint = '';
   function syncTravelButtons() {} function resetGoButtons() {} function setExpandHint(t) { expandHint = t || ''; }
+  var cardHidden = false; function szCardHidden() { return cardHidden; }
   function stopRouteProgressIndicator() {} function startRouteProgressIndicator() {} function cancelInFlightRoute() {}
   function dismissOriginSuggestions() {} function dismissDestSuggestions() {}
   function coordLabel(a, b) { return a + ',' + b; } function makeMarkerEl() { return {}; }
@@ -85,6 +86,7 @@ function make(opts = {}) {
   env.SZ_HERE = SZ_HERE;
   env.api = { setOriginFromLatLon, setDestFromLatLon, setTravelMode, clearRoute, win: window, originInput, destInput,
     focus(x) { document.activeElement = x; },
+    hideCard(h) { cardHidden = h; }, showAgain() { cardHidden = false; if (foldWhenShown) foldIfTall(); },
     graphLoading() { loadGraphInflight = true; },
     graphLoaded() { graph = {}; loadGraphInflight = false; },
     get state() { return { originNode, destNode, originMoved, destMoved, status: statusEl.textContent,
@@ -380,6 +382,16 @@ await ok('a phone\'s panel does not fold away from a box being typed in', async 
     await route(e, {});
     assert.strictEqual(a.state.minimized, folds, String(inBox));
   }
+});
+await ok('a route that lands while Directions is under another panel folds it when it shows again', async () => {
+  const e = make({ vh: 100, panelH: 80 }); const a = e.api;
+  a.setOriginFromLatLon(1, 1, 'O'); await snap(e, 'origin', 10);
+  a.setDestFromLatLon(2, 2, 'D'); await snap(e, 'dest', 20);
+  a.hideCard(true);                                   // Nearby opened while the route computes
+  await route(e, {});
+  assert.strictEqual(a.state.minimized, false);       // nothing measured under the other panel
+  a.showAgain();                                      // Nearby closed: Directions back, folded
+  assert.strictEqual(a.state.minimized, true);
 });
 await ok('the short note names the start, or both ends', async () => {
   let st = await farRoute([1.05, 1], [2, 2]);

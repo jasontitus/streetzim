@@ -719,6 +719,8 @@ await ok('"Only <language> articles": the saved choice, the label, the change', 
 // The Wiki panel itself (410, initWikiSidebar) on stubbed browser globals:
 // a map, MapLibre markers, the panel's markup, fetch of the geo-indexes.
 const SIDEBAR_SRC = slice('// --- Wiki sidebar: show Wikipedia entries', '// BEGIN sz-here');
+// One panel at a time (145-cards.js): the panel registers itself there.
+const CARDS_SRC = slice('// BEGIN sz-cards', '// END sz-cards');
 function panelDocument() {
   function el(tag) {
     const e = {
@@ -764,7 +766,7 @@ async function openPanel(config, files, { storage = null, bounds = [9.4, 9.7, 47
     ? { ok: true, json: () => Promise.resolve(files[url.slice(base.length)]) } : { ok: false });
   const init = new Function('window', 'document', 'fetch', 'maplibregl', 'setTimeout', 'clearTimeout', '_szStorage',
     '_szFlyToClear', 'history', 'location', 'baseUrl',
-    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + WIKI_SRC + SIDEBAR_SRC +
+    'var WIKI_GEO_INDEX = null, WIKI_GEO_QID = null, WIKI_QID_TITLES = null;\n' + CARDS_SRC + WIKI_SRC + SIDEBAR_SRC +
     '\nreturn initWikiSidebar;')({ innerWidth: 1000 }, document, fetch, { Marker }, () => 0, () => {},
     () => storage, () => {}, {}, { pathname: '/', search: '' }, base);
   const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r)); };

@@ -1742,4 +1742,73 @@ await ok('a popup takes the cursor only as it opens, and not from a box being ty
   assert.strictEqual(calls, 1);
 });
 
+// One panel at a time (sz-cards, 145-cards.js).
+await ok('panels: the one opened shows, the one under it waits, closing brings it back', () => {
+  const api = new Function(slice('// BEGIN sz-cards', '// END sz-cards')
+    + '\nreturn { szCardDefine, szCardOpen, szCardClosed, szCardHidden };')();
+  const mkEl = () => { const c = new Set(); return { classList: { add: (x) => c.add(x), remove: (x) => c.delete(x) }, hidden: () => c.has('sz-card-hidden') }; };
+  const els = { wiki: mkEl(), routing: mkEl(), find: mkEl() };
+  const log = [];
+  for (const n of Object.keys(els)) {
+    api.szCardDefine(n, { el: () => els[n], suspend: () => log.push(n + '-'), resume: () => log.push(n + '+') });
+  }
+  const shown = () => Object.keys(els).filter((n) => !els[n].hidden()).join(',');
+  api.szCardOpen('wiki');
+  assert.strictEqual(shown(), 'wiki,routing,find');          // closed panels carry no class
+  api.szCardOpen('routing');                                  // Directions to here, from Nearby
+  assert.strictEqual(els.wiki.hidden(), true);
+  assert.strictEqual(els.routing.hidden(), false);
+  assert.strictEqual(api.szCardHidden('wiki'), true);
+  assert.strictEqual(api.szCardHidden('routing'), false);
+  assert.deepStrictEqual(log, ['wiki-']);                    // a new panel: no resume of its own
+  api.szCardOpen('find');                                     // a chip: Directions waits too
+  assert.strictEqual(els.routing.hidden(), true);
+  assert.deepStrictEqual(log, ['wiki-', 'routing-']);
+  api.szCardClosed('find');                                   // Find closed: Directions back
+  assert.strictEqual(els.routing.hidden(), false);
+  assert.strictEqual(els.wiki.hidden(), true);
+  assert.deepStrictEqual(log.slice(2), ['routing+']);
+  api.szCardOpen('wiki');                                     // the Wiki toggle: Nearby on top again
+  assert.strictEqual(els.wiki.hidden(), false);
+  assert.strictEqual(els.routing.hidden(), true);
+  assert.deepStrictEqual(log.slice(3), ['routing-', 'wiki+']);
+  api.szCardOpen('wiki');                                     // asked again on top: nothing changes
+  assert.deepStrictEqual(log.slice(5), []);
+  api.szCardClosed('routing');                                // closed while under: Nearby stays, no class left
+  assert.strictEqual(els.routing.hidden(), false);
+  assert.strictEqual(api.szCardHidden('routing'), false);
+  assert.strictEqual(els.wiki.hidden(), false);
+  assert.deepStrictEqual(log.slice(5), []);
+  api.szCardClosed('wiki');                                   // the last one: nothing to bring back
+  assert.strictEqual(api.szCardHidden('wiki'), false);
+  api.szCardClosed('wiki');                                   // closing twice is harmless
+  api.szCardOpen('nobody');                                   // a name never defined does no harm
+  api.szCardClosed('nobody');
+});
+
+await ok('a Find strip under another panel leaves the keys to that panel', () => {
+  const src = /\nfunction _findResultsKeydown\(e\) \{[\s\S]*?\n\}/.exec(HTML)[0];
+  for (const hidden of [false, true]) {
+    const done = [];
+    const run = new Function('document', `
+      var _findResultsState = { strip: {}, items: [1, 2, 3], active: 1, map: {} };
+      function szCardHidden() { return ${hidden}; }
+      function szUiRtl() { return false; } function szDir() { return 'ltr'; }
+      function _scrollCarouselTo(i) { done.push('scroll' + i); } function _setActiveResult() { done.push('fly'); }
+      function _hidePlaceDetail() { done.push('hideDetail'); } function clearFindResults() { done.push('clear'); }
+      function _showPlaceDetail() { done.push('detail'); } function _placeDetailOpen() { return false; }
+      var done = arguments[1];
+      ${src}
+      return _findResultsKeydown;`);
+    const kd = run({ activeElement: null }, done);
+    for (const key of ['Enter', 'Escape', 'ArrowRight']) {
+      let prevented = false;
+      try { kd({ key, target: { tagName: 'BUTTON' }, preventDefault() { prevented = true; }, stopPropagation() {} }); } catch (e) {}
+      if (hidden) assert.strictEqual(prevented, false, key);
+    }
+    if (hidden) assert.deepStrictEqual(done, []);
+    else assert.ok(done.length > 0, 'shown: the keys act on the results');
+  }
+});
+
 console.log(`\n${pass} passed`);

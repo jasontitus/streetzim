@@ -518,6 +518,7 @@ function _renderFindResultsStrip(map, stash) {
     track.addEventListener('touchend', function() { armed = false; }, { passive: true });
   })();
   document.body.appendChild(strip);
+  szCardOpen('find');
 
   // Watch for the centered card. IntersectionObserver with a tall
   // narrow root margin would work, but the simpler signal is just
@@ -580,6 +581,7 @@ function _placeSearchAreaPill() {
 
 function _showSearchAreaPill(map) {
   if (_findResultsState.searchAreaBtn) return; // already on screen
+  if (szCardHidden('find')) return;            // the results are under another panel
   var btn = document.createElement('button');
   btn.id = 'find-search-area-btn';
   btn.type = 'button';
@@ -616,6 +618,20 @@ function _showSearchAreaPill(map) {
     });
   });
 }
+
+// The results under another panel: their "Search this area" goes with them.
+// The arrow keys move along the results while they show (the map's own
+// arrow-key panning is off then, 93); under another panel the map has them.
+szCardDefine('find', {
+  el: function() { return document.getElementById('find-results-strip'); },
+  suspend: function() {
+    _hideSearchAreaPill();
+    try { _findResultsState.map.keyboard.enable(); } catch (e) {}
+  },
+  resume: function() {
+    try { _findResultsState.map.keyboard.disable(); } catch (e) {}
+  }
+});
 
 function _hideSearchAreaPill() {
   var btn = _findResultsState.searchAreaBtn;
@@ -689,7 +705,8 @@ function _searchAreaApply(map) {
 }
 
 function _findResultsKeydown(e) {
-  if (!_findResultsState.strip) return;
+  // under another panel: its keys are that panel's
+  if (!_findResultsState.strip || szCardHidden('find')) return;
   var t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
             || t.tagName === 'SELECT' || t.isContentEditable)) {

@@ -175,6 +175,9 @@ var SZ_ON_DRIVE_PWA = /^\/drive\/viewer(\/|$)/.test(window.location.pathname);
 <div id="routing-panel">
   <h4><span data-i18n="routing.title">Directions</span><span id="routing-expand-hint" data-i18n="routing.expand_hint">— tap to expand</span>
     <span>
+      <!-- Start, in the header: shown with a route, folded or not (the go row
+           at the bottom sat under the road list, out of reach on a phone). -->
+      <button id="routing-start-top" type="button" data-i18n="routing.start">Start</button>
       <button id="routing-minimize" title="Fold down (show map)" aria-label="Fold" data-i18n-title="routing.fold_title" data-i18n-aria-label="routing.fold">&#x25BE;</button>
       <button id="routing-close" title="Close" data-i18n-title="common.close">&times;</button>
     </span>

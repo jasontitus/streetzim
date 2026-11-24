@@ -660,6 +660,7 @@ await ok('arrow keys follow the reading direction: the carousel and travel-mode 
       var _findResultsState = { strip: {}, items: [1, 2, 3, 4], active: 1 };
       function _scrollCarouselTo(i) { scrolled.push(i); }
       function _hidePlaceDetail() {} function clearFindResults() {} function _showPlaceDetail() {}
+      function szCardHidden() { return false; }
       ${carousel}
       var routingModes = ['drive', 'walk', 'bike'], travelMode = 'walk';
       function setTravelMode(m) { modes.push(m); }

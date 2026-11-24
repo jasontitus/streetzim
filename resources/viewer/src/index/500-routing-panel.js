@@ -137,6 +137,9 @@ function initRouting(map, config) {
         }
       }
     });
+    var top = document.getElementById('routing-start-top');
+    var mb = modeBtns[multiModal ? travelMode : 'drive'];
+    if (top && mb) top.setAttribute('aria-label', mb.getAttribute('aria-label') || szT('routing.start_driving', 'Start driving navigation'));
   }
 
   if (toggleBtn) toggleBtn.style.display = 'block';
@@ -169,6 +172,7 @@ function initRouting(map, config) {
     if (toggleBtn) toggleBtn.classList.add('active-control');
     panel.style.display = 'block';
     if (searchBoxEl) searchBoxEl.classList.add('streetzim-hidden');
+    szCardOpen('routing');
     map.getCanvas().style.cursor = 'crosshair';
     loadGraph();
   }
@@ -202,6 +206,17 @@ function initRouting(map, config) {
     try { map.resize(); } catch (err) {}
   }
   if (minBtn) minBtn.addEventListener('click', toggleMinimized);
+  // Start in the header: the go row's own button for the mode the route
+  // was planned for (one mode: Drive), so both start the same way.
+  var startTop = document.getElementById('routing-start-top');
+  if (startTop) {
+    startTop.setAttribute('aria-label', szT('routing.start_driving', 'Start driving navigation'));
+    startTop.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();     // not the folded header's unfold
+      var b = modeBtns[multiModal ? travelMode : 'drive'];
+      if (b) b.click();
+    });
+  }
   // Clicking anywhere on the header while minimized expands. When
   // not minimized the h4 is plain text so we only hook the handler
   // through the class-conditional cursor:pointer rule above.
@@ -226,7 +241,22 @@ function initRouting(map, config) {
     if (searchBoxEl) searchBoxEl.classList.remove('streetzim-hidden');
     map.getCanvas().style.cursor = '';
     clearRoute();
+    szCardClosed('routing');
   }
+  // Under another panel, the search box comes back (the panel took its
+  // place) and a map tap is no route end.
+  szCardDefine('routing', {
+    el: function() { return panel; },
+    suspend: function() {
+      if (searchBoxEl) searchBoxEl.classList.remove('streetzim-hidden');
+      map.getCanvas().style.cursor = '';
+    },
+    resume: function() {
+      if (searchBoxEl) searchBoxEl.classList.add('streetzim-hidden');
+      map.getCanvas().style.cursor = 'crosshair';
+      if (foldWhenShown) foldIfTall();     // a route came in while it was under
+    }
+  });
 
   clearBtn.addEventListener('click', function() {
     clearRoute();
@@ -265,6 +295,7 @@ function initRouting(map, config) {
     setExpandHint();
     clearBtn.style.display = 'none';
     goRow.classList.remove('visible');
+    panel.classList.remove('has-route');
     resetGoButtons();
     if (driveMode.active) driveMode.exit();
     lastRoute = null;

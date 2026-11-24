@@ -29,7 +29,7 @@
     setTravelMode: function(m) { return setTravelMode(m, false); },
     /// True while the routing panel is open: a map tap then picks a route
     /// point, so the place popups stay out of the way.
-    get panelActive() { return !!active; },
+    get panelActive() { return !!active && !szCardHidden('routing'); },
     setOrigin: setOriginFromLatLon,
     setDest:   setDestFromLatLon,
     /// Reset the routing panel to "no route picked" — clears both
@@ -47,6 +47,7 @@
     /// rail. No-op when already open.
     open: function() {
       if (!active) activate();
+      else szCardOpen('routing');    // open under another panel: on top again
     },
     /// Close the routing panel + clear route state. Mirrors the panel's
     /// `×` button.

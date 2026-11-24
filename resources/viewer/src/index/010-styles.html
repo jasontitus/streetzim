@@ -570,6 +570,9 @@
     padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
   }
 
+  /* One panel at a time (145-cards.js): an open panel under another. */
+  .sz-card-hidden { display: none !important; }
+
   /* --- Wiki panel --- */
   #wiki-panel {
     position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px;
@@ -951,6 +954,16 @@
   #routing-go-row {
     display: none; margin-top: 8px; gap: 6px;
   }
+  /* (#routing-panel h4 #id: over the header's plain-glyph button rule,
+     also its touch-size rule further down) */
+  #routing-panel h4 #routing-start-top {
+    display: none; margin: 0 8px 0 0; padding: 7px 16px; border: none; border-radius: 999px;
+    background: #2563eb; color: #fff; font-family: var(--ui-font); font-size: 14px;
+    font-weight: 600; line-height: 1.2; cursor: pointer; vertical-align: middle;
+    min-width: 0; min-height: 0;
+  }
+  #routing-panel h4 #routing-start-top:hover { color: #fff; background: #1d4ed8; }
+  #routing-panel.has-route h4 #routing-start-top { display: inline-block; }
   #routing-go-row.visible { display: flex; }
   #routing-go-row button {
     flex: 1; padding: 8px 6px; border: none; border-radius: 6px;
@@ -1177,6 +1190,8 @@
     #routing-close { margin-right: -8px !important; }
     #routing-panel.minimized h4 button { margin: -6px 0; }
     #routing-panel.minimized #routing-minimize { display: inline-flex; }
+    /* Start: a 44 px target, the header keeping its height */
+    #routing-panel h4 #routing-start-top { min-height: 44px; margin: -6px 8px -6px 0; }
     #wiki-panel-close { margin: -14px -12px -12px 0; }
     #search-clear {
       top: -4px; right: 0; width: 44px; height: 44px; padding: 0;

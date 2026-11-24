@@ -907,6 +907,7 @@ font: inherit; color: var(--accent);
 .search-no-results {
 padding: 16px 14px; color: var(--text-tertiary); font-size: 13px; text-align: center;
 }
+.sz-card-hidden { display: none !important; }
 #wiki-panel {
 position: absolute; top: calc(10px + var(--top-inset, 0px)); left: 10px;
 bottom: calc(30px + var(--safe-bottom, 0px)); width: 320px;
@@ -1247,6 +1248,14 @@ box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 #routing-go-row {
 display: none; margin-top: 8px; gap: 6px;
 }
+#routing-panel h4 #routing-start-top {
+display: none; margin: 0 8px 0 0; padding: 7px 16px; border: none; border-radius: 999px;
+background: #2563eb; color: #fff; font-family: var(--ui-font); font-size: 14px;
+font-weight: 600; line-height: 1.2; cursor: pointer; vertical-align: middle;
+min-width: 0; min-height: 0;
+}
+#routing-panel h4 #routing-start-top:hover { color: #fff; background: #1d4ed8; }
+#routing-panel.has-route h4 #routing-start-top { display: inline-block; }
 #routing-go-row.visible { display: flex; }
 #routing-go-row button {
 flex: 1; padding: 8px 6px; border: none; border-radius: 6px;
@@ -1445,6 +1454,7 @@ display: inline-flex; align-items: center; justify-content: center;
 #routing-close { margin-right: -8px !important; }
 #routing-panel.minimized h4 button { margin: -6px 0; }
 #routing-panel.minimized #routing-minimize { display: inline-flex; }
+#routing-panel h4 #routing-start-top { min-height: 44px; margin: -6px 8px -6px 0; }
 #wiki-panel-close { margin: -14px -12px -12px 0; }
 #search-clear {
 top: -4px; right: 0; width: 44px; height: 44px; padding: 0;
@@ -1753,6 +1763,7 @@ arm();
 <div id="routing-panel">
   <h4><span data-i18n="routing.title">Directions</span><span id="routing-expand-hint" data-i18n="routing.expand_hint">— tap to expand</span>
     <span>
+      <button id="routing-start-top" type="button" data-i18n="routing.start">Start</button>
       <button id="routing-minimize" title="Fold down (show map)" aria-label="Fold" data-i18n-title="routing.fold_title" data-i18n-aria-label="routing.fold">&#x25BE;</button>
       <button id="routing-close" title="Close" data-i18n-title="common.close">&times;</button>
     </span>
@@ -4776,7 +4787,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'c4d41607';
+var SZ_VIEWER_BUILD = 'd9fd58ee';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -5202,6 +5213,41 @@ map.on('load', settle);
 settle();
 }
 // END view-home-about
+// BEGIN sz-cards
+var _szCards = { order: [], defs: {} };
+function szCardDefine(name, def) { _szCards.defs[name] = def || {}; }
+function _szCardShow(name, shown, hooks) {
+var d = _szCards.defs[name];
+if (!d) return;
+var el = null;
+try { el = d.el ? d.el() : null; } catch (e) {}
+if (el && el.classList) {
+if (shown) el.classList.remove('sz-card-hidden'); else el.classList.add('sz-card-hidden');
+}
+var f = hooks ? (shown ? d.resume : d.suspend) : null;
+if (typeof f === 'function') { try { f(); } catch (e) {} }
+}
+function szCardOpen(name) {
+var o = _szCards.order, at = o.indexOf(name);
+if (at === o.length - 1 && at >= 0) { _szCardShow(name, true, false); return; }
+if (o.length) _szCardShow(o[o.length - 1], false, true);
+if (at >= 0) o.splice(at, 1);
+o.push(name);
+_szCardShow(name, true, at >= 0);
+}
+function szCardClosed(name) {
+var o = _szCards.order, at = o.indexOf(name);
+if (at < 0) return;
+var wasTop = at === o.length - 1;
+o.splice(at, 1);
+_szCardShow(name, true, false);
+if (wasTop && o.length) _szCardShow(o[o.length - 1], true, true);
+}
+function szCardHidden(name) {
+var o = _szCards.order, at = o.indexOf(name);
+return at >= 0 && at < o.length - 1;
+}
+// END sz-cards
 var FIND_RESULTS_STASH_KEY = 'streetzim_find_results';
 var _findResultsState = {
 map:     null,
@@ -5577,6 +5623,7 @@ if (card) card.click();
 track.addEventListener('touchend', function() { armed = false; }, { passive: true });
 })();
 document.body.appendChild(strip);
+szCardOpen('find');
 track.addEventListener('scroll', function() {
 if (_findResultsState.scrollDebounce) {
 clearTimeout(_findResultsState.scrollDebounce);
@@ -5615,6 +5662,7 @@ if (window.visualViewport) window.visualViewport.addEventListener('resize', _pla
 })();
 function _showSearchAreaPill(map) {
 if (_findResultsState.searchAreaBtn) return; // already on screen
+if (szCardHidden('find')) return;
 var btn = document.createElement('button');
 btn.id = 'find-search-area-btn';
 btn.type = 'button';
@@ -5649,6 +5697,16 @@ _findResultsState.searchAreaBtn.style.opacity = '1';
 });
 });
 }
+szCardDefine('find', {
+el: function() { return document.getElementById('find-results-strip'); },
+suspend: function() {
+_hideSearchAreaPill();
+try { _findResultsState.map.keyboard.enable(); } catch (e) {}
+},
+resume: function() {
+try { _findResultsState.map.keyboard.disable(); } catch (e) {}
+}
+});
 function _hideSearchAreaPill() {
 var btn = _findResultsState.searchAreaBtn;
 if (!btn) return;
@@ -5704,7 +5762,7 @@ label: label, origin: origin, items: filtered, fromView: true,
 renderFindResultsFromStash(map);
 }
 function _findResultsKeydown(e) {
-if (!_findResultsState.strip) return;
+if (!_findResultsState.strip || szCardHidden('find')) return;
 var t = e.target;
 if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
 || t.tagName === 'SELECT' || t.isContentEditable)) {
@@ -7166,6 +7224,7 @@ _findResultsState.markers = [];
 if (_findResultsState.strip && _findResultsState.strip.parentNode) {
 _findResultsState.strip.parentNode.removeChild(_findResultsState.strip);
 }
+if (_findResultsState.strip) szCardClosed('find');
 _findResultsState.strip = null;
 _findResultsState.track = null;
 _findResultsState.items = null;
@@ -10147,8 +10206,9 @@ else map.flyTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 14, duration: 1200 })
 }
 document.getElementById('find-chips').addEventListener('click', clearGroup, true);
 var routing = document.getElementById('routing-panel');
-if (routing) new MutationObserver(function () { if (routing.style.display === 'block') clearGroup(); })
-.observe(routing, { attributes: true, attributeFilter: ['style'] });
+if (routing) new MutationObserver(function () {
+if (routing.style.display === 'block' && !routing.classList.contains('sz-card-hidden')) clearGroup();
+}).observe(routing, { attributes: true, attributeFilter: ['style', 'class'] });
 mapBtn.addEventListener('click', function () {
 hide();
 resultsEl.style.display = 'none';
@@ -11261,6 +11321,7 @@ listEl.appendChild(div);
 });
 }
 function openPanel() {
+szCardOpen('wiki');
 active = true;
 staleView = false;
 refreshBar.style.display = 'none';
@@ -11280,9 +11341,12 @@ listEl.textContent = '';
 countEl.textContent = '';
 clearWikiMarkers();
 if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+szCardClosed('wiki');
 }
+szCardDefine('wiki', { el: function() { return panel; } });
 toggle.addEventListener('click', function() {
-if (active) closePanel(); else openPanel();
+if (active && szCardHidden('wiki')) szCardOpen('wiki');
+else if (active) closePanel(); else openPanel();
 });
 closeBtn.addEventListener('click', closePanel);
 refreshBtn.addEventListener('click', function() {
@@ -11399,6 +11463,9 @@ modeBtns[m].classList.add('hidden-mode');
 }
 }
 });
+var top = document.getElementById('routing-start-top');
+var mb = modeBtns[multiModal ? travelMode : 'drive'];
+if (top && mb) top.setAttribute('aria-label', mb.getAttribute('aria-label') || szT('routing.start_driving', 'Start driving navigation'));
 }
 if (toggleBtn) toggleBtn.style.display = 'block';
 var active = false;
@@ -11417,6 +11484,7 @@ active = true;
 if (toggleBtn) toggleBtn.classList.add('active-control');
 panel.style.display = 'block';
 if (searchBoxEl) searchBoxEl.classList.add('streetzim-hidden');
+szCardOpen('routing');
 map.getCanvas().style.cursor = 'crosshair';
 loadGraph();
 }
@@ -11437,6 +11505,15 @@ minBtn.title = folded ? szT('routing.unfold_title', 'Unfold (show directions)')
 try { map.resize(); } catch (err) {}
 }
 if (minBtn) minBtn.addEventListener('click', toggleMinimized);
+var startTop = document.getElementById('routing-start-top');
+if (startTop) {
+startTop.setAttribute('aria-label', szT('routing.start_driving', 'Start driving navigation'));
+startTop.addEventListener('click', function(e) {
+e.preventDefault(); e.stopPropagation();
+var b = modeBtns[multiModal ? travelMode : 'drive'];
+if (b) b.click();
+});
+}
 heading.addEventListener('click', function(e) {
 if (panel.classList.contains('minimized')) {
 toggleMinimized();
@@ -11450,7 +11527,20 @@ panel.classList.remove('minimized');
 if (searchBoxEl) searchBoxEl.classList.remove('streetzim-hidden');
 map.getCanvas().style.cursor = '';
 clearRoute();
+szCardClosed('routing');
 }
+szCardDefine('routing', {
+el: function() { return panel; },
+suspend: function() {
+if (searchBoxEl) searchBoxEl.classList.remove('streetzim-hidden');
+map.getCanvas().style.cursor = '';
+},
+resume: function() {
+if (searchBoxEl) searchBoxEl.classList.add('streetzim-hidden');
+map.getCanvas().style.cursor = 'crosshair';
+if (foldWhenShown) foldIfTall();
+}
+});
 clearBtn.addEventListener('click', function() {
 clearRoute();
 setRoutingStatus('');
@@ -11482,6 +11572,7 @@ resultEl.style.display = 'none';
 setExpandHint();
 clearBtn.style.display = 'none';
 goRow.classList.remove('visible');
+panel.classList.remove('has-route');
 resetGoButtons();
 if (driveMode.active) driveMode.exit();
 lastRoute = null;
@@ -13301,6 +13392,24 @@ if (map.getLayer('route-outline')) map.removeLayer('route-outline');
 if (map.getSource('route')) map.removeSource('route');
 routeDrawn = false;
 }
+var foldWhenShown = false;
+function foldIfTall() {
+foldWhenShown = false;
+try {
+var panelH = panel.getBoundingClientRect().height;
+var vh = window.innerHeight || document.documentElement.clientHeight;
+var typing = document.activeElement && panel.contains(document.activeElement)
+&& /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+if (vh > 0 && panelH / vh > 0.5 && !typing
+&& !panel.classList.contains('minimized')) {
+panel.classList.add('minimized');
+if (minBtn) {
+minBtn.title = szT('routing.unfold_title', 'Unfold (show directions)');
+}
+try { map.resize(); } catch (e) {}
+}
+} catch (e) {}
+}
 function setTravelMode(m, remember) {
 if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
 travelMode = m;
@@ -13323,6 +13432,7 @@ stopRouteProgressIndicator();
 resultEl.style.display = 'none';
 setExpandHint();
 goRow.classList.remove('visible');
+panel.classList.remove('has-route');
 lastRoute = null;
 removeRouteLine();
 }
@@ -13435,6 +13545,7 @@ renderRoads(result.roads);
 resultEl.style.display = 'block';
 clearBtn.style.display = 'block';
 goRow.classList.add('visible');
+panel.classList.add('has-route');
 resetGoButtons();
 lastRoute = augmentRouteForDriving(result);
 lastRoute.travel = routeTravel;
@@ -13450,20 +13561,8 @@ var bounds = shown.reduce(function(b, c) { return b.extend(c); },
 new maplibregl.LngLatBounds(shown[0], shown[0]));
 map.fitBounds(bounds, { padding: 60, duration: 1000 });
 }
-try {
-var panelH = panel.getBoundingClientRect().height;
-var vh = window.innerHeight || document.documentElement.clientHeight;
-var typing = document.activeElement && panel.contains(document.activeElement)
-&& /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
-if (vh > 0 && panelH / vh > 0.5 && !typing
-&& !panel.classList.contains('minimized')) {
-panel.classList.add('minimized');
-if (minBtn) {
-minBtn.title = szT('routing.unfold_title', 'Unfold (show directions)');
-}
-try { map.resize(); } catch (e) {}
-}
-} catch (e) {}
+if (szCardHidden('routing')) foldWhenShown = true;
+else foldIfTall();
 } else {
 placeEndMarkers();
 removeRouteLine();
@@ -13677,7 +13776,7 @@ setRoutingStatus(szT('routing.location_denied', 'Location denied or unavailable'
 );
 });
 map.on('click', function(e) {
-if (!active || !graph) return;
+if (!active || !graph || szCardHidden('routing')) return;
 if (driveMode && driveMode.active) return;
 var lat = e.lngLat.lat;
 var lon = e.lngLat.lng;
@@ -14277,7 +14376,7 @@ version: 6,
 get travelMode() { return travelMode; },
 get travelModes() { return routingModes.slice(); },
 setTravelMode: function(m) { return setTravelMode(m, false); },
-get panelActive() { return !!active; },
+get panelActive() { return !!active && !szCardHidden('routing'); },
 setOrigin: setOriginFromLatLon,
 setDest:   setDestFromLatLon,
 clear:     clearRoute,
@@ -14287,6 +14386,7 @@ if (btn) btn.click();
 },
 open: function() {
 if (!active) activate();
+else szCardOpen('routing');
 },
 close: function() {
 deactivate();

@@ -1095,6 +1095,7 @@ function clearFindResults() {
   if (_findResultsState.strip && _findResultsState.strip.parentNode) {
     _findResultsState.strip.parentNode.removeChild(_findResultsState.strip);
   }
+  if (_findResultsState.strip) szCardClosed('find');
   _findResultsState.strip = null;
   _findResultsState.track = null;
   _findResultsState.items = null;

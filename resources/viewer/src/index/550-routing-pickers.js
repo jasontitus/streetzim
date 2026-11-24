@@ -184,6 +184,28 @@
   // routes). Navigation in progress ends — its route was for the old mode.
   // `remember` false: a host-driven change (enterDriveMode) that must not
   // replace the user's own saved choice.
+  // Fold a panel that would cover most of a phone's screen (and the
+  // route under it). Not while a box in the panel is being typed in:
+  // folding hides it, the cursor with it, and the typing goes nowhere.
+  var foldWhenShown = false;
+  function foldIfTall() {
+    foldWhenShown = false;
+    try {
+      var panelH = panel.getBoundingClientRect().height;
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var typing = document.activeElement && panel.contains(document.activeElement)
+        && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+      if (vh > 0 && panelH / vh > 0.5 && !typing
+          && !panel.classList.contains('minimized')) {
+        panel.classList.add('minimized');
+        if (minBtn) {
+          minBtn.title = szT('routing.unfold_title', 'Unfold (show directions)');
+        }
+        try { map.resize(); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   function setTravelMode(m, remember) {
     if (routingModes.indexOf(m) < 0 || m === travelMode) return false;
     travelMode = m;
@@ -206,6 +228,7 @@
       resultEl.style.display = 'none';
       setExpandHint();
       goRow.classList.remove('visible');
+      panel.classList.remove('has-route');
       lastRoute = null;
       removeRouteLine();
     }
@@ -349,6 +372,7 @@
         resultEl.style.display = 'block';
         clearBtn.style.display = 'block';
         goRow.classList.add('visible');
+        panel.classList.add('has-route');
         resetGoButtons();
         lastRoute = augmentRouteForDriving(result);
         lastRoute.travel = routeTravel;
@@ -380,22 +404,10 @@
         // be 80%+ of viewport height. Threshold: panel takes more
         // than half the viewport height. The user can tap the
         // header stripe to expand again.
-        try {
-          var panelH = panel.getBoundingClientRect().height;
-          var vh = window.innerHeight || document.documentElement.clientHeight;
-          // Not while a box in the panel is being typed in: folding hides
-          // it, the cursor with it, and the typing goes nowhere.
-          var typing = document.activeElement && panel.contains(document.activeElement)
-            && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
-          if (vh > 0 && panelH / vh > 0.5 && !typing
-              && !panel.classList.contains('minimized')) {
-            panel.classList.add('minimized');
-            if (minBtn) {
-              minBtn.title = szT('routing.unfold_title', 'Unfold (show directions)');
-            }
-            try { map.resize(); } catch (e) {}
-          }
-        } catch (e) {}
+        // Under another panel it has no height to measure: decided when
+        // it shows again (the routing card's resume, 500).
+        if (szCardHidden('routing')) foldWhenShown = true;
+        else foldIfTall();
       } else {
         placeEndMarkers();
         removeRouteLine();
@@ -694,7 +706,7 @@
   // drive mode is active — a stray tap on the map while navigating
   // would otherwise silently reroute to wherever the finger landed.
   map.on('click', function(e) {
-    if (!active || !graph) return;
+    if (!active || !graph || szCardHidden('routing')) return;
     if (driveMode && driveMode.active) return;
     var lat = e.lngLat.lat;
     var lon = e.lngLat.lng;

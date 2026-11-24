@@ -536,6 +536,7 @@ function initWikiSidebar(map, config) {
   }
 
   function openPanel() {
+    szCardOpen('wiki');
     active = true;
     staleView = false;
     refreshBar.style.display = 'none';
@@ -556,10 +557,14 @@ function initWikiSidebar(map, config) {
     countEl.textContent = '';
     clearWikiMarkers();
     if (wikiPulseMarker) { wikiPulseMarker.remove(); wikiPulseMarker = null; }
+    szCardClosed('wiki');
   }
+  szCardDefine('wiki', { el: function() { return panel; } });
 
+  // Under another panel, the toggle brings it back rather than closing it.
   toggle.addEventListener('click', function() {
-    if (active) closePanel(); else openPanel();
+    if (active && szCardHidden('wiki')) szCardOpen('wiki');
+    else if (active) closePanel(); else openPanel();
   });
 
   closeBtn.addEventListener('click', closePanel);
