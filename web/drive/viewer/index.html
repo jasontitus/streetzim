@@ -4786,7 +4786,7 @@ return true;
 // END rtl-text
 // BEGIN view-home-about
 var SZ_VIEWER_VERSION = '1.0.0';
-var SZ_VIEWER_BUILD = 'b52c174e';
+var SZ_VIEWER_BUILD = '96f2fb9d';
 var SZ_VIEW_PREFIX = 'streetzim.view.';
 function _szStorage() {
 try {
@@ -9924,6 +9924,7 @@ frame.hidden = zoomHint.hidden = zoombar.hidden = showBtn.hidden = mapBtn.hidden
 linesEl.innerHTML = '';
 pickRow.hidden = mode === 'drop';
 againBtn.hidden = true;
+takeBtn.disabled = mode !== 'both';
 takeBtn.classList.toggle('primary', mode === 'both');
 if (mode === 'drop') {
 setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
@@ -10556,6 +10557,7 @@ file.value = '';
 file.click();
 });
 takeBtn.addEventListener('click', function () {
+if (takeBtn.disabled) return;
 takeFile.value = '';
 takeFile.click();
 });

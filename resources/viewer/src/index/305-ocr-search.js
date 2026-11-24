@@ -1509,6 +1509,7 @@ function initSignSearch(map, config) {
     linesEl.innerHTML = '';
     pickRow.hidden = mode === 'drop';
     againBtn.hidden = true;
+    takeBtn.disabled = mode !== 'both';     // the camera only where its tile shows
     takeBtn.classList.toggle('primary', mode === 'both');
     if (mode === 'drop') {
       setStatus(szT('search.photo_drop', 'Drag a photo onto the map, or paste one with ⌘V.'), 'drop');
@@ -2266,6 +2267,7 @@ function initSignSearch(map, config) {
     file.click();
   });
   takeBtn.addEventListener('click', function () {
+    if (takeBtn.disabled) return;
     takeFile.value = '';
     takeFile.click();
   });
